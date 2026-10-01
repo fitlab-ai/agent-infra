@@ -72,6 +72,7 @@ type PlatformOperation = Readonly<{
   pullRequestSummary?: PlatformPullRequestSummaryIntent;
   pullRequestReview?: PlatformPullRequestReviewIntent;
   resolutions?: readonly PlatformOperationResolution[];
+  retryBarrierId?: string;
   updatedAt: string;
 }>;
 type PlatformOperationJournal = Readonly<{
@@ -93,6 +94,7 @@ type RecordOperationInput = Readonly<{
   pullRequest?: PlatformPullRequestIntent;
   pullRequestSummary?: PlatformPullRequestSummaryIntent;
   pullRequestReview?: PlatformPullRequestReviewIntent;
+  retryBarrierId?: string;
   cwd?: string;
 }>;
 
@@ -128,6 +130,7 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
       || !Number.isSafeInteger(item.attempts) || item.attempts < 0 || item.attempts > MAX_ATTEMPTS
       || item.maxAttempts !== MAX_ATTEMPTS
       || !(item.lastCode === null || typeof item.lastCode === 'string')
+      || (item.retryBarrierId !== undefined && !/^[a-f0-9]{64}$/u.test(item.retryBarrierId))
       || (item.resolutions !== undefined && (!Array.isArray(item.resolutions) || item.resolutions.some((resolution: PlatformOperationResolution) =>
         !resolution || !['confirm-applied', 'retry', 'supersede'].includes(resolution.action)
         || typeof resolution.agent !== 'string' || !resolution.agent.trim()
@@ -234,6 +237,7 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
     ...(input.pullRequestSummary ? { pullRequestSummary: input.pullRequestSummary } : {}),
     ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
+    ...(previous?.retryBarrierId ?? input.retryBarrierId ? { retryBarrierId: previous?.retryBarrierId ?? input.retryBarrierId } : {}),
     ...(previous?.resolutions ? { resolutions: previous.resolutions } : {}),
     updatedAt: new Date().toISOString()
   };

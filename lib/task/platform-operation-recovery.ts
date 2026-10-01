@@ -48,7 +48,7 @@ function result(status: RecoveryResult['status'], recovered: string[], pending: 
 }
 
 function hasUnresolvedRetry(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number]): boolean {
-  return operation.resolutions?.at(-1)?.action === 'retry'
+  return (operation.resolutions?.at(-1)?.action === 'retry' || operation.retryBarrierId !== undefined)
     && operation.state !== 'succeeded'
     && !(operation.state === 'failed' && operation.lastCode === 'PLATFORM_OPERATION_SUPERSEDED');
 }
@@ -362,6 +362,7 @@ async function recoverPlatformOperations(
       }
     }
     let targetOperation = operation;
+    let targetRetryBarrierId: string | undefined;
     if (operation.kind === 'issue-metadata') {
       const current = currentIssueMetadataOperation(resolved.taskId, resolved.taskMdPath, resolved.repoRoot, operation);
       if (!current) {
@@ -372,6 +373,7 @@ async function recoverPlatformOperations(
         return result('blocked', recovered, [...pending, operation.id], { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound Issue identity differs from the journal target', retryable: false });
       }
       if (current.id !== operation.id) {
+        targetRetryBarrierId = operation.retryBarrierId ?? (hasUnresolvedRetry(operation) ? operation.id : undefined);
         try {
           recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, issueMetadata: operation.issueMetadata, dependency: operation.dependency,
@@ -399,6 +401,7 @@ async function recoverPlatformOperations(
         return result('blocked', recovered, pending, { code: 'PLATFORM_OPERATION_TARGET_UNAVAILABLE', message: 'Current comment target cannot be reconstructed safely', retryable: true });
       }
       if (current.id !== operation.id) {
+        targetRetryBarrierId = operation.retryBarrierId ?? (hasUnresolvedRetry(operation) ? operation.id : undefined);
         try {
           recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, dependency: operation.dependency, state: 'failed', lastCode: 'PLATFORM_OPERATION_SUPERSEDED' });
@@ -440,6 +443,7 @@ async function recoverPlatformOperations(
         ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
         ...(operation.pullRequestSummary ? { pullRequestSummary: operation.pullRequestSummary } : {}),
         ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {}),
+        ...(targetRetryBarrierId ? { retryBarrierId: targetRetryBarrierId } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : remote.status === 'failed' && remote.error?.retryable === false ? 'failed' : 'unknown',
         lastCode: remote.error?.code ?? null

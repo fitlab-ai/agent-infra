@@ -336,3 +336,59 @@ test('a dependency-scoped recovery cannot bypass an unresolved retry in another 
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
+
+test('a retry barrier survives comment replacement across ordinary and dependency-scoped recovery', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
+      }
+    }));
+    const staleTarget = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(staleTarget);
+    const stale = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...staleTarget, dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED' });
+    const later = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: '6'.repeat(64),
+      pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' }, dependency: 'deferred', state: 'queued'
+    });
+    const journalPath = path.join(f.taskDir, '.platform-operations.json');
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<{ id: string; updatedAt: string }> };
+    journal.operations.find((operation) => operation.id === stale.id)!.updatedAt = '2026-01-01T00:00:00.000Z';
+    journal.operations.find((operation) => operation.id === later.id)!.updatedAt = '2026-01-01T00:00:01.000Z';
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+
+    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
+    resolveFailedPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: stale.id, expectedDigest: stale.expectedDigest,
+      expectedState: 'failed', action: 'retry', agent: 'codex',
+      evidence: 'Remote comment listing showed the old projection marker is absent.', remoteState: 'absent', replaySafe: true
+    });
+    const first = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
+    const afterFirst = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations;
+    const replaced = afterFirst.find((operation) => operation.id !== stale.id && operation.id !== later.id);
+    assert.equal(afterFirst.find((operation) => operation.id === stale.id)?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+    assert.equal(replaced?.state, 'failed');
+    assert.equal(replaced?.retryBarrierId, stale.id);
+    assert.equal(replaced?.resolutions, undefined);
+    assert.equal(afterFirst.find((operation) => operation.id === later.id)?.state, 'queued');
+    assert.ok(first.status === 'failed' || first.status === 'blocked');
+
+    const callCount = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean).length : 0;
+    const second = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
+    const afterSecond = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations;
+    assert.equal(second.status, 'blocked');
+    assert.equal(afterSecond.find((operation) => operation.id === later.id)?.state, 'queued');
+    const callsAfterSecond = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean).length : 0;
+    assert.equal(callsAfterSecond, callCount);
+
+    const scoped = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
+    assert.equal(scoped.status, 'blocked');
+    assert.equal(scoped.error?.code, 'PLATFORM_OPERATION_RETRY_PENDING');
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
