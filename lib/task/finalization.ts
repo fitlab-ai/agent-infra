@@ -897,7 +897,9 @@ async function prepareUnderLock(
   }
 
   if (preflightState.ok && preflightState.state === 'active') {
-    const recovery = await recoverPlatformOperations(taskId, 'all', { agent: request.agent, cwd: repoRoot });
+    const recovery = await recoverPlatformOperations(taskId, 'all', {
+      agent: request.agent, cwd: repoRoot, omitFromDiffLabels: true
+    });
     if (recovery.status !== 'applied' && recovery.status !== 'no-op') {
       return failed(taskId, recovery.error ?? {
         code: 'PLATFORM_OPERATION_RECOVERY_PENDING',

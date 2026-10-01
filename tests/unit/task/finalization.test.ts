@@ -27,7 +27,7 @@ import {
   readTaskFinalizationHandoff
 } from '../../../lib/task/finalization-handoff.ts';
 import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
-import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/verification.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -297,6 +297,15 @@ test('finalization leaves Issue in-labels to PR delivery while verifying other I
   const taskFile = path.join(f.taskDir, 'task.md');
   fs.writeFileSync(taskFile, fs.readFileSync(taskFile, 'utf8').replace('status: active', 'delivery_base_ref: main\nstatus: active'));
   try {
+    const pendingLabelOperation = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata',
+      target: '{"kind":"number","value":42}', expectedDigest: 'a'.repeat(64),
+      issueMetadata: {
+        requirements: false, issueType: false, fields: false,
+        inLabels: 'from-diff', base: 'main', fromDiffFiles: ['src/task.ts'], inLabelMappingDigest: 'b'.repeat(64)
+      },
+      dependency: 'deferred', state: 'pending'
+    });
     const prepared = await prepareTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
       issueSync: async (_task, syncOptions) => {
@@ -317,6 +326,9 @@ test('finalization leaves Issue in-labels to PR delivery while verifying other I
     });
     assert.equal(prepared.status, 'prepared');
     assert.equal(prepared.error, null);
+    const recovered = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === pendingLabelOperation.id);
+    assert.equal(recovered?.state, 'failed');
+    assert.equal(recovered?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
     assert.match(fs.readFileSync(taskFile, 'utf8'), /^status: active$/m);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });

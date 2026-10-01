@@ -62,6 +62,33 @@ test('recovery supersedes an old comment digest when its task projection changed
   }
 });
 
+test('completion recovery supersedes a pending from-diff-only Issue label operation', async () => {
+  const f = fixture();
+  try {
+    const operation = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata',
+      target: '{"kind":"number","value":42}', expectedDigest: 'c'.repeat(64),
+      issueMetadata: {
+        requirements: false, issueType: false, fields: false,
+        inLabels: 'from-diff', base: 'main', fromDiffFiles: ['src/task.ts'], inLabelMappingDigest: 'd'.repeat(64)
+      },
+      dependency: 'deferred', state: 'pending'
+    });
+
+    const recovered = await recoverPlatformOperations(TASK_ID, 'all', {
+      agent: 'codex', cwd: f.repoRoot, omitFromDiffLabels: true
+    });
+    const persisted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
+
+    assert.equal(recovered.status, 'applied');
+    assert.deepEqual(recovered.recovered, [operation.id]);
+    assert.equal(persisted?.state, 'failed');
+    assert.equal(persisted?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('serial recovery consumes the remaining attempt budget before retrying an unknown operation', async () => {
   const f = fixture();
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
