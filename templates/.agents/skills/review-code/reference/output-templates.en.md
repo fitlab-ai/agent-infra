@@ -65,7 +65,7 @@ Next step - create a Pull Request:
 
 #### Branch A2: Update an Existing Pull Request
 
-Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`. `create-pr` delivers the current branch and reuses the existing bound PR.
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`. `commit` delivers the current commit; when there is no new commit, it uses push-only delivery to update the bound PR. The commit skill routes a bound PR to `watch-pr` afterward.
 
 ```text
 Next step - update the existing Pull Request:

@@ -96,7 +96,7 @@ Present the verification summary per `.agents/rules/validation-output.md`; do no
 
 ## 6. Render the next step
 
-Before rendering the next step, read `.agents/rules/next-step-output.md` and call the unified helper exactly once based on the latest task and PR state. A failed push keeps the task active and reports only diagnostics; a final commit routes to `create-pr` or `complete-task` according to `prFlow`.
+Before rendering the next step, read `.agents/rules/next-step-output.md` and call the unified helper exactly once based on the latest task and PR state. A failed push keeps the task active and reports only diagnostics. When a verified PR is already bound, route to `watch-pr`; without a bound PR, route to `create-pr` or `complete-task` according to `prFlow`.
 
 ## Notes
 

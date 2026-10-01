@@ -66,7 +66,7 @@
 
 #### 场景 A2：更新已有 Pull Request
 
-使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。`create-pr` 会交付当前分支，并复用已绑定的 PR。
+使用 `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。`commit` 会交付当前提交；没有新提交时执行 push-only，将更新推送到已绑定的 PR。完成后按 commit 技能的绑定 PR 路由进入 `watch-pr`。
 
 ```text
 下一步 - 更新已有 Pull Request：
