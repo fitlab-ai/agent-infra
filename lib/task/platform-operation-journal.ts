@@ -11,6 +11,16 @@ const MAX_ATTEMPTS = 3;
 
 type PlatformOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment' | 'issue-create' | 'issue-metadata' | 'pull-request' | 'pull-request-summary' | 'pull-request-review';
 type PlatformOperationState = 'queued' | 'pending' | 'unknown' | 'succeeded' | 'failed';
+type PlatformOperationResolution = Readonly<{
+  action: 'confirm-applied' | 'retry' | 'supersede';
+  agent: string;
+  evidence: string;
+  evidenceSource: 'operator-attestation';
+  remoteState: 'applied' | 'absent' | 'replaced' | 'cancelled';
+  replaySafe: boolean;
+  dependenciesPreserved: boolean;
+  resolvedAt: string;
+}>;
 type PlatformIssueMetadataIntent = Readonly<{
   requirements: boolean;
   issueType: boolean;
@@ -61,6 +71,7 @@ type PlatformOperation = Readonly<{
   pullRequest?: PlatformPullRequestIntent;
   pullRequestSummary?: PlatformPullRequestSummaryIntent;
   pullRequestReview?: PlatformPullRequestReviewIntent;
+  resolutions?: readonly PlatformOperationResolution[];
   updatedAt: string;
 }>;
 type PlatformOperationJournal = Readonly<{
@@ -117,6 +128,17 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
       || !Number.isSafeInteger(item.attempts) || item.attempts < 0 || item.attempts > MAX_ATTEMPTS
       || item.maxAttempts !== MAX_ATTEMPTS
       || !(item.lastCode === null || typeof item.lastCode === 'string')
+      || (item.resolutions !== undefined && (!Array.isArray(item.resolutions) || item.resolutions.some((resolution: PlatformOperationResolution) =>
+        !resolution || !['confirm-applied', 'retry', 'supersede'].includes(resolution.action)
+        || typeof resolution.agent !== 'string' || !resolution.agent.trim()
+        || typeof resolution.evidence !== 'string' || !resolution.evidence.trim()
+        || resolution.evidenceSource !== 'operator-attestation'
+        || !['applied', 'absent', 'replaced', 'cancelled'].includes(resolution.remoteState)
+        || typeof resolution.replaySafe !== 'boolean' || typeof resolution.dependenciesPreserved !== 'boolean'
+        || typeof resolution.resolvedAt !== 'string'
+        || (resolution.action === 'confirm-applied' && resolution.remoteState !== 'applied')
+        || (resolution.action === 'retry' && (resolution.remoteState !== 'absent' || !resolution.replaySafe))
+        || (resolution.action === 'supersede' && (!['replaced', 'cancelled'].includes(resolution.remoteState) || !resolution.dependenciesPreserved)))))
       || (item.kind === 'issue-metadata'
         ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
           || typeof item.issueMetadata.issueType !== 'boolean' || typeof item.issueMetadata.fields !== 'boolean'
@@ -212,6 +234,7 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
     ...(input.pullRequestSummary ? { pullRequestSummary: input.pullRequestSummary } : {}),
     ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
+    ...(previous?.resolutions ? { resolutions: previous.resolutions } : {}),
     updatedAt: new Date().toISOString()
   };
   const operations = previous
@@ -221,10 +244,64 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
   return next;
 }
 
+type ResolveFailedPlatformOperationInput = Readonly<{
+  taskRef: string;
+  operationId: string;
+  expectedDigest: string;
+  expectedState: 'failed';
+  action: PlatformOperationResolution['action'];
+  agent: string;
+  evidence: string;
+  remoteState: PlatformOperationResolution['remoteState'];
+  replaySafe?: boolean;
+  dependenciesPreserved?: boolean;
+  cwd?: string;
+}>;
+
+function resolveFailedPlatformOperation(input: ResolveFailedPlatformOperationInput): PlatformOperation {
+  if (!/^[a-f0-9]{64}$/u.test(input.operationId) || !/^[a-f0-9]{64}$/u.test(input.expectedDigest)
+    || input.expectedState !== 'failed' || !input.agent.trim() || input.evidence.trim().length < 20) {
+    throw Object.assign(new Error('Resolution requires the full operation identity, failed state, agent, and specific evidence'), { code: 'PLATFORM_OPERATION_RESOLUTION_PAYLOAD_INVALID' });
+  }
+  const { taskId, file } = resolveJournal(input.taskRef, input.cwd);
+  const journal = parseJournal(file, taskId);
+  const operation = journal.operations.find((item) => item.id === input.operationId);
+  if (!operation || operation.expectedDigest !== input.expectedDigest || operation.state !== input.expectedState) {
+    throw Object.assign(new Error('Operation identity, expected digest, or current state changed; inspect the journal and retry with current facts'), { code: 'PLATFORM_OPERATION_RESOLUTION_STALE' });
+  }
+  if (input.action === 'confirm-applied' && input.remoteState !== 'applied') {
+    throw Object.assign(new Error('confirm-applied requires remoteState=applied'), { code: 'PLATFORM_OPERATION_RESOLUTION_EVIDENCE_INVALID' });
+  }
+  if (input.action === 'retry' && (input.remoteState !== 'absent' || input.replaySafe !== true)) {
+    throw Object.assign(new Error('retry requires remoteState=absent and replaySafe=true'), { code: 'PLATFORM_OPERATION_RESOLUTION_EVIDENCE_INVALID' });
+  }
+  if (input.action === 'retry' && (operation.attempts >= operation.maxAttempts
+    || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-metadata', 'pull-request', 'pull-request-summary'].includes(operation.kind))) {
+    throw Object.assign(new Error('Operation has no remaining attempts or its recovery handler is not approved for safe replay'), { code: 'PLATFORM_OPERATION_RETRY_NOT_SAFE' });
+  }
+  if (input.action === 'supersede' && (!['replaced', 'cancelled'].includes(input.remoteState) || input.dependenciesPreserved !== true)) {
+    throw Object.assign(new Error('supersede requires remoteState=replaced|cancelled and dependenciesPreserved=true'), { code: 'PLATFORM_OPERATION_RESOLUTION_EVIDENCE_INVALID' });
+  }
+  const resolvedAt = new Date().toISOString();
+  const resolution: PlatformOperationResolution = {
+    action: input.action, agent: input.agent, evidence: input.evidence.trim(), evidenceSource: 'operator-attestation', remoteState: input.remoteState,
+    replaySafe: input.replaySafe === true, dependenciesPreserved: input.dependenciesPreserved === true, resolvedAt
+  };
+  const updated: PlatformOperation = {
+    ...operation,
+    state: input.action === 'confirm-applied' ? 'succeeded' : input.action === 'retry' ? 'queued' : 'failed',
+    lastCode: input.action === 'supersede' ? 'PLATFORM_OPERATION_SUPERSEDED' : null,
+    resolutions: [...(operation.resolutions ?? []), resolution],
+    updatedAt: resolvedAt
+  };
+  writeJournal(file, { ...journal, operations: journal.operations.map((item) => item.id === operation.id ? updated : item) });
+  return updated;
+}
+
 function readPlatformOperationJournal(taskRef: string, cwd?: string): PlatformOperationJournal {
   const { taskId, file } = resolveJournal(taskRef, cwd);
   return parseJournal(file, taskId);
 }
 
-export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as PLATFORM_OPERATION_MAX_ATTEMPTS, operationId, recordPlatformOperation, readPlatformOperationJournal };
-export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, RecordOperationInput };
+export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as PLATFORM_OPERATION_MAX_ATTEMPTS, operationId, recordPlatformOperation, readPlatformOperationJournal, resolveFailedPlatformOperation };
+export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationResolution, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, RecordOperationInput, ResolveFailedPlatformOperationInput };

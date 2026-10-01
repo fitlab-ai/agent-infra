@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { inspectPlatformCommentOperation } from '../../../lib/platform/issue-comments.ts';
-import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations } from '../../../lib/task/platform-operation-recovery.ts';
-import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
+import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations, resolvePlatformOperation } from '../../../lib/task/platform-operation-recovery.ts';
+import { readPlatformOperationJournal, recordPlatformOperation, resolveFailedPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -143,6 +143,109 @@ test('PR recovery preserves its typed intent when a replay does not succeed', as
     const persisted = journal.operations.find((item) => item.id === operation.id);
     assert.deepEqual(persisted?.pullRequest, intent);
     assert.ok(['unknown', 'failed', 'succeeded'].includes(persisted?.state ?? ''));
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('failed operation resolution binds the current identity and persists operator evidence', () => {
+  const f = fixture();
+  try {
+    const failed = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":42}',
+      expectedDigest: 'c'.repeat(64), issueMetadata: { requirements: true, issueType: false, fields: false },
+      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const resolved = resolveFailedPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
+      expectedState: 'failed', action: 'confirm-applied', agent: 'codex',
+      evidence: 'Remote Issue readback showed the requested body digest.', remoteState: 'applied'
+    });
+    assert.equal(resolved.state, 'succeeded');
+    assert.equal(resolved.attempts, 0);
+    assert.equal(resolved.resolutions?.[0]?.action, 'confirm-applied');
+    assert.equal(resolved.resolutions?.[0]?.evidenceSource, 'operator-attestation');
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations[0]?.resolutions?.length, 1);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('retry resolution preserves attempts and rejects unsafe or stale operation facts', () => {
+  const f = fixture();
+  try {
+    const failed = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":42}',
+      expectedDigest: 'd'.repeat(64), issueMetadata: { requirements: true, issueType: false, fields: false },
+      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    for (const input of [
+      { expectedDigest: 'e'.repeat(64), action: 'retry' as const, remoteState: 'absent' as const, replaySafe: true },
+      { expectedDigest: failed.expectedDigest, action: 'retry' as const, remoteState: 'absent' as const, replaySafe: false },
+      { expectedDigest: failed.expectedDigest, action: 'supersede' as const, remoteState: 'replaced' as const, dependenciesPreserved: false }
+    ]) {
+      assert.throws(() => resolveFailedPlatformOperation({
+        taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedState: 'failed', agent: 'codex',
+        evidence: 'Remote status was checked and dependency impact was reviewed.', ...input
+      }));
+    }
+    const retried = resolveFailedPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
+      expectedState: 'failed', action: 'retry', agent: 'codex',
+      evidence: 'Remote Issue readback confirmed target state is absent.', remoteState: 'absent', replaySafe: true
+    });
+    assert.equal(retried.state, 'queued');
+    assert.equal(retried.attempts, failed.attempts);
+    assert.equal(retried.resolutions?.[0]?.replaySafe, true);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('supersede requires evidence that replacement preserves dependencies', async () => {
+  const f = fixture();
+  try {
+    const failed = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: 'f'.repeat(64),
+      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const superseded = resolveFailedPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
+      expectedState: 'failed', action: 'supersede', agent: 'codex',
+      evidence: 'The replacement comment is current and no later operation depends on this payload.',
+      remoteState: 'replaced', dependenciesPreserved: true
+    });
+    assert.equal(superseded.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+    assert.equal(superseded.state, 'failed');
+    const drained = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
+    assert.equal(drained.status, 'no-op');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('retry resolves only its selected operation and leaves later writes queued on an unknown result', async () => {
+  const f = fixture();
+  try {
+    const failed = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '9'.repeat(64),
+      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const later = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'code.md', expectedDigest: '8'.repeat(64),
+      dependency: 'deferred', state: 'queued'
+    });
+    const resolved = await resolvePlatformOperation(TASK_ID, {
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
+      expectedState: 'failed', action: 'retry', agent: 'codex',
+      evidence: 'Remote comment listing showed the operation marker is absent.', remoteState: 'absent', replaySafe: true
+    }, { agent: 'codex', cwd: f.repoRoot });
+    const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+    assert.ok(resolved.status === 'blocked' || resolved.status === 'failed');
+    assert.ok(['unknown', 'failed'].includes(journal.operations.find((operation) => operation.id === failed.id)?.state ?? ''));
+    assert.equal(journal.operations.find((operation) => operation.id === failed.id)?.attempts, 1);
+    assert.equal(journal.operations.find((operation) => operation.id === later.id)?.state, 'queued');
+    assert.equal(journal.operations.find((operation) => operation.id === later.id)?.attempts, 0);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

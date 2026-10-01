@@ -147,6 +147,7 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-finalization', 'complete', 'task-bound', 'progress'),
     descriptor('internal', 'task-platform-recovery', 'inspect', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-platform-recovery', 'recover', 'task-bound', 'recovery'),
+    descriptor('internal', 'task-platform-recovery', 'resolve', 'task-bound', 'recovery'),
     descriptor('internal', 'task-short-id', 'list', 'conditional', 'diagnostic'),
     descriptor('internal', 'task-short-id', 'list-verify', 'conditional', 'diagnostic'),
     descriptor('internal', 'task-short-id', 'alloc', 'task-bound', 'progress'),

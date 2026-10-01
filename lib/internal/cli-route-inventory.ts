@@ -63,7 +63,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-invalidation': ['reconcile'],
   'task-lifecycle': ['intent'],
   'task-finalization': ['complete'],
-  'task-platform-recovery': ['inspect', 'recover'],
+  'task-platform-recovery': ['inspect', 'recover', 'resolve'],
   'task-short-id': ['list', 'list-verify', 'alloc', 'release', 'resolve'],
   'task-snapshot': ['snapshot'],
   'task-verify': ['event'],

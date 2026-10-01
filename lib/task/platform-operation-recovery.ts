@@ -20,9 +20,9 @@ import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
 import { platformResult } from '../platform/types.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { readPlatformOperationJournal, recordPlatformOperation } from './platform-operation-journal.ts';
+import { readPlatformOperationJournal, recordPlatformOperation, resolveFailedPlatformOperation } from './platform-operation-journal.ts';
 
-type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; excludeId?: string }>;
+type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; excludeId?: string; operationId?: string }>;
 type RecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'blocked' | 'failed';
   changed: boolean;
@@ -286,6 +286,7 @@ async function recoverPlatformOperations(
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
   const candidates = journal.operations.filter((operation) => operation.id !== options.excludeId
+    && (options.operationId === undefined || operation.id === options.operationId)
     && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
       || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')))
     .filter((operation) => selection === 'all' || operation.dependency === selection)
@@ -431,5 +432,28 @@ async function recoverPlatformOperations(
   return result(pending.length ? 'blocked' : recovered.length ? 'applied' : 'no-op', recovered, pending, pending.length ? { code: 'PLATFORM_OPERATION_RECOVERY_PENDING', message: 'Platform operations remain pending after the recovery budget', retryable: true } : null);
 }
 
-export { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations };
+async function resolvePlatformOperation(
+  taskRef: string,
+  input: Parameters<typeof resolveFailedPlatformOperation>[0],
+  options: RecoveryOptions
+): Promise<RecoveryResult> {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return result('failed', [], [], { code: resolved.code, message: resolved.message, retryable: false });
+  let operation;
+  try {
+    operation = resolveFailedPlatformOperation({ ...input, taskRef: resolved.taskId, cwd: resolved.repoRoot });
+  } catch (error) {
+    const value = error as { code?: string; message?: string };
+    return result('blocked', [], [input.operationId], { code: value.code || 'PLATFORM_OPERATION_RESOLUTION_FAILED', message: value.message || String(error), retryable: false });
+  }
+  if (input.action === 'retry') {
+    const targeted = await recoverPlatformOperations(resolved.taskId, operation.dependency, {
+      ...options, operationId: operation.id
+    });
+    if (targeted.status !== 'applied' && targeted.status !== 'no-op') return targeted;
+  }
+  return recoverPlatformOperations(resolved.taskId, 'all', { ...options, excludeId: operation.id });
+}
+
+export { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations, resolvePlatformOperation };
 export type { RecoveryOptions, RecoveryResult };

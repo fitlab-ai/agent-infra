@@ -47,6 +47,35 @@ test('platform-issue CLI advertises the four intent operations', () => {
   assert.match(result.stdout, /platform-issue sync/);
 });
 
+test('task-platform-recovery resolve confirms one failed operation with explicit evidence', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-recovery-resolve-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const taskId = 'TASK-20260101-000001';
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n\n# Task\n`);
+    const operation = recordPlatformOperation({
+      taskRef: taskId, cwd: root, kind: 'task-comment', target: 'task', expectedDigest: 'a'.repeat(64),
+      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const args = [taskId, 'resolve', '--operation-id', operation.id, '--expected-digest', operation.expectedDigest,
+      '--expected-state', 'failed', '--action', 'confirm-applied', '--remote-state', 'applied',
+      '--evidence', 'Remote comment readback matched the expected operation marker and digest.', '--agent', 'codex'];
+    const resolved = runRecovery(args, { cwd: root });
+    assert.equal(resolved.status, 0, resolved.stderr || resolved.stdout);
+    const persisted = readPlatformOperationJournal(taskId, root).operations[0];
+    assert.equal(persisted?.state, 'succeeded');
+    assert.equal(persisted?.resolutions?.[0]?.evidence, 'Remote comment readback matched the expected operation marker and digest.');
+
+    const stale = runRecovery(args, { cwd: root });
+    assert.equal(stale.status, 2);
+    assert.equal(JSON.parse(stale.stdout).error.code, 'PLATFORM_OPERATION_RESOLUTION_STALE');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('platform-issue requirements sync persists once and converges across CLI processes', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-issue-cli-'));
   try {
