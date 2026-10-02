@@ -2034,8 +2034,8 @@ test('sandbox-local task-finalization has no receipt or request side effects whe
   }
 });
 
-test('sandbox-local task-finalization rejects concurrent full handlers across reservation and terminal gates', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-busy-no-prepare-'));
+test('sandbox-local task-finalization rejects concurrent full handlers during domain preparation', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-domain-prepare-'));
   const taskId = 'TASK-20260809-010203';
   const generation = 'finalization-busy-no-prepare-generation';
   const controller = new AbortController();
@@ -2044,18 +2044,40 @@ test('sandbox-local task-finalization rejects concurrent full handlers across re
   let second: CollectedChild | null = null;
   let third: CollectedChild | null = null;
   let releasePrepare!: () => void;
-  let releaseCompletion!: () => void;
+  let releaseDomainPrepare!: () => void;
   let markPrepared!: () => void;
-  let markCompletionHeld!: () => void;
   const prepareGate = new Promise<void>((resolve) => { releasePrepare = resolve; });
-  const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve; });
   const preparedEntered = new Promise<void>((resolve) => { markPrepared = resolve; });
-  const completionHeld = new Promise<void>((resolve) => { markCompletionHeld = resolve; });
   let prepareCalls = 0;
   try {
     const branch = initializeRepository(root);
     const manifestPath = writeControlManifest(root, branch, generation);
     writeFinalizationTaskFixture(root, taskId);
+    const providerSource = path.join(root, '.agents', 'finalization-gated-provider.mjs');
+    fs.copyFileSync(path.resolve('tests/fixtures/platform-providers/finalization-gated-provider.mjs'), providerSource);
+    const receiptDir = path.join(root, '.agents', 'workspace', '.task-finalization');
+    const receiptPath = path.join(receiptDir, `${taskId}.json`);
+    const enteredPath = path.join(root, 'domain-prepare-entered');
+    const releasePath = path.join(root, 'domain-prepare-release');
+    const callsPath = path.join(root, 'platform-comment-calls');
+    releaseDomainPrepare = () => fs.writeFileSync(releasePath, 'release\n');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+      task: { shortIdLength: 2 },
+      platform: {
+        type: 'finalization-gated',
+        providers: {
+          'finalization-gated': {
+            source: '.agents/finalization-gated-provider.mjs',
+            config: { enteredPath, releasePath, callsPath, issueId: 'finalization-test-issue' }
+          }
+        }
+      }
+    }));
+    const taskPath = path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md');
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(
+      'agent_infra_version: v0.9.9',
+      "agent_infra_version: v0.9.9\nplatform_issue_identity: '{\"kind\":\"id\",\"value\":\"finalization-test-issue\"}'"
+    ));
     const manifest = readSandboxControlManifest(manifestPath);
     server = serveSandboxControl(manifestPath, controller.signal, {
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
@@ -2067,14 +2089,7 @@ test('sandbox-local task-finalization rejects concurrent full handlers across re
         const prepared = await prepareSandboxControlExecution(params);
         markPrepared();
         await prepareGate;
-        return {
-          ...prepared,
-          completion: prepared.completion.then(async (result) => {
-            markCompletionHeld();
-            await completionGate;
-            return result;
-          })
-        };
+        return prepared;
       }
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
@@ -2085,11 +2100,24 @@ test('sandbox-local task-finalization rejects concurrent full handlers across re
     ]);
     releasePrepare();
     await waitForStatusStateAsync(manifest.publicStatusDir, 'busy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
-    await completionHeld;
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        const deadline = Date.now() + SANDBOX_CONTROL_TEST_TIMEOUT_MS;
+        const poll = () => {
+          if (fs.existsSync(enteredPath)) return resolve();
+          if (Date.now() >= deadline) return reject(new Error('domain preparation did not reach gated platform comment write'));
+          setTimeout(poll, 10);
+        };
+        poll();
+      }),
+      first.result.then((result) => {
+        throw new Error(`first full handler exited before gated domain preparation: ${result.stderr || result.stdout || result.exitCode}`);
+      })
+    ]);
     const activeRequestId = fs.readdirSync(manifest.processingDir).find((entry) => fs.existsSync(path.join(manifest.processingDir, entry, 'reservation.json')));
     assert.ok(activeRequestId, 'active executor reservation is present');
-    const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
     const acceptedReceipt = fs.readFileSync(receiptPath, 'utf8');
+    assert.equal(fs.readFileSync(callsPath, 'utf8'), 'write\n');
     second = runSandboxLocalTaskFinalizationAsync(root, manifest, taskId);
     third = runSandboxLocalTaskFinalizationAsync(root, manifest, taskId);
     const concurrentResults = await Promise.all([second.result, third.result]);
@@ -2099,15 +2127,16 @@ test('sandbox-local task-finalization rejects concurrent full handlers across re
     }
     assert.equal(prepareCalls, 1);
     assert.equal(fs.readFileSync(receiptPath, 'utf8'), acceptedReceipt);
+    assert.equal(fs.readFileSync(callsPath, 'utf8'), 'write\n');
     assert.equal(fs.readdirSync(path.join(manifest.channelDir, 'requests')).length, 0);
-    releaseCompletion();
+    releaseDomainPrepare();
     const firstResult = await first.result;
     assert.equal(firstResult.exitCode, 0, firstResult.stderr || firstResult.stdout);
     assert.equal(JSON.parse(firstResult.stdout).status, 'completed', firstResult.stdout);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
   } finally {
     releasePrepare();
-    releaseCompletion();
+    releaseDomainPrepare();
     controller.abort();
     await server?.catch(() => undefined);
     await stopCollectedChild(first);
