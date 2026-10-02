@@ -194,8 +194,13 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
   const { taskId, file } = resolveJournal(input.taskRef, input.cwd);
   const journal = parseJournal(file, taskId);
   const id = operationId(input);
-  const previous = journal.operations.find((item) => item.id === id)
-    ?? (input.replaceOperationId ? journal.operations.find((item) => item.id === input.replaceOperationId) : undefined);
+  const targetIndex = journal.operations.findIndex((item) => item.id === id);
+  const replacementIndex = input.replaceOperationId
+    ? journal.operations.findIndex((item) => item.id === input.replaceOperationId)
+    : -1;
+  const target = targetIndex >= 0 ? journal.operations[targetIndex] : undefined;
+  const replacement = replacementIndex >= 0 ? journal.operations[replacementIndex] : undefined;
+  const previousAttempts = Math.max(target?.attempts ?? 0, replacement?.attempts ?? 0);
   const next: PlatformOperation = {
     id,
     kind: input.kind,
@@ -203,7 +208,7 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     expectedDigest: input.expectedDigest,
     dependency: input.dependency,
     state: input.state,
-    attempts: (previous?.attempts ?? 0) + (input.state === 'pending' ? 1 : 0),
+    attempts: previousAttempts + (input.state === 'pending' ? 1 : 0),
     lastCode: input.lastCode ?? null,
     ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
     ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
@@ -212,10 +217,12 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
     updatedAt: new Date().toISOString()
   };
-  const operations = journal.operations.some((item) => item.id === id)
-    ? journal.operations.map((item) => item.id === id ? next : item)
-    : input.replaceOperationId && journal.operations.some((item) => item.id === input.replaceOperationId)
-      ? journal.operations.map((item) => item.id === input.replaceOperationId ? next : item)
+  const operations = replacementIndex >= 0
+    ? journal.operations.flatMap((item, index) => index === replacementIndex
+      ? [next]
+      : index === targetIndex ? [] : [item])
+    : targetIndex >= 0
+      ? journal.operations.map((item, index) => index === targetIndex ? next : item)
       : [...journal.operations, next];
   writeJournal(file, { version: 1, taskId, operations });
   return next;

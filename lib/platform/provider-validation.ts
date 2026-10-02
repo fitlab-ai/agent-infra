@@ -509,9 +509,11 @@ const PROVIDER_ERROR_CATALOG: Readonly<Record<string, { message: string; retryab
   REMOTE_INVALID: { message: 'The platform remote is invalid', retryable: false },
   UPSTREAM_UNRESOLVED: { message: 'The platform upstream repository could not be resolved', retryable: false },
   RESOURCE_NOT_FOUND: { message: 'The platform resource was not found', retryable: false },
+  COMMENT_LIST_FAILED: { message: 'Comments could not be listed', retryable: true },
   PR_NOT_FOUND: { message: 'The pull request was not found', retryable: false },
   ISSUE_NOT_FOUND: { message: 'The issue was not found', retryable: false },
   REMOTE_BUSY: { message: 'Platform provider is temporarily busy', retryable: true },
+  IN_LABEL_SYNC_PARTIAL: { message: 'In-label synchronization is partial or unknown', retryable: true },
   NETWORK_TRANSIENT: { message: 'The platform request failed temporarily', retryable: true },
   NETWORK_RETRY: { message: 'The platform request failed temporarily', retryable: true },
   NETWORK_RETRY_EXHAUSTED: { message: 'The platform request retries were exhausted', retryable: true },
@@ -702,5 +704,32 @@ function wrapProviderOperations(provider: PlatformProvider): RuntimePlatformProv
   return wrapped as RuntimePlatformProvider;
 }
 
-export { invokeProviderOperation, providerErrorRetryable, validationError, wrapProviderOperations };
+function wrapBuiltInProviderErrors(provider: PlatformProvider): RuntimePlatformProvider {
+  const wrap = async (call: () => Promise<unknown>): Promise<unknown> => {
+    const result = await call();
+    if (!result || typeof result !== 'object' || (result as { ok?: unknown }).ok !== false) return result;
+    const envelope = result as { error?: { code?: unknown; message?: unknown } };
+    if (typeof envelope.error?.code !== 'string' || typeof envelope.error.message !== 'string') return result;
+    return { ...(result as Record<string, unknown>), error: {
+      code: envelope.error.code,
+      message: envelope.error.message,
+      retryable: providerErrorRetryable(envelope.error.code)
+    } };
+  };
+  const wrapped: PlatformProvider = { ...provider, context: { ...provider.context } };
+  wrapped.context.resolve = (input) => wrap(() => provider.context.resolve(input)) as ReturnType<PlatformProvider['context']['resolve']>;
+  for (const groupName of ['issues', 'comments', 'changeRequests', 'checks', 'reviews', 'releases', 'securityAlerts', 'repositoryMetadata', 'verification'] as const) {
+    const group = provider[groupName];
+    if (!group) continue;
+    const target: Record<string, unknown> = { ...group };
+    for (const method of Object.keys(group)) {
+      const original = group[method as keyof typeof group] as (...args: never[]) => Promise<unknown>;
+      target[method] = (input: unknown) => wrap(() => original(input as never));
+    }
+    (wrapped as unknown as Record<string, unknown>)[groupName] = target;
+  }
+  return wrapped as RuntimePlatformProvider;
+}
+
+export { invokeProviderOperation, providerErrorRetryable, validationError, wrapBuiltInProviderErrors, wrapProviderOperations };
 export type { LoadedRuntimeProvider, NormalizedProviderResult, RuntimePlatformProvider };

@@ -40,8 +40,30 @@ import { resourceIdentityNumber, resourceIdentityString } from './resource-ident
 import { extractPullRequestFileNames, syncLabelDelta } from './in-label-sync.ts';
 import type { PlatformError } from './types.ts';
 
-function providerError(error: PlatformError): ProviderError {
-  return { code: error.code, message: error.message, retryable: error.retryable } as ProviderError;
+function providerError(error: PlatformError | ProviderError): ProviderError {
+  return { code: error.code, message: error.message };
+}
+
+function publicProviderErrors(provider: PlatformProvider): PlatformProvider {
+  const sanitize = async (call: () => Promise<unknown>): Promise<unknown> => {
+    const result = await call();
+    if (!result || typeof result !== 'object' || (result as { ok?: unknown }).ok !== false) return result;
+    const envelope = result as { error?: PlatformError | ProviderError };
+    return envelope.error ? { ...(result as Record<string, unknown>), error: providerError(envelope.error) } : result;
+  };
+  const wrapped: PlatformProvider = { ...provider, context: { ...provider.context } };
+  wrapped.context.resolve = (input) => sanitize(() => provider.context.resolve(input)) as ReturnType<PlatformProvider['context']['resolve']>;
+  for (const groupName of ['issues', 'comments', 'changeRequests', 'checks', 'reviews', 'releases', 'securityAlerts', 'repositoryMetadata', 'verification'] as const) {
+    const group = provider[groupName];
+    if (!group) continue;
+    const target: Record<string, unknown> = { ...group };
+    for (const method of Object.keys(group)) {
+      const original = group[method as keyof typeof group] as (...args: never[]) => Promise<unknown>;
+      target[method] = (input: unknown) => sanitize(() => original(input as never));
+    }
+    (wrapped as unknown as Record<string, unknown>)[groupName] = target;
+  }
+  return wrapped;
 }
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
@@ -158,7 +180,7 @@ function resolveGitHubChangeRequestGitEvidence({
 }
 
 function failure(error: PlatformError | ProviderError): ProviderResult<PlatformContextSnapshot> {
-  return { ok: false, error: 'retryable' in error ? providerError(error) : error };
+  return { ok: false, error: providerError(error) };
 }
 
 function resolveContext(
@@ -1106,7 +1128,7 @@ function createGitHubProvider(
   input: PlatformProviderFactoryInput,
   client: GitHubClient = createGitHubClient()
 ): PlatformProvider {
-  return {
+  return publicProviderErrors({
     type: input.providerType,
     contractVersion: 2,
     identity: { issue: 'number', 'pull-request': 'number', comment: 'number', release: 'key' },
@@ -1116,7 +1138,7 @@ function createGitHubProvider(
         return resolveContext(client, contextInput);
       }
     }
-  };
+  });
 }
 
 export {

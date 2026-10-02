@@ -66,6 +66,40 @@ test('recovery supersedes an old comment digest when its task projection changed
   }
 });
 
+test('recovery removes an already queued replacement and continues to the next comment', async () => {
+  const f = fixture();
+  try {
+    fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs'), config: {} } }
+      }
+    }));
+    const old = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(old);
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...old, dependency: 'deferred', state: 'pending' });
+    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
+    const replacement = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(replacement);
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...replacement, dependency: 'deferred', state: 'queued' });
+    fs.writeFileSync(path.join(f.taskDir, 'code.md'), '# Later artifact\n');
+    const later = inspectPlatformCommentOperation(TASK_ID, { kind: 'artifact', artifact: 'code.md', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(later);
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...later, dependency: 'deferred', state: 'queued' });
+
+    const recovered = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
+    const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+
+    assert.equal(recovered.status, 'applied');
+    assert.deepEqual(recovered.pending, []);
+    assert.deepEqual(journal.operations.map((operation) => operation.id), [replacement.id, later.id]);
+    assert.deepEqual(journal.operations.map((operation) => operation.state), ['succeeded', 'succeeded']);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('each automatic recovery run retries the head three times and records cumulative attempts', async () => {
   const f = fixture();
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
