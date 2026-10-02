@@ -27,7 +27,7 @@ import {
   readTaskFinalizationHandoff
 } from '../../../lib/task/finalization-handoff.ts';
 import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
-import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
+import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/verification.ts';
 
 const TASK_ID = 'TASK-20260101-000001';

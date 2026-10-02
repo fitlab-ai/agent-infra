@@ -22,13 +22,7 @@ import type { PlatformResult } from '../platform/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from './platform-operation-journal.ts';
 
-type RecoveryOptions = Readonly<{
-  agent: string;
-  client?: PlatformClient;
-  cwd?: string;
-  limit?: number;
-  excludeId?: string;
-}>;
+type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; excludeId?: string }>;
 type RecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'blocked' | 'failed';
   changed: boolean;
