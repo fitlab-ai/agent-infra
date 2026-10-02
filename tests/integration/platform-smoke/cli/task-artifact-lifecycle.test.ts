@@ -19,6 +19,7 @@ import { upsertSection } from '../../../../lib/task/sections.ts';
 import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.ts';
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
+import { recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
@@ -36,43 +37,14 @@ function fixture(files: Record<string, string> = {}, completeReports = true) {
 }
 
 function recordFixtureCompletions(taskDir: string) {
-  const actions: Record<string, string> = {
-    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
-    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
-  };
-  const facts: unknown[] = [];
-  const logs: string[] = [];
-  let second = 0;
   const names = fs.readdirSync(taskDir).filter((name) => {
     const identity = parseArtifactName(name);
-    return identity !== null && actions[identity.family] !== undefined;
+    return identity !== null && ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(identity.family);
   }).sort((left, right) => {
     const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
     return a.family.localeCompare(b.family) || a.round - b.round;
   });
-  for (const name of names) {
-    const identity = parseArtifactName(name)!;
-    const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
-    const file = path.join(taskDir, name);
-    const content = fs.readFileSync(file, 'utf8');
-    facts.push({ event, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: 'completed' });
-    const step = `${actions[identity.family]} (Round ${identity.round})`;
-    const time = () => `2026-01-01 00:00:${String(second++).padStart(2, '0')}+00:00`;
-    logs.push(`- ${time()} — **${step} [started]** by codex — started`);
-    logs.push(`- ${time()} — **${step}** by codex — completed → ${name}`);
-  }
-  const taskPath = path.join(taskDir, 'task.md');
-  const task = fs.readFileSync(taskPath, 'utf8');
-  const fmEnd = task.indexOf('\n---', 4);
-  const factLine = `completion_facts: '${JSON.stringify(facts)}'`;
-  const withFacts = /^completion_facts:.*$/mu.test(task)
-    ? task.replace(/^completion_facts:.*$/mu, factLine)
-    : `${task.slice(0, fmEnd)}\n${factLine}${task.slice(fmEnd)}`;
-  const logSection = `## Activity Log\n\n${logs.join('\n')}\n`;
-  const output = /## Activity Log\n/u.test(withFacts)
-    ? withFacts.replace(/## Activity Log\n[\s\S]*?(?=\n## |$)/u, logSection)
-    : `${withFacts}\n${logSection}`;
-  fs.writeFileSync(taskPath, output);
+  recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
 }
 
 function addReceipt(f: ReturnType<typeof fixture>, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {

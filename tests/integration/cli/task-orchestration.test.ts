@@ -5,9 +5,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from '../../helpers.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
-import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -44,10 +43,6 @@ function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactRe
 }
 
 function seedCompletionEvidence(taskDir: string, selectedFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']) {
-  const actions: Record<string, string> = {
-    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
-    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
-  };
   const familyOrder = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'];
   const names = fs.readdirSync(taskDir).filter((name) => {
     const identity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r[2-9]\d*)?\.md$/u.exec(name);
@@ -58,38 +53,11 @@ function seedCompletionEvidence(taskDir: string, selectedFamilies = ['analysis',
     return familyOrder.indexOf(leftIdentity[1]!) - familyOrder.indexOf(rightIdentity[1]!)
       || Number(leftIdentity[2] ?? 1) - Number(rightIdentity[2] ?? 1);
   });
-  const facts = names.map((name) => {
+  const completions = names.map((name) => {
     const identity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(name)!;
-    const family = identity[1]!;
-    const filePath = path.join(taskDir, name);
-    const content = fs.readFileSync(filePath, 'utf8');
-    return {
-      family, name, round: Number(identity[2] ?? 1),
-      fact: {
-        event: family === 'analysis' ? 'analyze.completed' : `${family}.completed`, output: name,
-        outputSha256: sha256File(filePath), semanticDigest: canonicalSemanticDigest(content),
-        requestId: `fixture-${name}`, result: 'completed'
-      }
-    };
+    return { name, family: identity[1]!, round: Number(identity[2] ?? 1) };
   });
-  const taskPath = path.join(taskDir, 'task.md');
-  let task = fs.readFileSync(taskPath, 'utf8');
-  task = task.replace(/^completion_facts:.*\n/mu, '');
-  const fmEnd = task.indexOf('\n---', 4);
-  task = `${task.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify(facts.map(({ fact }) => fact))}'${task.slice(fmEnd)}`;
-  const entries = facts.flatMap(({ family, name, round }, index) => {
-    const step = `${actions[family]} (Round ${round})`;
-    const start = String(index * 2).padStart(2, '0');
-    const done = String(index * 2 + 1).padStart(2, '0');
-    return [
-      `- 2026-01-01 00:00:${start}+00:00 — **${step} [started]** by codex — started`,
-      `- 2026-01-01 00:00:${done}+00:00 — **${step}** by codex — completed → ${name}`
-    ];
-  });
-  task = /## Activity Log\n/u.test(task)
-    ? task.replace(/## Activity Log\n[\s\S]*$/u, `## Activity Log\n\n${entries.join('\n')}\n`)
-    : `${task}\n## Activity Log\n\n${entries.join('\n')}\n`;
-  fs.writeFileSync(taskPath, task);
+  recordArtifactCompletions(taskDir, completions);
 }
 
 function approvedRouteFixture(

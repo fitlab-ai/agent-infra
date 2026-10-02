@@ -25,8 +25,8 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
-import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
+import { recordArtifactCompletions } from '../../helpers.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -107,43 +107,12 @@ function seedLifecycleReceipts(f: ReturnType<typeof fixture>) {
 }
 
 function seedCompletionEvidence(taskDir: string) {
-  const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name)).sort((left, right) => {
-    const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
-    return a.family.localeCompare(b.family) || a.round - b.round;
-  });
-  const action: Record<string, string> = {
-    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
-    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
-  };
-  const completionFacts: unknown[] = [];
-  const entries: string[] = [];
-  let second = 0;
-  for (const name of names) {
-    const identity = parseArtifactName(name)!;
-    const file = path.join(taskDir, name);
-    const bytes = fs.readFileSync(file);
-    completionFacts.push({
-      event: identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`,
-      output: name, outputSha256: sha256File(file),
-      semanticDigest: canonicalSemanticDigest(bytes.toString('utf8')),
-      requestId: `request-${name}`, result: 'completed'
+  const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name))
+    .sort((left, right) => {
+      const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
+      return a.family.localeCompare(b.family) || a.round - b.round;
     });
-    const step = `${action[identity.family]} (Round ${identity.round})`;
-    const timestamp = () => `2026-01-01 00:00:${String(second++).padStart(2, '0')}+00:00`;
-    entries.push(`- ${timestamp()} — **${step} [started]** by codex — started`);
-    entries.push(`- ${timestamp()} — **${step}** by codex — completed → ${name}`);
-  }
-  const taskPath = path.join(taskDir, 'task.md');
-  let content = fs.readFileSync(taskPath, 'utf8');
-  const frontmatterEnd = content.indexOf('\n---', 4);
-  const factLine = `completion_facts: '${JSON.stringify(completionFacts)}'`;
-  content = /^completion_facts:.*$/mu.test(content)
-    ? content.replace(/^completion_facts:.*$/mu, factLine)
-    : `${content.slice(0, frontmatterEnd)}\n${factLine}${content.slice(frontmatterEnd)}`;
-  content = /## (?:活动日志|Activity Log)\n/u.test(content)
-    ? content.replace(/## (?:活动日志|Activity Log)\n[\s\S]*$/u, `## Activity Log\n\n${entries.join('\n')}\n`)
-    : `${content}\n## Activity Log\n\n${entries.join('\n')}\n`;
-  fs.writeFileSync(taskPath, content);
+  recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
 }
 
 test('dispatch respects the repository execution lock', () => {

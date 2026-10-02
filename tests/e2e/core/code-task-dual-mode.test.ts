@@ -5,9 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from "../../helpers.ts";
+import { INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from "../../helpers.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
-import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import { upsertSection } from "../../../lib/task/sections.ts";
 
 const TASK_ID = "TASK-20260101-000001";
@@ -32,19 +31,13 @@ function makeFixture(files: Record<string, string>) {
 }
 
 function seedCompletionEvidence(taskDir: string) {
-  const actions: Record<string, string> = {
-    analysis: "Analyze Task", "review-analysis": "Review Analysis", plan: "Plan Task",
-    "review-plan": "Review Plan", code: "Code Task", "review-code": "Review Code"
-  };
   const taskContent = fs.readFileSync(path.join(taskDir, "task.md"), "utf8");
   const reports = fs.readdirSync(taskDir).flatMap((name) => {
     const identity = /^((?:review-)?analysis|(?:review-)?plan|code|review-code)(?:-r([2-9]\d*))?\.md$/.exec(name);
     if (!identity) return [];
-    const family = identity[1]! as keyof typeof actions;
+    const family = identity[1]!;
     const round = Number(identity[2] ?? 1);
     if (family === "review-code" && new RegExp(`\\*\\*Review Code \\(Round ${round}\\) \\[started\\]\\*\\*`).test(taskContent)) return [];
-    const filePath = path.join(taskDir, name);
-    const content = fs.readFileSync(filePath, "utf8");
     const inputName = family === "review-analysis" ? "analysis.md"
       : family === "plan" ? "analysis.md"
         : family === "review-plan" ? "plan.md"
@@ -53,30 +46,9 @@ function seedCompletionEvidence(taskDir: string) {
     const inputNames = family === "code" && fs.existsSync(path.join(taskDir, "review-plan.md"))
       ? ["plan.md", "review-plan.md"]
       : inputName ? [inputName] : [];
-    const eventFamily = family === "analysis" ? "analyze" : family;
-    return [{
-      name, family, round, filePath,
-      fact: {
-        event: `${eventFamily}.completed`, output: name, outputSha256: sha256File(filePath),
-        semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: "completed",
-        lifecycleInputs: inputNames.map((input) => ({ name: input, sha256: sha256File(path.join(taskDir, input)) }))
-      }
-    }];
+    return [{ name, round, lifecycleInputs: inputNames }];
   }).sort((left, right) => left.round - right.round || left.name.localeCompare(right.name));
-  const taskPath = path.join(taskDir, "task.md");
-  let task = fs.readFileSync(taskPath, "utf8");
-  task = task.replace(/\n---\n/u, `\ncompletion_facts: '${JSON.stringify(reports.map(({ fact }) => fact))}'\n---\n`);
-  const rows = reports.flatMap(({ name, family, round }) => {
-    const label = `${actions[family]} (Round ${round})`;
-    return [
-      `- 2026-01-01 00:00:00+00:00 — **${label} [started]** by codex — started`,
-      `- 2026-01-01 00:00:01+00:00 — **${label}** by codex — completed → ${name}`
-    ];
-  });
-  task = /## Activity Log\n/u.test(task)
-    ? task.replace("## Activity Log\n", `## Activity Log\n\n${rows.join("\n")}\n`)
-    : task.replace("# Task\n", `# Task\n\n## Activity Log\n\n${rows.join("\n")}\n`);
-  fs.writeFileSync(taskPath, task);
+  recordArtifactCompletions(taskDir, reports);
 }
 
 function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
