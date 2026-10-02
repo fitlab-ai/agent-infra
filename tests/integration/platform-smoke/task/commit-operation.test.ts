@@ -399,6 +399,149 @@ test('task-bound local retry preserves a committed intent whose Git identity is 
   }
 });
 
+test('task-bound local retry accepts the original multiline commit message after a sync warning', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000011';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+    const request = input(root, {
+      taskRef: taskId, agent: 'codex', round: 3,
+      message: 'fix: checkpoint\n\nExplain the change',
+      delivery: { mode: 'local' }, push: undefined
+    });
+
+    const first = executeCommitOperation(request);
+    assert.equal(first.result, 'committed_with_warnings');
+    assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
+    assert.equal(readCheckpointIntent(taskDir, taskId)?.state, 'committed');
+
+    fs.appendFileSync(path.join(taskDir, 'task.md'), '\n## Activity Log\n');
+    const retry = executeCommitOperation(request);
+
+    assert.equal(retry.result, 'no_op');
+    assert.equal(retry.warnings.length, 0);
+    assert.equal(readCheckpointIntent(taskDir, taskId), null);
+    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /checkpoint_commit: [a-f0-9]{40}/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound local retry accepts directory pathspecs after a sync warning', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000012';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+    fs.mkdirSync(path.join(root, 'src', 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'nested', 'change.txt'), 'directory change\n');
+    const expectedHead = git(root, ['rev-parse', 'HEAD']);
+    git(root, ['add', '--', 'src']);
+    const expectedTree = git(root, ['write-tree']);
+    git(root, ['reset', '-q', '--', 'src']);
+    const request = input(root, {
+      taskRef: taskId, agent: 'codex', round: 3, paths: ['src'],
+      message: 'fix: checkpoint directory', expectedHead, expectedTree,
+      delivery: { mode: 'local' }, push: undefined
+    });
+
+    const first = executeCommitOperation(request);
+    assert.equal(first.result, 'committed_with_warnings');
+    assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
+    assert.equal(readCheckpointIntent(taskDir, taskId)?.state, 'committed');
+
+    fs.appendFileSync(path.join(taskDir, 'task.md'), '\n## Activity Log\n');
+    const retry = executeCommitOperation(request);
+
+    assert.equal(retry.result, 'no_op');
+    assert.equal(retry.warnings.length, 0);
+    assert.equal(readCheckpointIntent(taskDir, taskId), null);
+    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /checkpoint_commit: [a-f0-9]{40}/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('prepared recovery validates a multiline commit under its directory pathspec', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000013';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
+    fs.mkdirSync(path.join(root, 'src', 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'nested', 'change.txt'), 'recovered change\n');
+    const expectedHead = git(root, ['rev-parse', 'HEAD']);
+    git(root, ['add', '--', 'src']);
+    const expectedTree = git(root, ['write-tree']);
+    git(root, ['reset', '-q', '--', 'src']);
+    const request = input(root, {
+      taskRef: taskId, agent: 'codex', round: 4, paths: ['src'],
+      message: 'fix: recovered checkpoint\n\nExplain recovery', expectedHead, expectedTree,
+      delivery: { mode: 'local' }, push: undefined
+    });
+    const identity = {
+      taskId, branch: 'feature', mode: 'local' as const, expectedHead, expectedTree,
+      paths: ['src'], message: request.message, round: 4
+    };
+    git(root, ['add', '--', 'src']);
+    git(root, ['commit', '-qm', request.message]);
+    const committedHead = git(root, ['rev-parse', 'HEAD']);
+    writeCheckpointIntent(taskDir, {
+      version: 1, ...identity, digest: checkpointIntentDigest(identity), state: 'prepared', committedHead: null,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    });
+
+    const recovered = executeCommitOperation(request);
+
+    assert.equal(recovered.result, 'no_op');
+    assert.equal(readCheckpointIntent(taskDir, taskId), null);
+    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), new RegExp(`checkpoint_commit: ${committedHead}`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('synced intent retry validates its Git identity and clears the retained marker', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000014';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+    const request = input(root, { taskRef: taskId, agent: 'codex', round: 5, delivery: { mode: 'local' }, push: undefined });
+    git(root, ['add', '--', 'change.txt']);
+    git(root, ['commit', '-qm', request.message]);
+    const committedHead = git(root, ['rev-parse', 'HEAD']);
+    const identity = {
+      taskId, branch: 'feature', mode: 'local' as const,
+      expectedHead: request.expectedHead, expectedTree: request.expectedTree,
+      paths: [...request.paths], message: request.message, round: 5
+    };
+    writeCheckpointIntent(taskDir, {
+      version: 1, ...identity, digest: checkpointIntentDigest(identity), state: 'synced', committedHead,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    });
+
+    const retry = executeCommitOperation(request);
+
+    assert.equal(retry.result, 'no_op');
+    assert.equal(readCheckpointIntent(taskDir, taskId), null);
+    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), new RegExp(`checkpoint_commit: ${committedHead}`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('task-bound commit from a repository subdirectory resolves the canonical repository root', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000003';
