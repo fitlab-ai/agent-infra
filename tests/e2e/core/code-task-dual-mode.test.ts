@@ -21,7 +21,11 @@ function makeFixture(files: Record<string, string>) {
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: technical-design-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };
   const withAnalysis = withPlan["analysis.md"] ? withPlan : { "analysis.md": FULL_ANALYSIS, ...withPlan };
-  for (const [name, content] of Object.entries(withAnalysis)) fs.writeFileSync(path.join(taskDir, name), content);
+  const hasCode = Object.keys(withAnalysis).some((name) => /^code(?:-r[2-9]\d*)?\.md$/.test(name));
+  const withReviewPlan = hasCode && !withAnalysis["review-plan.md"]
+    ? { "review-plan.md": zhReviewPlan("plan.md", "通过"), ...withAnalysis }
+    : withAnalysis;
+  for (const [name, content] of Object.entries(withReviewPlan)) fs.writeFileSync(path.join(taskDir, name), content);
   seedLifecycleReceipts(taskDir);
   seedCompletionEvidence(taskDir);
   return { root, taskDir };
@@ -41,12 +45,21 @@ function seedCompletionEvidence(taskDir: string) {
     if (family === "review-code" && new RegExp(`\\*\\*Review Code \\(Round ${round}\\) \\[started\\]\\*\\*`).test(taskContent)) return [];
     const filePath = path.join(taskDir, name);
     const content = fs.readFileSync(filePath, "utf8");
+    const inputName = family === "review-analysis" ? "analysis.md"
+      : family === "plan" ? "analysis.md"
+        : family === "review-plan" ? "plan.md"
+          : family === "code" ? "plan.md"
+      : family === "review-code" ? "code.md" : null;
+    const inputNames = family === "code" && fs.existsSync(path.join(taskDir, "review-plan.md"))
+      ? ["plan.md", "review-plan.md"]
+      : inputName ? [inputName] : [];
     const eventFamily = family === "analysis" ? "analyze" : family;
     return [{
       name, family, round, filePath,
       fact: {
         event: `${eventFamily}.completed`, output: name, outputSha256: sha256File(filePath),
-        semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: "completed"
+        semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: "completed",
+        lifecycleInputs: inputNames.map((input) => ({ name: input, sha256: sha256File(path.join(taskDir, input)) }))
       }
     }];
   }).sort((left, right) => left.round - right.round || left.name.localeCompare(right.name));
@@ -88,10 +101,15 @@ function seedLifecycleReceipts(taskDir: string) {
   const codeOutputs = fs.readdirSync(taskDir).filter((name) => /^code(?:-r[2-9]\d*)?\.md$/.test(name));
   for (const output of codeOutputs) {
     if (!fs.existsSync(path.join(taskDir, "plan.md"))) continue;
-    addReceipt(taskDir, {
+    const receipts: Parameters<typeof upsertArtifactReceipt>[1][] = [{
       event: "code.completed", output, input: "plan.md",
       inputSha256: sha256File(path.join(taskDir, "plan.md")), completedAt
+    }];
+    if (fs.existsSync(path.join(taskDir, "review-plan.md"))) receipts.push({
+      event: "code.completed", output, input: "review-plan.md",
+      inputSha256: sha256File(path.join(taskDir, "review-plan.md")), completedAt
     });
+    for (const receipt of receipts) addReceipt(taskDir, receipt);
   }
   const reviewCodeOutputs = fs.readdirSync(taskDir).filter((name) => /^review-code(?:-r[2-9]\d*)?\.md$/.test(name));
   for (const output of reviewCodeOutputs) {

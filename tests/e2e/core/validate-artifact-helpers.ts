@@ -7,7 +7,8 @@ import type { SpawnSyncReturns } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 import { buildBoundFact, buildSkippedFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { parseTypedTaskFrontmatter } from "../../../lib/task/frontmatter.ts";
 import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
@@ -132,6 +133,7 @@ function attachArtifactCompletionFact(taskDir: string, family: "code" | "review-
   const outputPath = path.join(taskDir, output);
   const inputPath = path.join(taskDir, input);
   if (!fs.existsSync(inputPath)) write(inputPath, `# ${input.replace(/\.md$/u, "")} fixture\n`);
+  if (family === "review-code" && !fs.existsSync(path.join(taskDir, "plan.md"))) write(path.join(taskDir, "plan.md"), "# plan fixture\n");
   const report = fs.readFileSync(outputPath, "utf8");
   const fact = {
     event: `${family}.completed`, output,
@@ -140,8 +142,54 @@ function attachArtifactCompletionFact(taskDir: string, family: "code" | "review-
     lifecycleInputs: [{ name: input, sha256: sha256File(inputPath) }]
   };
   const taskPath = path.join(taskDir, "task.md");
-  const task = fs.readFileSync(taskPath, "utf8");
-  write(taskPath, task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`));
+  let task = fs.readFileSync(taskPath, "utf8");
+  const facts = [fact];
+  const activityRows: string[] = [];
+  const timestamp = /## (?:Activity Log|活动日志)\s*\n([\s\S]*?)- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) —/.exec(task)?.[2]
+    || formatTimestamp(new Date());
+  const addCurrentArtifact = (artifactFamily: "plan" | "code", artifactName: string, content: string, lifecycleInput?: string) => {
+    const artifactPath = path.join(taskDir, artifactName);
+    const stage = artifactFamily === "plan" ? "Plan Task" : "Code Task";
+    const event = `${artifactFamily}.completed`;
+    facts.unshift({
+      event, output: artifactName, outputSha256: sha256File(artifactPath),
+      semanticDigest: canonicalSemanticDigest(content), requestId: `fixture:${artifactFamily}`,
+      result: "{}", lifecycleInputs: lifecycleInput
+        ? [{ name: lifecycleInput, sha256: sha256File(path.join(taskDir, lifecycleInput)) }]
+        : []
+    });
+    const done = new RegExp(`— \\*\\*${stage} \\(Round 1\\)\\*\\* by [^\\n]+→ ${artifactName.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`);
+    if (!done.test(task)) activityRows.push(
+      `- ${timestamp} — **${stage} (Round 1) [started]** by codex — started`,
+      `- ${timestamp} — **${stage} (Round 1)** by codex — completed → ${artifactName}`
+    );
+    else activityRows.push(`- ${timestamp} — **${stage} (Round 1) [started]** by codex — started`);
+  };
+  if (family === "code") {
+    const planContent = fs.readFileSync(inputPath, "utf8");
+    addCurrentArtifact("plan", "plan.md", planContent);
+  } else {
+    const codeContent = fs.readFileSync(inputPath, "utf8");
+    addCurrentArtifact("code", "code.md", codeContent, "plan.md");
+  }
+  const action = family === "code" ? "Code Task" : "Review Code";
+  const currentDone = new RegExp(`— \\*\\*${action} \\(Round 1\\)\\*\\* by [^\\n]+→ ${output.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`);
+  if (!currentDone.test(task)) activityRows.push(
+    `- ${timestamp} — **${action} (Round 1) [started]** by codex — started`,
+    `- ${timestamp} — **${action} (Round 1)** by codex — completed → ${output}`
+  );
+  else activityRows.push(`- ${timestamp} — **${action} (Round 1) [started]** by codex — started`);
+  const escapedFacts = JSON.stringify(JSON.stringify(facts));
+  task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${escapedFacts}\n---\n`);
+  task = task.replace(/(## (?:Activity Log|活动日志)\s*\n)/u, `$1\n${activityRows.join("\n")}\n`);
+  if (family === "review-code") {
+    const mutation = upsertArtifactReceipt(task, {
+      event: "review-code.completed", output, input,
+      inputSha256: sha256File(inputPath), completedAt: timestamp
+    });
+    task = upsertSection(task, mutation).content;
+  }
+  write(taskPath, task);
 }
 
 function writeJson(filePathname: string, value: unknown) {

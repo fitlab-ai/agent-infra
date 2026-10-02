@@ -6,9 +6,10 @@ import { spawnSync } from "node:child_process";
 
 import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 import {
   buildTaskFrontmatter,
   parseValidatorPayload,
@@ -117,14 +118,22 @@ function addCompletionEvidence(taskDir: string): void {
   const artifactPath = path.join(taskDir, "review-code.md");
   const inputPath = path.join(taskDir, "code.md");
   write(inputPath, "# Code fixture\n");
+  const planPath = path.join(taskDir, "plan.md");
+  write(planPath, "# Plan fixture\n");
   const report = fs.readFileSync(artifactPath, "utf8");
+  const code = fs.readFileSync(inputPath, "utf8");
+  const codeFact = {
+    event: "code.completed", output: "code.md", outputSha256: sha256File(inputPath),
+    semanticDigest: canonicalSemanticDigest(code), requestId: "code-test", result: "{}",
+    lifecycleInputs: [{ name: "plan.md", sha256: sha256File(planPath) }]
+  };
   const fact = {
     event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(artifactPath),
     semanticDigest: canonicalSemanticDigest(report), requestId: "review-code-test", result: JSON.stringify({ manualValidation: 0 }),
     lifecycleInputs: [{ name: "code.md", sha256: sha256File(inputPath) }]
   };
   task = task.replace(/^completion_facts:.*\n/mu, "");
-  task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
+  task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([codeFact, fact]))}\n---\n`);
   const verdict = report.includes("总体结论**：需要修改") ? "Changes Requested" : "Approved";
   task = task.replace(
     "- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1)** by codex — done",
@@ -132,8 +141,12 @@ function addCompletionEvidence(taskDir: string): void {
   );
   task = task.replace(
     /^(- 2026-03-28 00:00:00\+00:00 — \*\*Review Code \(Round 1\)\*\* by codex — .*→ review-code\.md)$/mu,
-    "- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started\n$1"
+    "- 2026-03-28 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n- 2026-03-28 00:00:00+00:00 — **Code Task (Round 1)** by codex — completed → code.md\n- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started\n$1"
   );
+  task = upsertSection(task, upsertArtifactReceipt(task, {
+    event: "review-code.completed", output: "review-code.md", input: "code.md",
+    inputSha256: sha256File(inputPath), completedAt: "2026-03-28 00:00:00+00:00"
+  })).content;
   fs.writeFileSync(taskPath, task);
 }
 

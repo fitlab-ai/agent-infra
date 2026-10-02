@@ -714,7 +714,7 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
 }
 
 const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
-  "analyze-task": { family: "analysis", event: "analysis.completed" },
+  "analyze-task": { family: "analysis", event: "analyze.completed" },
   "plan-task": { family: "plan", event: "plan.completed" },
   "review-analysis": { family: "review-analysis", event: "review-analysis.completed" },
   "review-plan": { family: "review-plan", event: "review-plan.completed" },
