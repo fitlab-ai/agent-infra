@@ -5,6 +5,7 @@ import path from 'node:path';
 import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import {
@@ -283,7 +284,7 @@ export async function publishPrReview(options: {
       })
       : unsupportedProviderOperation(loaded.value.provider, 'reviews.publish');
     if (!published.ok) {
-      if (published.error.retryable) {
+      if (published.error.retryable || providerErrorRetryable(published.error.code)) {
         const reconciled = await listPrReviews(options.prNumber, { cwd: options.cwd, client: options.client });
         const found = reconciled.reviews.find((review) => firstLine(review.body) === marker);
         if (found) return platformResult('applied', {

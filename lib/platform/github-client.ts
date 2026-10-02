@@ -3,13 +3,13 @@ import spawn from 'cross-spawn';
 
 import semver from 'semver';
 
-import type { PlatformError } from './types.ts';
-
 type RunResult = { status: number | null; stdout: string; stderr: string; error?: Error };
 type RunOptions = { cwd?: string; input?: string };
 type Runner = (args: string[], options: RunOptions) => RunResult;
 type RequestOptions = RunOptions & { method?: 'GET' | 'PATCH' | 'POST' | 'PUT' | 'DELETE' };
-type ClientResult<T> = { ok: true; value: T } | { ok: false; error: PlatformError };
+type GitHubError = { code: string; message: string };
+type ClientResult<T> = { ok: true; value: T } | { ok: false; error: GitHubError };
+type GitHubRequestFailure = GitHubError & { requestRetryable: boolean };
 type ResponseMetadata = {
   status: number;
   requestUrl: string;
@@ -86,36 +86,40 @@ function defaultSleep(delayMs: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
 
-function classifyGitHubFailure(result: RunResult): PlatformError {
+function classifyGitHubFailure(result: RunResult): GitHubRequestFailure {
   const errorCode = result.error && 'code' in result.error ? (result.error as NodeJS.ErrnoException).code : undefined;
   if (errorCode === 'ENOBUFS') {
     return {
       code: 'PLATFORM_OUTPUT_TOO_LARGE',
       message: 'GitHub CLI output exceeded the configured limit',
-      retryable: false
+      requestRetryable: false
     };
   }
   const detail = boundedFailureDetail(result);
   const lower = detail.toLowerCase();
   if (/\b401\b|bad credentials|authentication required|not logged into/.test(lower)) {
-    return { code: 'AUTH_REQUIRED', message: detail || 'GitHub authentication is required', retryable: false };
+    return { code: 'AUTH_REQUIRED', message: detail || 'GitHub authentication is required', requestRetryable: false };
   }
   if (/\b429\b|rate limit|secondary rate|\b5\d\d\b|timeout|timed out|econnreset|enotfound|dns|tls|socket|network/.test(lower)) {
-    return { code: 'NETWORK_TRANSIENT', message: detail || 'GitHub request failed temporarily', retryable: true };
+    return { code: 'NETWORK_TRANSIENT', message: detail || 'GitHub request failed temporarily', requestRetryable: true };
   }
   if (/\b403\b|resource not accessible|permission denied/.test(lower)) {
-    return { code: 'PERMISSION_DENIED', message: detail || 'GitHub permission denied', retryable: false };
+    return { code: 'PERMISSION_DENIED', message: detail || 'GitHub permission denied', requestRetryable: false };
   }
   if (/\b404\b/.test(lower)) {
-    return { code: 'RESOURCE_NOT_FOUND', message: detail || 'GitHub resource not found', retryable: false };
+    return { code: 'RESOURCE_NOT_FOUND', message: detail || 'GitHub resource not found', requestRetryable: false };
   }
   if (/\b422\b|validation failed/.test(lower)) {
-    return { code: 'PLATFORM_REQUEST_INVALID', message: detail || 'GitHub rejected the request', retryable: false };
+    return { code: 'PLATFORM_REQUEST_INVALID', message: detail || 'GitHub rejected the request', requestRetryable: false };
   }
   if (errorCode === 'ENOENT') {
-    return { code: 'PLATFORM_DEPENDENCY_MISSING', message: detail || 'GitHub CLI is unavailable', retryable: false };
+    return { code: 'PLATFORM_DEPENDENCY_MISSING', message: detail || 'GitHub CLI is unavailable', requestRetryable: false };
   }
-  return { code: 'PLATFORM_REQUEST_FAILED', message: detail || 'GitHub request failed', retryable: false };
+  return { code: 'PLATFORM_REQUEST_FAILED', message: detail || 'GitHub request failed', requestRetryable: false };
+}
+
+function clientError(error: GitHubError): GitHubError {
+  return { code: error.code, message: error.message };
 }
 
 function responseUrl(args: string[]): string {
@@ -164,13 +168,13 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
       const result = runner(args, request);
       if (result.status === 0) return { ok: true, value: result.stdout };
       const error = classifyGitHubFailure(result);
-      if (!retryableMethod || !error.retryable) return { ok: false, error };
+      if (!retryableMethod || !error.requestRetryable) return { ok: false, error: clientError(error) };
       if (attempt >= delays.length) {
         return {
           ok: false,
           error: error.code === 'NETWORK_TRANSIENT'
-            ? { ...error, code: 'NETWORK_RETRY_EXHAUSTED', message: `${error.message} (retry exhausted)` }
-            : error
+            ? { ...clientError(error), code: 'NETWORK_RETRY_EXHAUSTED', message: `${error.message} (retry exhausted)` }
+            : clientError(error)
         };
       }
       sleep(delays[attempt]!);
@@ -181,12 +185,12 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
   return {
     version(request = {}) {
       const result = runner(['--version'], request);
-      if (result.status !== 0) return { ok: false, error: classifyGitHubFailure(result) };
+      if (result.status !== 0) return { ok: false, error: clientError(classifyGitHubFailure(result)) };
       const version = result.stdout.match(/^gh version (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|$)/m)?.[1];
       if (!version || !semver.valid(version)) {
         return {
           ok: false,
-          error: { code: 'GH_CLI_VERSION_INVALID', message: 'GitHub CLI returned an invalid version', retryable: false }
+          error: { code: 'GH_CLI_VERSION_INVALID', message: 'GitHub CLI returned an invalid version' }
         };
       }
       return { ok: true, value: version };
@@ -203,7 +207,7 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
       } catch {
         return {
           ok: false,
-          error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub returned invalid JSON', retryable: true }
+          error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub returned invalid JSON' }
         };
       }
     },
@@ -217,7 +221,7 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
       if (!parsed) {
         return {
           ok: false,
-          error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub response metadata or JSON is invalid', retryable: true }
+          error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub response metadata or JSON is invalid' }
         };
       }
       return { ok: true, value: parsed };
@@ -225,5 +229,5 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
   };
 }
 
-export { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse };
+export { createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse };
 export type { ClientResult, GitHubClient, JsonResponse, RequestOptions, ResponseMetadata, RunOptions, RunResult, Runner };

@@ -9,10 +9,10 @@ import {
   providerStatus
 } from './provider-bridge.ts';
 import type {
-  PlatformError,
   SecurityAlertKind,
   SecurityAlertSnapshot
 } from './provider-contract.ts';
+import type { PlatformError } from './types.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 

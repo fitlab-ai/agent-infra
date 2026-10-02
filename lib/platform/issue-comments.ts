@@ -7,6 +7,7 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import {
@@ -33,6 +34,10 @@ import {
   renderSafeCodeFence
 } from './comment-safety.ts';
 import type { FenceRange } from './comment-safety.ts';
+
+function isRetryable(error: { code: string; retryable?: boolean }): boolean {
+  return error.retryable ?? providerErrorRetryable(error.code);
+}
 
 type RemoteComment = {
   id: number | string;
@@ -578,7 +583,7 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
   const issue = resourceIdentityNumber(issueIdentityFromTask);
   const listed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
   if (!listed.ok) {
-    return platformResult(listed.error.retryable ? 'blocked' : 'failed', {
+    return platformResult(isRetryable(listed.error) ? 'blocked' : 'failed', {
       ...contextFields(context), resource: { kind: 'issue', number: issue }, error: listed.error
     });
   }
@@ -648,10 +653,10 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
     if (!written.ok) {
-      if (!current && written.error.retryable) {
+      if (!current && isRetryable(written.error)) {
         // A provider owns reconciliation because only it knows how to address the resource.
       }
-      return platformResult(written.error.retryable ? 'blocked' : 'failed', {
+      return platformResult(isRetryable(written.error) ? 'blocked' : 'failed', {
         ...contextFields(context),
         resource: { kind: 'issue', number: issue },
         operations,
@@ -674,7 +679,7 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.delete');
     if (!deleted.ok) {
-      return platformResult(deleted.error.retryable ? 'blocked' : 'failed', {
+      return platformResult(isRetryable(deleted.error) ? 'blocked' : 'failed', {
         ...contextFields(context),
         resource: { kind: 'issue', number: issue },
         operations,
@@ -686,7 +691,7 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
   if (options.kind === 'summary') {
     const refreshed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
     if (!refreshed.ok) {
-      return platformResult(refreshed.error.retryable ? 'blocked' : 'failed', {
+      return platformResult(isRetryable(refreshed.error) ? 'blocked' : 'failed', {
         ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: refreshed.error
       });
     }
@@ -714,7 +719,7 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.delete');
       if (!deleted.ok) {
-        return platformResult(deleted.error.retryable ? 'blocked' : 'failed', {
+        return platformResult(isRetryable(deleted.error) ? 'blocked' : 'failed', {
           ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: deleted.error
         });
       }
@@ -725,7 +730,7 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
       if (!written.ok) {
-        return platformResult(written.error.retryable ? 'blocked' : 'failed', {
+        return platformResult(isRetryable(written.error) ? 'blocked' : 'failed', {
           ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: written.error
         });
       }
@@ -736,7 +741,7 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
         const error = reconciled.ok
           ? { code: 'SUMMARY_POSITION_UNVERIFIED', message: 'Summary comment is not provably last among task-managed comments', retryable: true }
           : reconciled.error;
-        return platformResult(error.retryable ? 'blocked' : 'failed', {
+        return platformResult(isRetryable(error) ? 'blocked' : 'failed', {
           ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error
         });
       }
@@ -837,7 +842,7 @@ async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: strin
         ? { ok: true as const, value: response.value.map((comment) => ({ id: comment.id, body: comment.body, user: comment.author?.name ? { login: comment.author.name } : undefined })) }
         : response)
       : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
-  if (!listed.ok) return platformResult(listed.error.retryable ? 'blocked' : 'failed', { ...contextFields(context), error: listed.error });
+  if (!listed.ok) return platformResult(isRetryable(listed.error) ? 'blocked' : 'failed', { ...contextFields(context), error: listed.error });
   const matches = findMarkerComments(listed.value, MARKERS.task(resolved.taskId));
   if (matches.length > 1) return platformResult('failed', { ...contextFields(context), error: { code: 'COMMENT_MARKER_CONFLICT', message: 'Multiple task comments use the registered marker', retryable: false } });
   const owner = matches[0]?.user?.login;

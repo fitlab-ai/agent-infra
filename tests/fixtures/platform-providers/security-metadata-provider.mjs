@@ -30,7 +30,7 @@ export default async function createPlatformProvider(input) {
       async reconcileLabels(request) {
         if (partialMetadata) return {
           ok: false,
-          error: { code: 'PERMISSION_DENIED', message: 'denied', retryable: false },
+          error: { code: 'PERMISSION_DENIED', message: 'denied' },
           value: {
             changed: true,
             created: ['in: partial'],

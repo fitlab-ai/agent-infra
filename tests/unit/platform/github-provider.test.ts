@@ -2,7 +2,25 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createGitHubProvider } from '../../../lib/platform/github-provider.ts';
+import { invokeProviderOperation } from '../../../lib/platform/provider-validation.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+
+test('GitHub provider errors match the public contract and normalize through provider validation', async () => {
+  const client = {
+    version: () => ({ ok: false, error: { code: 'AUTH_REQUIRED', message: 'Authentication required', retryable: false } })
+  } as unknown as GitHubClient;
+  const provider = createGitHubProvider({
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
+  }, client);
+
+  const raw = await provider.context.resolve({ repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'o/r', gitRemote: null });
+  assert.deepEqual(raw, { ok: false, error: { code: 'AUTH_REQUIRED', message: 'Authentication required' } });
+  const normalized = await invokeProviderOperation('github', 'context.resolve', async () => raw, (value) => value);
+  assert.deepEqual(normalized, {
+    ok: false,
+    error: { code: 'AUTH_REQUIRED', message: 'Platform authentication is required', retryable: false, providerType: 'github', phase: 'context.resolve' }
+  });
+});
 
 test('GitHub checks normalize raw fields directly to the provider snapshot contract', async () => {
   const client = {

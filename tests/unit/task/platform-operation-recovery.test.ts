@@ -44,25 +44,63 @@ test('recovery supersedes an old comment digest when its task projection changed
     const first = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
     assert.ok(first);
     recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...first, dependency: 'deferred', state: 'pending' });
+    const later = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'later.md', expectedDigest: 'b'.repeat(64),
+      dependency: 'deferred', state: 'queued'
+    });
     fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
 
     const recovered = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
     const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
-    const stale = journal.operations.find((operation) => operation.id === first.id);
-    const current = journal.operations.find((operation) => operation.id !== first.id);
-    assert.equal(stale?.state, 'failed');
-    assert.equal(stale?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+    const current = journal.operations[0];
+    assert.notEqual(current?.id, first.id);
     assert.ok(current);
     assert.notEqual(current.expectedDigest, first.expectedDigest);
-    assert.notEqual(current.state, 'succeeded');
-    assert.deepEqual(recovered.pending, [current.id]);
-    assert.equal(recovered.pending.includes(first.id), false);
+    assert.equal(current.attempts, 4);
+    assert.equal(current.state, 'unknown');
+    assert.deepEqual(recovered.pending, [current.id, later.id]);
+    assert.equal(journal.operations[1]?.id, later.id);
+    assert.equal(journal.operations[1]?.state, 'queued');
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
 
-test('serial recovery consumes the remaining attempt budget before retrying an unknown operation', async () => {
+test('recovery removes an already queued replacement and continues to the next comment', async () => {
+  const f = fixture();
+  try {
+    fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs'), config: {} } }
+      }
+    }));
+    const old = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(old);
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...old, dependency: 'deferred', state: 'pending' });
+    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
+    const replacement = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(replacement);
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...replacement, dependency: 'deferred', state: 'queued' });
+    fs.writeFileSync(path.join(f.taskDir, 'code.md'), '# Later artifact\n');
+    const later = inspectPlatformCommentOperation(TASK_ID, { kind: 'artifact', artifact: 'code.md', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(later);
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...later, dependency: 'deferred', state: 'queued' });
+
+    const recovered = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
+    const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+
+    assert.equal(recovered.status, 'applied');
+    assert.deepEqual(recovered.pending, []);
+    assert.deepEqual(journal.operations.map((operation) => operation.id), [replacement.id, later.id]);
+    assert.deepEqual(journal.operations.map((operation) => operation.state), ['succeeded', 'succeeded']);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('each automatic recovery run retries the head three times and records cumulative attempts', async () => {
   const f = fixture();
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
@@ -79,24 +117,19 @@ test('serial recovery consumes the remaining attempt budget before retrying an u
       dependency: 'required', state: 'pending'
     });
 
-    for (const attempts of [2, 3]) {
+    for (const attempts of [4, 7]) {
       const recovery = await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
       const persisted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
       assert.equal(persisted?.attempts, attempts);
       assert.equal(persisted?.state, 'unknown', JSON.stringify({ recovery, providerCalls: fs.readFileSync(callsPath, 'utf8') }));
     }
-
-    await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
-    const exhausted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
-    assert.equal(exhausted?.attempts, 3);
-    assert.equal(exhausted?.state, 'unknown');
-    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 2);
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 6);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
 
-test('recovery stops at an exhausted earlier operation and leaves later writes queued', async () => {
+test('recovery retries the failed head and leaves later writes queued', async () => {
   const f = fixture();
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
@@ -108,23 +141,56 @@ test('recovery stops at an exhausted earlier operation and leaves later writes q
       }
     }));
     const earlier = {
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata' as const,
-      target: '{"kind":"number","value":42}', expectedDigest: 'a'.repeat(64),
-      issueMetadata: { requirements: true, issueType: false, fields: false },
-      dependency: 'deferred' as const, state: 'pending' as const
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request' as const,
+      target: 'head:feature:base:main', expectedDigest: 'a'.repeat(64),
+      pullRequest: { action: 'create' as const, baseRef: 'main', headRef: 'feature' },
+      dependency: 'required' as const, state: 'pending' as const
     };
-    for (let attempt = 0; attempt < 3; attempt += 1) recordPlatformOperation(earlier);
+    const firstOperation = recordPlatformOperation(earlier);
     const later = recordPlatformOperation({
-      ...earlier, target: '{"kind":"number","value":43}', expectedDigest: 'b'.repeat(64), state: 'queued'
+      ...earlier, target: 'head:other:base:main', expectedDigest: 'b'.repeat(64), state: 'queued'
     });
 
     const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
     const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+    const first = journal.operations[0]!;
 
     assert.equal(recovered.status, 'blocked');
-    assert.deepEqual(recovered.pending, [journal.operations[0]!.id, later.id]);
+    assert.deepEqual(recovered.pending, [firstOperation.id, later.id]);
+    assert.equal(first.id, firstOperation.id);
+    assert.equal(first.attempts, 4);
+    assert.equal(first.state, 'unknown');
     assert.equal(journal.operations.find((operation) => operation.id === later.id)?.state, 'queued');
-    assert.equal(fs.existsSync(callsPath), false);
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 3);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('human supplied retry count overrides the automatic retry budget even when errors say non-retryable', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true, verifyHeadFailures: 5 } } }
+      }
+    }));
+    const operation = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
+      expectedDigest: 'a'.repeat(64), pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },
+      dependency: 'required', state: 'pending'
+    });
+
+    const recovery = await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot, attempts: 5 });
+    const persisted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
+    assert.equal(recovery.status, 'failed');
+    assert.deepEqual(recovery.error, { code: 'PLATFORM_REQUEST_FAILED', message: 'The platform request failed' });
+    assert.equal(persisted?.attempts, 6);
+    assert.equal(persisted?.state, 'unknown');
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 5);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

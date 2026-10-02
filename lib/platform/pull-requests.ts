@@ -12,6 +12,7 @@ import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { inspectPlatformIssue } from './issues.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
 import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import {
   planInLabelUpdate,
@@ -741,9 +742,10 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
         : unsupportedProviderOperation(provider, 'changeRequests.update');
     if (!synced.ok) {
       const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
-      state.effect = synced.error.retryable ? 'unknown' : 'no-op';
+      const retryable = synced.error.retryable || providerErrorRetryable(synced.error.code);
+      state.effect = retryable ? 'unknown' : 'no-op';
       state.after = state.effect === 'unknown' ? null : item.snapshot.labels;
-      const partial = successfulWrites > 0 || synced.error.retryable;
+      const partial = successfulWrites > 0 || retryable;
       const error = partial
         ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
         : synced.error;

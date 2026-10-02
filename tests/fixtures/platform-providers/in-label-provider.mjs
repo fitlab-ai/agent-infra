@@ -9,7 +9,7 @@ function receipt(id, changed = true) {
 }
 
 function wrongTarget(message) {
-  return { ok: false, error: { code: 'WRONG_TARGET', message, retryable: false } };
+  return { ok: false, error: { code: 'WRONG_TARGET', message } };
 }
 
 function configuredIdentity(config, resource, number) {
@@ -57,6 +57,7 @@ function changeRequest(config, labels) {
 
 export default async function createPlatformProvider(input) {
   const config = input.config || {};
+  let verifyHeadCalls = 0;
   let issueLabels = ['in: core', 'keep'];
   let pullRequestLabels = ['in: stale', 'type: feature'];
   const context = {
@@ -118,6 +119,10 @@ export default async function createPlatformProvider(input) {
       ...(config.recoveryVerifyHead ? {
         async verifyHead() {
           recordCall(config, 'changeRequests.verifyHead');
+          verifyHeadCalls += 1;
+          if (verifyHeadCalls <= (config.verifyHeadFailures || 0)) {
+            return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: 'Configured transient failure' } };
+          }
           return { ok: true, value: { sha: 'a'.repeat(40) } };
         }
       } : {}),

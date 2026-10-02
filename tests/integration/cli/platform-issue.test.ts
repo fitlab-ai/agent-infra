@@ -23,6 +23,24 @@ function runRecovery(args: string[], options: { cwd?: string; env?: NodeJS.Proce
   });
 }
 
+test('task platform recovery rejects non-positive and non-integer retry budgets', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-recovery-cli-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const taskId = 'TASK-20260101-000001';
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+    for (const attempts of ['0', '-1', '1.5']) {
+      const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--attempts', attempts], { cwd: root });
+      assert.equal(recovered.status, 1, `${attempts}: ${recovered.stdout}`);
+      assert.equal(JSON.parse(recovered.stdout).error.code, 'PLATFORM_OPERATION_RECOVERY_PAYLOAD_INVALID');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('platform-issue CLI validates closed option combinations before I/O', () => {
   for (const args of [
     ['sync', 'TASK-20260101-000001', '--agent', 'codex'],
@@ -186,9 +204,10 @@ test('platform-issue in-label sync stays deferred until completion and dry-run i
     const recoveredJournal = readPlatformOperationJournal(taskId, root).operations;
     const superseded = recoveredJournal.find((item) => item.id === operation.id);
     const retargeted = recoveredJournal.find((item) => item.id !== operation.id && item.issueMetadata?.inLabels === 'from-diff');
-    assert.equal(superseded?.state, 'failed');
-    assert.equal(superseded?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+    assert.equal(superseded, undefined);
+    assert.ok(retargeted);
     assert.notDeepEqual(retargeted?.issueMetadata?.fromDiffFiles, operation.issueMetadata?.fromDiffFiles, JSON.stringify(recoveredJournal));
+    assert.equal(recoveredJournal[0]?.id, retargeted.id);
     assert.equal(retargeted?.state, 'succeeded');
 
     assert.ok(retargeted);
@@ -206,10 +225,10 @@ test('platform-issue in-label sync stays deferred until completion and dry-run i
     const currentMapping = mappingJournal.find((item) => item.id !== retargeted.id
       && item.issueMetadata?.inLabels === 'from-diff'
       && JSON.stringify(item.issueMetadata.fromDiffFiles) === JSON.stringify(retargeted.issueMetadata?.fromDiffFiles));
-    assert.equal(staleMapping?.state, 'failed', JSON.stringify({ mappingRecovery: mappingRecovery.stdout, mappingJournal }));
-    assert.equal(staleMapping?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+    assert.equal(staleMapping, undefined);
     assert.ok(currentMapping);
     assert.notEqual(currentMapping.id, retargeted.id);
+    assert.equal(mappingJournal[0]?.id, currentMapping.id);
     assert.notEqual(currentMapping.issueMetadata?.inLabelMappingDigest, retargeted.issueMetadata?.inLabelMappingDigest, JSON.stringify({ retargeted, currentMapping }));
     assert.deepEqual(currentMapping.issueMetadata?.fromDiffFiles, retargeted.issueMetadata?.fromDiffFiles);
     assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), mappingFilesBefore);

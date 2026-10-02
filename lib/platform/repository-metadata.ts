@@ -14,9 +14,10 @@ import type {
   LabelReconciliation,
   MilestoneDefinition,
   MilestoneInitialization,
-  PlatformError,
+  ProviderError,
   ProviderResult
 } from './provider-contract.ts';
+import type { PlatformError } from './types.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 
@@ -288,7 +289,7 @@ function operationStatus(changed: boolean): 'applied' | 'no-op' {
   return changed ? 'applied' : 'no-op';
 }
 
-function errorStatus(error: PlatformError): PlatformResult['status'] {
+function errorStatus(error: PlatformError | ProviderError): PlatformResult['status'] {
   return error.code === 'PLATFORM_CAPABILITY_UNSUPPORTED' ? 'degraded' : providerStatus(error);
 }
 

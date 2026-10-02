@@ -7,7 +7,6 @@ import type { ResourceIdentity } from '../platform/resource-identity.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 
 const JOURNAL_FILE = '.platform-operations.json';
-const MAX_ATTEMPTS = 3;
 
 type PlatformOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment' | 'issue-create' | 'issue-metadata' | 'pull-request' | 'pull-request-summary' | 'pull-request-review';
 type PlatformOperationState = 'queued' | 'pending' | 'unknown' | 'succeeded' | 'failed';
@@ -54,7 +53,6 @@ type PlatformOperation = Readonly<{
   dependency: 'deferred' | 'required';
   state: PlatformOperationState;
   attempts: number;
-  maxAttempts: typeof MAX_ATTEMPTS;
   lastCode: string | null;
   issueMetadata?: PlatformIssueMetadataIntent;
   issueCreate?: PlatformIssueCreateIntent;
@@ -82,6 +80,7 @@ type RecordOperationInput = Readonly<{
   pullRequest?: PlatformPullRequestIntent;
   pullRequestSummary?: PlatformPullRequestSummaryIntent;
   pullRequestReview?: PlatformPullRequestReviewIntent;
+  replaceOperationId?: string;
   cwd?: string;
 }>;
 
@@ -114,8 +113,7 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
       || !/^[a-f0-9]{64}$/u.test(item.expectedDigest)
       || !['deferred', 'required'].includes(item.dependency)
       || !['queued', 'pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
-      || !Number.isSafeInteger(item.attempts) || item.attempts < 0 || item.attempts > MAX_ATTEMPTS
-      || item.maxAttempts !== MAX_ATTEMPTS
+      || !Number.isSafeInteger(item.attempts) || item.attempts < 0
       || !(item.lastCode === null || typeof item.lastCode === 'string')
       || (item.kind === 'issue-metadata'
         ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
@@ -196,7 +194,13 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
   const { taskId, file } = resolveJournal(input.taskRef, input.cwd);
   const journal = parseJournal(file, taskId);
   const id = operationId(input);
-  const previous = journal.operations.find((item) => item.id === id);
+  const targetIndex = journal.operations.findIndex((item) => item.id === id);
+  const replacementIndex = input.replaceOperationId
+    ? journal.operations.findIndex((item) => item.id === input.replaceOperationId)
+    : -1;
+  const target = targetIndex >= 0 ? journal.operations[targetIndex] : undefined;
+  const replacement = replacementIndex >= 0 ? journal.operations[replacementIndex] : undefined;
+  const previousAttempts = Math.max(target?.attempts ?? 0, replacement?.attempts ?? 0);
   const next: PlatformOperation = {
     id,
     kind: input.kind,
@@ -204,8 +208,7 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     expectedDigest: input.expectedDigest,
     dependency: input.dependency,
     state: input.state,
-    attempts: Math.min(MAX_ATTEMPTS, (previous?.attempts ?? 0) + (input.state === 'pending' ? 1 : 0)),
-    maxAttempts: MAX_ATTEMPTS,
+    attempts: previousAttempts + (input.state === 'pending' ? 1 : 0),
     lastCode: input.lastCode ?? null,
     ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
     ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
@@ -214,9 +217,13 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
     updatedAt: new Date().toISOString()
   };
-  const operations = previous
-    ? journal.operations.map((item) => item.id === id ? next : item)
-    : [...journal.operations, next];
+  const operations = replacementIndex >= 0
+    ? journal.operations.flatMap((item, index) => index === replacementIndex
+      ? [next]
+      : index === targetIndex ? [] : [item])
+    : targetIndex >= 0
+      ? journal.operations.map((item, index) => index === targetIndex ? next : item)
+      : [...journal.operations, next];
   writeJournal(file, { version: 1, taskId, operations });
   return next;
 }
@@ -226,5 +233,5 @@ function readPlatformOperationJournal(taskRef: string, cwd?: string): PlatformOp
   return parseJournal(file, taskId);
 }
 
-export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as PLATFORM_OPERATION_MAX_ATTEMPTS, operationId, recordPlatformOperation, readPlatformOperationJournal };
+export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, operationId, recordPlatformOperation, readPlatformOperationJournal };
 export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, RecordOperationInput };

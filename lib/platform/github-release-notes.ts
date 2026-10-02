@@ -1,5 +1,6 @@
 import type { GitHubClient } from './github-client.ts';
 import { createGitHubClient } from './github-client.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
 
 type GitHubActorInput = {
   name?: string | null;
@@ -43,13 +44,14 @@ function normalizePlatformAuthor(author: { login?: string | null } | null | unde
   };
 }
 
-function failure(error: { code: string; message: string; retryable: boolean }) {
+function failure(error: { code: string; message: string; retryable?: boolean }) {
+  const retryable = error.retryable ?? providerErrorRetryable(error.code);
   return {
-    status: error.retryable ? 'blocked' as const : 'failed' as const,
+    status: retryable ? 'blocked' as const : 'failed' as const,
     changed: false,
     operation: null,
     url: null,
-    error
+    error: { code: error.code, message: error.message }
   };
 }
 

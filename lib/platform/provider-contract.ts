@@ -12,17 +12,14 @@ type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-type PlatformError = {
+type ProviderError = {
   code: string;
   message: string;
-  retryable: boolean;
-  providerType?: string;
-  phase?: string;
 };
 
 type ProviderResult<T> =
   | { ok: true; value: T }
-  | { ok: false; error: PlatformError; value?: T };
+  | { ok: false; error: ProviderError; value?: T };
 
 type ProviderOperationContext = {
   repositoryRoot: string;
@@ -534,10 +531,7 @@ function validatePlatformProvider(
       ok: false,
       error: {
         code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
-        message: 'Provider must expose matching type, contractVersion, and context.resolve',
-        retryable: false,
-        providerType,
-        phase: 'provider-validation'
+        message: 'Provider must expose matching type, contractVersion, and context.resolve'
       }
     };
   }
@@ -550,10 +544,7 @@ function validatePlatformProvider(
         ok: false,
         error: {
           code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
-          message: 'Provider identity declaration is invalid',
-          retryable: false,
-          providerType,
-          phase: 'provider-validation'
+          message: 'Provider identity declaration is invalid'
         }
       };
     }
@@ -567,10 +558,7 @@ function validatePlatformProvider(
         ok: false,
         error: {
           code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
-          message: `Provider operation group ${groupName} is incomplete`,
-          retryable: false,
-          providerType,
-          phase: 'provider-validation'
+          message: `Provider operation group ${groupName} is incomplete`
         }
       };
     }
@@ -583,9 +571,6 @@ function validatePlatformProvider(
             error: {
               code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
               message: `Provider operation group ${groupName} requires an identity declaration for ${resourceKind}`,
-              retryable: false,
-              providerType,
-              phase: 'provider-validation'
             }
           };
         }
@@ -617,7 +602,7 @@ export type {
   MutationReceipt,
   PlatformCapabilities,
   PlatformContextSnapshot,
-  PlatformError,
+  ProviderError,
   PlatformProvider,
   PlatformProviderFactory,
   PlatformProviderFactoryInput,

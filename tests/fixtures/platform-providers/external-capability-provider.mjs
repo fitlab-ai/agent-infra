@@ -31,9 +31,9 @@ export default async function createPlatformProvider(input) {
         };
       },
       async listClosing() { return { ok: true, value: [] }; },
-      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async resolveGitEvidence() { return { ok: false, error: { code: 'PLATFORM_CAPABILITY_UNSUPPORTED', message: 'unsupported', retryable: false } }; }
+      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async resolveGitEvidence() { return { ok: false, error: { code: 'PLATFORM_CAPABILITY_UNSUPPORTED', message: 'unsupported' } }; }
     }
   };
 }

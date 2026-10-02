@@ -81,7 +81,7 @@ test('the current platform write starts only after earlier work drains', async (
   }
 });
 
-test('a deferred failure does not block an independent required write', async () => {
+test('a required write waits behind an earlier deferred failure', async () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-operation-dependency-'));
   const taskId = 'TASK-20260101-000003';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
@@ -106,9 +106,10 @@ test('a deferred failure does not block an independent required write', async ()
       persistenceFailure: (error) => platformResult('failed', { error })
     });
 
-    assert.equal(result.status, 'applied');
-    assert.equal(executed, true);
+    assert.equal(result.status, 'blocked');
+    assert.equal(executed, false);
     assert.equal(readPlatformOperationJournal(taskId, repoRoot).operations.find((item) => item.id === deferred.id)?.state, 'failed');
+    assert.equal(readPlatformOperationJournal(taskId, repoRoot).operations[1]?.state, 'queued');
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }

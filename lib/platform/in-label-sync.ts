@@ -1,5 +1,6 @@
 import { computeInLabels } from './metadata-labels.ts';
 import { createHash } from 'node:crypto';
+import { providerErrorRetryable } from './provider-validation.ts';
 import type { PlatformError } from './types.ts';
 
 type InLabelPlan = {
@@ -150,7 +151,7 @@ function syncLabelDelta(
   const delta = labelDelta(current, target, prefix);
   let changed = false;
   const failure = (error: PlatformError): LabelDeltaResult => {
-    if (changed || error.retryable) {
+    if (changed || error.retryable || providerErrorRetryable(error.code)) {
       return {
         status: 'blocked',
         changed,

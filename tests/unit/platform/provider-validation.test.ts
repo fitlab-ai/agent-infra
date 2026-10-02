@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { validatePlatformProvider } from '../../../lib/platform/provider-contract.ts';
-import { invokeProviderOperation, wrapProviderOperations } from '../../../lib/platform/provider-validation.ts';
+import { invokeProviderOperation, providerErrorRetryable, wrapProviderOperations } from '../../../lib/platform/provider-validation.ts';
 import { serializeResourceIdentity } from '../../../lib/platform/resource-identity.ts';
 
 test('provider invocation maps throws and malformed envelopes to stable failures', async () => {
@@ -20,9 +20,11 @@ test('provider invocation maps throws and malformed envelopes to stable failures
   if (!envelope.ok) assert.equal(envelope.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
 });
 
-test('provider invocation preserves structured provider errors and retryability', async () => {
-  const result = await invokeProviderOperation('trae', 'issues.inspect', async () => ({ ok: false, error: { code: 'REMOTE_BUSY', message: 'try later', retryable: true } }), (value) => value as never);
+test('provider errors expose code and message while request retry policy stays internal', async () => {
+  const result = await invokeProviderOperation('trae', 'issues.inspect', async () => ({ ok: false, error: { code: 'REMOTE_BUSY', message: 'try later' } }), (value) => value as never);
   assert.deepEqual(result, { ok: false, error: { code: 'REMOTE_BUSY', message: 'Platform provider is temporarily busy', retryable: true, providerType: 'trae', phase: 'issues.inspect' } });
+  assert.equal(providerErrorRetryable('REMOTE_BUSY'), true);
+  assert.equal(providerErrorRetryable('PERMISSION_DENIED'), false);
 });
 
 test('provider metadata is sorted by identity and rejects duplicate identities', async () => {
@@ -39,9 +41,9 @@ test('provider metadata is sorted by identity and rejects duplicate identities',
     context: { async resolve() { return { ok: true, value: { type: 'trae', scope: { id: 'scope' }, currentUser: null, capabilities: { authenticated: true, comment: false, triage: false, push: false, admin: false }, authenticated: true } }; } },
     issues: {
       async describeRepository() { return { ok: true, value: metadata }; },
-      async inspect() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; }
+      async inspect() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; }
     }
   } as never);
   const sorted = await provider.issues!.describeRepository({} as never);
@@ -123,7 +125,7 @@ test('provider result validation rejects duplicate nested options, mismatched id
       async update() { return { ok: true, value: { remoteId: 'issue-1', changed: false } }; }
     },
     releases: {
-      async inspect() { return { ok: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found', retryable: false } }; },
+      async inspect() { return { ok: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found' } }; },
       async create() { return { ok: true, value: { remoteId: 'release-1', changed: false } }; },
       async update() { return { ok: true, value: { remoteId: 'release-1', changed: false } }; },
       async reconcileMilestones() { return { ok: true, value: { changed: false, created: [], closed: [] } }; },
@@ -241,7 +243,7 @@ test('provider operation validation rejects coercion, context mismatch, and raw 
     context: { async resolve() { return { ok: true, value: {} }; } },
     releases: {
       async inspect() {
-        return { ok: false, error: { code: 'RAW_SECRET', message: 'token=fake-supersecret', retryable: true } };
+        return { ok: false, error: { code: 'RAW_SECRET', message: 'token=fake-supersecret' } };
       },
       async create() { return { ok: true, value: { remoteId: 'r1', changed: false } }; },
       async update() { return { ok: true, value: { remoteId: 'r1', changed: false } }; },

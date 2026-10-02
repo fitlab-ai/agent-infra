@@ -4,6 +4,8 @@ type PlatformError = {
   code: string;
   message: string;
   retryable: boolean;
+  providerType?: string;
+  phase?: string;
 };
 
 type PlatformCapabilities = {

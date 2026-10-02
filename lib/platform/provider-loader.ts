@@ -12,13 +12,14 @@ import {
 } from './provider-contract.ts';
 import type {
   JsonValue,
-  PlatformError,
   PlatformProvider,
   PlatformProviderFactoryInput
 } from './provider-contract.ts';
 import { createGitHubProvider } from './github-provider.ts';
 import { createNoneProvider } from './none-provider.ts';
 import { wrapProviderOperations } from './provider-validation.ts';
+import type { LoadedRuntimeProvider, RuntimePlatformProvider } from './provider-validation.ts';
+import type { PlatformError } from './types.ts';
 import type { PlatformClient } from './context.ts';
 
 type ProviderLoaderOptions = {
@@ -28,7 +29,7 @@ type ProviderLoaderOptions = {
 };
 
 type LoadedPlatformProvider = {
-  provider: PlatformProvider;
+  provider: LoadedRuntimeProvider;
   providerType: string;
   repositoryRoot: string;
   workingDirectory: string;
@@ -44,7 +45,7 @@ type ResolvedExternalSource = {
   importUrl: string;
 };
 
-const sessions = new Map<string, Promise<PlatformProvider>>();
+const sessions = new Map<string, Promise<LoadedRuntimeProvider>>();
 
 function findRepositoryRoot(cwd: string): string {
   try {
@@ -151,15 +152,15 @@ async function instantiateProvider(
   importUrl: string | null,
   config: Readonly<Record<string, JsonValue>>,
   client?: PlatformClient
-): Promise<PlatformProvider> {
+): Promise<LoadedRuntimeProvider> {
   const input: PlatformProviderFactoryInput = {
     providerType,
     contractVersion: PLATFORM_PROVIDER_CONTRACT_VERSION,
     repositoryRoot,
     config
   };
-  if (providerType === 'github') return createGitHubProvider(input, client as never);
-  if (providerType === 'none') return createNoneProvider(input);
+  if (providerType === 'github') return createGitHubProvider(input, client as never) as unknown as RuntimePlatformProvider;
+  if (providerType === 'none') return createNoneProvider(input) as unknown as RuntimePlatformProvider;
 
   let moduleValue: Record<string, unknown>;
   try {
