@@ -708,7 +708,7 @@ test("ensureCodexModelInheritance projects current project hook trust into the s
     const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
       hooks?: { state?: Record<string, { trusted_hash?: string; enabled?: boolean }> };
     };
-    assert.deepEqual(data.hooks?.state, {
+    assert.deepEqual(JSON.parse(JSON.stringify(data.hooks?.state ?? {})), {
       "/workspace/.codex/hooks.json:pre_tool_use:0:0": {
         trusted_hash: trustedHash,
         enabled: true
@@ -758,7 +758,7 @@ test("ensureCodexModelInheritance replaces stale sandbox hook trust and preserve
     const data = toml.parse(fs.readFileSync(configPath, "utf8")) as {
       hooks?: { state?: Record<string, { trusted_hash?: string }> };
     };
-    assert.deepEqual(data.hooks?.state, {
+    assert.deepEqual(JSON.parse(JSON.stringify(data.hooks?.state ?? {})), {
       "/home/devuser/.codex/hooks.json:session_start:0:0": {
         trusted_hash: `sha256:${"e".repeat(64)}`
       },
@@ -849,7 +849,7 @@ for (const hostConfig of [
         hooks?: { state?: Record<string, { trusted_hash?: string }> };
       };
       assert.equal(data.model, "gpt-5.4");
-      assert.deepEqual(data.hooks?.state, {
+      assert.deepEqual(JSON.parse(JSON.stringify(data.hooks?.state ?? {})), {
         "/home/devuser/.codex/hooks.json:session_start:0:0": {
           trusted_hash: `sha256:${"b".repeat(64)}`
         }
