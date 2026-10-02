@@ -48,7 +48,7 @@ async function coordinatePlatformWrite<T extends OperationResult>(input: Coordin
       excludeId: operationId
     });
   if (drained.status !== 'applied' && drained.status !== 'no-op') {
-    return input.block(drained.error ?? {
+    return input.block(drained.error ? { ...drained.error, retryable: true } : {
       code: 'PLATFORM_OPERATION_QUEUE_BLOCKED',
       message: 'A previous platform operation is still unresolved; the current write remains queued',
       retryable: true

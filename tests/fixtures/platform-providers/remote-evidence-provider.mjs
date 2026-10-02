@@ -7,8 +7,8 @@ export default async function createPlatformProvider(input) {
     identity: { issue: 'number', 'pull-request': 'number' },
     ...(input.config.checks ? { checks: {
       async inspectRequired() { return { ok: true, value: input.config.checks }; },
-      async resolveRun() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async fetchLogs() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; }
+      async resolveRun() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async fetchLogs() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; }
     } } : {}),
     context: {
       async resolve() {
@@ -53,19 +53,18 @@ export default async function createPlatformProvider(input) {
             head: value.head,
             base: value.base
           } }
-          : { ok: false, error: { code: 'PR_NOT_FOUND', message: 'Pull request was not found', retryable: false } };
+          : { ok: false, error: { code: 'PR_NOT_FOUND', message: 'Pull request was not found' } };
       },
       async listClosing() { return { ok: true, value: [] }; },
-      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
+      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
       async resolveGitEvidence(request) {
         if (!evidenceEnabled) {
           return {
             ok: false,
             error: {
               code: 'PLATFORM_CAPABILITY_UNSUPPORTED',
-              message: 'Git evidence is not supported by this provider',
-              retryable: false
+              message: 'Git evidence is not supported by this provider'
             }
           };
         }

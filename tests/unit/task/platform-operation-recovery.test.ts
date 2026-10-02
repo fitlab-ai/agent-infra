@@ -153,6 +153,7 @@ test('human supplied retry count overrides the automatic retry budget even when 
     const recovery = await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot, attempts: 5 });
     const persisted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
     assert.equal(recovery.status, 'failed');
+    assert.deepEqual(recovery.error, { code: 'PLATFORM_REQUEST_FAILED', message: 'The platform request failed' });
     assert.equal(persisted?.attempts, 6);
     assert.equal(persisted?.state, 'unknown');
     assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 5);

@@ -22,7 +22,7 @@ export default async function createPlatformProvider(input) {
       }
     },
     releases: {
-      async inspect() { return { ok: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found', retryable: false } }; },
+      async inspect() { return { ok: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found' } }; },
       async create() { return receipt('release-created'); },
       async update() { return receipt('release-updated'); },
       async reconcileMilestones() { return { ok: true, value: { changed: false, created: [], closed: [] } }; },

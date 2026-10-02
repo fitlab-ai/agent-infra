@@ -2,9 +2,12 @@ import path from 'node:path';
 
 import { loadPlatformProvider } from './provider-loader.ts';
 import { defaultGitRemote, parseGitHubRemote } from './github-provider.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
-import type { PlatformProvider, PlatformContextSnapshot, PlatformError } from './provider-contract.ts';
+import type { PlatformContextSnapshot } from './provider-contract.ts';
+import type { PlatformError } from './types.ts';
+import type { LoadedRuntimeProvider } from './provider-validation.ts';
 
 type PlatformClientResult<T> =
   | { ok: true; value: T }
@@ -23,7 +26,7 @@ type ContextOptions = {
 };
 
 type LoadedContext = {
-  provider: PlatformProvider;
+  provider: LoadedRuntimeProvider;
   providerType: string;
   repositoryRoot: string;
   workingDirectory: string;
@@ -33,7 +36,7 @@ type LoadedContext = {
 };
 
 function errorStatus(error: PlatformError): PlatformResult['status'] {
-  if (error.retryable || error.code === 'AUTH_REQUIRED' || error.code === 'PLATFORM_DEPENDENCY_MISSING') return 'blocked';
+  if (error.retryable || providerErrorRetryable(error.code) || error.code === 'AUTH_REQUIRED' || error.code === 'PLATFORM_DEPENDENCY_MISSING') return 'blocked';
   if (error.code === 'REMOTE_MISSING' || error.code === 'PLATFORM_UNSUPPORTED') return 'no-op';
   return 'failed';
 }
@@ -43,9 +46,10 @@ function contextError(
   error: PlatformError,
   repository: string | null = null
 ): PlatformResult {
+  const retryable = error.retryable ?? providerErrorRetryable(error.code);
   return platformResult(errorStatus(error), {
     platform: { type: providerType || null, repository, currentUser: null },
-    error: { code: error.code, message: error.message, retryable: error.retryable }
+    error: { code: error.code, message: error.message, retryable }
   });
 }
 

@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import type {
-  PlatformError,
+  ProviderError,
   ProviderOperationContext,
   PlatformProvider,
   ProviderResult,
@@ -15,6 +15,9 @@ import {
 } from './resource-identity.ts';
 import type { LoadedContext } from './context.ts';
 import type { PlatformResult } from './types.ts';
+import type { PlatformError } from './types.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
+import type { NormalizedProviderResult } from './provider-validation.ts';
 
 function providerOperationContext(
   loaded: LoadedContext,
@@ -29,30 +32,28 @@ function providerOperationContext(
   };
 }
 
-function providerError(error: PlatformError, fallbackCode: string): PlatformError {
+function providerError(error: ProviderError | PlatformError, fallbackCode: string): PlatformError {
   return {
     code: error.code || fallbackCode,
     message: error.message || 'Platform provider operation failed',
-    retryable: error.retryable
+    retryable: 'retryable' in error ? error.retryable : providerErrorRetryable(error.code)
   };
 }
 
-function providerStatus(error: PlatformError): PlatformResult['status'] {
-  return error.retryable ? 'blocked' : 'failed';
+function providerStatus(error: ProviderError | PlatformError): PlatformResult['status'] {
+  return ('retryable' in error ? error.retryable : providerErrorRetryable(error.code)) ? 'blocked' : 'failed';
 }
 
 function unsupportedProviderOperation(
   provider: PlatformProvider,
   operation: string
-): ProviderResult<never> {
+): NormalizedProviderResult<never> {
   return {
     ok: false,
     error: {
       code: 'PLATFORM_CAPABILITY_UNSUPPORTED',
       message: `Platform '${provider.type}' does not provide ${operation}`,
-      retryable: false,
-      providerType: provider.type,
-      phase: 'operation'
+      retryable: false
     }
   };
 }

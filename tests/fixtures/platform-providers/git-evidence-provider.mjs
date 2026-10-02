@@ -27,10 +27,10 @@ export default async function createPlatformProvider(input) {
       }
     },
     changeRequests: {
-      async inspect() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
+      async inspect() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
       async listClosing() { return { ok: true, value: [] }; },
-      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
-      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
+      async create() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
+      async update() { return { ok: false, error: { code: 'UNUSED', message: 'unused' } }; },
       async resolveGitEvidence() {
         return {
           ok: true,

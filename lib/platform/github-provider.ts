@@ -21,7 +21,7 @@ import type {
   MutationReceipt,
   MilestoneInitialization,
   PlatformContextSnapshot,
-  PlatformError,
+  ProviderError,
   ProviderOperationContext,
   PlatformProvider,
   PlatformProviderFactoryInput,
@@ -38,6 +38,11 @@ import type {
 } from './provider-contract.ts';
 import { resourceIdentityNumber, resourceIdentityString } from './resource-identity.ts';
 import { extractPullRequestFileNames, syncLabelDelta } from './in-label-sync.ts';
+import type { PlatformError } from './types.ts';
+
+function providerError(error: PlatformError): ProviderError {
+  return { code: error.code, message: error.message, retryable: error.retryable } as ProviderError;
+}
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
 const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
@@ -105,7 +110,6 @@ function resolveGitHubChangeRequestGitEvidence({
       error: {
         code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
         message: 'Pull request repository identity is inconsistent',
-        retryable: false
       }
     };
   }
@@ -127,7 +131,6 @@ function resolveGitHubChangeRequestGitEvidence({
       error: {
         code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
         message: 'Pull request Git refs are invalid',
-        retryable: false
       }
     };
   }
@@ -145,7 +148,6 @@ function resolveGitHubChangeRequestGitEvidence({
       error: {
         code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
         message: `No GitHub remote can provide evidence for ${repository}`,
-        retryable: false
       }
     };
   }
@@ -155,8 +157,8 @@ function resolveGitHubChangeRequestGitEvidence({
   };
 }
 
-function failure(error: { code: string; message: string; retryable: boolean }): ProviderResult<PlatformContextSnapshot> {
-  return { ok: false, error };
+function failure(error: PlatformError | ProviderError): ProviderResult<PlatformContextSnapshot> {
+  return { ok: false, error: 'retryable' in error ? providerError(error) : error };
 }
 
 function resolveContext(
@@ -170,19 +172,17 @@ function resolveContext(
     return failure({
       code: 'GH_CLI_VERSION_UNSUPPORTED',
       message: 'GitHub CLI ' + version.value + ' is unsupported; install gh >= ' + MINIMUM_GITHUB_CLI_VERSION,
-      retryable: false
     });
   }
   const remote = input.gitRemote || defaultGitRemote(cwd);
   if (!remote) {
-    return failure({ code: 'REMOTE_MISSING', message: 'Git origin remote is not configured', retryable: false });
+    return failure({ code: 'REMOTE_MISSING', message: 'Git origin remote is not configured' });
   }
   const ownerRepo = parseGitHubRemote(remote);
   if (!ownerRepo) {
     return failure({
       code: /github\.com/i.test(remote) ? 'REMOTE_INVALID' : 'PLATFORM_UNSUPPORTED',
       message: 'Unable to parse GitHub owner/repo from configured remote',
-      retryable: false
     });
   }
   const repository = client.json(['api', 'repos/' + ownerRepo], { cwd });
@@ -192,7 +192,6 @@ function resolveContext(
   if (!upstream) return failure({
     code: 'UPSTREAM_UNRESOLVED',
     message: 'Unable to resolve the upstream repository',
-    retryable: false
   });
   const user = client.json(['api', 'graphql', '-f', 'query=' + CURRENT_USER_QUERY], { cwd });
   if (!user.ok) return failure(user.error);
@@ -241,18 +240,18 @@ function repositoryHead(cwd: string): string {
 
 function verifyRemoteBranch(cwd: string, repositoryName: string, head: string):
   | { ok: true; value: string }
-  | { ok: false; error: { code: string; message: string; retryable: boolean } } {
+  | { ok: false; error: ProviderError } {
   const wanted = expectedHeadRepository(repositoryName, head);
   if (!wanted.ref || !/^[A-Za-z0-9._/-]+$/.test(wanted.ref)) return {
     ok: false,
-    error: { code: 'PR_HEAD_INVALID', message: 'Pull request head ref is invalid', retryable: false }
+    error: { code: 'PR_HEAD_INVALID', message: 'Pull request head ref is invalid' }
   };
   const remotes = configuredGitRemotes(cwd);
   const remote = remotes.find((item) => item.repository.toLowerCase() === wanted.repository.toLowerCase())
     ?? remotes.find((item) => item.name === 'origin');
   if (!remote) return {
     ok: false,
-    error: { code: 'PR_REMOTE_BRANCH_MISSING', message: `No configured remote can verify ${wanted.repository}:${wanted.ref}`, retryable: false }
+    error: { code: 'PR_REMOTE_BRANCH_MISSING', message: `No configured remote can verify ${wanted.repository}:${wanted.ref}` }
   };
   try {
     const output = execFileSync('git', ['ls-remote', '--refs', remote.name, `refs/heads/${wanted.ref}`], {
@@ -262,19 +261,19 @@ function verifyRemoteBranch(cwd: string, repositoryName: string, head: string):
     const sha = match?.split(/\s+/)[0] || null;
     if (!sha || !/^[a-f0-9]{40}$/i.test(sha)) return {
       ok: false,
-      error: { code: 'PR_REMOTE_BRANCH_MISSING', message: `Remote branch ${wanted.repository}:${wanted.ref} does not exist`, retryable: false }
+      error: { code: 'PR_REMOTE_BRANCH_MISSING', message: `Remote branch ${wanted.repository}:${wanted.ref} does not exist` }
     };
     return { ok: true, value: sha };
   } catch (error) {
     return {
       ok: false,
-      error: { code: 'PR_REMOTE_BRANCH_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), retryable: true }
+      error: { code: 'PR_REMOTE_BRANCH_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) }
     };
   }
 }
 
 function invalid(code: string, message: string): ProviderResult<never> {
-  return { ok: false, error: { code, message, retryable: false } };
+  return { ok: false, error: { code, message } };
 }
 
 function changeRequestSnapshot(value: any): ChangeRequestSnapshot {
@@ -347,7 +346,7 @@ function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
 }
 
 function partialFailure<T>(response: { ok: false; error: PlatformError }, value: T): ProviderResult<T> {
-  return { ok: false, error: response.error, value };
+  return { ok: false, error: providerError(response.error), value };
 }
 
 function labelReconciliation(
@@ -390,8 +389,8 @@ function syncLabels(
         status: 'blocked' as const,
         changed: true,
         error: synced.error
-          ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
-          : { code: 'IN_LABEL_SYNC_PARTIAL', message: 'In-label synchronization is partial or unknown', retryable: true }
+          ? { ...providerError(synced.error), code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+          : { code: 'IN_LABEL_SYNC_PARTIAL', message: 'In-label synchronization is partial or unknown' }
       };
       return synced;
     }
@@ -642,13 +641,13 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       try {
         localHead = repositoryHead(context.workingDirectory);
       } catch (error) {
-        return { ok: false, error: { code: 'PR_LOCAL_HEAD_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), retryable: false } };
+        return { ok: false, error: { code: 'PR_LOCAL_HEAD_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) } };
       }
       const remote = verifyRemoteBranch(context.workingDirectory, repository(context), head);
       if (!remote.ok) return remote;
       if (remote.value !== localHead) return {
         ok: false,
-        error: { code: 'PR_REMOTE_HEAD_MISMATCH', message: `Remote head ${remote.value} does not match local HEAD ${localHead}`, retryable: false }
+        error: { code: 'PR_REMOTE_HEAD_MISMATCH', message: `Remote head ${remote.value} does not match local HEAD ${localHead}` }
       };
       return { ok: true, value: { sha: localHead } };
     },
@@ -909,7 +908,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       try {
         const tag = resourceIdentityString(release) || '';
         const result = module.publishGitHubReleaseNotes({ repository: repository(context), tag, title, notesFile }, { cwd: context.workingDirectory, client });
-        if (result.status === 'failed' || result.status === 'blocked') return { ok: false, error: result.error || { code: 'RELEASE_NOTES_PUBLISH_FAILED', message: 'Release notes publish failed', retryable: false } };
+        if (result.status === 'failed' || result.status === 'blocked') return { ok: false, error: result.error ? providerError(result.error) : { code: 'RELEASE_NOTES_PUBLISH_FAILED', message: 'Release notes publish failed' } };
         return { ok: true, value: { changed: result.changed, remoteId: tag } };
       } finally {
         fs.rmSync(temporaryRoot, { recursive: true, force: true });
@@ -921,7 +920,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         repository: repository(context), commitOids, branch, historyLimit, fromTime, toTime
       }, { cwd: context.workingDirectory, client });
       if (collected.status === 'failed' || collected.status === 'blocked' || !('pullRequests' in collected)) {
-        return { ok: false, error: collected.error || { code: 'RELEASE_NOTES_COLLECTION_FAILED', message: 'Release notes could not be collected', retryable: false } };
+        return { ok: false, error: collected.error ? providerError(collected.error) : { code: 'RELEASE_NOTES_COLLECTION_FAILED', message: 'Release notes could not be collected' } };
       }
       const mergedPullRequests = collected.pullRequests.map((item: any) => ({
         id: String(item.number), identity: { kind: 'number' as const, value: Number(item.number) }, number: Number(item.number),

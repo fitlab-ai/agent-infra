@@ -13,7 +13,7 @@ import type {
   MilestoneReconciliation,
   MutationReceipt,
   PlatformContextSnapshot,
-  PlatformError,
+  ProviderError,
   PlatformProvider,
   ProviderResult,
   ReleaseNoteAuthor,
@@ -29,8 +29,23 @@ import type {
   VerificationRemoteFacts
 } from './provider-contract.ts';
 import type { JsonValue } from './provider-contract.ts';
+import type { PlatformError } from './types.ts';
 
 type ResultValidator<T> = (value: unknown) => T;
+type NormalizedProviderResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: PlatformError; value?: T };
+type RuntimeResult<T> = T extends { ok: true; value: infer V }
+  ? { ok: true; value: V }
+  : T extends { ok: false; error: ProviderError; value?: infer V }
+    ? { ok: false; error: PlatformError; value?: V }
+    : T;
+type RuntimeMethod<T> = T extends (...args: infer A) => Promise<infer R>
+  ? (...args: A) => Promise<RuntimeResult<R>>
+  : T;
+type RuntimeProviderValue<T> = T extends object ? { [K in keyof T]: RuntimeMethod<T[K]> } : T;
+type RuntimePlatformProvider = { [K in keyof PlatformProvider]: RuntimeProviderValue<PlatformProvider[K]> };
+type LoadedRuntimeProvider = RuntimePlatformProvider;
 
 function validationError(providerType: string, phase: string, message: string, code = 'PLATFORM_PROVIDER_RESULT_INVALID'): PlatformError {
   return {
@@ -538,10 +553,14 @@ function safeProviderError(providerType: string, operation: string, value: unkno
   return {
     code: definition ? item.code as string : 'PLATFORM_PROVIDER_OPERATION_FAILED',
     message: definition?.message || PROVIDER_ERROR_CATALOG.PLATFORM_PROVIDER_OPERATION_FAILED!.message,
-    retryable: definition?.retryable || false,
+    retryable: definition?.retryable ?? false,
     providerType,
     phase: operation
   };
+}
+
+function providerErrorRetryable(code: string): boolean {
+  return PROVIDER_ERROR_CATALOG[code]?.retryable ?? false;
 }
 
 function validators(providerType: string, declaration?: ProviderIdentityDeclaration): Record<string, ResultValidator<unknown>> {
@@ -629,7 +648,7 @@ async function invokeProviderOperation<T>(
   operation: string,
   call: () => Promise<unknown>,
   validate: ResultValidator<T>
-): Promise<ProviderResult<T>> {
+): Promise<NormalizedProviderResult<T>> {
   try {
     const raw = await call();
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: validationError(providerType, operation, 'Provider operation returned an invalid result envelope') };
@@ -646,8 +665,8 @@ async function invokeProviderOperation<T>(
       try {
         exactKeys(envelope, Object.hasOwn(envelope, 'value') ? ['ok', 'error', 'value'] : ['ok', 'error'], `${operation} result`);
         const error = envelope.error as Record<string, unknown>;
-        exactKeys(error, ['code', 'message', 'retryable'], `${operation} error`);
-        if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' || !error.message || typeof error.retryable !== 'boolean') throw new Error('invalid provider error');
+        exactKeys(error, ['code', 'message'], `${operation} error`);
+        if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' || !error.message) throw new Error('invalid provider error');
         return {
           ok: false,
           error: safeProviderError(providerType, operation, error),
@@ -663,7 +682,7 @@ async function invokeProviderOperation<T>(
   }
 }
 
-function wrapProviderOperations(provider: PlatformProvider): PlatformProvider {
+function wrapProviderOperations(provider: PlatformProvider): RuntimePlatformProvider {
   const map = validators(provider.type, provider.identity);
   const wrapped: PlatformProvider = { ...provider, context: { ...provider.context } };
   wrapped.context.resolve = (input) => invokeProviderOperation(provider.type, 'context.resolve', () => provider.context.resolve(input), map['context.resolve']! as ResultValidator<PlatformContextSnapshot>);
@@ -680,7 +699,8 @@ function wrapProviderOperations(provider: PlatformProvider): PlatformProvider {
     }
     (wrapped as unknown as Record<string, unknown>)[groupName] = target;
   }
-  return wrapped;
+  return wrapped as RuntimePlatformProvider;
 }
 
-export { invokeProviderOperation, validationError, wrapProviderOperations };
+export { invokeProviderOperation, providerErrorRetryable, validationError, wrapProviderOperations };
+export type { LoadedRuntimeProvider, NormalizedProviderResult, RuntimePlatformProvider };

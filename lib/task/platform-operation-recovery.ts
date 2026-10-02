@@ -21,6 +21,7 @@ import { platformResult } from '../platform/types.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from './platform-operation-journal.ts';
+import { providerErrorRetryable } from '../platform/provider-validation.ts';
 
 type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; attempts?: number; excludeId?: string }>;
 const DEFAULT_RECOVERY_ATTEMPTS = 3;
@@ -29,8 +30,9 @@ type RecoveryResult = Readonly<{
   changed: boolean;
   recovered: readonly string[];
   pending: readonly string[];
-  error: { code: string; message: string; retryable: boolean } | null;
+  error: { code: string; message: string } | null;
 }>;
+type RecoveryError = { code: string; message: string; retryable?: boolean };
 
 function labelsMatchOwnedPrefix(actual: readonly string[], expected: readonly string[], prefix: 'status:' | 'in:'): boolean {
   return actual.filter((label) => label.startsWith(prefix)).sort().join('\0')
@@ -44,8 +46,8 @@ function fieldsMatchExpected(
   return Object.entries(expected).every(([name, value]) => actual[name] === value);
 }
 
-function result(status: RecoveryResult['status'], recovered: string[], pending: string[], error: RecoveryResult['error'] = null): RecoveryResult {
-  return { status, changed: recovered.length > 0, recovered, pending, error };
+function result(status: RecoveryResult['status'], recovered: string[], pending: string[], error: RecoveryError | null = null): RecoveryResult {
+  return { status, changed: recovered.length > 0, recovered, pending, error: error ? { code: error.code, message: error.message } : null };
 }
 
 function summaryPayload(taskDir: string, taskId: string): { body: string; sha256: string } | null {
@@ -190,7 +192,7 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
   const listed = resolved.value.provider.comments?.list
     ? await resolved.value.provider.comments.list({ context: providerOperationContext(resolved.value), parent: identity })
     : unsupportedProviderOperation(resolved.value.provider, 'comments.list');
-  if (!listed.ok) return platformResult(listed.error.retryable ? 'blocked' : 'failed', { error: providerError(listed.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') });
+  if (!listed.ok) return platformResult(providerErrorRetryable(listed.error.code) ? 'blocked' : 'failed', { error: providerError(listed.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') });
   const marker = `<!-- sync-pr:${taskId}:summary -->`;
   const summaries = listed.value.filter((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === marker);
   if (summaries.length > 1) return platformResult('blocked', { error: {
