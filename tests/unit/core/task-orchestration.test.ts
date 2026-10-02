@@ -25,6 +25,8 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -89,6 +91,47 @@ function seedLifecycleReceipts(f: ReturnType<typeof fixture>) {
     event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
     inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt
   });
+  seedCompletionEvidence(f.taskDir);
+}
+
+function seedCompletionEvidence(taskDir: string) {
+  const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name)).sort((left, right) => {
+    const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
+    return a.family.localeCompare(b.family) || a.round - b.round;
+  });
+  const action: Record<string, string> = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
+    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
+  };
+  const completionFacts: unknown[] = [];
+  const entries: string[] = [];
+  let second = 0;
+  for (const name of names) {
+    const identity = parseArtifactName(name)!;
+    const file = path.join(taskDir, name);
+    const bytes = fs.readFileSync(file);
+    completionFacts.push({
+      event: identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`,
+      output: name, outputSha256: sha256File(file),
+      semanticDigest: canonicalSemanticDigest(bytes.toString('utf8')),
+      requestId: `request-${name}`, result: 'completed'
+    });
+    const step = `${action[identity.family]} (Round ${identity.round})`;
+    const timestamp = () => `2026-01-01 00:00:${String(second++).padStart(2, '0')}+00:00`;
+    entries.push(`- ${timestamp()} — **${step} [started]** by codex — started`);
+    entries.push(`- ${timestamp()} — **${step}** by codex — completed → ${name}`);
+  }
+  const taskPath = path.join(taskDir, 'task.md');
+  let content = fs.readFileSync(taskPath, 'utf8');
+  const frontmatterEnd = content.indexOf('\n---', 4);
+  const factLine = `completion_facts: '${JSON.stringify(completionFacts)}'`;
+  content = /^completion_facts:.*$/mu.test(content)
+    ? content.replace(/^completion_facts:.*$/mu, factLine)
+    : `${content.slice(0, frontmatterEnd)}\n${factLine}${content.slice(frontmatterEnd)}`;
+  content = /## (?:活动日志|Activity Log)\n/u.test(content)
+    ? content.replace(/## (?:活动日志|Activity Log)\n[\s\S]*$/u, `## Activity Log\n\n${entries.join('\n')}\n`)
+    : `${content}\n## Activity Log\n\n${entries.join('\n')}\n`;
+  fs.writeFileSync(taskPath, content);
 }
 
 test('dispatch respects the repository execution lock', () => {
@@ -510,6 +553,7 @@ test('route selects one fresh role from existing lifecycle facts', () => {
 
   const review = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(review.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(review.taskDir);
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: review.root }).next, {
     action: 'review-analysis', role: 'reviewer', stage: 'review-analysis', round: 1, artifact: 'review-analysis.md',
     requestedModel: null, requestedReasoningEffort: null
@@ -528,21 +572,21 @@ test('route selects one fresh role from existing lifecycle facts', () => {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
     inputSha256: sha256File(path.join(code.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
+  seedCompletionEvidence(code.taskDir);
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: code.root }).next, {
     action: 'code-task', role: 'executor', stage: 'code', round: 1, artifact: 'code.md',
     requestedModel: null, requestedReasoningEffort: null
   });
 });
 
-test('route requires the latest review to bind the latest artifact structurally', () => {
+test('an incomplete higher-round code file does not supersede the latest completed report', () => {
   const f = approvedCodeFixture();
   fs.writeFileSync(path.join(f.taskDir, 'code-r2.md'), '# Code round 2\n');
   fs.utimesSync(path.join(f.taskDir, 'review-code.md'), new Date(), new Date());
 
-  assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).next, {
-    action: 'review-code', role: 'reviewer', stage: 'review-code', round: 2, artifact: 'review-code-r2.md',
-    requestedModel: null, requestedReasoningEffort: null
-  });
+  const routed = routeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  assert.equal(routed.next, null);
+  assert.equal(routed.status, 'running');
 });
 
 test('route uses the same recommendation facts as lifecycle capability checks', () => {
@@ -574,6 +618,7 @@ test('route completes a clean reviewed head even when manual validation remains'
       '**人工校验**：1'
     )
   );
+  seedCompletionEvidence(manual.taskDir);
   const routed = routeOrchestration('TASK-20260101-000001', {
     repoRoot: manual.root,
     captureRepository: () => ({ head: manual.head, headTree: tree, worktreeTree: tree })
@@ -600,10 +645,11 @@ test('route rejects clean completion while a lifecycle execution remains open', 
   for (const runState of ['missing', 'idle'] as const) {
     const f = cleanCommitCandidateFixture();
     const taskPath = path.join(f.taskDir, 'task.md');
-    fs.appendFileSync(
-      taskPath,
-      '\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
-    );
+    const beforeActivity = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(taskPath, beforeActivity.replace(
+      '## Activity Log\n\n',
+      '## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
+    ));
     if (runState === 'missing') fs.unlinkSync(path.join(f.taskDir, 'orchestration.json'));
     const taskBefore = fs.readFileSync(taskPath);
     const runPath = path.join(f.taskDir, 'orchestration.json');
@@ -917,6 +963,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -958,6 +1005,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -979,6 +1027,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
 test('replaying a start event with blank actual model/effort is idempotent, not a replay conflict', () => {
   const f = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -1003,6 +1052,7 @@ test('replaying a start event with blank actual model/effort is idempotent, not 
 test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () => {
   const f = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'

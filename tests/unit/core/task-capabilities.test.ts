@@ -7,10 +7,45 @@ import { createHash } from 'node:crypto';
 
 import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
-import { invalidationMutation, createInvalidationOperation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { parseLifecyclePathDecision } from '../../../lib/task/lifecycle-path.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
+
+function recordCompletedReports(taskDir: string, content: string): string {
+  const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name)).sort((left, right) => {
+    const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
+    return a.family.localeCompare(b.family) || a.round - b.round;
+  });
+  const action: Record<string, string> = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
+    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
+  };
+  const facts: unknown[] = [];
+  const entries: string[] = [];
+  let second = 0;
+  for (const name of names) {
+    const identity = parseArtifactName(name)!;
+    const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
+    const file = path.join(taskDir, name);
+    const bytes = fs.readFileSync(file);
+    facts.push({ event, output: name, outputSha256: createHash('sha256').update(bytes).digest('hex'), semanticDigest: canonicalSemanticDigest(bytes.toString('utf8')), requestId: `request-${name}`, result: 'completed' });
+    const step = `${action[identity.family]} (Round ${identity.round})`;
+    const timestamp = (offset: number) => `2026-01-01 00:00:${String(offset).padStart(2, '0')}+00:00`;
+    entries.push(`- ${timestamp(second++)} — **${step} [started]** by codex — started`);
+    entries.push(`- ${timestamp(second++)} — **${step}** by codex — completed → ${name}`);
+  }
+  const end = content.indexOf('\n---', 4);
+  const factLine = `completion_facts: '${JSON.stringify(facts)}'`;
+  const withFacts = /^completion_facts:.*$/mu.test(content)
+    ? content.replace(/^completion_facts:.*$/mu, factLine)
+    : end < 0 ? content : `${content.slice(0, end)}\n${factLine}${content.slice(end)}`;
+  const logHeading = /## (?:活动日志|Activity Log)\n/u;
+  return logHeading.test(withFacts)
+    ? withFacts.replace(/## (?:活动日志|Activity Log)\n[\s\S]*$/u, `## Activity Log\n\n${entries.join('\n')}\n`)
+    : `${withFacts}\n## Activity Log\n\n${entries.join('\n')}\n`;
+}
 
 const trigger: ExplicitTrigger = {
   initiator: 'model', requestId: 'request-1', requestedAction: 'analysis',
@@ -21,7 +56,7 @@ function facts(currentStep: string): LifecycleFacts {
   return {
     taskState: 'active', currentStep, artifacts: {
       analysis: [], 'review-analysis': [], plan: [], 'review-plan': [], code: [], 'review-code': []
-    }, artifactHashes: {}, reviews: {}, invalidation: { operations: [], targets: [] },
+    }, artifactHashes: {}, reviews: {},
     reworkIntents: [],
     unresolvedLedger: { analysis: 0, plan: 0, code: 0 }, executionBusy: false
   };
@@ -146,6 +181,7 @@ test('rework classification uses ordered completed review cycles and ignores an 
       rows.unshift(`| review-code.completed | ${output} | ${input} | ${hash} | 2026-01-0${round} 00:00:00+00:00 |`);
     }
     let content = `---\nid: TASK-20260101-000001\nstatus: active\n---\n# Task\n\n## 产物生命周期收据\n\n| event | output | input | input_sha256 | completed_at |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}\n`;
+    content = recordCompletedReports(taskDir, content);
     fs.writeFileSync(path.join(taskDir, 'task.md'), content);
     let result = buildLifecycleFacts(taskDir, content);
     assert.equal(result.ok, true);
@@ -154,6 +190,8 @@ test('rework classification uses ordered completed review cycles and ignores an 
 
     const approved = fs.readFileSync(path.join(taskDir, 'review-code-r2.md'), 'utf8').replace('通过', '需要修改');
     fs.writeFileSync(path.join(taskDir, 'review-code-r2.md'), approved);
+    content = recordCompletedReports(taskDir, content);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
     result = buildLifecycleFacts(taskDir, content);
     assert.equal(result.ok, true);
     if (!result.ok) return;
@@ -185,18 +223,6 @@ test('recommendation facts cannot bypass a missing prerequisite', () => {
   });
   assert.equal(result.allowed, false);
   assert.equal(result.reasonCode, 'ANALYSIS_ARTIFACT_REQUIRED');
-});
-
-test('pending invalidation blocks lifecycle authorization but preserves the logical next action', () => {
-  const pending = {
-    ...facts('code'), invalidation: {
-      operations: [{ status: 'pending' } as never], targets: []
-    }
-  };
-  const result = canStart('analysis', pending, trigger);
-  assert.equal(result.allowed, false);
-  assert.equal(result.reasonCode, 'INVALIDATION_INCOMPLETE');
-  assert.equal(recommendNext(pending).action, 'analysis');
 });
 
 test('lifecycle facts derive execution busy from an open lifecycle activity', () => {
@@ -238,59 +264,6 @@ test('lifecycle facts derive execution busy from an open lifecycle activity', ()
     assert.equal(idle.ok, true);
     if (!idle.ok) return;
     assert.equal(idle.facts.executionBusy, false);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('invalidated review history does not require rework classification', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-invalidated-rework-'));
-  try {
-    const taskDir = path.join(root, 'task');
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：精简路径。\n- **判定依据**：边界明确。\n- **未满足的更高路径条件**：无需额外设计。\n- **升级触发条件**：范围变化。\n');
-    const receipts: string[] = [];
-    const names = [
-      { input: 'code.md', output: 'review-code.md', round: 1 },
-      { input: 'code-r2.md', output: 'review-code-r2.md', round: 2 }
-    ] as const;
-    for (const { input, output, round } of names) {
-      fs.writeFileSync(path.join(taskDir, input), `# Code ${round}\n`);
-      fs.writeFileSync(path.join(taskDir, output), `# Review\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n`);
-      const inputHash = createHash('sha256').update(fs.readFileSync(path.join(taskDir, input))).digest('hex');
-      receipts.push(`| review-code.completed | ${output} | ${input} | ${inputHash} | 2026-01-0${round} 00:00:00+00:00 |`);
-    }
-    let content = `---\nid: TASK-20260101-000001\nstatus: active\n---\n# Task\n\n## 产物生命周期收据\n\n| event | output | input | input_sha256 | completed_at |\n| --- | --- | --- | --- | --- |\n${receipts.join('\n')}\n`;
-    const source = {
-      sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
-      sourceSha256: 'a'.repeat(64), createdAt: '2026-01-03 00:00:00+00:00', updatedAt: '2026-01-03 00:00:00+00:00'
-    };
-    const operation = createInvalidationOperation(source);
-    const targets = names.flatMap(({ input, output, round }) => [
-      { targetKind: 'artifact' as const, targetFamily: 'code', targetArtifact: input, targetRound: round },
-      { targetKind: 'artifact' as const, targetFamily: 'review-code', targetArtifact: output, targetRound: round }
-    ]).map((shape) => {
-      const targetShape = {
-        ...shape,
-        targetSha256: createHash('sha256').update(fs.readFileSync(path.join(taskDir, shape.targetArtifact))).digest('hex')
-      };
-      return {
-        ...targetShape, targetId: targetIdFor(operation.operationId, targetShape), operationId: operation.operationId,
-        status: 'completed' as const, reasonCode: 'upstream-replaced', updatedAt: source.updatedAt
-      };
-    });
-    content = upsertSection(content, invalidationMutation(content, {
-      operations: [{ ...operation, status: 'completed', processed: targets.length, total: targets.length, completedAt: source.updatedAt }],
-      targets
-    })).content;
-    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
-
-    const result = buildLifecycleFacts(taskDir, content, 'active');
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.deepEqual(result.facts.artifacts.code, []);
-    assert.deepEqual(result.facts.artifacts['review-code'], []);
-    assert.deepEqual(result.facts.reworkClassificationRequired, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -350,7 +323,9 @@ test('qualification recovery only evaluates the latest active artifact in each f
     if (!built.ok) return;
     fs.writeFileSync(path.join(taskDir, 'analysis-r2.md'), `# Current analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需要独立审查。\n- **未满足的更高路径条件**：已选最高路径。\n- **升级触发条件**：无。\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
 
-    const result = buildLifecycleFacts(taskDir, content, 'active');
+    const completedContent = recordCompletedReports(taskDir, content);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), completedContent);
+    const result = buildLifecycleFacts(taskDir, completedContent, 'active');
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(result.facts.qualificationStale, false);
@@ -369,7 +344,9 @@ test('an absent qualification audit does not mark the latest artifact stale', ()
     const content = qualificationTask();
     fs.writeFileSync(path.join(taskDir, 'task.md'), content);
     fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis without qualification audit\n');
-    const result = buildLifecycleFacts(taskDir, content, 'active');
+    const completedContent = recordCompletedReports(taskDir, content);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), completedContent);
+    const result = buildLifecycleFacts(taskDir, completedContent, 'active');
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(result.facts.qualificationStale, false);
@@ -454,7 +431,7 @@ test('lifecycle facts use completed review receipts rather than review body form
     for (const [name, value] of Object.entries(artifacts)) fs.writeFileSync(path.join(taskDir, name), value);
     const receipt = (event: string, output: string, input: string) =>
       `| ${event} | ${output} | ${input} | ${sha256File(path.join(taskDir, input))} | 2026-01-01 00:00:00+00:00 |`;
-    const content = [
+    const content = recordCompletedReports(taskDir, [
       '---', 'id: TASK-20260101-000001', 'status: active', 'current_step: code-review', '---', '', '# Task', '',
       '## 产物生命周期收据', '',
       '| event | output | input | input_sha256 | completed_at |',
@@ -463,7 +440,7 @@ test('lifecycle facts use completed review receipts rather than review body form
       receipt('review-plan.completed', 'review-plan.md', 'plan.md'),
       receipt('review-code.completed', 'review-code.md', 'code.md'),
       '', '## Activity Log', ''
-    ].join('\n');
+    ].join('\n'));
     fs.writeFileSync(path.join(taskDir, 'task.md'), content);
 
     const result = buildLifecycleFacts(taskDir, content, 'active');
@@ -477,51 +454,6 @@ test('lifecycle facts use completed review receipts rather than review body form
     const manualValidation = canStart('manual-validation', result.facts, { ...trigger, requestedAction: 'manual-validation' });
     assert.equal(manualValidation.allowed, false);
     assert.equal(manualValidation.reasonCode, 'CODE_REVIEW_IDENTITY_INVALID');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('completed invalidation removes stale review approvals from lifecycle facts', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-invalidation-'));
-  try {
-    const taskDir = path.join(root, 'task');
-    fs.mkdirSync(taskDir, { recursive: true });
-    const taskPath = path.join(taskDir, 'task.md');
-    let content = '---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\n---\n\n# Task\n';
-    for (const [name, value] of [
-      ['analysis.md', '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需要独立审查。\n- **未满足的更高路径条件**：已选最高路径。\n- **升级触发条件**：无。\n'],
-      ['review-analysis.md', '# Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'],
-      ['plan.md', '# Plan\n'],
-      ['review-plan.md', '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n']
-    ] as const) {
-      fs.writeFileSync(path.join(taskDir, name), value);
-    }
-    const source = {
-      sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
-      sourceSha256: 'a'.repeat(64), createdAt: '2026-01-01 00:00:00+00:00', updatedAt: '2026-01-01 00:00:00+00:00'
-    };
-    const operation = createInvalidationOperation(source);
-    const targetShape = {
-      targetKind: 'artifact' as const, targetFamily: 'review-plan', targetArtifact: 'review-plan.md', targetRound: 1,
-      targetSha256: 'b'.repeat(64)
-    };
-    const target: InvalidationTarget = {
-      ...targetShape, targetId: targetIdFor(operation.operationId, targetShape), operationId: operation.operationId,
-      status: 'completed', reasonCode: 'upstream-replaced', updatedAt: source.updatedAt
-    };
-    content = upsertSection(content, invalidationMutation(content, {
-      operations: [{ ...operation, status: 'completed', processed: 1, total: 1, completedAt: source.updatedAt }],
-      targets: [target]
-    })).content;
-    fs.writeFileSync(taskPath, content);
-
-    const result = buildLifecycleFacts(taskDir, content, 'active');
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.deepEqual(result.facts.artifacts['review-plan'], []);
-    assert.equal(result.facts.reviews['review-plan'], undefined);
-    assert.equal(canStart('code', result.facts, { ...trigger, requestedAction: 'code' }).reasonCode, 'PLAN_REVIEW_REQUIRED');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

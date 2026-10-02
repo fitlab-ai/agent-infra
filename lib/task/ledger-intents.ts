@@ -19,6 +19,7 @@ import type { ReworkClassification, ReworkIntent, ReworkTarget } from './rework-
 import { extractSection, extractSubSection } from './sections.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
+import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
 
 type ReviewSeverity = 'blocker' | 'major' | 'minor';
 type ExecutorResponse = 'accepted' | 'adjusted' | 'refuted' | 'cannot-judge';
@@ -103,9 +104,8 @@ function findingEvidence(reviewContent: string, evidence: string): string | null
 }
 
 function taskFactDigest(taskDir: string, content: string): string {
-  const analysisNames = fs.readdirSync(taskDir).filter((name) => /^analysis(?:-r\d+)?\.md$/.test(name));
-  const latest = analysisNames.map((name) => ({ name, round: parseArtifactName(name)?.round ?? 0 })).sort((a, b) => b.round - a.round)[0];
-  const flow = latest ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, latest.name), 'utf8')) : null;
+  const latest = inspectArtifactDirectory(taskDir, 'analysis').latest;
+  const flow = latest ? parseLifecyclePathDecision(fs.readFileSync(latest.path, 'utf8'), latest.name) : null;
   return semanticDigest(JSON.stringify({
     taskInput: normalizedTaskFact(extractSection(content, ['任务输入', 'Task Input'])),
     requirements: normalizedTaskFact(extractSection(content, ['需求', 'Requirements'])),
@@ -250,10 +250,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
       }
       const sourceIdentity = parseArtifactName(intent.sourceArtifact!);
       const expectedFamily = `review-${finding.stage}`;
-      const latestSource = fs.readdirSync(resolved.taskDir)
-        .map((name) => parseArtifactName(name))
-        .filter((identity) => identity?.family === expectedFamily)
-        .sort((left, right) => right!.round - left!.round || left!.name.localeCompare(right!.name))[0];
+      const latestSource = inspectArtifactDirectory(resolved.taskDir, expectedFamily as 'review-analysis' | 'review-plan' | 'review-code').latest;
       if (!sourceIdentity || sourceIdentity.family !== expectedFamily || latestSource?.name !== sourceIdentity.name) {
         return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact is not the latest review for the finding stage', resolved.taskId);
       }

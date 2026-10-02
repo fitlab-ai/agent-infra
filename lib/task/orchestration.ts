@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
-import { artifactName, maxArtifactRound } from './artifact-name.ts';
+import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
@@ -56,7 +56,6 @@ import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, 
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
-import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { resolveArtifactContext } from './artifact-lifecycle.ts';
@@ -611,8 +610,11 @@ function validateSavedCurrentDiffBase(
   taskDir: string,
   reviewedHead: string
 ): Readonly<{ code: string; message: string }> | null {
-  const reviewRound = maxArtifactRound(fs.readdirSync(taskDir), 'review-code');
-  const reviewContent = fs.readFileSync(path.join(taskDir, artifactName('review-code', reviewRound)), 'utf8');
+  const reviewInventory = inspectArtifactDirectory(taskDir, 'review-code');
+  if (reviewInventory.status !== 'ready' || !reviewInventory.latest) {
+    return { code: 'ORCHESTRATION_REVIEW_INVALID', message: 'latest completed review-code artifact is unavailable' };
+  }
+  const reviewContent = fs.readFileSync(reviewInventory.latest.path, 'utf8');
   const savedTargetHead = extractReviewTargetHead(reviewContent);
   const savedDiffBase = extractReviewDiffBase(reviewContent);
   const savedReviewedHead = extractReviewedHead(reviewContent) || extractReviewBaseline(reviewContent);
@@ -701,11 +703,11 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     if (facts.facts.executionBusy && !run?.pendingDelegation) {
       return failed('ORCHESTRATION_EXECUTION_BUSY', 'clean completion requires no open lifecycle execution', resolved.taskId);
     }
-    const reviewRound = maxArtifactRound(fs.readdirSync(resolved.taskDir), 'review-code');
-    const review = parseReviewSummary(fs.readFileSync(
-      path.join(resolved.taskDir, artifactName('review-code', reviewRound)),
-      'utf8'
-    ));
+    const reviewInventory = inspectArtifactDirectory(resolved.taskDir, 'review-code');
+    if (reviewInventory.status !== 'ready' || !reviewInventory.latest) {
+      return failed('ORCHESTRATION_REVIEW_INVALID', 'latest completed review-code artifact is unavailable', resolved.taskId);
+    }
+    const review = parseReviewSummary(fs.readFileSync(reviewInventory.latest.path, 'utf8'));
     if (!review.ok || review.summary.manualValidation === null) {
       return failed('ORCHESTRATION_REVIEW_INVALID', 'latest code review has no numeric manual-validation count', resolved.taskId);
     }
@@ -857,14 +859,6 @@ function prepareOrchestrationDelegationUnlocked(
     return failed('ORCHESTRATION_DELEGATION_BUSY', 'the repository already has a pending lifecycle delegation', resolved.taskId);
   }
   if (run.stepCount >= run.maxSteps) return pauseOrchestration(taskRef, 'ORCHESTRATION_MAX_STEPS', 'maximum orchestration steps reached', true, options);
-  const invalidation = reconcileTaskInvalidation(taskRef, { repoRoot: resolved.repoRoot });
-  if (invalidation.status === 'failed') {
-    return failed(
-      'ORCHESTRATION_INVALIDATION_RECONCILE_FAILED',
-      `${invalidation.error?.code ?? 'UNKNOWN'}: ${invalidation.error?.message ?? ''}`,
-      resolved.taskId
-    );
-  }
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;

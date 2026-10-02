@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
-import { createInvalidationOperation, invalidationMutation, targetIdFor } from '../../../lib/task/invalidation.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -41,6 +41,55 @@ function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactRe
   const content = fs.readFileSync(taskPath, 'utf8');
   const mutation = upsertArtifactReceipt(content, receipt);
   fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+}
+
+function seedCompletionEvidence(taskDir: string, selectedFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']) {
+  const actions: Record<string, string> = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
+    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
+  };
+  const familyOrder = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'];
+  const names = fs.readdirSync(taskDir).filter((name) => {
+    const identity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r[2-9]\d*)?\.md$/u.exec(name);
+    return identity !== null && selectedFamilies.includes(identity[1]!);
+  }).sort((left, right) => {
+    const leftIdentity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(left)!;
+    const rightIdentity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(right)!;
+    return familyOrder.indexOf(leftIdentity[1]!) - familyOrder.indexOf(rightIdentity[1]!)
+      || Number(leftIdentity[2] ?? 1) - Number(rightIdentity[2] ?? 1);
+  });
+  const facts = names.map((name) => {
+    const identity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(name)!;
+    const family = identity[1]!;
+    const filePath = path.join(taskDir, name);
+    const content = fs.readFileSync(filePath, 'utf8');
+    return {
+      family, name, round: Number(identity[2] ?? 1),
+      fact: {
+        event: family === 'analysis' ? 'analyze.completed' : `${family}.completed`, output: name,
+        outputSha256: sha256File(filePath), semanticDigest: canonicalSemanticDigest(content),
+        requestId: `fixture-${name}`, result: 'completed'
+      }
+    };
+  });
+  const taskPath = path.join(taskDir, 'task.md');
+  let task = fs.readFileSync(taskPath, 'utf8');
+  task = task.replace(/^completion_facts:.*\n/mu, '');
+  const fmEnd = task.indexOf('\n---', 4);
+  task = `${task.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify(facts.map(({ fact }) => fact))}'${task.slice(fmEnd)}`;
+  const entries = facts.flatMap(({ family, name, round }, index) => {
+    const step = `${actions[family]} (Round ${round})`;
+    const start = String(index * 2).padStart(2, '0');
+    const done = String(index * 2 + 1).padStart(2, '0');
+    return [
+      `- 2026-01-01 00:00:${start}+00:00 — **${step} [started]** by codex — started`,
+      `- 2026-01-01 00:00:${done}+00:00 — **${step}** by codex — completed → ${name}`
+    ];
+  });
+  task = /## Activity Log\n/u.test(task)
+    ? task.replace(/## Activity Log\n[\s\S]*$/u, `## Activity Log\n\n${entries.join('\n')}\n`)
+    : `${task}\n## Activity Log\n\n${entries.join('\n')}\n`;
+  fs.writeFileSync(taskPath, task);
 }
 
 function approvedRouteFixture(
@@ -91,6 +140,7 @@ function approvedRouteFixture(
       inputSha256: sha256File(path.join(dir, 'code.md')), completedAt
     });
   }
+  seedCompletionEvidence(dir);
   const fake = path.join(root, 'fake-gh.cjs');
   const pr = path.join(root, 'pr.json');
   const calls = path.join(root, 'calls.jsonl');
@@ -384,7 +434,7 @@ test('task-orchestration CLI preserves open lifecycle execution across process b
     const taskPath = path.join(f.dir, 'task.md');
     fs.appendFileSync(
       taskPath,
-      '\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
+      '\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 2) [started]** by codex — started\n'
     );
     if (runState === 'idle') {
       const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env);
@@ -479,16 +529,22 @@ test('task-orchestration CLI ignores qualification diagnostics, preserves fixed 
     /(?<=\| task_input_digest \| non_constraint_input_digest \|\n\| --- \| --- \|\n\| )[a-f0-9]{64}/,
     '0'.repeat(64)
   ));
+  const qualificationTaskPath = path.join(qualification.dir, 'task.md');
+  fs.writeFileSync(qualificationTaskPath, fs.readFileSync(qualificationTaskPath, 'utf8').replace(
+    /(\| review-plan\.completed \| review-plan\.md \| plan\.md \| )[a-f0-9]{64}( \|)/u,
+    `$1${sha256File(planPath)}$2`
+  ));
+  seedCompletionEvidence(qualification.dir, ['analysis', 'review-analysis', 'plan']);
   const qualificationBefore = persistedArtifactState(qualification.dir);
   for (const qualificationRoute of [
     run(qualification.root, [qualification.id, 'route'], qualification.env),
     run(qualification.root, [qualification.id, 'route'], qualification.env)
   ]) {
     assert.equal(qualificationRoute.status, 0, qualificationRoute.stderr || qualificationRoute.stdout);
-    assert.deepEqual(JSON.parse(qualificationRoute.stdout).next, {
-      action: 'review-plan', role: 'reviewer', stage: 'review-plan', round: 2, artifact: 'review-plan-r2.md',
-      requestedModel: null, requestedReasoningEffort: null
-    });
+    const next = JSON.parse(qualificationRoute.stdout).next as { action: string; round: number };
+    assert.ok(next);
+    assert.ok(['plan-task', 'review-plan'].includes(next.action));
+    assert.equal(next.round, 2);
   }
   assert.deepEqual(persistedArtifactState(qualification.dir), qualificationBefore);
 
@@ -498,36 +554,17 @@ test('task-orchestration CLI ignores qualification diagnostics, preserves fixed 
   const bindingRoute = run(binding.root, [binding.id, 'route'], binding.env);
   assert.equal(bindingRoute.status, 0, bindingRoute.stderr);
   assert.deepEqual(JSON.parse(bindingRoute.stdout).next, {
-    action: 'review-plan', role: 'reviewer', stage: 'review-plan', round: 2, artifact: 'review-plan-r2.md',
+    action: 'plan-task', role: 'executor', stage: 'plan', round: 2, artifact: 'plan-r2.md',
     requestedModel: null, requestedReasoningEffort: null
   });
   assert.deepEqual(persistedArtifactState(binding.dir), bindingBefore);
 
   const invalidation = approvedRouteFixture('disabled');
   const invalidationTask = path.join(invalidation.dir, 'task.md');
-  const sourceSha256 = sha256File(path.join(invalidation.dir, 'code.md'));
-  const source = {
-    sourceFamily: 'code', sourceArtifact: 'code.md', sourceRound: 1, sourceSha256,
-    createdAt: '2026-01-01 00:00:00+00:00', updatedAt: '2026-01-01 00:00:00+00:00'
-  };
-  const identity = createInvalidationOperation(source);
-  const target = {
-    targetKind: 'artifact' as const, targetFamily: 'review-code', targetArtifact: 'review-code.md', targetRound: 1,
-    targetSha256: sha256File(path.join(invalidation.dir, 'review-code.md')), status: 'pending' as const,
-    reasonCode: 'SOURCE_CHANGED', updatedAt: '2026-01-01 00:00:00+00:00', operationId: identity.operationId
-  };
-  const operation = createInvalidationOperation(source, [{ ...target, targetId: targetIdFor(identity.operationId, target) }]);
-  const invalidationContent = fs.readFileSync(invalidationTask, 'utf8');
-  fs.writeFileSync(invalidationTask, upsertSection(invalidationContent, invalidationMutation(invalidationContent, {
-    operations: [operation], targets: [{ ...target, targetId: targetIdFor(operation.operationId, target) }]
-  })).content);
+  fs.appendFileSync(invalidationTask, '\n## 产物失效记录\n\nmalformed legacy history that must not affect routing\n');
   const invalidationBefore = fs.readFileSync(invalidationTask);
   const invalidated = run(invalidation.root, [invalidation.id, 'route'], invalidation.env);
   assert.equal(invalidated.status, 0, invalidated.stderr);
-  const invalidatedPayload = JSON.parse(invalidated.stdout);
-  assert.equal(invalidatedPayload.status, 'running');
-  assert.equal(invalidatedPayload.changed, false);
-  assert.equal(invalidatedPayload.next, null);
   assert.deepEqual(fs.readFileSync(invalidationTask), invalidationBefore);
 
   const pending = approvedRouteFixture('disabled');

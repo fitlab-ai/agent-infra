@@ -38,12 +38,9 @@ import { validateLocalArtifact } from './local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from './local-artifact-finalization.ts';
 import { buildLifecycleFacts, canStart, effectiveReworkTarget } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
-import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
-import type { InvalidationTargetKind } from './invalidation.ts';
-import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
 import type { ReworkTarget } from './rework-intent.ts';
-import { ARTIFACT_FAMILIES, parseQualificationAudit, parseTaskQualification } from './qualification-audit.ts';
+import { parseTaskQualification } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
@@ -420,218 +417,6 @@ function eventTrigger(request: TaskEventRequest, family: EventFamily): ExplicitT
   };
 }
 
-function receiptGraphHasCycle(receipts: readonly ArtifactReceipt[]): boolean {
-  const edges = new Map<string, string[]>();
-  for (const receipt of receipts) {
-    const outputs = edges.get(receipt.input) ?? [];
-    outputs.push(receipt.output);
-    edges.set(receipt.input, outputs);
-  }
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (node: string): boolean => {
-    if (visiting.has(node)) return true;
-    if (visited.has(node)) return false;
-    visiting.add(node);
-    for (const output of edges.get(node) ?? []) if (visit(output)) return true;
-    visiting.delete(node);
-    visited.add(node);
-    return false;
-  };
-  return [...edges.keys()].some(visit);
-}
-
-function qualificationInvalidationSeeds(
-  content: string,
-  taskDir: string,
-  inventory: readonly { family: string; name: string }[],
-  baselineDigest?: string
-): { changed: boolean; safe: boolean; seeds: readonly string[] } {
-  const task = parseTaskQualification(content);
-  if (!task.ok) return { changed: true, safe: false, seeds: [] };
-  if (baselineDigest !== undefined) {
-    if (!/^[a-f0-9]{64}$/u.test(baselineDigest)) return { changed: true, safe: false, seeds: [] };
-    if (baselineDigest === task.qualification.taskInputDigest) return { changed: false, safe: true, seeds: [] };
-  }
-  const audits: Array<{ name: string; snapshotTaskDigest: string; snapshotNonConstraintDigest: string; dependencies: readonly { constraintId: string; constraintDigest: string }[]; candidates: readonly { candidateId: string; status: string; impact: string; constraintIds: readonly string[]; evidence: string }[] }> = [];
-  let observedQualification = false;
-  for (const artifact of inventory) {
-    let artifactContent: string;
-    try { artifactContent = fs.readFileSync(path.join(taskDir, artifact.name), 'utf8'); }
-    catch { return { changed: true, safe: false, seeds: [] }; }
-    const parsed = parseQualificationAudit(artifactContent);
-    if (!parsed.ok) return { changed: true, safe: false, seeds: [] };
-    if (!parsed.audit.present) continue;
-    observedQualification = true;
-    const snapshot = parsed.audit.snapshot;
-    if (!snapshot) return { changed: true, safe: false, seeds: [] };
-    audits.push({
-      name: artifact.name,
-      snapshotTaskDigest: snapshot.taskInputDigest,
-      snapshotNonConstraintDigest: snapshot.nonConstraintInputDigest,
-      dependencies: parsed.audit.constraintDependencies,
-      candidates: parsed.audit.candidateQualifications
-    });
-  }
-  if (!task.qualification.present) return { changed: false, safe: true, seeds: [] };
-  const allAuditsPresent = observedQualification && audits.length === inventory.length;
-  if (!allAuditsPresent) return { changed: true, safe: false, seeds: [] };
-  if (baselineDigest === undefined && audits.every((audit) => audit.snapshotTaskDigest === task.qualification.taskInputDigest)) {
-    return { changed: false, safe: true, seeds: [] };
-  }
-  const candidateMap = new Map(task.qualification.candidates.map((candidate) => [candidate.candidateId, candidate]));
-  const currentConstraints = new Map(task.qualification.constraints.map((constraint) => [constraint.constraintId, constraint.digest]));
-  const snapshotsMatch = audits.every((audit) => audit.snapshotNonConstraintDigest === task.qualification.nonConstraintInputDigest);
-  const candidatesMatch = audits.every((audit) => audit.candidates.length === candidateMap.size
-    && audit.candidates.every((row) => {
-      const current = candidateMap.get(row.candidateId);
-      return Boolean(current && row.status === current.status && row.impact === current.impact
-        && row.evidence === current.evidence && row.constraintIds.join(',') === current.constraintIds.join(','));
-    }));
-  const changedConstraints = new Set<string>();
-  let referencesValid = true;
-  for (const audit of audits) {
-    for (const dependency of audit.dependencies) {
-      const currentDigest = currentConstraints.get(dependency.constraintId);
-      if (!currentDigest) referencesValid = false;
-      else if (currentDigest !== dependency.constraintDigest) changedConstraints.add(dependency.constraintId);
-    }
-  }
-  const safe = allAuditsPresent && snapshotsMatch && candidatesMatch && referencesValid && changedConstraints.size > 0;
-  if (!safe) return { changed: true, safe: false, seeds: [] };
-  const seeds = new Set<string>();
-  for (const audit of audits) {
-    if (audit.dependencies.some((dependency) => changedConstraints.has(dependency.constraintId))) seeds.add(audit.name);
-  }
-  return { changed: true, safe: true, seeds: [...seeds] };
-}
-
-function invalidationMutationForCompletion(
-  content: string,
-  taskDir: string,
-  family: EventFamily,
-  artifact: ArtifactIdentity,
-  timestamp: string,
-  frontmatter: Record<string, unknown>
-): { mutation: ReturnType<typeof invalidationMutation> | null } | { error: string } {
-  if (!['analyze', 'plan', 'code'].includes(family)) return { mutation: null };
-  const parsed = parseInvalidationDocument(content);
-  if (!parsed.ok) return { error: parsed.message };
-  const downstream: Record<'analyze' | 'plan' | 'code', readonly string[]> = {
-    analyze: ['review-analysis', 'plan', 'review-plan', 'code', 'review-code'],
-    plan: ['review-plan', 'code', 'review-code'],
-    code: ['review-code']
-  };
-  const qualificationFallback = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'];
-  const sourceFamily = family as 'analyze' | 'plan' | 'code';
-  const sourceArtifactFamily = sourceFamily === 'analyze' ? 'analysis' : sourceFamily;
-  let receipts: readonly ArtifactReceipt[] = [];
-  try {
-    receipts = parseArtifactReceipts(content).rows;
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
-  }
-  const inventory = fs.readdirSync(taskDir).flatMap((name) => {
-    const identity = parseArtifactName(name);
-    if (!identity || !(ARTIFACT_FAMILIES as readonly string[]).includes(identity.family)) return [];
-    try {
-      const stat = fs.lstatSync(path.join(taskDir, name));
-      if (!stat.isFile() || stat.isSymbolicLink()) return [];
-      return [{ family: identity.family, name, round: identity.round, sha256: sha256File(path.join(taskDir, name)) }];
-    } catch (error) {
-      throw new Error(`cannot inspect invalidation artifact '${name}': ${error instanceof Error ? error.message : String(error)}`);
-    }
-  });
-  const nodeMap = new Map(inventory.map((node) => [`${node.family}/${node.name}`, node]));
-  let graphUsable = receipts.length > 0;
-  for (const receipt of receipts) {
-    const output = parseArtifactName(receipt.output);
-    const input = nodeMap.get(`${parseArtifactName(receipt.input)?.family}/${receipt.input}`);
-    if (!output || !nodeMap.has(`${output.family}/${receipt.output}`) || !input || input.sha256 !== receipt.inputSha256) {
-      graphUsable = false;
-      break;
-    }
-  }
-  if (graphUsable && receiptGraphHasCycle(receipts)) graphUsable = false;
-  if (inventory.some((node) => node.family !== 'analysis' && node.name !== artifact.name
-    && !receipts.some((receipt) => receipt.output === node.name))) graphUsable = false;
-  const selected = new Set<string>();
-  if (graphUsable) {
-    const currentIdentity = parseArtifactName(artifact.name);
-    const previousName = currentIdentity && currentIdentity.round > 1 ? artifactName(sourceArtifactFamily, currentIdentity.round - 1) : null;
-    const previous = previousName ? inventory.find((node) => node.family === sourceArtifactFamily && node.name === previousName) : null;
-    const previousFact = previousName ? parseCompletionFacts(frontmatter.completion_facts).find((fact) => fact.output === previousName && fact.event === `${sourceFamily === 'analyze' ? 'analysis' : sourceFamily}.completed`) : null;
-    if (!previous || !previousFact || previousFact.outputSha256 !== previous.sha256) graphUsable = false;
-    if (graphUsable && previous) {
-      selected.add(`${previous.family}/${previous.name}`);
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const receipt of receipts) {
-          const consumer = `${parseArtifactName(receipt.output)!.family}/${receipt.output}`;
-          if (selected.has(`${parseArtifactName(receipt.input)!.family}/${receipt.input}`) && !selected.has(consumer)) {
-            selected.add(consumer);
-            changed = true;
-          }
-        }
-      }
-      selected.delete(`${previous.family}/${previous.name}`);
-    }
-  }
-  const qualification = qualificationInvalidationSeeds(
-    content, taskDir, inventory,
-    typeof frontmatter.qualification_input_digest === 'string' ? frontmatter.qualification_input_digest : undefined
-  );
-  let qualificationChange = qualification.changed;
-  if (qualificationChange && (!graphUsable || !qualification.safe)) graphUsable = false;
-  if (qualificationChange && graphUsable) {
-    for (const seed of qualification.seeds) selected.add(`${parseArtifactName(seed)?.family}/${seed}`);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const receipt of receipts) {
-        const consumer = `${parseArtifactName(receipt.output)!.family}/${receipt.output}`;
-        if (selected.has(`${parseArtifactName(receipt.input)!.family}/${receipt.input}`) && !selected.has(consumer)) {
-          selected.add(consumer);
-          changed = true;
-        }
-      }
-    }
-  }
-  const reasonCode = qualificationChange ? 'qualification-changed' : 'upstream-replaced';
-  const fallbackFamilies = qualificationChange ? qualificationFallback : downstream[sourceFamily];
-  const targetNodes = (graphUsable
-    ? inventory.filter((node) => selected.has(`${node.family}/${node.name}`))
-    : inventory.filter((node) => fallbackFamilies.includes(node.family)))
-    .filter((node) => !(node.family === FAMILY[family].artifact && node.name === artifact.name));
-  const targets = targetNodes.flatMap((node) => {
-    const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetInput?: string; targetRound: number; targetSha256: string }> = [
-      { targetKind: 'artifact', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 }
-    ];
-    for (const receipt of receipts.filter((candidate) => candidate.output === node.name)) {
-      shapes.push({ targetKind: 'receipt', targetFamily: node.family, targetArtifact: node.name, targetInput: receipt.input, targetRound: node.round, targetSha256: receipt.inputSha256 });
-    }
-    if (node.family.startsWith('review-')) shapes.push({ targetKind: 'approval', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 });
-    if (node.family === 'review-code') shapes.push({ targetKind: 'reviewed-snapshot', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 });
-    return shapes.map((targetShape) => ({ ...targetShape, targetId: targetIdFor('pending', targetShape), operationId: 'pending', status: 'pending' as const, reasonCode, updatedAt: timestamp }));
-  });
-  if (targets.length === 0) return { mutation: null };
-  const source = {
-    sourceFamily: lifecycleAction(family), sourceArtifact: artifact.name,
-    sourceRound: parseArtifactName(artifact.name)?.round ?? 1, sourceSha256: sha256File(artifact.path),
-    createdAt: timestamp, updatedAt: timestamp
-  };
-  const operation = createInvalidationOperation(source);
-  const normalizedTargets = targets.map((target: (typeof targets)[number]) => ({
-    ...target, operationId: operation.operationId,
-    targetId: targetIdFor(operation.operationId, target)
-  }));
-  const operationWithTotal = createInvalidationOperation(source, normalizedTargets);
-  const next = upsertInvalidation(parsed.document, operationWithTotal, normalizedTargets);
-  if (!next.ok) return { error: next.message };
-  return { mutation: next.changed ? invalidationMutation(content, next.document) : null };
-}
-
 function reworkIntentMutationForCompletion(
   content: string,
   taskDir: string,
@@ -644,18 +429,15 @@ function reworkIntentMutationForCompletion(
   const hash = sha256File(artifact.path);
   let next = parsed.intents;
   if (family === 'analyze' || family === 'plan' || family === 'code') {
-    const hashes = Object.fromEntries(fs.readdirSync(taskDir).flatMap((name) => {
-      if (!/^review-(?:analysis|plan|code)(?:-r\d+)?\.md$/.test(name)) return [];
-      try { return [[name, sha256File(path.join(taskDir, name))]]; }
-      catch { return []; }
+    const hashes = Object.fromEntries(['review-analysis', 'review-plan', 'review-code'].flatMap((reviewFamily) => {
+      const inventory = inspectArtifactDirectory(taskDir, reviewFamily as ArtifactFamily);
+      return inventory.status === 'ready' ? inventory.completed.map((review) => [review.name, sha256File(review.path)]) : [];
     }));
     const action = family === 'analyze' ? 'analysis' : family;
     let target: ReworkTarget = action;
     if (family === 'analyze') {
-      const previousAnalysis = fs.readdirSync(taskDir)
-        .map((name) => parseArtifactName(name))
-        .filter((identity) => identity?.family === 'analysis' && identity.name !== artifact.name)
-        .sort((left, right) => right!.round - left!.round || left!.name.localeCompare(right!.name))[0];
+      const previousAnalysis = inspectArtifactDirectory(taskDir, 'analysis').completed
+        .filter((identity) => identity.name !== artifact.name).at(-1);
       const pathState = previousAnalysis
         ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, previousAnalysis.name), 'utf8'))
         : undefined;
@@ -791,19 +573,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
   catch (error) { return failed(request, { code: 'TASK_READ_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   const initialParts = eventParts(request.event);
-  if (initialParts.phase === 'started' && !request.dryRun) {
-    const reconciled = reconcileTaskInvalidation(request.taskRef, { repoRoot: resolved.repoRoot });
-    if (reconciled.status === 'failed') {
-      return failed(request, {
-        code: 'EVENT_TRANSITION_INVALID',
-        message: `INVALIDATION_RECONCILE_FAILED: ${reconciled.error?.code ?? 'UNKNOWN'}: ${reconciled.error?.message ?? ''}`
-      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-    }
-    if (reconciled.changed) {
-      try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
-      catch (error) { return failed(request, { code: 'TASK_READ_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
-    }
-  }
   let frontmatter;
   try { frontmatter = parseTypedTaskFrontmatter(content); }
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
@@ -948,8 +717,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const safetyFailure = capability.reasonCode === 'TASK_NOT_ACTIVE'
       || capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN';
     if (!capability.allowed && (normalized.initiator === 'orchestrator' || safetyFailure)) {
-      const code = capability.reasonCode === 'INVALIDATION_INCOMPLETE' ? 'TASK_INVALIDATION_BLOCKED' : 'EVENT_TRANSITION_INVALID';
-      return failed(normalized, { code, message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
   }
   const findingCountError = validateReviewFindingCounts(
@@ -987,7 +755,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   let completionReceipts: readonly ArtifactReceipt[] = [];
   let currentFact: CompletionFact | null = null;
-  let completionInvalidation: ReturnType<typeof invalidationMutation> | null = null;
   let completionRework: ReturnType<typeof reworkIntentMutation> | null = null;
   if (eventIdentity.phase === 'completed' && completedArtifact) {
     const receipt = buildCompletionReceipt(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter, normalized);
@@ -1016,9 +783,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       );
     }
     try {
-      const invalidation = invalidationMutationForCompletion(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter);
-      if ('error' in invalidation) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: invalidation.error }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      completionInvalidation = invalidation.mutation;
       const rework = reworkIntentMutationForCompletion(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp);
       if ('error' in rework) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: rework.error }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       completionRework = rework.mutation;
@@ -1103,7 +867,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
   }
-  if (completionInvalidation) mutations.push(completionInvalidation);
   if (completionRework) mutations.push(completionRework);
   if (eventIdentity.phase === 'completed' && normalized.implementationInput) {
     let implementationRows;
@@ -1123,9 +886,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     });
   }
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
-  const sourceCompletion = eventIdentity.phase === 'completed'
-    && ['analyze', 'plan', 'code'].includes(eventIdentity.family);
-  const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, invalidationContext: sourceCompletion ? 'source-completion' : 'standard', metadataProvider: () => metadata });
+  const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
   if (!normalized.dryRun && orchestrationCompletion) {
     try {

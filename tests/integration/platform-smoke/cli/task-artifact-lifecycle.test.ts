@@ -14,7 +14,6 @@ import {
 } from '../../../../lib/task/artifact-lifecycle.ts';
 import { artifactName, parseArtifactName } from '../../../../lib/task/artifact-name.ts';
 import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../../lib/task/artifact-receipts.ts';
-import { createInvalidationOperation, invalidationMutation, targetIdFor, type InvalidationTarget } from '../../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../../lib/task/sections.ts';
 import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
@@ -24,7 +23,7 @@ import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operation
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
 
-function fixture(files: Record<string, string> = {}) {
+function fixture(files: Record<string, string> = {}, completeReports = true) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-lifecycle-'));
   spawnSync('git', ['init', '-q'], { cwd: repoRoot });
   fs.writeFileSync(path.join(repoRoot, '.gitignore'), '.agents/workspace/\n');
@@ -32,7 +31,48 @@ function fixture(files: Record<string, string> = {}) {
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(taskDir, name), content);
+  if (completeReports) recordFixtureCompletions(taskDir);
   return { repoRoot, taskDir };
+}
+
+function recordFixtureCompletions(taskDir: string) {
+  const actions: Record<string, string> = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
+    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
+  };
+  const facts: unknown[] = [];
+  const logs: string[] = [];
+  let second = 0;
+  const names = fs.readdirSync(taskDir).filter((name) => {
+    const identity = parseArtifactName(name);
+    return identity !== null && actions[identity.family] !== undefined;
+  }).sort((left, right) => {
+    const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
+    return a.family.localeCompare(b.family) || a.round - b.round;
+  });
+  for (const name of names) {
+    const identity = parseArtifactName(name)!;
+    const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
+    const file = path.join(taskDir, name);
+    const content = fs.readFileSync(file, 'utf8');
+    facts.push({ event, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: 'completed' });
+    const step = `${actions[identity.family]} (Round ${identity.round})`;
+    const time = () => `2026-01-01 00:00:${String(second++).padStart(2, '0')}+00:00`;
+    logs.push(`- ${time()} — **${step} [started]** by codex — started`);
+    logs.push(`- ${time()} — **${step}** by codex — completed → ${name}`);
+  }
+  const taskPath = path.join(taskDir, 'task.md');
+  const task = fs.readFileSync(taskPath, 'utf8');
+  const fmEnd = task.indexOf('\n---', 4);
+  const factLine = `completion_facts: '${JSON.stringify(facts)}'`;
+  const withFacts = /^completion_facts:.*$/mu.test(task)
+    ? task.replace(/^completion_facts:.*$/mu, factLine)
+    : `${task.slice(0, fmEnd)}\n${factLine}${task.slice(fmEnd)}`;
+  const logSection = `## Activity Log\n\n${logs.join('\n')}\n`;
+  const output = /## Activity Log\n/u.test(withFacts)
+    ? withFacts.replace(/## Activity Log\n[\s\S]*?(?=\n## |$)/u, logSection)
+    : `${withFacts}\n${logSection}`;
+  fs.writeFileSync(taskPath, output);
 }
 
 function addReceipt(f: ReturnType<typeof fixture>, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
@@ -55,6 +95,7 @@ function writeQualifiedArtifact(f: ReturnType<typeof fixture>, name: string) {
   if (!built.ok) return;
   const lifecycle = parseArtifactName(name)?.family === 'analysis' ? `${STANDARD_ANALYSIS}\n` : `# ${name}\n\n`;
   fs.writeFileSync(path.join(f.taskDir, name), `${lifecycle}## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
+  recordFixtureCompletions(f.taskDir);
 }
 
 function git(root: string, args: string[]): string {
@@ -84,6 +125,12 @@ function completedReviewFixture(f: ReturnType<typeof fixture>, options: { includ
     `- **Reviewed Snapshot Tree**: ${reviewed.tree}`,
     '- **Overall Verdict**: Approved'
   ].join('\n') + '\n';
+  const analysisPath = path.join(f.taskDir, 'analysis.md');
+  fs.writeFileSync(analysisPath, STANDARD_ANALYSIS);
+  const analysisFact = {
+    event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(analysisPath),
+    semanticDigest: canonicalSemanticDigest(STANDARD_ANALYSIS), requestId: 'fixture-analysis', result: 'completed'
+  };
   const reviewPath = path.join(f.taskDir, 'review-code.md');
   fs.writeFileSync(reviewPath, report);
   const fact = {
@@ -93,9 +140,12 @@ function completedReviewFixture(f: ReturnType<typeof fixture>, options: { includ
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
     '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
     'delivery_remote: origin', 'delivery_base_ref: main',
-    `completion_facts: ${JSON.stringify(JSON.stringify([fact]))}`, '---', '', '# Task', '',
+    `completion_facts: ${JSON.stringify(JSON.stringify([analysisFact, fact]))}`, '---', '', '# Task', '',
     '## 活动日志', '',
-    '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md', ''
+    '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started',
+    '- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — Analysis completed → analysis.md',
+    '- 2026-01-01 00:00:02+00:00 — **Review Code (Round 1) [started]** by codex — started',
+    '- 2026-01-01 00:00:03+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md', ''
   ].join('\n'));
   return { head };
 }
@@ -201,34 +251,36 @@ test('read inventory returns canonical history plus topology diagnostics', () =>
   assert.deepEqual(result.diagnostics.map((item) => item.code).sort(), ['NONCANONICAL_NAME', 'ROUND_GAP']);
 });
 
-test('inventory excludes completed invalidation targets while preserving their round history', () => {
-  const f = fixture({ 'analysis.md': '# analysis\n' });
+test('legacy invalidation text is inert and does not filter the physical artifact inventory', () => {
+  const f = fixture({ 'analysis.md': '# analysis\n' }, false);
   const taskPath = path.join(f.taskDir, 'task.md');
-  const content = fs.readFileSync(taskPath, 'utf8');
-  const source = {
-    sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
-    sourceSha256: 'a'.repeat(64), createdAt: '2026-01-01 00:00:00+00:00', updatedAt: '2026-01-01 00:00:00+00:00'
-  };
-  const operation = createInvalidationOperation(source);
-  const shape = {
-    targetKind: 'artifact' as const, targetFamily: 'analysis', targetArtifact: 'analysis.md', targetRound: 1,
-    targetSha256: sha256File(path.join(f.taskDir, 'analysis.md'))
-  };
-  const target: InvalidationTarget = {
-    ...shape, targetId: targetIdFor(operation.operationId, shape), operationId: operation.operationId,
-    status: 'completed', reasonCode: 'upstream-replaced', updatedAt: source.updatedAt
-  };
-  const invalidation = {
-    operations: [{ ...operation, status: 'completed' as const, processed: 1, total: 1, completedAt: source.updatedAt }],
-    targets: [target]
-  };
-  fs.writeFileSync(taskPath, upsertSection(content, invalidationMutation(content, invalidation)).content);
+  fs.appendFileSync(taskPath, '\n## 产物失效记录\n\nnot a valid legacy table\n');
 
   const result = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
   assert.equal(result.status, 'ready');
-  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.artifacts.map((artifact) => artifact.name), ['analysis.md']);
+  assert.deepEqual(result.completed, []);
   assert.equal(result.latest, null);
   assert.deepEqual(result.next, { round: 2, name: 'analysis-r2.md' });
+});
+
+test('an open higher round resumes while the prior completed round remains current', () => {
+  const f = fixture({
+    'analysis.md': STANDARD_ANALYSIS,
+    'plan.md': '# Plan 1\n',
+    'plan-r2.md': '# Plan 2\n'
+  });
+  const taskPath = path.join(f.taskDir, 'task.md');
+  fs.appendFileSync(taskPath, '- 2026-01-01 00:01:00+00:00 — **Plan Task (Round 3) [started]** by codex — started\n');
+
+  const inventory = inspectTaskArtifacts(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+  assert.equal(inventory.status, 'ready');
+  assert.equal(inventory.latest?.name, 'plan-r2.md');
+  assert.deepEqual(inventory.openRounds, [3]);
+  const context = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+  assert.equal(context.status, 'ready');
+  assert.equal(context.selection?.disposition, 'resume');
+  assert.equal(context.next?.name, 'plan-r3.md');
 });
 
 test('unknown families fail without resolving outside the catalog', () => {
@@ -463,6 +515,7 @@ test('code fix routing trusts the review receipt when code and review family rou
     '- **总体结论**：需要修改',
     '- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0', ''
   ].join('\n'));
+  recordFixtureCompletions(f.taskDir);
   addReceipt(f, {
     event: 'code.completed', output: 'code-r2.md', input: 'plan.md',
     inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'

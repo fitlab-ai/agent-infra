@@ -8,6 +8,7 @@ import { applyTaskLifecycle, inspectTaskLifecycleProgress, lifecycleIntentCatalo
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {
@@ -205,6 +206,23 @@ test('restore transports task receipts with artifacts without using mtime', () =
     inputSha256: sha256File(path.join(staging, 'plan.md')), completedAt: '2026-07-18 12:00:00+00:00'
   });
   content = upsertSection(content, mutation).content;
+  const factSpecs = [
+    { name: 'analysis.md', event: 'analyze.completed', step: 'Analyze Task' },
+    { name: 'plan.md', event: 'plan.completed', step: 'Plan Task' },
+    { name: 'review-plan.md', event: 'review-plan.completed', step: 'Review Plan' }
+  ];
+  const facts = factSpecs.map(({ name, event }) => {
+    const file = path.join(staging, name);
+    const artifactContent = fs.readFileSync(file, 'utf8');
+    return { event, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(artifactContent), requestId: `restore-${name}`, result: 'completed' };
+  });
+  const fmEnd = content.indexOf('\n---', 4);
+  content = `${content.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify(facts)}'${content.slice(fmEnd)}`;
+  const completionRows = factSpecs.flatMap(({ name, step }, index) => [
+    `- 2026-07-18 11:5${6 + index}:00+00:00 — **${step} (Round 1) [started]** by codex — started`,
+    `- 2026-07-18 11:5${6 + index}:30+00:00 — **${step} (Round 1)** by codex — Completed → ${name}`
+  ]).join('\n');
+  content = content.replace('## Activity Log\n\n', `## Activity Log\n\n${completionRows}\n`);
   fs.writeFileSync(taskPath, content);
 
   const result = applyTaskLifecycle(

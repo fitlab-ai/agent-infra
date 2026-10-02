@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 
 import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 
 const METADATA = { timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' };
 
@@ -17,6 +19,19 @@ function fixture(rows: string[] = []) {
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nstatus: active\nagent_infra_version: v0.8.6-alpha.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };
+}
+
+function completeReview(taskDir: string, name: string, family: 'review-analysis' | 'review-plan' | 'review-code') {
+  const taskPath = path.join(taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const file = path.join(taskDir, name);
+  const report = fs.readFileSync(file, 'utf8');
+  const fact = { event: `${family}.completed`, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(report), requestId: `fixture-${name}`, result: 'completed' };
+  const fmEnd = content.indexOf('\n---', 4);
+  const withFacts = `${content.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify([fact])}'${content.slice(fmEnd)}`;
+  const round = name === `${family}.md` ? 1 : Number(/-r(\d+)\.md$/u.exec(name)?.[1] ?? 1);
+  const action = family === 'review-analysis' ? 'Review Analysis' : family === 'review-plan' ? 'Review Plan' : 'Review Code';
+  fs.writeFileSync(taskPath, `${withFacts}\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **${action} (Round ${round}) [started]** by codex — started\n- 2026-01-01 00:00:01+00:00 — **${action} (Round ${round})** by codex — completed → ${name}\n`);
 }
 
 test('finding upsert allocates per-stage ids and replays as no-op', () => {
@@ -221,6 +236,7 @@ test('legacy pending rebuild validates and converts a grouped review binding', (
   try {
     const reviewPath = path.join(path.dirname(f.taskMd), 'review-plan.md');
     fs.writeFileSync(reviewPath, '# Review\n\n#### 1. Design finding\n\nUse the selected boundary.\n');
+    completeReview(path.dirname(f.taskMd), 'review-plan.md', 'review-plan');
     fs.appendFileSync(f.taskMd, `\n## Rework Intent\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | PL-1 | review-plan.md | ${'a'.repeat(64)} | plan | pending | 2026-01-01T00:00:00.000Z |  |\n`);
     const result = applyLedgerIntent({
       kind: 'rework-intent-rebuild', taskRef: f.taskId, findingId: 'PL-1', sourceArtifact: 'review-plan.md',

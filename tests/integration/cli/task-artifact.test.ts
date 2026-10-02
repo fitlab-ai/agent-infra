@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：夹具需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现高风险边界。\n';
 const ANALYSIS_DECISION = '- **本任务路径**：标准路径。\n- **判定依据**：夹具需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现高风险边界。';
@@ -19,11 +21,20 @@ function fixture() {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis-review\n---\n\n# Task\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), STANDARD_ANALYSIS);
+  const analysisPath = path.join(dir, 'analysis.md');
+  const facts = [{
+    event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(analysisPath),
+    semanticDigest: canonicalSemanticDigest(STANDARD_ANALYSIS), requestId: 'fixture-analysis', result: 'completed'
+  }];
+  fs.writeFileSync(path.join(dir, 'task.md'), fs.readFileSync(path.join(dir, 'task.md'), 'utf8')
+    .replace('current_step: requirement-analysis-review', `current_step: requirement-analysis-review\ncompletion_facts: '${JSON.stringify(facts)}'`)
+    .replace('## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started\n',
+      '## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — completed → analysis.md\n'));
   return { root, id, dir };
 }
 
 function run(root: string, args: string[]) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8' });
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
 }
 
 function localArtifact(family: 'analysis' | 'plan' | 'code', suffix = ''): string {
@@ -247,6 +258,18 @@ test('task-artifact finalize-local rejects invalid analysis flow decisions and a
 
 test('task-artifact finalize-local supports direct code report repair', () => {
   const f = fixture();
+  const planPath = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(planPath, '# Plan\n');
+  const planFacts = [{
+    event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(planPath),
+    semanticDigest: canonicalSemanticDigest('# Plan\n'), requestId: 'fixture-plan', result: 'completed'
+  }];
+  const taskPath = path.join(f.dir, 'task.md');
+  const task = fs.readFileSync(taskPath, 'utf8');
+  const currentFacts = JSON.parse(task.match(/^completion_facts: '(.+)'$/m)![1]!);
+  fs.writeFileSync(taskPath, task
+    .replace(/^completion_facts: '(.+)'$/m, `completion_facts: '${JSON.stringify([...currentFacts, ...planFacts])}'`)
+    .replace('## Activity Log\n\n', '## Activity Log\n\n- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — started\n- 2026-01-01 00:00:03+00:00 — **Plan Task (Round 1)** by codex — completed → plan.md\n'));
   const artifact = path.join(f.dir, 'code.md');
   fs.appendFileSync(path.join(f.dir, 'task.md'), '- 2026-01-01 00:01:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n');
   fs.writeFileSync(artifact, localArtifact('code').replace('## 测试结果\n', '## 测试结果：\n'));

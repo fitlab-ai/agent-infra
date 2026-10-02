@@ -22,7 +22,6 @@ const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-review'
   || command === 'task-event'
   || command === 'task-ledger'
-  || command === 'task-invalidation'
   || command === 'task-warning';
 const taskPlatformRecoveryCommand = command === 'task-platform-recovery';
 const manualValidationWorkflowCommand = command === 'manual-validation';
@@ -240,11 +239,6 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
   case 'task-event': {
     const { taskEvent } = await import('../lib/internal/task-event.ts');
     await taskEvent(process.argv.slice(3));
-    break;
-  }
-  case 'task-invalidation': {
-    const { taskInvalidation } = await import('../lib/internal/task-invalidation.ts');
-    taskInvalidation(process.argv.slice(3));
     break;
   }
   case 'task-lifecycle': {

@@ -19,6 +19,7 @@ import { archiveManualValidationGeneration, createManualValidationTransaction, m
 import type { ManualValidationTransaction } from '../../../lib/task/manual-validation-transaction.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 
 const TASK_ID = 'TASK-20260101-000042';
 
@@ -207,6 +208,29 @@ function createFixture(): Fixture {
   writePrChangeReportAtomic(reportPath, report.value);
   const artifactPath = path.join(taskDir, 'manual-validation.md');
   fs.writeFileSync(artifactPath, '# Manual Validation\n\nValidated.\n');
+  const completionFacts = ['analysis.md', 'review-code.md'].map((name) => {
+    const artifactPath = path.join(taskDir, name);
+    const content = fs.readFileSync(artifactPath, 'utf8');
+    const family = name === 'analysis.md' ? 'analyze' : 'review-code';
+    return {
+      event: `${family}.completed`, output: name, outputSha256: sha256File(artifactPath),
+      semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: name === 'review-code' ? JSON.stringify({ manualValidation: 1 }) : content
+    };
+  });
+  let completedTask = fs.readFileSync(taskPath, 'utf8').replace(
+    /\n---\n/u,
+    `\ncompletion_facts: '${JSON.stringify(completionFacts)}'\n---\n`
+  );
+  completedTask = completedTask.replace(
+    '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
+    [
+      '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started',
+      '- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — completed → analysis.md',
+      '- 2026-01-01 00:00:02+00:00 — **Review Code (Round 1) [started]** by codex — started',
+      '- 2026-01-01 00:00:03+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md'
+    ].join('\n')
+  );
+  fs.writeFileSync(taskPath, completedTask);
   return { root, taskId: TASK_ID, taskDir, taskPath, summaryPath, reportPath, baseSha, headSha };
 }
 

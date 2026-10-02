@@ -64,7 +64,7 @@ function serializeScalar(value: FrontmatterScalar): string {
     throw new FrontmatterError('MUTATION_INVALID', 'frontmatter numbers must be finite');
   }
   if (value === '') return '';
-  const serialized = stringify(value).trimEnd();
+  const serialized = stringify(value, { lineWidth: 0 }).trimEnd();
   if (serialized.includes('\n') || serialized.includes('\r')) {
     throw new FrontmatterError('MUTATION_INVALID', 'frontmatter values must be scalar');
   }

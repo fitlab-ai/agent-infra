@@ -120,7 +120,12 @@ function addCompletionFact(taskDir: string): void {
     lifecycleInputs: [{ name: "code.md", sha256: sha256File(inputPath) }]
   };
   const task = fs.readFileSync(taskPath, "utf8");
-  fs.writeFileSync(taskPath, task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`));
+  const withFact = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
+  const withPair = withFact.replace(
+    /(^- \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} — \*\*Review Code \(Round 1\)\*\* by codex — Verdict: .*→ review-code\.md)$/mu,
+    "- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started\n$1"
+  );
+  fs.writeFileSync(taskPath, withPair);
 }
 
 test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async () => {

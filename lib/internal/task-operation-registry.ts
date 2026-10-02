@@ -142,7 +142,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-review', 'preflight', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-review', 'finalize-summary', 'task-bound', 'progress'),
     descriptor('internal', 'task-event', 'event', 'task-bound', 'progress'),
-    descriptor('internal', 'task-invalidation', 'reconcile', 'task-bound', 'progress'),
     descriptor('internal', 'task-lifecycle', 'intent', 'task-bound', 'progress'),
     descriptor('internal', 'task-finalization', 'complete', 'task-bound', 'progress'),
     descriptor('internal', 'task-platform-recovery', 'inspect', 'task-bound', 'diagnostic'),
@@ -222,7 +221,7 @@ export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
-  'task-orchestration', 'task-review', 'task-event', 'task-invalidation', 'task-lifecycle',
+  'task-orchestration', 'task-review', 'task-event', 'task-lifecycle',
   'task-finalization', 'task-platform-recovery', 'task-short-id', 'task-snapshot', 'task-verify', 'task-validate', 'manual-validation'
 ]);
 export const PUBLIC_DISPATCHER_ROUTES = Object.freeze([

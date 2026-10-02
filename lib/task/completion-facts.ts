@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 import { canonicalSemanticDigest } from './artifact-operations.ts';
-import { inspectActivityLog } from './activity-log.ts';
+import { inspectActivityLog, pairEntries } from './activity-log.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { sha256File } from './artifact-receipts.ts';
@@ -53,14 +53,36 @@ export function hasArtifactCompletionFact(taskContent: string, artifactPath: str
 }
 
 export function hasArtifactCompletionLog(taskContent: string, artifact: string, event: string): boolean {
+  return artifactCompletionOrder(taskContent, artifact, event) !== null;
+}
+
+/** Returns the stable Activity Log position of a paired completion row. */
+export function artifactCompletionOrder(taskContent: string, artifact: string, event: string): number | null {
   const identity = parseArtifactName(artifact);
-  if (!identity) return false;
-  const action = event === 'review-code.completed' ? 'Review Code'
-    : event === 'review-plan.completed' ? 'Review Plan'
-      : event === 'review-analysis.completed' ? 'Review Analysis' : null;
-  if (!action) return false;
+  if (!identity) return null;
+  const family = event === 'analysis.completed' || event === 'analyze.completed' ? 'analysis'
+    : event === 'review-analysis.completed' ? 'review-analysis'
+      : event === 'plan.completed' ? 'plan'
+        : event === 'review-plan.completed' ? 'review-plan'
+          : event === 'code.completed' ? 'code'
+            : event === 'review-code.completed' ? 'review-code' : null;
+  if (!family || family !== identity.family) return null;
+  const action = family === 'analysis' ? 'Analyze Task'
+    : family === 'review-analysis' ? 'Review Analysis'
+      : family === 'plan' ? 'Plan Task'
+        : family === 'review-plan' ? 'Review Plan'
+          : family === 'code' ? 'Code Task' : 'Review Code';
   const { section, invalidEntries } = inspectActivityLog(taskContent);
-  if (!section || invalidEntries.length > 0) return false;
-  const expected = `${action} (Round ${identity.round})`;
-  return section.entries.some((entry) => entry.step === expected && entry.note.includes(`→ ${artifact}`));
+  if (!section || invalidEntries.length > 0) return null;
+  const ordered = section.entries.map((entry, sourceOrder) => ({ entry, sourceOrder }))
+    .sort((left, right) => Date.parse(left.entry.time.replace(' ', 'T')) - Date.parse(right.entry.time.replace(' ', 'T')) || left.sourceOrder - right.sourceOrder);
+  const entries = ordered.map(({ entry }) => entry);
+  const roundPattern = new RegExp(`^${action} \\(Round ${identity.round}(?:, [^)]+)?\\)$`);
+  const row = pairEntries(entries).find((candidate) => candidate.started !== ''
+    && candidate.done !== '' && roundPattern.test(candidate.step)
+    && candidate.note.includes(`→ ${artifact}`));
+  if (!row) return null;
+  const doneIndex = ordered.findIndex(({ entry }) => entry.time === row.done
+    && entry.step === row.step && entry.note === row.note);
+  return doneIndex < 0 ? null : doneIndex;
 }

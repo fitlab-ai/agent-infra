@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from "../../helpers.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import { upsertSection } from "../../../lib/task/sections.ts";
 
 const TASK_ID = "TASK-20260101-000001";
@@ -22,7 +23,47 @@ function makeFixture(files: Record<string, string>) {
   const withAnalysis = withPlan["analysis.md"] ? withPlan : { "analysis.md": FULL_ANALYSIS, ...withPlan };
   for (const [name, content] of Object.entries(withAnalysis)) fs.writeFileSync(path.join(taskDir, name), content);
   seedLifecycleReceipts(taskDir);
+  seedCompletionEvidence(taskDir);
   return { root, taskDir };
+}
+
+function seedCompletionEvidence(taskDir: string) {
+  const actions: Record<string, string> = {
+    analysis: "Analyze Task", "review-analysis": "Review Analysis", plan: "Plan Task",
+    "review-plan": "Review Plan", code: "Code Task", "review-code": "Review Code"
+  };
+  const taskContent = fs.readFileSync(path.join(taskDir, "task.md"), "utf8");
+  const reports = fs.readdirSync(taskDir).flatMap((name) => {
+    const identity = /^((?:review-)?analysis|(?:review-)?plan|code|review-code)(?:-r([2-9]\d*))?\.md$/.exec(name);
+    if (!identity) return [];
+    const family = identity[1]! as keyof typeof actions;
+    const round = Number(identity[2] ?? 1);
+    if (family === "review-code" && new RegExp(`\\*\\*Review Code \\(Round ${round}\\) \\[started\\]\\*\\*`).test(taskContent)) return [];
+    const filePath = path.join(taskDir, name);
+    const content = fs.readFileSync(filePath, "utf8");
+    const eventFamily = family === "analysis" ? "analyze" : family;
+    return [{
+      name, family, round, filePath,
+      fact: {
+        event: `${eventFamily}.completed`, output: name, outputSha256: sha256File(filePath),
+        semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: "completed"
+      }
+    }];
+  }).sort((left, right) => left.round - right.round || left.name.localeCompare(right.name));
+  const taskPath = path.join(taskDir, "task.md");
+  let task = fs.readFileSync(taskPath, "utf8");
+  task = task.replace(/\n---\n/u, `\ncompletion_facts: '${JSON.stringify(reports.map(({ fact }) => fact))}'\n---\n`);
+  const rows = reports.flatMap(({ name, family, round }) => {
+    const label = `${actions[family]} (Round ${round})`;
+    return [
+      `- 2026-01-01 00:00:00+00:00 — **${label} [started]** by codex — started`,
+      `- 2026-01-01 00:00:01+00:00 — **${label}** by codex — completed → ${name}`
+    ];
+  });
+  task = /## Activity Log\n/u.test(task)
+    ? task.replace("## Activity Log\n", `## Activity Log\n\n${rows.join("\n")}\n`)
+    : task.replace("# Task\n", `# Task\n\n## Activity Log\n\n${rows.join("\n")}\n`);
+  fs.writeFileSync(taskPath, task);
 }
 
 function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
@@ -200,7 +241,7 @@ test("code-task dual-mode: human-supplemented review (Approved with findings) fa
     "review-code-r2.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **人工校验**：0")
   });
 
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
   assert.equal(result.output.verdict, null);
   assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
@@ -225,7 +266,7 @@ test("code-task dual-mode: human-supplemented review with unparsable verdict sti
     "review-code-r2.md": "- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
   });
 
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
   assert.match(result.output.message, /cannot parse|unrecognized/);
 });
@@ -305,7 +346,7 @@ test("code-task decision mode requires a completed approved review identity", ()
     "code.md": "# code",
     "review-code.md": zhReview("通过")
   });
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
   assert.match(result.output.message, /completed Activity Log identity/i);
 });
