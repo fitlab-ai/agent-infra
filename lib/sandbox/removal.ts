@@ -50,14 +50,6 @@ import { getProcessStartTime } from '../server/process-state.ts';
 import { releaseStaleShortIdRegistry } from '../task/short-id.ts';
 import { withRepositoryMutationLock } from '../task/task-execution-lock.ts';
 import { fetchSandboxRows, type SandboxRow } from './commands/list-running.ts';
-import {
-  formatIntermediateCleanupReport,
-  cleanupIntermediateUnderRemovalCoordinator,
-  protectIntermediateCleanupReport,
-  mergeIntermediateCleanupReports,
-  type IntermediateCleanupReport,
-  scanIntermediateCleanup
-} from '../task/intermediate-cleanup.ts';
 import { createSandboxControlBindingEvidence } from './task-cleanup.ts';
 import {
   createCleanPermit,
@@ -946,7 +938,7 @@ async function runRmOneUnderRepositoryLock(
   tools: SandboxTool[],
   branch: string,
   options: RmOneOptions = {}
-): Promise<IntermediateCleanupReport | null> {
+): Promise<null> {
   const target = options.target ?? resolveRmTarget(
     config,
     tools,
@@ -1048,7 +1040,7 @@ async function rmOneCore(
   tools: SandboxTool[],
   branch: string,
   options: RmOneOptions = {}
-): Promise<IntermediateCleanupReport | null> {
+): Promise<null> {
   const target = options.target ?? resolveRmTarget(
     config,
     tools,

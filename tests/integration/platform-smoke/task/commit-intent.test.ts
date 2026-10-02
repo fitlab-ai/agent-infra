@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { onPlatforms } from '../../../helpers.ts';
 
 import {
   checkpointIntentDigest,
@@ -40,13 +41,46 @@ function intent(root: string): CheckpointIntent {
 
 test('checkpoint intent is atomically persisted and removed after synchronization', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-intent-'));
+  const taskDir = path.join(root, 'TASK-20260101-000001');
   try {
+    fs.mkdirSync(taskDir);
     const value = intent(root);
-    writeCheckpointIntent(root, value);
-    assert.equal(fs.existsSync(intentPath(root, value.taskId)), true);
-    assert.deepEqual(readCheckpointIntent(root, value.taskId), value);
-    removeCheckpointIntent(root, value.taskId);
-    assert.equal(readCheckpointIntent(root, value.taskId), null);
+    writeCheckpointIntent(taskDir, value);
+    assert.equal(fs.existsSync(intentPath(taskDir)), true);
+    assert.deepEqual(readCheckpointIntent(taskDir, value.taskId), value);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(intentPath(taskDir)).mode & 0o777, 0o600);
+    removeCheckpointIntent(taskDir, value.taskId);
+    assert.equal(readCheckpointIntent(taskDir, value.taskId), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint intent rejects a task directory mismatch and inconsistent state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-intent-'));
+  const taskDir = path.join(root, 'TASK-20260101-000001');
+  const otherDir = path.join(root, 'TASK-20260101-000002');
+  try {
+    fs.mkdirSync(taskDir);
+    fs.mkdirSync(otherDir);
+    const value = intent(root);
+    assert.throws(() => writeCheckpointIntent(otherDir, value), /COMMIT_INTENT_INVALID/);
+    fs.writeFileSync(intentPath(taskDir), JSON.stringify({ ...value, state: 'committed' }));
+    assert.throws(() => readCheckpointIntent(taskDir, value.taskId), /COMMIT_INTENT_INVALID/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint intent rejects a symlink at its task-local path', onPlatforms('linux', 'darwin'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-intent-'));
+  const taskDir = path.join(root, 'TASK-20260101-000001');
+  try {
+    fs.mkdirSync(taskDir);
+    const external = path.join(root, 'external.json');
+    fs.writeFileSync(external, JSON.stringify(intent(root)));
+    fs.symlinkSync(external, intentPath(taskDir));
+    assert.throws(() => readCheckpointIntent(taskDir, 'TASK-20260101-000001'), /COMMIT_INTENT_INVALID/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -10,19 +10,36 @@ function gitText(repoRoot: string, args: readonly string[]): string {
   }).trim();
 }
 
+function gitOutput(repoRoot: string, args: readonly string[]): string {
+  return execFileSync('git', [...args], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+}
+
+function commitPaths(repoRoot: string, head: string, pathspec?: readonly string[]): string[] {
+  const args = ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', head];
+  if (pathspec && pathspec.length > 0) args.push('--', ...pathspec);
+  return gitOutput(repoRoot, args).split('\0').filter(Boolean).sort();
+}
+
+function canonicalMessage(message: string): string {
+  return message.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+}
+
 function checkpointCommitMatches(repoRoot: string, intent: CheckpointIntent, head: string): boolean {
   try {
     const parent = gitText(repoRoot, ['rev-parse', `${head}^`]);
     const tree = gitText(repoRoot, ['rev-parse', `${head}^{tree}`]);
-    const message = gitText(repoRoot, ['show', '-s', '--format=%s', head]);
-    const changed = gitText(repoRoot, ['diff-tree', '--no-commit-id', '--name-only', '-r', head])
-      .split('\n')
-      .filter(Boolean)
-      .sort();
+    const message = canonicalMessage(gitOutput(repoRoot, ['show', '-s', '--format=%B', head]));
+    const changed = commitPaths(repoRoot, head);
+    const selected = commitPaths(repoRoot, head, intent.paths);
     return parent === intent.expectedHead
       && tree === intent.expectedTree
-      && message === intent.message
-      && JSON.stringify(changed) === JSON.stringify([...intent.paths].sort());
+      && message === canonicalMessage(intent.message)
+      && changed.length > 0
+      && JSON.stringify(changed) === JSON.stringify(selected);
   } catch {
     return false;
   }

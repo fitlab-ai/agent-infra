@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -32,12 +32,19 @@ type IntentIdentity = Readonly<{
   round: number;
 }>;
 
-function intentRoot(repoRoot: string): string {
-  return path.join(repoRoot, '.agents', 'workspace', '.task-commit-intents');
+const MAX_INTENT_SIZE = 1024 * 1024;
+const TASK_ID_PATTERN = /^TASK-\d{8}-\d{6}$/;
+
+function intentPath(taskDir: string): string {
+  return path.join(taskDir, '.checkpoint-intent.json');
 }
 
-function intentPath(repoRoot: string, taskId: string): string {
-  return path.join(intentRoot(repoRoot), `${taskId}.json`);
+function assertTaskDirectory(taskDir: string, taskId: string): void {
+  if (!TASK_ID_PATTERN.test(taskId) || path.basename(path.resolve(taskDir)) !== taskId) {
+    throw new Error('COMMIT_INTENT_INVALID: task directory does not match task ID');
+  }
+  const stat = fs.statSync(taskDir);
+  if (!stat.isDirectory()) throw new Error('COMMIT_INTENT_INVALID: task directory is not a directory');
 }
 
 function checkpointIntentDigest(identity: IntentIdentity): string {
@@ -56,8 +63,13 @@ function checkpointIntentDigest(identity: IntentIdentity): string {
 function isIntent(value: unknown): value is CheckpointIntent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const intent = value as Record<string, unknown>;
+  const validState = ['prepared', 'committed', 'synced'].includes(String(intent.state));
+  const validHead = intent.committedHead === null
+    ? intent.state === 'prepared'
+    : typeof intent.committedHead === 'string' && /^[a-f0-9]{40,64}$/.test(intent.committedHead)
+      && intent.state !== 'prepared';
   return intent.version === 1
-    && typeof intent.taskId === 'string' && intent.taskId.length > 0
+    && typeof intent.taskId === 'string' && TASK_ID_PATTERN.test(intent.taskId)
     && typeof intent.branch === 'string' && intent.branch.length > 0
     && intent.mode === 'local'
     && typeof intent.expectedHead === 'string' && /^[a-f0-9]{40,64}$/.test(intent.expectedHead)
@@ -66,27 +78,50 @@ function isIntent(value: unknown): value is CheckpointIntent {
     && typeof intent.message === 'string' && intent.message.length > 0
     && Number.isSafeInteger(intent.round) && Number(intent.round) > 0
     && typeof intent.digest === 'string' && /^[a-f0-9]{64}$/.test(intent.digest)
-    && ['prepared', 'committed', 'synced'].includes(String(intent.state))
-    && (intent.committedHead === null || (typeof intent.committedHead === 'string' && /^[a-f0-9]{40,64}$/.test(intent.committedHead)))
+    && validState && validHead
     && typeof intent.createdAt === 'string' && intent.createdAt.length > 0
     && typeof intent.updatedAt === 'string' && intent.updatedAt.length > 0
     && intent.digest === checkpointIntentDigest(intent as unknown as IntentIdentity);
 }
 
-function readCheckpointIntent(repoRoot: string, taskId: string): CheckpointIntent | null {
-  const target = intentPath(repoRoot, taskId);
-  if (!fs.existsSync(target)) return null;
-  const value = JSON.parse(fs.readFileSync(target, 'utf8')) as unknown;
-  if (!isIntent(value)) throw new Error('COMMIT_INTENT_INVALID: checkpoint intent schema is invalid');
-  return value;
+function invalidIntent(): never {
+  throw new Error('COMMIT_INTENT_INVALID: checkpoint intent schema is invalid');
 }
 
-function writeCheckpointIntent(repoRoot: string, value: CheckpointIntent): void {
-  if (!isIntent(value)) throw new Error('COMMIT_INTENT_INVALID: checkpoint intent schema is invalid');
-  const directory = intentRoot(repoRoot);
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const target = intentPath(repoRoot, value.taskId);
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+function readCheckpointIntent(taskDir: string, taskId: string): CheckpointIntent | null {
+  assertTaskDirectory(taskDir, taskId);
+  const target = intentPath(taskDir);
+  let before: fs.Stats;
+  try { before = fs.lstatSync(target); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_INTENT_SIZE) return invalidIntent();
+
+  let descriptor: number | undefined;
+  try {
+    const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+    descriptor = fs.openSync(target, fs.constants.O_RDONLY | noFollow);
+    const opened = fs.fstatSync(descriptor);
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino
+      || opened.size !== before.size || opened.size > MAX_INTENT_SIZE) return invalidIntent();
+    const value = JSON.parse(fs.readFileSync(descriptor, 'utf8')) as unknown;
+    if (!isIntent(value) || value.taskId !== taskId) return invalidIntent();
+    return value;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('COMMIT_INTENT_INVALID:')) throw error;
+    return invalidIntent();
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function writeCheckpointIntent(taskDir: string, value: CheckpointIntent): void {
+  assertTaskDirectory(taskDir, value.taskId);
+  if (!isIntent(value)) return invalidIntent();
+  const target = intentPath(taskDir);
+  const temporary = `${target}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   try { fs.renameSync(temporary, target); }
   catch (error) {
@@ -105,9 +140,9 @@ function updateCheckpointIntent(
   return next;
 }
 
-function removeCheckpointIntent(repoRoot: string, taskId: string): void {
-  const target = intentPath(repoRoot, taskId);
-  try { fs.unlinkSync(target); } catch (error) {
+function removeCheckpointIntent(taskDir: string, taskId: string): void {
+  assertTaskDirectory(taskDir, taskId);
+  try { fs.unlinkSync(intentPath(taskDir)); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 }
@@ -127,7 +162,6 @@ function sameCheckpointIntent(left: CheckpointIntent, right: IntentIdentity): bo
 export {
   checkpointIntentDigest,
   intentPath,
-  intentRoot,
   isIntent,
   readCheckpointIntent,
   removeCheckpointIntent,
