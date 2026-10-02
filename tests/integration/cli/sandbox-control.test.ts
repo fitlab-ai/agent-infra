@@ -388,6 +388,27 @@ function runRecoverSandboxControl(params: {
   }));
 }
 
+function runSandboxLocalTaskFinalization(root: string, manifest: ReturnType<typeof readSandboxControlManifest>, taskId: string) {
+  return spawnSync(path.resolve('bin/internal-cli.sh'), [
+    'task-finalization', taskId, 'complete', '--agent', 'codex'
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      AGENT_INFRA_TASK_ID: taskId,
+      AGENT_INFRA_CONTROL_TOKEN: manifest.token,
+      AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
+      AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
+      AGENT_INFRA_CONTROL_DIR: manifest.channelDir,
+      AGENT_INFRA_CONTROL_STATUS_DIR: manifest.publicStatusDir,
+      AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
+      AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined,
+      AGENT_INFRA_EXECUTOR_MANIFEST: undefined
+    }
+  });
+}
+
 function monotonicNowMs(): number {
   return Number(process.hrtime.bigint() / 1_000_000n);
 }
@@ -1953,6 +1974,51 @@ test('task-finalization normal publication fails closed on a conflicting termina
     controller.abort();
     await server?.catch(() => undefined);
     await clientResult?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox-local task-finalization does not prepare a receipt before broker admission', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-busy-no-prepare-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-busy-no-prepare-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts')
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    controller.abort();
+    await server;
+    server = undefined;
+
+    const statusPath = path.join(manifest.publicStatusDir, 'status.json');
+    const status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as Record<string, unknown>;
+    status.state = 'busy';
+    status.reasonCode = null;
+    status.activeRequestId = '11111111-1111-4111-8111-111111111111';
+    status.updatedAt = Date.now();
+    atomicWriteJson(statusPath, status);
+
+    const local = runSandboxLocalTaskFinalization(root, manifest, taskId);
+    assert.equal(local.status, 2, local.stderr || local.stdout);
+    assert.equal(JSON.parse(local.stdout).status, 'blocked', local.stdout);
+    assert.equal(JSON.parse(local.stdout).error.code, 'SANDBOX_CONTROL_BUSY', local.stdout);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`)), false);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-finalization')), false);
+    assert.equal(fs.readdirSync(path.join(manifest.channelDir, 'requests')).length, 0);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md')), true);
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

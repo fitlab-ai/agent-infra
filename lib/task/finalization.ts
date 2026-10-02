@@ -863,17 +863,6 @@ async function prepareUnderLock(
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
   }
-  if (options.controlBinding && (receipt.controlBinding?.generation !== options.controlBinding.generation
-    || receipt.controlBinding.requestId !== options.controlBinding.requestId)) {
-    const state = resolveTaskRef(taskId, { repoRoot });
-    if (!(receipt.lifecycle === 'done' && state.ok && state.state === 'completed')) {
-      return failed(taskId, {
-        code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
-        message: 'canonical receipt is not bound to the current sandbox request', retryable: false
-      });
-    }
-  }
-
   const preflightState = resolveTaskRef(taskId, { repoRoot });
   if (options.preflight && preflightState.ok && preflightState.state === 'active') {
     try {
@@ -1153,6 +1142,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         }
       }
       let receipt = readReceipt(repoRoot, resolved.taskId);
+      let importedHandoff = false;
       if (!receipt && options.controlBinding && options.handoffDirectory && request.handoffSha256) {
         try {
           const handoff = readTaskFinalizationHandoff(
@@ -1164,6 +1154,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
             throw new Error('TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
           }
           writeReceipt(repoRoot, receipt);
+          importedHandoff = true;
           try { handoff.cleanup(); } catch { /* keep the persisted canonical receipt usable */ }
         } catch (error) {
           return failed(resolved.taskId, {
@@ -1180,28 +1171,20 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       }
       if (options.controlBinding) {
         const proof = inspectTaskLifecycleProgress(repoRoot, resolved.taskId, request.agent);
-        const oldBinding = receipt.controlBinding;
-        if (!oldBinding || oldBinding.generation !== options.controlBinding.generation || proof === 'unknown') {
+        if (proof === 'unknown') {
           return failed(resolved.taskId, {
             code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
-            message: 'canonical receipt has no valid host recovery proof', retryable: false
+            message: 'task lifecycle progress cannot be verified', retryable: false
           });
         }
-        if (oldBinding.requestId !== options.controlBinding.requestId && proof === 'not-started') {
-          if (receipt.lifecycle !== 'pending' || !options.handoffDirectory || !request.handoffSha256) {
-            return failed(resolved.taskId, {
-              code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
-              message: 'pending receipt cannot be rebound without a current handoff', retryable: false
-            });
-          }
+        if (!importedHandoff && options.handoffDirectory && request.handoffSha256) {
           try {
             const handoff = readTaskFinalizationHandoff(
               options.handoffDirectory, resolved.taskId, options.controlBinding, request.handoffSha256
             );
             const nextReceipt = validateReceipt(handoff.receipt, resolved.taskId);
             if (nextReceipt.receiptId !== receipt.receiptId || nextReceipt.intent !== receipt.intent
-              || nextReceipt.lifecycle !== 'pending') throw new Error('handoff is not continuous with canonical receipt');
-            receipt = updateReceipt(repoRoot, receipt, { controlBinding: options.controlBinding });
+              || nextReceipt.lifecycle !== receipt.lifecycle) throw new Error('handoff is not continuous with canonical receipt');
             try { handoff.cleanup(); } catch { /* keep the persisted canonical receipt usable */ }
           } catch (error) {
             return failed(resolved.taskId, {

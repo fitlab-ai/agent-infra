@@ -203,12 +203,7 @@ request ID：
 agent-infra-internal sandbox-control recover <request-id>
 ```
 
-accepted 的 task finalization 不得提交新请求。若 request ID 缺失或 receipt 无法
-读取，保持 pending；只从 stderr、handoff 或 receipt 中恢复原 ID，不按 task key
-查询。broker 的 `processing/<request-id>/result.json` 只是私有 transport evidence，
-不是 task receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验
-仍是权威。只有请求在 accepted 之前已被拒绝，才可依据错误的 retryability 使用
-新的 request ID。
+accepted 的 task finalization 不得提交新请求。若 request ID 缺失或 receipt 无法读取，保持 pending；只从 stderr、handoff 或 receipt 中恢复原 ID，不按 task key 查询。broker 的 `processing/<request-id>/result.json` 只是私有 transport evidence，不是 task receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验仍是权威。若同 ID 恢复仍没有 terminal result，必须检查 broker 和宿主 executor 的活动状态：活动请求、`busy` 或状态未知时停止并保留原 request ID。只有确认原请求从未启动或 executor 已结束后，才可用新的 request ID 重试；新请求会在 broker 接纳后执行完整 prepare 和 commit。仅当请求在 accepted 之前已被拒绝时，才可直接依据错误的 retryability 决定是否提交新的 request ID.
 
 ### 8. 告知用户
 
