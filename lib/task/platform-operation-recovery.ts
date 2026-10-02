@@ -28,7 +28,6 @@ type RecoveryOptions = Readonly<{
   cwd?: string;
   limit?: number;
   excludeId?: string;
-  omitFromDiffLabels?: boolean;
 }>;
 type RecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'blocked' | 'failed';
@@ -121,18 +120,6 @@ function currentIssueMetadataOperation(taskId: string, taskMdPath: string, repoR
     taskContent: createHash('sha256').update(content).digest('hex')
   })).digest('hex');
   return { kind: 'issue-metadata' as const, target, expectedDigest, issueMetadata: currentMetadata, id: operationId({ kind: 'issue-metadata', target, expectedDigest }) };
-}
-
-function withoutFromDiffLabels(metadata: NonNullable<ReturnType<typeof readPlatformOperationJournal>['operations'][number]['issueMetadata']>) {
-  const current = { ...metadata };
-  delete current.inLabels;
-  delete current.base;
-  delete current.fromDiffFiles;
-  delete current.inLabelMappingDigest;
-  const hasOtherOperation = current.requirements || current.issueType || current.fields
-    || current.status !== undefined || current.assignees !== undefined
-    || current.milestone !== undefined || current.state !== undefined;
-  return hasOtherOperation ? current : null;
 }
 
 async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
@@ -315,28 +302,6 @@ async function recoverPlatformOperations(
   const pending: string[] = [];
   const selected = candidates.slice(0, limit);
   for (const [index, operation] of selected.entries()) {
-    if (options.omitFromDiffLabels && operation.kind === 'issue-metadata'
-      && operation.issueMetadata?.inLabels === 'from-diff') {
-      const issueMetadata = withoutFromDiffLabels(operation.issueMetadata);
-      if (!issueMetadata) {
-        try {
-          recordPlatformOperation({
-            taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind,
-            target: operation.target, expectedDigest: operation.expectedDigest,
-            dependency: operation.dependency, state: 'failed', lastCode: 'PLATFORM_OPERATION_SUPERSEDED',
-            issueMetadata: operation.issueMetadata
-          });
-        } catch (error) {
-          const value = error as { code?: string; message?: string };
-          return result('blocked', recovered, [...pending, operation.id], {
-            code: value.code || 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED',
-            message: value.message || String(error), retryable: true
-          });
-        }
-        recovered.push(operation.id);
-        continue;
-      }
-    }
     if (operation.state === 'failed') {
       pending.push(operation.id);
       return result('blocked', recovered, pending, {
@@ -376,12 +341,7 @@ async function recoverPlatformOperations(
     }
     let targetOperation = operation;
     if (operation.kind === 'issue-metadata') {
-      let operationForRecovery = operation;
-      if (options.omitFromDiffLabels && operation.issueMetadata?.inLabels === 'from-diff') {
-        const issueMetadata = withoutFromDiffLabels(operation.issueMetadata);
-        if (issueMetadata) operationForRecovery = { ...operation, issueMetadata };
-      }
-      const current = currentIssueMetadataOperation(resolved.taskId, resolved.taskMdPath, resolved.repoRoot, operationForRecovery);
+      const current = currentIssueMetadataOperation(resolved.taskId, resolved.taskMdPath, resolved.repoRoot, operation);
       if (!current) {
         pending.push(operation.id);
         return result('blocked', recovered, pending, { code: 'PLATFORM_OPERATION_TARGET_UNAVAILABLE', message: 'Current Issue metadata target cannot be reconstructed safely', retryable: true });
@@ -394,7 +354,7 @@ async function recoverPlatformOperations(
           recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, issueMetadata: operation.issueMetadata, dependency: operation.dependency,
             state: 'failed', lastCode: 'PLATFORM_OPERATION_SUPERSEDED' });
-          targetOperation = { ...operationForRecovery, expectedDigest: current.expectedDigest, issueMetadata: current.issueMetadata, id: current.id };
+          targetOperation = { ...operation, expectedDigest: current.expectedDigest, issueMetadata: current.issueMetadata, id: current.id };
         } catch (error) {
           const value = error as { code?: string; message?: string };
           return result('blocked', recovered, [...pending, operation.id], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || String(error), retryable: true });
