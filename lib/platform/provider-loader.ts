@@ -17,7 +17,7 @@ import type {
 } from './provider-contract.ts';
 import { createGitHubProvider } from './github-provider.ts';
 import { createNoneProvider } from './none-provider.ts';
-import { wrapBuiltInProviderErrors, wrapProviderOperations } from './provider-validation.ts';
+import { wrapProviderOperations } from './provider-validation.ts';
 import type { LoadedRuntimeProvider, RuntimePlatformProvider } from './provider-validation.ts';
 import type { PlatformError } from './types.ts';
 import type { PlatformClient } from './context.ts';
@@ -159,8 +159,8 @@ async function instantiateProvider(
     repositoryRoot,
     config
   };
-  if (providerType === 'github') return wrapBuiltInProviderErrors(createGitHubProvider(input, client as never));
-  if (providerType === 'none') return wrapBuiltInProviderErrors(createNoneProvider(input));
+  if (providerType === 'github') return createGitHubProvider(input, client as never) as unknown as RuntimePlatformProvider;
+  if (providerType === 'none') return createNoneProvider(input) as unknown as RuntimePlatformProvider;
 
   let moduleValue: Record<string, unknown>;
   try {
