@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from "../../helpers.ts";
+import { INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from "../../helpers.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { upsertSection } from "../../../lib/task/sections.ts";
 
@@ -20,9 +20,35 @@ function makeFixture(files: Record<string, string>) {
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: technical-design-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };
   const withAnalysis = withPlan["analysis.md"] ? withPlan : { "analysis.md": FULL_ANALYSIS, ...withPlan };
-  for (const [name, content] of Object.entries(withAnalysis)) fs.writeFileSync(path.join(taskDir, name), content);
+  const hasCode = Object.keys(withAnalysis).some((name) => /^code(?:-r[2-9]\d*)?\.md$/.test(name));
+  const withReviewPlan = hasCode && !withAnalysis["review-plan.md"]
+    ? { "review-plan.md": zhReviewPlan("plan.md", "通过"), ...withAnalysis }
+    : withAnalysis;
+  for (const [name, content] of Object.entries(withReviewPlan)) fs.writeFileSync(path.join(taskDir, name), content);
   seedLifecycleReceipts(taskDir);
+  seedCompletionEvidence(taskDir);
   return { root, taskDir };
+}
+
+function seedCompletionEvidence(taskDir: string) {
+  const taskContent = fs.readFileSync(path.join(taskDir, "task.md"), "utf8");
+  const reports = fs.readdirSync(taskDir).flatMap((name) => {
+    const identity = /^((?:review-)?analysis|(?:review-)?plan|code|review-code)(?:-r([2-9]\d*))?\.md$/.exec(name);
+    if (!identity) return [];
+    const family = identity[1]!;
+    const round = Number(identity[2] ?? 1);
+    if (family === "review-code" && new RegExp(`\\*\\*Review Code \\(Round ${round}\\) \\[started\\]\\*\\*`).test(taskContent)) return [];
+    const inputName = family === "review-analysis" ? "analysis.md"
+      : family === "plan" ? "analysis.md"
+        : family === "review-plan" ? "plan.md"
+          : family === "code" ? "plan.md"
+      : family === "review-code" ? "code.md" : null;
+    const inputNames = family === "code" && fs.existsSync(path.join(taskDir, "review-plan.md"))
+      ? ["plan.md", "review-plan.md"]
+      : inputName ? [inputName] : [];
+    return [{ name, round, lifecycleInputs: inputNames }];
+  }).sort((left, right) => left.round - right.round || left.name.localeCompare(right.name));
+  recordArtifactCompletions(taskDir, reports);
 }
 
 function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
@@ -47,10 +73,15 @@ function seedLifecycleReceipts(taskDir: string) {
   const codeOutputs = fs.readdirSync(taskDir).filter((name) => /^code(?:-r[2-9]\d*)?\.md$/.test(name));
   for (const output of codeOutputs) {
     if (!fs.existsSync(path.join(taskDir, "plan.md"))) continue;
-    addReceipt(taskDir, {
+    const receipts: Parameters<typeof upsertArtifactReceipt>[1][] = [{
       event: "code.completed", output, input: "plan.md",
       inputSha256: sha256File(path.join(taskDir, "plan.md")), completedAt
+    }];
+    if (fs.existsSync(path.join(taskDir, "review-plan.md"))) receipts.push({
+      event: "code.completed", output, input: "review-plan.md",
+      inputSha256: sha256File(path.join(taskDir, "review-plan.md")), completedAt
     });
+    for (const receipt of receipts) addReceipt(taskDir, receipt);
   }
   const reviewCodeOutputs = fs.readdirSync(taskDir).filter((name) => /^review-code(?:-r[2-9]\d*)?\.md$/.test(name));
   for (const output of reviewCodeOutputs) {
@@ -200,7 +231,7 @@ test("code-task dual-mode: human-supplemented review (Approved with findings) fa
     "review-code-r2.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **人工校验**：0")
   });
 
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
   assert.equal(result.output.verdict, null);
   assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
@@ -225,7 +256,7 @@ test("code-task dual-mode: human-supplemented review with unparsable verdict sti
     "review-code-r2.md": "- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
   });
 
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
   assert.match(result.output.message, /cannot parse|unrecognized/);
 });
@@ -305,7 +336,7 @@ test("code-task decision mode requires a completed approved review identity", ()
     "code.md": "# code",
     "review-code.md": zhReview("通过")
   });
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
   assert.match(result.output.message, /completed Activity Log identity/i);
 });

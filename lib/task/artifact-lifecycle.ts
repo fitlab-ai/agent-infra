@@ -6,19 +6,19 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
 import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
+import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
-import { receiptForOutput, sha256File } from './artifact-receipts.ts';
-import { hasArtifactCompletionFact, hasArtifactCompletionLog } from './completion-facts.ts';
+import { receiptForOutput, receiptsForOutput, sha256File } from './artifact-receipts.ts';
+import { artifactCompletionOrder, hasArtifactCompletionFact, hasArtifactCompletionLog, parseCompletionFacts } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
-import { isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
-import type { InvalidationDocument } from './invalidation.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import type { LifecyclePathState } from './lifecycle-path.ts';
 import { parseReworkIntentDocument } from './rework-intent.ts';
 import { selectArtifactDisposition } from './artifact-selection.ts';
 import type { ArtifactSelection } from './artifact-selection.ts';
+import { executionInputsMatchLatest } from './execution-inputs.ts';
 
 const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
 const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
@@ -29,24 +29,37 @@ const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
 
 /** Init, repair and finalization share the same authoritative round identity. */
 export function hasOpenArtifactRound(content: string, family: string, round: number): boolean {
+  return openArtifactRounds(content, family).includes(round);
+}
+
+function openArtifactRounds(content: string, family: string): number[] {
   const activity = locateActivityLog(content);
   const step = ARTIFACT_STEPS[family];
-  if (!activity || !step) return false;
+  if (!activity || !step) return [];
   const qualifier = family === 'code'
     ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d*))?'
     : '';
-  const expected = new RegExp(`^${step} \\(Round ${round}${qualifier}\\)$`);
-  return startedBackedRows(pairEntries(activity.entries)).filter((row) => expected.test(row.step) && !row.done).length === 1;
+  const expected = new RegExp(`^${step} \\(Round ([1-9]\\d*)${qualifier}\\)$`);
+  return [...new Set(startedBackedRows(pairEntries(activity.entries))
+    .filter((row) => expected.test(row.step) && !row.done)
+    .map((row) => Number(expected.exec(row.step)?.[1])))].sort((left, right) => left - right);
 }
 
 function hasCompletedArtifactRound(content: string, family: string, round: number, name: string): boolean {
-  const activity = locateActivityLog(content);
-  const step = ARTIFACT_STEPS[family];
-  if (!activity || !step) return false;
-  const expected = new RegExp(`^${escapeRegExp(step)} \\(Round ${round}(?:, [^)]+)?\\)$`);
-  return startedBackedRows(pairEntries(activity.entries)).some((row) =>
-    expected.test(row.step) && Boolean(row.done) && row.note.includes(`→ ${name}`)
-  );
+  const event = completionEvent(family);
+  return Boolean(event && parseArtifactName(name)?.round === round
+    && artifactCompletionOrder(content, name, event) !== null
+    && hasArtifactCompletionFact(content, name, event));
+}
+
+function completionEvent(family: string): string | null {
+  if (family === 'analysis') return 'analyze.completed';
+  if (family === 'review-analysis') return 'review-analysis.completed';
+  if (family === 'plan') return 'plan.completed';
+  if (family === 'review-plan') return 'review-plan.completed';
+  if (family === 'code') return 'code.completed';
+  if (family === 'review-code') return 'review-code.completed';
+  return null;
 }
 
 type ArtifactIdentity = {
@@ -60,7 +73,7 @@ type ArtifactIdentity = {
 type ArtifactDiagnosticCode =
   | 'NONCANONICAL_NAME' | 'ROUND_OUT_OF_RANGE' | 'MISSING_BASE' | 'ROUND_GAP'
   | 'DUPLICATE_LOGICAL_ROUND' | 'NON_REGULAR_FILE' | 'SYMBOLIC_LINK'
-  | 'FILESYSTEM_RACE' | 'CATALOG_CONFLICT' | 'BROKEN_REFERENCE';
+  | 'FILESYSTEM_RACE' | 'CATALOG_CONFLICT' | 'BROKEN_REFERENCE' | 'MULTIPLE_OPEN_ROUNDS';
 type ArtifactDiagnostic = {
   code: ArtifactDiagnosticCode;
   family: ArtifactFamily;
@@ -74,7 +87,7 @@ type ArtifactErrorCode =
   | 'LIFECYCLE_PATH_INVALID'
   | 'ARTIFACT_IDENTITY_INVALID' | 'ARTIFACT_NOT_FOUND'
   | 'ARTIFACT_NOT_REGULAR' | 'ARTIFACT_NOT_READABLE' | 'ARTIFACT_VERDICT_INVALID'
-  | 'ARTIFACT_MODE_REFUSED' | 'ARTIFACT_INVALIDATION_INVALID'
+  | 'ARTIFACT_MODE_REFUSED'
   | 'ARTIFACT_SELECTION_INDETERMINATE';
 
 type ArtifactError = { code: ArtifactErrorCode; message: string };
@@ -87,8 +100,10 @@ type ArtifactInventoryResult = {
   taskState: TaskWorkspaceState | null;
   family: ArtifactFamily | string;
   artifacts: readonly ArtifactIdentity[];
+  completed: readonly ArtifactIdentity[];
   latest: ArtifactIdentity | null;
   next: { round: number; name: string } | null;
+  openRounds: readonly number[];
   reviewedInput: ArtifactIdentity | null;
   diagnostics: readonly ArtifactDiagnostic[];
   error: ArtifactError | null;
@@ -122,7 +137,7 @@ type InspectOptions = {
 const BLOCKING_DIAGNOSTICS = new Set<ArtifactDiagnosticCode>([
   'NONCANONICAL_NAME', 'ROUND_OUT_OF_RANGE', 'MISSING_BASE', 'ROUND_GAP',
   'DUPLICATE_LOGICAL_ROUND', 'NON_REGULAR_FILE', 'SYMBOLIC_LINK',
-  'FILESYSTEM_RACE', 'CATALOG_CONFLICT'
+  'FILESYSTEM_RACE', 'CATALOG_CONFLICT', 'MULTIPLE_OPEN_ROUNDS'
 ]);
 
 function familySpec(family: string): ArtifactFamilySpec | null {
@@ -136,7 +151,7 @@ function escapeRegExp(value: string): string {
 function failure(requestRef: string, family: string, error: ArtifactError, extra: Partial<ArtifactInventoryResult> = {}): ArtifactInventoryResult {
   return {
     status: 'failed', changed: false, requestRef, taskId: null, taskDir: null,
-    taskState: null, family, artifacts: [], latest: null, next: null,
+    taskState: null, family, artifacts: [], completed: [], latest: null, next: null, openRounds: [],
     reviewedInput: null, diagnostics: [], error, ...extra
   };
 }
@@ -168,18 +183,11 @@ function inspectArtifactDirectory(
       taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
     });
   }
-  let invalidation: InvalidationDocument = { operations: [], targets: [] };
+  let taskContent: string;
   try {
-    const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
-    const parsed = parseInvalidationDocument(taskContent);
-    if (!parsed.ok) {
-      return failure(requestRef, family, { code: 'ARTIFACT_INVALIDATION_INVALID', message: parsed.message }, {
-        taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
-      });
-    }
-    invalidation = parsed.document;
+    taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
   } catch (error) {
-    return failure(requestRef, family, { code: 'ARTIFACT_INVALIDATION_INVALID', message: String(error) }, {
+    return failure(requestRef, family, { code: 'ARTIFACT_DIRECTORY_READ_FAILED', message: String(error) }, {
       taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
     });
   }
@@ -216,23 +224,34 @@ function inspectArtifactDirectory(
       }
       const identity = { ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
       knownArtifacts.push(identity);
-      if (!isArtifactInvalidated(invalidation, family, entry.name)) artifacts.push(identity);
+      artifacts.push(identity);
     } catch (error) {
       diagnostics.push(diagnostic('FILESYSTEM_RACE', family, entry.name, String(error)));
     }
   }
   artifacts.sort((left, right) => left.round - right.round);
   knownArtifacts.sort((left, right) => left.round - right.round);
+  const openRounds = openArtifactRounds(taskContent, family);
   const knownRounds = new Set(knownArtifacts.map((item) => item.round));
-  if (knownArtifacts.length > 0 && !knownRounds.has(1)) diagnostics.push(diagnostic('MISSING_BASE', family, null, `${family}.md is missing`));
-  const max = knownArtifacts.at(-1)?.round ?? 0;
+  for (const round of openRounds) knownRounds.add(round);
+  const max = Math.max(...knownRounds, 0);
+  if (max > 0 && !knownRounds.has(1)) diagnostics.push(diagnostic('MISSING_BASE', family, null, `${family}.md is missing`));
   for (let round = 1; round <= max; round += 1) {
     if (!knownRounds.has(round)) diagnostics.push(diagnostic('ROUND_GAP', family, null, `${artifactName(family, round)} is missing`));
   }
-  const latest = artifacts.at(-1) ?? null;
+  const event = completionEvent(family);
+  const completed = event
+    ? artifacts.flatMap((artifact) => {
+      const order = artifactCompletionOrder(taskContent, artifact.name, event);
+      return order !== null && hasArtifactCompletionFact(taskContent, artifact.path, event)
+        ? [{ artifact, order }] : [];
+    }).sort((left, right) => left.order - right.order).map(({ artifact }) => artifact)
+    : [];
+  if (openRounds.length > 1) diagnostics.push(diagnostic('MULTIPLE_OPEN_ROUNDS', family, null, `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`));
+  const latest = completed.at(-1) ?? null;
   let hasReviewCodeReceipt = false;
   if (family === 'review-code' && latest) {
-    try { hasReviewCodeReceipt = Boolean(receiptForOutput(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), latest.name)); }
+    try { hasReviewCodeReceipt = Boolean(receiptForOutput(taskContent, latest.name)); }
     catch { hasReviewCodeReceipt = false; }
   }
   const reviewedInput = family.startsWith('review-') && latest && (family !== 'review-code' || hasReviewCodeReceipt)
@@ -240,9 +259,9 @@ function inspectArtifactDirectory(
     : null;
   return {
     status: 'ready', changed: false, requestRef, taskId: identity.taskId ?? null,
-    taskDir, taskState: identity.taskState ?? null, family, artifacts, latest,
+    taskDir, taskState: identity.taskState ?? null, family, artifacts, completed, latest,
     next: { round: max + 1, name: artifactName(family, max + 1) },
-    reviewedInput, diagnostics, error: null
+    openRounds, reviewedInput, diagnostics, error: null
   };
 }
 
@@ -262,9 +281,6 @@ function resolveReviewedInput(
     const abs = path.join(taskDir, input.name);
     const stat = fs.lstatSync(abs);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('referenced input is not a regular file');
-    const invalidation = parseInvalidationDocument(taskContent);
-    if (!invalidation.ok) throw new Error(invalidation.message);
-    if (isArtifactInvalidated(invalidation.document, expectedFamily, input.name)) throw new Error(`${input.name} is invalidated`);
     const actualSha256 = sha256File(abs);
     if (actualSha256 !== receipt.inputSha256) {
       throw new Error(`${input.name} content digest does not match receipt`);
@@ -338,10 +354,22 @@ function hasSelectionEvidence(
   content: string,
   family: ArtifactFamily,
   options: InspectOptions,
-  context: ArtifactContextResult
+  context: ArtifactContextResult,
+  pathState: LifecyclePathState
 ): boolean {
   if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) return true;
   if (options.reasonCode === 'new-requirement' || options.reasonCode === 'upstream-fact-doubt') return true;
+  if ((family === 'plan' || family === 'code') && context.latest) {
+    const latestInputs = Object.fromEntries(context.inputs.map((input) => [input.family, input.name]));
+    const capturedInputs = receiptsForOutput(content, context.latest.name)
+      .filter((receipt) => receipt.event === `${family}.completed`)
+      .filter((receipt) => {
+        try { return sha256File(path.join(context.taskDir!, receipt.input)) === receipt.inputSha256; }
+        catch { return false; }
+      })
+      .map((receipt) => receipt.input);
+    if (!executionInputsMatchLatest(family, pathState, latestInputs, capturedInputs)) return true;
+  }
   if (family.startsWith('review-')) {
     const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
     const currentInput = context.inputs.find((input) => input.family === reviewedFamily);
@@ -398,16 +426,19 @@ function attachArtifactSelection(
   } catch (error) {
     return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
   }
-  const openLatest = context.latest ? hasOpenArtifactRound(taskContent, family, context.latest.round) : false;
-  const openNext = hasOpenArtifactRound(taskContent, family, context.next.round);
-  const open = openLatest || openNext;
-  const selectedIdentity = openLatest ? context.latest! : context.next;
+  const openRounds = openArtifactRounds(taskContent, family);
+  if (openRounds.length > 1) return fail('ARTIFACT_TOPOLOGY_CONFLICT', `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`);
+  const openRound = openRounds[0] ?? null;
+  const selectedIdentity = openRound === null ? context.next : {
+    family, round: openRound, name: artifactName(family, openRound),
+    path: path.join(context.taskDir, artifactName(family, openRound)), size: 0, mtimeMs: 0
+  };
   try {
-    const hasChangeEvidence = hasSelectionEvidence(taskContent, family, options, context);
+    const hasChangeEvidence = hasSelectionEvidence(taskContent, family, options, context, pathState);
     const selection = selectArtifactDisposition({
       next: { family, round: selectedIdentity.round, name: selectedIdentity.name },
       latest: context.latest,
-      open,
+      open: openRound !== null,
       hasChangeEvidence
     });
     return {
@@ -434,7 +465,8 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     const selected = attachArtifactSelection(code, pathState, options);
     if (selected.status !== 'ready' || !selected.selection) return selected;
     if (selected.selection.disposition === 'reuse') return selected;
-    if (selected.codeMode?.mode === 'error') {
+    if (selected.codeMode?.mode === 'error'
+      && selected.codeMode.message.includes('is not captured by the latest code input receipt')) {
       return {
         ...selected,
         status: 'ready',
@@ -490,23 +522,33 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const source = inspectTaskArtifacts(taskRef, inputFamily, options);
   if (source.status === 'failed' || !source.latest) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `latest ${inputFamily} artifact is required`);
   const reviewCode = inspectTaskArtifacts(taskRef, 'review-code', options);
+  try {
+    const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
+    const hasPendingImplementation = parseImplementationInputs(taskContent).rows.some((input) => input.needsImplementation && input.status === 'pending');
+    if (hasPendingImplementation && !reviewCode.latest) {
+      const candidate = reviewCode.artifacts.at(-1)?.name ?? 'review-code.md';
+      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `cannot find completed Activity Log identity for ${candidate}`);
+    }
+  } catch (error) {
+    return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
+  }
   const latestCode = inventory.latest;
-  const codeMax = latestCode?.round ?? 0;
+  const codeMax = inventory.next?.round ? inventory.next.round - 1 : latestCode?.round ?? 0;
   const reviewMax = reviewCode.latest?.round ?? 0;
   const inputs = [source.latest];
   const sourceReviewFamily = inputFamily === 'analysis' ? 'review-analysis' : 'review-plan';
   const sourceReview = inspectTaskArtifacts(taskRef, sourceReviewFamily, options);
   if (sourceReview.status === 'ready' && sourceReview.latest && sourceReview.reviewedInput?.name === source.latest.name) inputs.push(sourceReview.latest);
-  if (latestCode) {
+  if (inventory.openRounds.length > 0) {
     try {
       const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
-      if (hasOpenArtifactRound(taskContent, 'code', latestCode.round)) {
+      const openRound = inventory.openRounds[0]!;
         const review = reviewCode.latest;
         const openInputs = review ? [...inputs, review] : inputs;
         const openVerdict = review ? parseVerdict(review.path) : null;
         const openRow = locateActivityLog(taskContent)
           ? startedBackedRows(pairEntries(locateActivityLog(taskContent)!.entries))
-            .find((row) => row.step.startsWith(`Code Task (Round ${latestCode.round}`) && !row.done)
+            .find((row) => row.step.startsWith(`Code Task (Round ${openRound}`) && !row.done)
           : null;
         const decisionInput = /, decision (II-[1-9]\d*)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
         const fixInput = /, fix for (review-code(?:-r\d+)?\.md)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
@@ -516,10 +558,9 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
         return withCodeMode(
           inventory, openInputs, 'ready', mode, codeMax, reviewMax,
           openVerdict?.ok ? openVerdict.verdict : null, fixInput ?? review?.name ?? null,
-          `Resuming open code round ${latestCode.round}.`,
+          `Resuming open code round ${openRound}.`,
           decisionInput
         );
-      }
     } catch (error) {
       return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
     }
@@ -652,6 +693,13 @@ export function validateArtifactPublication(taskDir: string, family: ArtifactFam
       const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
       if (hasCompletedArtifactRound(task, family, existing.round, name)) {
         return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completed artifact '${name}' is immutable` };
+      }
+      const event = completionEvent(family);
+      const frontmatter = parseTypedTaskFrontmatter(task);
+      const completionFactExists = event !== null && parseCompletionFacts(frontmatter.completion_facts)
+        .some((fact) => fact.event === event && fact.output === name);
+      if (event && completionFactExists && artifactCompletionOrder(task, name, event) !== null) {
+        return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completion evidence for '${name}' does not match its current content` };
       }
     } catch (error) {
       return { code: 'ARTIFACT_SELECTION_INDETERMINATE', message: error instanceof Error ? error.message : String(error) };

@@ -19,6 +19,7 @@ import {
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 
 function makeTempRepo() {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-merge-'));
@@ -609,6 +610,30 @@ test('merge workspace transports receipt-backed review context across mtime chan
       completedAt: '2026-04-09 12:13:13+00:00'
     });
     fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+    const completedArtifacts = ['analysis.md', 'plan.md', 'review-plan.md'].map((name) => {
+      const artifactPath = path.join(sourceTaskDir, name);
+      const artifactContent = fs.readFileSync(artifactPath, 'utf8');
+      const family = name.replace(/\.md$/u, '');
+      return {
+        event: family === 'analysis' ? 'analyze.completed' : `${family}.completed`, output: name,
+        outputSha256: sha256File(artifactPath), semanticDigest: canonicalSemanticDigest(artifactContent),
+        requestId: `fixture-${name}`, result: 'completed'
+      };
+    });
+    let completedTask = fs.readFileSync(taskPath, 'utf8').replace(
+      /\n---\n/u,
+      `\ncompletion_facts: ${JSON.stringify(JSON.stringify(completedArtifacts))}\n---\n`
+    );
+    completedTask += [
+      '## Activity Log', '',
+      '- 2026-04-09 12:13:10+00:00 — **Analyze Task (Round 1) [started]** by codex — started',
+      '- 2026-04-09 12:13:11+00:00 — **Analyze Task (Round 1)** by codex — completed → analysis.md',
+      '- 2026-04-09 12:13:12+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+      '- 2026-04-09 12:13:13+00:00 — **Plan Task (Round 1)** by codex — completed → plan.md',
+      '- 2026-04-09 12:13:14+00:00 — **Review Plan (Round 1) [started]** by codex — started',
+      '- 2026-04-09 12:13:15+00:00 — **Review Plan (Round 1)** by codex — completed → review-plan.md', ''
+    ].join('\n');
+    fs.writeFileSync(taskPath, completedTask);
 
     execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' });
     const localTaskDir = path.join(repoDir, '.agents', 'workspace', 'active', taskId);

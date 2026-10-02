@@ -8,6 +8,7 @@ import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 
 // Branch matrix for the complete-task.preflight `manual-validation` check
 // (see plan-r6). Completion requires a committed receipt, transaction, artifact
@@ -34,6 +35,37 @@ id: TASK-20260101-000001
 ${activityEntries.join('\n')}
 `);
   return taskDir;
+}
+
+function markReviewCodeCompleted(taskDir: string, content: string): void {
+  fs.writeFileSync(path.join(taskDir, 'review-code.md'), content);
+  const names = fs.readdirSync(taskDir).filter((name) => /^review-code(?:-r[2-9]\d*)?\.md$/u.test(name)).sort((left, right) => {
+    const round = (name: string) => name === 'review-code.md' ? 1 : Number(/-r(\d+)\.md$/u.exec(name)?.[1]);
+    return round(left) - round(right);
+  });
+  const facts = names.map((name) => {
+    const artifact = path.join(taskDir, name);
+    const artifactContent = fs.readFileSync(artifact, 'utf8');
+    const round = name === 'review-code.md' ? 1 : Number(/-r(\d+)\.md$/u.exec(name)?.[1]);
+    return {
+      event: 'review-code.completed', output: name, outputSha256: sha256File(artifact),
+      semanticDigest: canonicalSemanticDigest(artifactContent), requestId: `review-code-test-${round}`, result: 'completed', round
+    };
+  });
+  const taskPath = path.join(taskDir, 'task.md');
+  let task = fs.readFileSync(taskPath, 'utf8');
+  const fmEnd = task.indexOf('\n---', 4);
+  task = `${task.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify(facts)}'${task.slice(fmEnd)}`;
+  const rows = facts.flatMap((fact, index) => {
+    const step = `Review Code (Round ${fact.round})`;
+    const baseSecond = 2 + index * 2;
+    return [
+      `- 2026-01-01 00:0${baseSecond}:00+00:00 — **${step} [started]** by claude — started`,
+      `- 2026-01-01 00:0${baseSecond}:01+00:00 — **${step}** by claude — Review completed → ${fact.output}`
+    ];
+  }).join('\n');
+  task += `${task.endsWith('\n') ? '' : '\n'}${rows}\n`;
+  fs.writeFileSync(taskPath, task);
 }
 
 function addCommittedManualValidation(taskDir: string, appendCompletion = true) {
@@ -109,7 +141,7 @@ test('manual-validation check passes when no review-code artifact exists', async
 
 test('manual-validation check passes when the latest review-code has zero pending items', async () => {
   const taskDir = fixture([]);
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1.replace('**人工校验**：1', '**人工校验**：0'));
+  markReviewCodeCompleted(taskDir, REVIEW_CODE_MV_1.replace('**人工校验**：1', '**人工校验**：0'));
   const result = await check(taskDir);
   assert.equal(result.status, 'pass');
   assert.match(result.message, /No pending manual validation items/);
@@ -117,7 +149,7 @@ test('manual-validation check passes when the latest review-code has zero pendin
 
 test('manual-validation check fails when pending items exist without a manual-validation artifact', async () => {
   const taskDir = fixture([]);
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
+  markReviewCodeCompleted(taskDir, REVIEW_CODE_MV_1);
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /manual validation item\(s\) pending/);
@@ -127,7 +159,7 @@ test('manual-validation check fails when the artifact exists but completion is n
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md'
   ]);
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
+  markReviewCodeCompleted(taskDir, REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');
@@ -138,7 +170,7 @@ test('manual-validation check passes on the standard flow when completion follow
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
   ]);
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
+  markReviewCodeCompleted(taskDir, REVIEW_CODE_MV_1);
   addCommittedManualValidation(taskDir);
   const result = await check(taskDir);
   assert.equal(result.status, 'pass');
@@ -151,12 +183,13 @@ test('manual-validation check fails when completion predates a newer review-code
     '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; human-confirmed validation and committed receipt; transaction=mv-test-1; receipt=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; head=cccccccccccccccccccccccccccccccccccccccc',
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 2)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code-r2.md'
   ]);
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'review-code-r2.md'), REVIEW_CODE_MV_1);
+  markReviewCodeCompleted(taskDir, REVIEW_CODE_MV_1);
   const committed = addCommittedManualValidation(taskDir, false);
   const taskPath = path.join(taskDir, 'task.md');
   const task = fs.readFileSync(taskPath, 'utf8');
-  fs.writeFileSync(taskPath, task.replace(/(- 2026-01-01 00:00:00\+00:00 — \*\*Review Code \(Round 2\)\*\*)/u, `${committed.completion}\n$1`));
+  const priorCompletion = committed.completion.replace(/^- .*? —/u, '- 2026-01-01 00:00:01+00:00 —');
+  fs.writeFileSync(taskPath, task.replace(/(- 2026-01-01 00:00:00\+00:00 — \*\*Review Code \(Round 2\)\*\*)/u, `${priorCompletion}\n$1`));
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /Latest review-code \(round 2\) came after/);
@@ -166,7 +199,7 @@ test('manual-validation check fails closed when the latest review-code completio
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md'
   ]);
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
+  markReviewCodeCompleted(taskDir, REVIEW_CODE_MV_1);
   addCommittedManualValidation(taskDir, false);
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');

@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { renderTaskVerification } from "../../../lib/task/verification.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { gitSafeEnv } from "../../helpers.ts";
+import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
+import { sha256File } from "../../../lib/task/artifact-receipts.ts";
 
 test("complete-task renders an exemption covering multiple post-review commits", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-post-review-exemption-"));
@@ -34,13 +36,22 @@ test("complete-task renders an exemption covering multiple post-review commits",
 
     const taskDir = path.join(root, ".agents", "workspace", "active", taskId);
     fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "review-code.md"), "# Review\n");
+    const reviewPath = path.join(taskDir, "review-code.md");
+    const reviewFact = {
+      event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(reviewPath),
+      semanticDigest: canonicalSemanticDigest(fs.readFileSync(reviewPath, "utf8")), requestId: "fixture-review-code", result: "{}"
+    };
     fs.writeFileSync(path.join(taskDir, "task.md"), [
-      "---", `id: ${taskId}`, "status: active", "current_step: code-review", `last_reviewed_commit: ${reviewedHead}`, "---", "",
+      "---", `id: ${taskId}`, "status: active", "current_step: code-review", `last_reviewed_commit: ${reviewedHead}`,
+      `completion_facts: ${JSON.stringify(JSON.stringify([reviewFact]))}`, "---", "",
+      "## Activity Log", "",
+      "- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started",
+      "- 2026-01-01 00:00:01+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md", "",
       "## Review Disagreement Ledger", "",
       "| id | stage | round | severity | status | evidence |", "|----|-------|-------|----------|--------|----------|",
       "| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed two subsequent commits |", ""
     ].join("\n"));
-    fs.writeFileSync(path.join(taskDir, "review-code.md"), "# Review\n");
     const configDir = path.join(root, ".agents", "skills", "complete-task", "config");
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(path.join(configDir, "verify.json"), JSON.stringify({ skill: "complete-task", checks: { "post-review-commit": {} } }));

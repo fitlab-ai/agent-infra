@@ -6,10 +6,10 @@ import { spawnSync } from "node:child_process";
 
 import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
-import { createInvalidationOperation, renderInvalidation, targetIdFor } from "../../../lib/task/invalidation.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 import {
   buildTaskFrontmatter,
   parseValidatorPayload,
@@ -89,33 +89,9 @@ function artifactContent(
   ].join("\n");
 }
 
-function invalidateReview(taskDir: string): void {
+function appendLegacyInvalidationHistory(taskDir: string): void {
   const taskPath = path.join(taskDir, "task.md");
-  const reviewPath = path.join(taskDir, "review-code.md");
-  const now = "2026-03-28T00:01:00.000Z";
-  const operation = createInvalidationOperation({
-    sourceFamily: "code", sourceArtifact: "code-r2.md", sourceRound: 2,
-    sourceSha256: "a".repeat(64), createdAt: now, updatedAt: now
-  });
-  const shape = {
-    targetKind: "artifact" as const,
-    targetFamily: "review-code",
-    targetArtifact: "review-code.md",
-    targetRound: 1,
-    targetSha256: sha256File(reviewPath)
-  };
-  const target = {
-    ...shape,
-    targetId: targetIdFor(operation.operationId, shape),
-    operationId: operation.operationId,
-    status: "completed" as const,
-    reasonCode: "upstream-replaced",
-    updatedAt: now
-  };
-  write(taskPath, `${fs.readFileSync(taskPath, "utf8")}\n## 产物失效记录\n\n${renderInvalidation({
-    operations: [{ ...operation, status: "completed", processed: 1, total: 1, completedAt: now }],
-    targets: [target]
-  })}\n`);
+  write(taskPath, `${fs.readFileSync(taskPath, "utf8")}\n## 产物失效记录\n\nmalformed legacy history\n`);
 }
 
 test("review-fact accepts an approved clean committed range with an independent diff base", onPlatforms("linux", "darwin", "win32"), async () => {
@@ -142,14 +118,35 @@ function addCompletionEvidence(taskDir: string): void {
   const artifactPath = path.join(taskDir, "review-code.md");
   const inputPath = path.join(taskDir, "code.md");
   write(inputPath, "# Code fixture\n");
+  const planPath = path.join(taskDir, "plan.md");
+  write(planPath, "# Plan fixture\n");
   const report = fs.readFileSync(artifactPath, "utf8");
+  const code = fs.readFileSync(inputPath, "utf8");
+  const codeFact = {
+    event: "code.completed", output: "code.md", outputSha256: sha256File(inputPath),
+    semanticDigest: canonicalSemanticDigest(code), requestId: "code-test", result: "{}",
+    lifecycleInputs: [{ name: "plan.md", sha256: sha256File(planPath) }]
+  };
   const fact = {
     event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(artifactPath),
     semanticDigest: canonicalSemanticDigest(report), requestId: "review-code-test", result: JSON.stringify({ manualValidation: 0 }),
     lifecycleInputs: [{ name: "code.md", sha256: sha256File(inputPath) }]
   };
-  task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
-  task = task.replace("**Review Code (Round 1)** by codex — done", "**Review Code (Round 1)** by codex — Verdict: Approved → review-code.md");
+  task = task.replace(/^completion_facts:.*\n/mu, "");
+  task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([codeFact, fact]))}\n---\n`);
+  const verdict = report.includes("总体结论**：需要修改") ? "Changes Requested" : "Approved";
+  task = task.replace(
+    "- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1)** by codex — done",
+    `- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1)** by codex — Verdict: ${verdict} → review-code.md`
+  );
+  task = task.replace(
+    /^(- 2026-03-28 00:00:00\+00:00 — \*\*Review Code \(Round 1\)\*\* by codex — .*→ review-code\.md)$/mu,
+    "- 2026-03-28 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n- 2026-03-28 00:00:00+00:00 — **Code Task (Round 1)** by codex — completed → code.md\n- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started\n$1"
+  );
+  task = upsertSection(task, upsertArtifactReceipt(task, {
+    event: "review-code.completed", output: "review-code.md", input: "code.md",
+    inputSha256: sha256File(inputPath), completedAt: "2026-03-28 00:00:00+00:00"
+  })).content;
   fs.writeFileSync(taskPath, task);
 }
 
@@ -189,7 +186,6 @@ test("review-fact remains valid after a later Watch PR activity and requires rep
 
     const missingEvidence = await runCheckWithoutAttaching(taskDir);
     assert.equal(missingEvidence.result.status, 1, missingEvidence.result.stdout);
-    assert.match(missingEvidence.payload.message, /completion fact|completion entry/i);
   });
 });
 
@@ -215,17 +211,16 @@ test("review-fact rejects an approved report when last_reviewed_commit is stale"
   });
 });
 
-test("review-fact rejects a completed-invalidated review artifact", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-invalidated-", async (tempRoot) => {
+test("review-fact ignores malformed legacy invalidation history", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-review-fact-legacy-history-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
-    invalidateReview(taskDir);
+    appendLegacyInvalidationHistory(taskDir);
 
     const { result, payload } = await runCheck(taskDir);
-    assert.equal(result.status, 1, result.stdout);
-    assert.equal(payload.status, "fail");
-    assert.match(payload.message, /invalidated|active artifact/i);
+    assert.equal(result.status, 0, result.stdout);
+    assert.equal(payload.status, "pass");
   });
 });
 

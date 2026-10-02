@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
+import { sha256File } from "../../../lib/task/artifact-receipts.ts";
 import {
   buildTaskFrontmatter,
   parseValidatorPayload,
@@ -60,6 +63,30 @@ function buildReviewCode(baselineLine: string | null, verdict = "通过") {
 }
 
 async function runCheck(taskDir: string, repositoryRoot?: string) {
+  const reportName = fs.readdirSync(taskDir)
+    .filter((name) => /^review-code(?:-r[2-9]\d*)?\.md$/u.test(name))
+    .sort((left, right) => Number(/-r(\d+)/u.exec(left)?.[1] ?? 1) - Number(/-r(\d+)/u.exec(right)?.[1] ?? 1))
+    .at(-1);
+  const reportPath = reportName ? path.join(taskDir, reportName) : null;
+  if (reportName && reportPath) {
+    const round = Number(/-r(\d+)/u.exec(reportName)?.[1] ?? 1);
+    const taskPath = path.join(taskDir, "task.md");
+    let task = fs.readFileSync(taskPath, "utf8");
+    const fact = {
+      event: "review-code.completed", output: reportName, outputSha256: sha256File(reportPath),
+      semanticDigest: canonicalSemanticDigest(fs.readFileSync(reportPath, "utf8")),
+      requestId: "post-review-commit-fixture", result: "completed"
+    };
+    task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
+    task = task.replace("## 活动日志\n\n- 2026-03-28 00:00:00+00:00 — **Completed** by codex — archived", [
+      "## Activity Log",
+      "",
+      `- 2026-03-28 00:00:00+00:00 — **Review Code (Round ${round}) [started]** by codex — started`,
+      `- 2026-03-28 00:00:01+00:00 — **Review Code (Round ${round})** by codex — Verdict: Approved → ${reportName}`,
+      "- 2026-03-28 00:00:02+00:00 — **Completed** by codex — archived"
+    ].join("\n"));
+    write(taskPath, task);
+  }
   const result = await runValidator(
     ["check", "post-review-commit", taskDir, "--skill", "complete-task"],
     repositoryRoot ? { repositoryRoot } : {}

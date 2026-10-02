@@ -25,6 +25,8 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
+import { recordArtifactCompletions } from '../../helpers.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -78,6 +80,14 @@ function seedLifecycleReceipts(f: ReturnType<typeof fixture>) {
     inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt
   });
   addReceipt(f.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'review-analysis.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
     inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt
   });
@@ -86,9 +96,23 @@ function seedLifecycleReceipts(f: ReturnType<typeof fixture>) {
     inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt
   });
   addReceipt(f.taskDir, {
+    event: 'code.completed', output: 'code.md', input: 'review-plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'review-plan.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
     event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
     inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt
   });
+  seedCompletionEvidence(f.taskDir);
+}
+
+function seedCompletionEvidence(taskDir: string) {
+  const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name))
+    .sort((left, right) => {
+      const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
+      return a.family.localeCompare(b.family) || a.round - b.round;
+    });
+  recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
 }
 
 test('dispatch respects the repository execution lock', () => {
@@ -510,6 +534,7 @@ test('route selects one fresh role from existing lifecycle facts', () => {
 
   const review = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(review.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(review.taskDir);
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: review.root }).next, {
     action: 'review-analysis', role: 'reviewer', stage: 'review-analysis', round: 1, artifact: 'review-analysis.md',
     requestedModel: null, requestedReasoningEffort: null
@@ -525,24 +550,32 @@ test('route selects one fresh role from existing lifecycle facts', () => {
     inputSha256: sha256File(path.join(code.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
   addReceipt(code.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(code.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(code.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md',
+    inputSha256: sha256File(path.join(code.taskDir, 'review-analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(code.taskDir, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
     inputSha256: sha256File(path.join(code.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
+  seedCompletionEvidence(code.taskDir);
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: code.root }).next, {
     action: 'code-task', role: 'executor', stage: 'code', round: 1, artifact: 'code.md',
     requestedModel: null, requestedReasoningEffort: null
   });
 });
 
-test('route requires the latest review to bind the latest artifact structurally', () => {
+test('an incomplete higher-round code file does not supersede the latest completed report', () => {
   const f = approvedCodeFixture();
   fs.writeFileSync(path.join(f.taskDir, 'code-r2.md'), '# Code round 2\n');
   fs.utimesSync(path.join(f.taskDir, 'review-code.md'), new Date(), new Date());
 
-  assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).next, {
-    action: 'review-code', role: 'reviewer', stage: 'review-code', round: 2, artifact: 'review-code-r2.md',
-    requestedModel: null, requestedReasoningEffort: null
-  });
+  const routed = routeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  assert.equal(routed.next, null);
+  assert.equal(routed.status, 'running');
 });
 
 test('route uses the same recommendation facts as lifecycle capability checks', () => {
@@ -574,6 +607,7 @@ test('route completes a clean reviewed head even when manual validation remains'
       '**人工校验**：1'
     )
   );
+  seedCompletionEvidence(manual.taskDir);
   const routed = routeOrchestration('TASK-20260101-000001', {
     repoRoot: manual.root,
     captureRepository: () => ({ head: manual.head, headTree: tree, worktreeTree: tree })
@@ -600,10 +634,11 @@ test('route rejects clean completion while a lifecycle execution remains open', 
   for (const runState of ['missing', 'idle'] as const) {
     const f = cleanCommitCandidateFixture();
     const taskPath = path.join(f.taskDir, 'task.md');
-    fs.appendFileSync(
-      taskPath,
-      '\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
-    );
+    const beforeActivity = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(taskPath, beforeActivity.replace(
+      '## Activity Log\n\n',
+      '## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
+    ));
     if (runState === 'missing') fs.unlinkSync(path.join(f.taskDir, 'orchestration.json'));
     const taskBefore = fs.readFileSync(taskPath);
     const runPath = path.join(f.taskDir, 'orchestration.json');
@@ -917,6 +952,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -958,6 +994,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -979,6 +1016,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
 test('replaying a start event with blank actual model/effort is idempotent, not a replay conflict', () => {
   const f = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -1003,6 +1041,7 @@ test('replaying a start event with blank actual model/effort is idempotent, not 
 test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () => {
   const f = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
+  seedCompletionEvidence(f.taskDir);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'

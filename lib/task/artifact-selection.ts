@@ -32,7 +32,7 @@ function selectArtifactDisposition(request: ArtifactSelectionRequest): ArtifactS
   if (!request.latest) {
     return {
       disposition: 'create',
-      reasonCode: request.next.round === 1 ? 'no-history' : 'invalidated-history',
+      reasonCode: 'no-completed-history',
       artifact: request.next, writeRequired: true
     };
   }

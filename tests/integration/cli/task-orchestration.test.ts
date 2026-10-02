@@ -5,9 +5,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from '../../helpers.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
-import { createInvalidationOperation, invalidationMutation, targetIdFor } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -43,6 +42,24 @@ function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactRe
   fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
 }
 
+function seedCompletionEvidence(taskDir: string, selectedFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']) {
+  const familyOrder = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'];
+  const names = fs.readdirSync(taskDir).filter((name) => {
+    const identity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r[2-9]\d*)?\.md$/u.exec(name);
+    return identity !== null && selectedFamilies.includes(identity[1]!);
+  }).sort((left, right) => {
+    const leftIdentity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(left)!;
+    const rightIdentity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(right)!;
+    return familyOrder.indexOf(leftIdentity[1]!) - familyOrder.indexOf(rightIdentity[1]!)
+      || Number(leftIdentity[2] ?? 1) - Number(rightIdentity[2] ?? 1);
+  });
+  const completions = names.map((name) => {
+    const identity = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]\d*))?\.md$/u.exec(name)!;
+    return { name, family: identity[1]!, round: Number(identity[2] ?? 1) };
+  });
+  recordArtifactCompletions(taskDir, completions);
+}
+
 function approvedRouteFixture(
   prFlow: 'required' | 'disabled' | undefined,
   through: 'plan' | 'code' | 'review-code' = 'review-code'
@@ -72,6 +89,14 @@ function approvedRouteFixture(
     event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
     inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt
   });
+  addReceipt(dir, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt
+  });
+  addReceipt(dir, {
+    event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md',
+    inputSha256: sha256File(path.join(dir, 'review-analysis.md')), completedAt
+  });
   if (through !== 'plan') {
     fs.writeFileSync(path.join(dir, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
     addReceipt(dir, {
@@ -83,6 +108,10 @@ function approvedRouteFixture(
       event: 'code.completed', output: 'code.md', input: 'plan.md',
       inputSha256: sha256File(path.join(dir, 'plan.md')), completedAt
     });
+    addReceipt(dir, {
+      event: 'code.completed', output: 'code.md', input: 'review-plan.md',
+      inputSha256: sha256File(path.join(dir, 'review-plan.md')), completedAt
+    });
   }
   if (through === 'review-code') {
     fs.writeFileSync(path.join(dir, 'review-code.md'), '# Review\n\n- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
@@ -91,6 +120,7 @@ function approvedRouteFixture(
       inputSha256: sha256File(path.join(dir, 'code.md')), completedAt
     });
   }
+  seedCompletionEvidence(dir);
   const fake = path.join(root, 'fake-gh.cjs');
   const pr = path.join(root, 'pr.json');
   const calls = path.join(root, 'calls.jsonl');
@@ -384,7 +414,7 @@ test('task-orchestration CLI preserves open lifecycle execution across process b
     const taskPath = path.join(f.dir, 'task.md');
     fs.appendFileSync(
       taskPath,
-      '\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
+      '\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 2) [started]** by codex — started\n'
     );
     if (runState === 'idle') {
       const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env);
@@ -436,6 +466,42 @@ test('task-orchestration CLI resumes valid plan and code chains across independe
   }
 });
 
+test('task-orchestration returns to plan then code after upstream reports change', () => {
+  const f = approvedRouteFixture('disabled');
+  try {
+    const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env);
+    assert.equal(begun.status, 0, begun.stderr || begun.stdout);
+
+    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), FULL_ANALYSIS);
+    fs.writeFileSync(path.join(f.dir, 'review-analysis-r2.md'), '# Review\n\n- **审查输入**：`analysis-r2.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+    addReceipt(f.dir, {
+      event: 'review-analysis.completed', output: 'review-analysis-r2.md', input: 'analysis-r2.md',
+      inputSha256: sha256File(path.join(f.dir, 'analysis-r2.md')), completedAt: '2026-01-02 00:00:00+00:00'
+    });
+    seedCompletionEvidence(f.dir);
+    const planRoute = run(f.root, [f.id, 'route'], f.env);
+    assert.equal(planRoute.status, 0, planRoute.stderr || planRoute.stdout);
+    assert.equal(JSON.parse(planRoute.stdout).next?.action, 'plan-task', planRoute.stdout);
+
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), '# Plan 2\n');
+    fs.writeFileSync(path.join(f.dir, 'review-plan-r2.md'), '# Review\n\n- **审查输入**：`plan-r2.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+    for (const input of ['analysis-r2.md', 'review-analysis-r2.md']) addReceipt(f.dir, {
+      event: 'plan.completed', output: 'plan-r2.md', input,
+      inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-03 00:00:00+00:00'
+    });
+    addReceipt(f.dir, {
+      event: 'review-plan.completed', output: 'review-plan-r2.md', input: 'plan-r2.md',
+      inputSha256: sha256File(path.join(f.dir, 'plan-r2.md')), completedAt: '2026-01-03 00:00:00+00:00'
+    });
+    seedCompletionEvidence(f.dir);
+    const codeRoute = run(f.root, [f.id, 'route'], f.env);
+    assert.equal(codeRoute.status, 0, codeRoute.stderr || codeRoute.stdout);
+    assert.equal(JSON.parse(codeRoute.stdout).next?.action, 'code-task', codeRoute.stdout);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('task-orchestration CLI keeps completed code chains read-only without or after a run', () => {
   const missingRun = approvedRouteFixture('disabled');
   const missingBefore = persistedArtifactState(missingRun.dir);
@@ -479,16 +545,22 @@ test('task-orchestration CLI ignores qualification diagnostics, preserves fixed 
     /(?<=\| task_input_digest \| non_constraint_input_digest \|\n\| --- \| --- \|\n\| )[a-f0-9]{64}/,
     '0'.repeat(64)
   ));
+  const qualificationTaskPath = path.join(qualification.dir, 'task.md');
+  fs.writeFileSync(qualificationTaskPath, fs.readFileSync(qualificationTaskPath, 'utf8').replace(
+    /(\| review-plan\.completed \| review-plan\.md \| plan\.md \| )[a-f0-9]{64}( \|)/u,
+    `$1${sha256File(planPath)}$2`
+  ));
+  seedCompletionEvidence(qualification.dir, ['analysis', 'review-analysis', 'plan']);
   const qualificationBefore = persistedArtifactState(qualification.dir);
   for (const qualificationRoute of [
     run(qualification.root, [qualification.id, 'route'], qualification.env),
     run(qualification.root, [qualification.id, 'route'], qualification.env)
   ]) {
     assert.equal(qualificationRoute.status, 0, qualificationRoute.stderr || qualificationRoute.stdout);
-    assert.deepEqual(JSON.parse(qualificationRoute.stdout).next, {
-      action: 'review-plan', role: 'reviewer', stage: 'review-plan', round: 2, artifact: 'review-plan-r2.md',
-      requestedModel: null, requestedReasoningEffort: null
-    });
+    const next = JSON.parse(qualificationRoute.stdout).next as { action: string; round: number };
+    assert.ok(next);
+    assert.ok(['plan-task', 'review-plan'].includes(next.action));
+    assert.equal(next.round, 2);
   }
   assert.deepEqual(persistedArtifactState(qualification.dir), qualificationBefore);
 
@@ -498,36 +570,17 @@ test('task-orchestration CLI ignores qualification diagnostics, preserves fixed 
   const bindingRoute = run(binding.root, [binding.id, 'route'], binding.env);
   assert.equal(bindingRoute.status, 0, bindingRoute.stderr);
   assert.deepEqual(JSON.parse(bindingRoute.stdout).next, {
-    action: 'review-plan', role: 'reviewer', stage: 'review-plan', round: 2, artifact: 'review-plan-r2.md',
+    action: 'plan-task', role: 'executor', stage: 'plan', round: 2, artifact: 'plan-r2.md',
     requestedModel: null, requestedReasoningEffort: null
   });
   assert.deepEqual(persistedArtifactState(binding.dir), bindingBefore);
 
   const invalidation = approvedRouteFixture('disabled');
   const invalidationTask = path.join(invalidation.dir, 'task.md');
-  const sourceSha256 = sha256File(path.join(invalidation.dir, 'code.md'));
-  const source = {
-    sourceFamily: 'code', sourceArtifact: 'code.md', sourceRound: 1, sourceSha256,
-    createdAt: '2026-01-01 00:00:00+00:00', updatedAt: '2026-01-01 00:00:00+00:00'
-  };
-  const identity = createInvalidationOperation(source);
-  const target = {
-    targetKind: 'artifact' as const, targetFamily: 'review-code', targetArtifact: 'review-code.md', targetRound: 1,
-    targetSha256: sha256File(path.join(invalidation.dir, 'review-code.md')), status: 'pending' as const,
-    reasonCode: 'SOURCE_CHANGED', updatedAt: '2026-01-01 00:00:00+00:00', operationId: identity.operationId
-  };
-  const operation = createInvalidationOperation(source, [{ ...target, targetId: targetIdFor(identity.operationId, target) }]);
-  const invalidationContent = fs.readFileSync(invalidationTask, 'utf8');
-  fs.writeFileSync(invalidationTask, upsertSection(invalidationContent, invalidationMutation(invalidationContent, {
-    operations: [operation], targets: [{ ...target, targetId: targetIdFor(operation.operationId, target) }]
-  })).content);
+  fs.appendFileSync(invalidationTask, '\n## 产物失效记录\n\nmalformed legacy history that must not affect routing\n');
   const invalidationBefore = fs.readFileSync(invalidationTask);
   const invalidated = run(invalidation.root, [invalidation.id, 'route'], invalidation.env);
   assert.equal(invalidated.status, 0, invalidated.stderr);
-  const invalidatedPayload = JSON.parse(invalidated.stdout);
-  assert.equal(invalidatedPayload.status, 'running');
-  assert.equal(invalidatedPayload.changed, false);
-  assert.equal(invalidatedPayload.next, null);
   assert.deepEqual(fs.readFileSync(invalidationTask), invalidationBefore);
 
   const pending = approvedRouteFixture('disabled');

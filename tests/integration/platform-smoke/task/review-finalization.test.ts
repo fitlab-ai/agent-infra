@@ -7,7 +7,8 @@ import { spawnSync } from 'node:child_process';
 
 import { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
-import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
+import { canonicalSemanticDigest, inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
+import { sha256File } from '../../../../lib/task/artifact-receipts.ts';
 import {
   finalizeReviewSummaryContent,
   parseReviewSummary,
@@ -596,7 +597,13 @@ test('review finalization preserves summary-marked substantive duplicates byte-f
 test('review finalization preserves a completed review artifact byte-for-byte', () => {
   const f = domainFixture();
   const taskPath = path.join(f.dir, 'task.md');
-  fs.appendFileSync(taskPath, '- 2026-01-01 00:01:00+00:00 — **Review Analysis (Round 1)** by codex — Analysis review completed → review-analysis.md; verdict=approved; 0 blockers, 0 major, 0 minor\n');
+  const artifact = fs.readFileSync(f.artifactPath, 'utf8');
+  const fact = {
+    event: 'review-analysis.completed', output: 'review-analysis.md', outputSha256: sha256File(f.artifactPath),
+    semanticDigest: canonicalSemanticDigest(artifact), requestId: 'fixture-review-analysis', result: 'completed'
+  };
+  const task = fs.readFileSync(taskPath, 'utf8').replace(/\n---\n/u, `\ncompletion_facts: '${JSON.stringify([fact])}'\n---\n`);
+  fs.writeFileSync(taskPath, `${task}\n- 2026-01-01 00:01:00+00:00 — **Review Analysis (Round 1)** by codex — Analysis review completed → review-analysis.md; verdict=approved; 0 blockers, 0 major, 0 minor\n`);
   const before = fs.readFileSync(f.artifactPath);
 
   const result = finalizeReviewSummary(
@@ -605,7 +612,7 @@ test('review finalization preserves a completed review artifact byte-for-byte', 
   );
 
   assert.equal(result.status, 'failed');
-  assert.match(result.error?.message ?? '', /completed artifact/u);
+  assert.match(result.error?.message ?? '', /completed artifact|completion evidence/u);
   assert.deepEqual(fs.readFileSync(f.artifactPath), before);
 });
 

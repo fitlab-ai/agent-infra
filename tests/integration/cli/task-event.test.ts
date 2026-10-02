@@ -19,13 +19,13 @@ import {
   validateLocalArtifact,
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
-import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
-import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
+import { buildLifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 
 const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
 
@@ -33,7 +33,7 @@ function lifecycleInput(name: string, suffix = ''): string {
   return name.startsWith('analysis') ? `${FULL_ANALYSIS}${suffix}` : `# ${name}${suffix}\n`;
 }
 test('review completion accepts the current valid review artifact', () => {
-  const f = fixture('requirement-analysis');
+  const f = fixture('requirement-analysis-review');
   try {
     const started = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
     assert.equal(started.status, 0, started.stdout || started.stderr);
@@ -45,6 +45,16 @@ test('review completion accepts the current valid review artifact', () => {
     ]);
     assert.equal(completed.status, 0, completed.stdout || completed.stderr);
     assert.equal(JSON.parse(completed.stdout).toStep, 'requirement-analysis-review');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('started lifecycle events ignore malformed legacy invalidation history', () => {
+  const f = fixture('requirement-analysis');
+  try {
+    fs.appendFileSync(f.file, '\n## 产物失效记录\n\nnot a valid legacy table\n');
+    const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    assert.match(fs.readFileSync(f.file, 'utf8'), /not a valid legacy table/);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -108,6 +118,12 @@ function fixture(step = 'requirement-analysis-review') {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\ndelivery_remote: origin\ndelivery_base_ref: main\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), FULL_ANALYSIS);
+  if (['technical-design-review', 'code', 'code-review', 'commit'].includes(step)) {
+    fs.writeFileSync(path.join(dir, 'plan.md'), lifecycleInput('plan.md'));
+  }
+  if (['code-review', 'commit'].includes(step)) {
+    fs.writeFileSync(path.join(dir, 'code.md'), lifecycleInput('code.md'));
+  }
   if ((!explicitStep && step === 'requirement-analysis-review') || step === 'commit') {
     fs.writeFileSync(path.join(dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
     addReceipt(path.join(dir, 'task.md'), {
@@ -122,6 +138,43 @@ function fixture(step = 'requirement-analysis-review') {
       event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
       inputSha256: sha256File(path.join(dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
     });
+  }
+  const actions: Record<string, string> = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
+    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
+  };
+  const completedNames = fs.readdirSync(dir).filter((name) => parseQualificationArtifactName(name)
+    && actions[parseQualificationArtifactName(name)!.family] !== undefined
+    && !(step === 'requirement-analysis' && name === 'analysis.md'))
+    .sort((left, right) => {
+      const a = parseQualificationArtifactName(left)!; const b = parseQualificationArtifactName(right)!;
+      return a.family.localeCompare(b.family) || a.round - b.round;
+    });
+  if (completedNames.length > 0) {
+    const facts = completedNames.map((name) => {
+      const identity = parseQualificationArtifactName(name)!;
+      const file = path.join(dir, name);
+      const content = fs.readFileSync(file, 'utf8');
+      return {
+        event: identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`,
+        output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(content),
+        requestId: `fixture-${name}`, result: 'completed'
+      };
+    });
+    const task = fs.readFileSync(path.join(dir, 'task.md'), 'utf8');
+    const fmEnd = task.indexOf('\n---', 4);
+    const withFacts = `${task.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify(facts)}'${task.slice(fmEnd)}`;
+    let second = 0;
+    const logs = completedNames.flatMap((name) => {
+      const identity = parseQualificationArtifactName(name)!;
+      const stepName = `${actions[identity.family]} (Round ${identity.round})`;
+      const time = () => `2026-01-01 00:00:${String(second++).padStart(2, '0')}+00:00`;
+      return [
+        `- ${time()} — **${stepName} [started]** by codex — started`,
+        `- ${time()} — **${stepName}** by codex — completed → ${name}`
+      ];
+    });
+    fs.writeFileSync(path.join(dir, 'task.md'), withFacts.replace('## Activity Log\n\n', `## Activity Log\n\n${logs.join('\n')}\n`));
   }
   return { root, id, dir, file: path.join(dir, 'task.md') };
 }
@@ -261,8 +314,8 @@ function testTimestamp(offsetSeconds: number): string {
   return `${value.slice(0, 10)} ${value.slice(11, 19)}+00:00`;
 }
 
-function localArtifact(family: LocalArtifactFamily, suffix = '') {
-  let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+function localArtifact(family: LocalArtifactFamily, suffix = '', artifact = `${family}.md`) {
+  let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   if (family === 'analysis') {
     content = content.replace(
       '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n内容',
@@ -290,6 +343,41 @@ function addReceipt(file: string, receipt: ArtifactReceipt) {
   const content = fs.readFileSync(file, 'utf8');
   const mutation = upsertArtifactReceipt(content, receipt);
   fs.writeFileSync(file, upsertSection(content, mutation).content);
+}
+
+function recordFixtureCompletion(taskDir: string, name: string) {
+  const identity = parseQualificationArtifactName(name);
+  if (!identity || identity.family === 'manual-validation' || identity.family === 'validation-run' || identity.family === 'pr-review') return;
+  const artifactPath = path.join(taskDir, name);
+  const artifactContent = fs.readFileSync(artifactPath, 'utf8');
+  const taskPath = path.join(taskDir, 'task.md');
+  let task = fs.readFileSync(taskPath, 'utf8');
+  const current = task.match(/^completion_facts: '(.+)'$/m)?.[1];
+  const facts = current ? JSON.parse(current) as Array<{ output?: string }> : [];
+  const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
+  const fact = {
+    event, output: name, outputSha256: sha256File(artifactPath), semanticDigest: canonicalSemanticDigest(artifactContent),
+    requestId: `fixture-${name}`, result: 'completed'
+  };
+  const nextFacts = [...facts.filter((existing) => existing.output !== name), fact];
+  task = /^completion_facts:.*$/m.test(task)
+    ? task.replace(/^completion_facts:.*$/m, `completion_facts: '${JSON.stringify(nextFacts)}'`)
+    : task.replace(/\n---\n/u, `\ncompletion_facts: '${JSON.stringify(nextFacts)}'\n---\n`);
+  const actions: Record<string, string> = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis', plan: 'Plan Task',
+    'review-plan': 'Review Plan', code: 'Code Task', 'review-code': 'Review Code'
+  };
+  const step = `${actions[identity.family]} (Round ${identity.round})`;
+  const startedSecond = String(identity.round * 2).padStart(2, '0');
+  const completedSecond = String(identity.round * 2 + 1).padStart(2, '0');
+  const log = [
+    `- 2026-01-01 00:00:${startedSecond}+00:00 — **${step} [started]** by codex — started`,
+    `- 2026-01-01 00:00:${completedSecond}+00:00 — **${step}** by codex — completed → ${name}`
+  ].join('\n');
+  task = /## Activity Log\n/u.test(task)
+    ? task.replace('## Activity Log\n', `## Activity Log\n\n${log}\n`)
+    : `${task}\n## Activity Log\n\n${log}\n`;
+  fs.writeFileSync(taskPath, task);
 }
 
 function codeReport(plan = 'plan.md') {
@@ -338,6 +426,7 @@ function prepareReview(
 ) {
   const f = fixture(scenario.step);
   fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input));
+  recordFixtureCompletion(f.dir, scenario.input);
   setLedger(f.file, rows);
   const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
@@ -406,6 +495,7 @@ last_reviewed_commit: abcdef1234567890
     event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
     inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-07-18 10:00:00+08:00'
   });
+  for (const name of ['analysis.md', 'plan.md', 'code.md', 'review-code.md']) recordFixtureCompletion(f.dir, name);
   return f;
 }
 
@@ -796,6 +886,7 @@ test('started replay keeps the open identity after its artifact lands', () => {
 test('plan event reopens technical design after commit preparation', () => {
   const f = fixture('commit');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan round 1\n');
+  recordFixtureCompletion(f.dir, 'plan.md');
 
   const started = run(f.root, [
     f.id, 'plan.started', '--agent', 'codex', '--reason-code', 'new-requirement',
@@ -809,7 +900,7 @@ test('plan event reopens technical design after commit preparation', () => {
   assert.equal(startedResult.round, 2);
   assert.equal(startedResult.artifact, 'plan-r2.md');
 
-  fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
+  fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan', '', 'plan-r2.md'));
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan'),
     '--reason-code', 'new-requirement', '--request-id', `${f.id}:plan-rework`, '--initiator', 'human'
@@ -829,6 +920,8 @@ test('plan event reopens technical design after code review', () => {
     event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
     inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
+  const reviewSha = sha256File(path.join(f.dir, 'review-code.md'));
+  fs.appendFileSync(f.file, `\n## 返工意图\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code.md | ${reviewSha} | plan | design | ${'a'.repeat(64)} | ${'b'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z |  |\n`);
 
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
@@ -836,12 +929,12 @@ test('plan event reopens technical design after code review', () => {
   assert.equal(startedResult.status, 'applied');
   assert.equal(startedResult.fromStep, 'code-review');
   assert.equal(startedResult.toStep, 'code-review');
-  assert.equal(startedResult.round, 1);
-  assert.equal(startedResult.artifact, 'plan.md');
+  assert.equal(startedResult.round, 2);
+  assert.equal(startedResult.artifact, 'plan-r2.md');
 
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+  fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan', '', 'plan-r2.md'));
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
   ]);
   assert.equal(completed.status, 0, completed.stdout || completed.stderr);
   const completedResult = JSON.parse(completed.stdout);
@@ -850,7 +943,7 @@ test('plan event reopens technical design after code review', () => {
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
-  assert.match(content, /`plan\.md`/);
+  assert.match(content, /`plan-r2\.md`/);
 });
 
 test('standalone plan start does not require a fresh analysis review', () => {
@@ -861,6 +954,9 @@ test('standalone plan start does not require a fresh analysis review', () => {
     inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
   fs.appendFileSync(path.join(f.dir, 'analysis.md'), '# Changed after review\n');
+  recordFixtureCompletion(f.dir, 'analysis.md');
+  const reviewSha = sha256File(path.join(f.dir, 'review-code.md'));
+  fs.appendFileSync(f.file, `\n## 返工意图\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code.md | ${reviewSha} | plan | design | ${'a'.repeat(64)} | ${'b'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z |  |\n`);
 
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
@@ -1149,6 +1245,7 @@ test('streamlined design rework is consumed after the analysis upgrade step', ()
   const f = fixture('code-review');
   try {
     fs.writeFileSync(path.join(f.dir, 'analysis.md'), FULL_ANALYSIS.replace('完整路径', '精简路径'));
+    recordFixtureCompletion(f.dir, 'analysis.md');
     const sourceSha256 = sha256File(path.join(f.dir, 'review-code.md'));
     fs.appendFileSync(f.file, `\n## 返工意图\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code.md | ${sourceSha256} | plan | design | ${'a'.repeat(64)} | ${'b'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z |  |\n`);
 
@@ -1169,218 +1266,6 @@ test('streamlined design rework is consumed after the analysis upgrade step', ()
     if (parsed.ok) assert.equal(parsed.intents[0]?.status, 'consumed');
     const facts = buildLifecycleFacts(f.dir, fs.readFileSync(f.file, 'utf8'));
     assert.equal(facts.ok, true);
-    if (facts.ok) assert.equal(recommendNext(facts.facts).action, 'plan');
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
-test('source completion records resumable invalidation and lifecycle starts reconcile before continuing', () => {
-  const f = fixture('code');
-  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
-  for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
-    fs.writeFileSync(path.join(f.dir, name), `# ${name}\n`);
-  }
-  addReceipt(f.file, {
-    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
-    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
-  });
-  addReceipt(f.file, {
-    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
-    inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
-  });
-  addReceipt(f.file, {
-    event: 'code.completed', output: 'code.md', input: 'plan.md',
-    inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
-  });
-  addReceipt(f.file, {
-    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
-    inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
-  });
-  const started = run(f.root, [
-    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
-    '--request-id', `${f.id}:source-change`, '--initiator', 'human'
-  ]);
-  assert.equal(started.status, 0, started.stdout || started.stderr);
-  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
-  const completed = run(f.root, [
-    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
-    ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
-  ]);
-  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-  const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-  assert.equal(invalidation.ok, true);
-  if (!invalidation.ok) return;
-  assert.equal(invalidation.document.operations[0]?.status, 'pending');
-  assert.equal(invalidation.document.targets.every((target) => target.status === 'pending'), true);
-  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'artifact').length, 5);
-  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'receipt').length, 4);
-  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'approval').length, 3);
-  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'reviewed-snapshot').length, 1);
-
-  const startedReview = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
-  assert.equal(startedReview.status, 0, startedReview.stdout || startedReview.stderr);
-  const reconciled = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-  assert.equal(reconciled.ok, true);
-  if (!reconciled.ok) return;
-  assert.equal(reconciled.document.operations[0]?.status, 'completed');
-  assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
-});
-
-test('source replacement distinguishes same-hash receipt inputs and reconciles both edges', () => {
-  const f = fixture('code');
-  try {
-    const analysisPath = path.join(f.dir, 'analysis.md');
-    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), fs.readFileSync(analysisPath));
-    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
-      fs.writeFileSync(path.join(f.dir, name), `# ${name}\n`);
-    }
-    const analysisSha = sha256File(analysisPath);
-    addReceipt(f.file, { event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    const previousFact = {
-      event: 'analysis.completed', output: 'analysis.md', outputSha256: analysisSha,
-      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:analysis-r1`, result: '{}'
-    };
-    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousFact])}'\n`));
-
-    const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:same-hash-receipts`, '--reason-code', 'new-requirement']);
-    assert.equal(started.status, 0, started.stdout || started.stderr);
-    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
-    const completed = run(f.root, [
-      f.id, 'analyze.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:same-hash-receipts`, '--reason-code', 'new-requirement',
-      '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
-    ]);
-    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(invalidation.ok, true);
-    if (!invalidation.ok) return;
-    const planReceiptTargets = invalidation.document.targets.filter((target) => target.targetKind === 'receipt' && target.targetArtifact === 'plan.md');
-    assert.deepEqual(planReceiptTargets.map((target) => target.targetInput).sort(), ['analysis.md', 'review-analysis.md']);
-    assert.equal(new Set(planReceiptTargets.map((target) => target.targetId)).size, 2);
-
-    const reconcile = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
-    assert.equal(reconcile.status, 0, reconcile.stdout || reconcile.stderr);
-    const reconciled = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(reconciled.ok, true);
-    if (!reconciled.ok) return;
-    assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
-test('source replacement uses static downstream invalidation when receipt graph has a disconnected cycle', () => {
-  const f = fixture('technical-design');
-  try {
-    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
-      fs.writeFileSync(path.join(f.dir, name), name === 'plan.md' ? '# Plan\n' : `# ${name}\n`);
-    }
-    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'review-code.md', inputSha256: sha256File(path.join(f.dir, 'review-code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    const previousFact = {
-      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
-      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
-    };
-    const task = fs.readFileSync(f.file, 'utf8');
-    fs.writeFileSync(f.file, task.replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousFact])}'\n`));
-
-    const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:plan-r2`, '--reason-code', 'new-requirement']);
-    assert.equal(started.status, 0, started.stdout || started.stderr);
-    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
-    const completed = run(f.root, [
-      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:plan-r2`, '--reason-code', 'new-requirement',
-      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
-    ]);
-    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(invalidation.ok, true);
-    if (!invalidation.ok) return;
-    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'code.md'), true);
-    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'review-code.md'), true);
-    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
-test('source replacement uses static downstream invalidation when the prior output identity is unverified', () => {
-  const f = fixture('technical-design');
-  try {
-    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
-      fs.writeFileSync(path.join(f.dir, name), name === 'plan.md' ? '# Plan\n' : `# ${name}\n`);
-    }
-    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
-    const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:unverified-source`, '--reason-code', 'new-requirement']);
-    assert.equal(started.status, 0, started.stdout || started.stderr);
-    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
-    const completed = run(f.root, [
-      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:unverified-source`, '--reason-code', 'new-requirement',
-      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
-    ]);
-    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(invalidation.ok, true);
-    if (!invalidation.ok) return;
-    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'code.md'), true);
-    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
-test('qualification evidence gaps use the full lifecycle fallback for plan replacement', () => {
-  const f = fixture('technical-design');
-  try {
-    enableQualification(f.file);
-    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
-    fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
-    fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
-    fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
-    fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
-    for (const [event, output, input] of [
-      ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
-      ['plan.completed', 'plan.md', 'analysis.md'],
-      ['plan.completed', 'plan.md', 'review-analysis.md'],
-      ['review-plan.completed', 'review-plan.md', 'plan.md'],
-      ['code.completed', 'code.md', 'plan.md'],
-      ['code.completed', 'code.md', 'review-plan.md'],
-      ['review-code.completed', 'review-code.md', 'code.md'],
-      ['review-code.completed', 'review-code.md', 'review-plan.md']
-    ] as const) addReceipt(f.file, {
-      event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00'
-    });
-    const previousPlanFact = {
-      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
-      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
-    };
-    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousPlanFact])}'\n`));
-
-    const started = run(f.root, [
-      f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
-      '--request-id', `${f.id}:qualification-gap-plan-r2`, '--reason-code', 'new-requirement'
-    ]);
-    assert.equal(started.status, 0, started.stdout || started.stderr);
-    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('Keep recovery bounded', 'Keep recovery auditable'));
-    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
-    const completed = run(f.root, [
-      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model',
-      '--request-id', `${f.id}:qualification-gap-plan-r2`, '--reason-code', 'new-requirement',
-      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
-    ]);
-    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(invalidation.ok, true);
-    if (!invalidation.ok) return;
-    const invalidatedArtifacts = new Set(invalidation.document.targets
-      .filter((target) => target.targetKind === 'artifact')
-      .map((target) => target.targetArtifact));
-    for (const name of ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
-      assert.equal(invalidatedArtifacts.has(name), true, `${name} should be conservatively invalidated`);
-    }
-    assert.equal(invalidatedArtifacts.has('plan-r2.md'), false);
-    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -1388,6 +1273,7 @@ test('code completion rejects a missing lifecycle input freeze without writing c
   const f = fixture('code');
   try {
     fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+    recordFixtureCompletion(f.dir, 'plan.md');
     fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
     addReceipt(f.file, {
       event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
@@ -1410,106 +1296,6 @@ test('code completion rejects a missing lifecycle input freeze without writing c
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('candidate qualification changes trigger the conservative invalidation reason', () => {
-  const f = fixture('code');
-  enableQualification(f.file);
-  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
-  fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
-  for (const name of ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md'] as const) {
-    const built = buildQualificationAudit(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(built.ok, true);
-    if (!built.ok) return;
-    fs.appendFileSync(path.join(f.dir, name), `\n## 资格审计\n\n${renderQualificationAudit(built.audit)}\n`);
-  }
-  for (const [event, output, input] of [
-    ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
-    ['review-plan.completed', 'review-plan.md', 'plan.md'],
-    ['code.completed', 'code.md', 'plan.md'],
-    ['review-code.completed', 'review-code.md', 'code.md']
-  ] as const) addReceipt(f.file, {
-    event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00'
-  });
-
-  const started = run(f.root, [
-    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
-    '--request-id', `${f.id}:qualification-change`, '--initiator', 'human'
-  ]);
-  assert.equal(started.status, 0, started.stdout || started.stderr);
-  fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('| A | Rebuild the earliest stale stage | qualified |', '| A | Rebuild the earliest stale stage | rejected |'));
-  const currentTask = fs.readFileSync(f.file, 'utf8');
-  const currentAudit = buildQualificationAudit(currentTask);
-  assert.equal(currentAudit.ok, true);
-  if (!currentAudit.ok) return;
-  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), `${localArtifact('analysis')}\n## 资格审计\n\n${renderQualificationAudit(currentAudit.audit)}\n`);
-  const completed = run(f.root, [
-    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
-    ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
-  ]);
-  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-  const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-  assert.equal(invalidation.ok, true);
-  if (!invalidation.ok) return;
-  assert.equal(invalidation.document.targets.length > 0, true);
-  assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
-  assert.equal(invalidation.document.targets.some((target) => target.targetFamily === 'code'), true);
-});
-
-test('pure constraint changes seed receipt invalidation from qualified consumers only', () => {
-  const f = fixture('technical-design');
-  try {
-    enableQualification(f.file);
-    const names = ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md'];
-    for (const name of names) {
-      const input = fs.readFileSync(f.file, 'utf8');
-      const usesConstraint = name === 'plan.md' || name === 'review-plan.md';
-      const audit = buildQualificationAudit(input, { constraints: usesConstraint ? ['C-1'] : [] });
-      assert.equal(audit.ok, true);
-      if (!audit.ok) return;
-      const body = name === 'analysis.md' ? FULL_ANALYSIS : name === 'review-analysis.md' ? reviewArtifact('Analysis Review', 'analysis.md')
-        : name === 'plan.md' ? '# Plan\n' : name === 'review-plan.md' ? reviewArtifact('Plan Review', 'plan.md')
-          : name === 'code.md' ? '# Code\n' : reviewCodeArtifact();
-      fs.writeFileSync(path.join(f.dir, name), `${body}\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n`);
-    }
-    for (const [event, output, input] of [
-      ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
-      ['plan.completed', 'plan.md', 'analysis.md'],
-      ['plan.completed', 'plan.md', 'review-analysis.md'],
-      ['review-plan.completed', 'review-plan.md', 'plan.md'],
-      ['code.completed', 'code.md', 'plan.md'],
-      ['code.completed', 'code.md', 'review-plan.md'],
-      ['review-code.completed', 'review-code.md', 'code.md'],
-      ['review-code.completed', 'review-code.md', 'review-plan.md']
-    ] as const) addReceipt(f.file, { event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00' });
-    const previousPlanFact = {
-      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
-      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
-    };
-    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousPlanFact])}'\n`));
-
-    const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:constraint-change`, '--reason-code', 'new-requirement']);
-    assert.equal(started.status, 0, started.stdout || started.stderr);
-    let currentTask = fs.readFileSync(f.file, 'utf8').replace('Keep recovery bounded', 'Keep recovery auditable');
-    fs.writeFileSync(f.file, currentTask);
-    const currentAudit = buildQualificationAudit(currentTask);
-    assert.equal(currentAudit.ok, true);
-    if (!currentAudit.ok) return;
-    const nextPlan = localArtifact('plan').replace('artifact-context:TASK-20260101-000001:plan:plan.md', 'artifact-context:TASK-20260101-000001:plan:plan-r2.md');
-    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), `${nextPlan}\n## 资格审计\n\n${renderQualificationAudit(currentAudit.audit)}\n`);
-    const completed = run(f.root, [
-      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:constraint-change`, '--reason-code', 'new-requirement',
-      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
-    ]);
-    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
-    assert.equal(invalidation.ok, true);
-    if (!invalidation.ok) return;
-    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'code.md'), true);
-    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'review-analysis.md'), false);
-    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
 test('standalone started events may skip qualification recovery ordering', () => {
   const f = fixture('code-review');
   for (const [name, content] of [
@@ -1523,6 +1309,7 @@ test('standalone started events may skip qualification recovery ordering', () =>
   });
   enableQualification(f.file);
   writeQualifiedArtifact(f.file, path.join(f.dir, 'plan.md'));
+  recordFixtureCompletion(f.dir, 'plan.md');
 
   const skipped = run(f.root, [f.id, 'review-plan.started', '--agent', 'codex', '--dry-run']);
   assert.equal(skipped.status, 0, skipped.stderr);
@@ -1575,7 +1362,9 @@ for (const scenario of [
   test(`${scenario.family} event completes a supplemental round from its review stage`, () => {
     const f = fixture(scenario.step);
     fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input));
+    recordFixtureCompletion(f.dir, scenario.input);
     fs.writeFileSync(path.join(f.dir, scenario.first), reviewArtifact(scenario.title, scenario.input));
+    recordFixtureCompletion(f.dir, scenario.first);
 
     const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
     assert.equal(started.status, 0, started.stderr);
@@ -1611,6 +1400,7 @@ for (const scenario of [
   test(`${scenario.family} event is authorized by explicit intent without current-step adjacency`, () => {
     const f = fixture(scenario.step);
     fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input));
+    recordFixtureCompletion(f.dir, scenario.input);
 
     const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
     assert.equal(started.status, 0, started.stdout || started.stderr);
@@ -1620,6 +1410,7 @@ for (const scenario of [
 test('review-code event completes the regular code review path', () => {
   const f = fixture('code');
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+  recordFixtureCompletion(f.dir, 'code.md');
 
   const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
@@ -1641,6 +1432,8 @@ test('review-code event completes the regular code review path', () => {
 
 test('review-code completes against the Git diff without a code artifact receipt', () => {
   const f = fixture('code');
+  fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+  recordFixtureCompletion(f.dir, 'code.md');
   const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
 
@@ -1899,7 +1692,7 @@ test('review completion refuses to rewrite a completed review artifact', () => {
   const changedArtifact = fs.readFileSync(path.join(f.dir, scenario.artifact));
   const finalized = finalizeReview(f, scenario);
   assert.equal(finalized.status, 1);
-  assert.match(JSON.parse(finalized.stdout).error.message, /completed artifact/u);
+  assert.match(JSON.parse(finalized.stdout).error.message, /completed artifact|completion evidence/u);
   assert.deepEqual(fs.readFileSync(path.join(f.dir, scenario.artifact)), changedArtifact);
   assert.equal(fs.readFileSync(f.file, 'utf8'), beforeTask);
 });
@@ -2217,7 +2010,9 @@ test('code completion keeps its original result counts and permits only exact re
   const f = fixture('technical-design-review');
   try {
     fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+    recordFixtureCompletion(f.dir, 'plan.md');
     fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+    recordFixtureCompletion(f.dir, 'review-plan.md');
     addReceipt(f.file, {
       event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
       inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
@@ -2242,6 +2037,7 @@ test('code completion keeps its original result counts and permits only exact re
     const withoutOptionalReceipt = after.split('\n')
       .filter((line) => !line.startsWith('| code.completed | code.md | review-plan.md |'))
       .join('\n');
+    assert.notEqual(withoutOptionalReceipt, after);
     fs.writeFileSync(f.file, withoutOptionalReceipt);
     const missingOptionalReceipt = run(f.root, completedArgs);
     assert.notEqual(missingOptionalReceipt.status, 0);
@@ -2258,6 +2054,7 @@ test('code completion keeps its original result counts and permits only exact re
 test('code completion rejects a plan changed after code started', () => {
   const f = fixture('technical-design-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan v1\n');
+  recordFixtureCompletion(f.dir, 'plan.md');
   fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
   addReceipt(f.file, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
@@ -2301,8 +2098,10 @@ test('code-r7 completion accepts a directly repaired report', () => {
   const f = fixture('code');
   const planPath = path.join(f.dir, 'plan.md');
   fs.writeFileSync(planPath, localArtifact('plan'));
+  recordFixtureCompletion(f.dir, 'plan.md');
   const planSha256 = sha256File(planPath);
   fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+  recordFixtureCompletion(f.dir, 'review-plan.md');
   addReceipt(f.file, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
     inputSha256: planSha256, completedAt: '2026-01-01 00:00:00+00:00'
@@ -2321,6 +2120,8 @@ test('code-r7 completion accepts a directly repaired report', () => {
           .replace('### 审查决定\n通过', '### 审查决定\n需要修改')
         : reviewCodeArtifact(codeArtifact)
     );
+    recordFixtureCompletion(f.dir, codeArtifact);
+    recordFixtureCompletion(f.dir, reviewArtifactName);
   }
   addReceipt(f.file, {
     event: 'code.completed', output: 'code-r6.md', input: 'plan.md',

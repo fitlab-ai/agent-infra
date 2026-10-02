@@ -6,4 +6,5 @@ export { writeSandboxEngineFixture, writeNodeCommandShim, sandboxRow } from "./h
 export { langTemplate, renderPlaceholders, buildCommandSyncFiles, escapeRegExp, parseFrontmatter, skillDocPaths } from "./helpers/templates.ts";
 export { commandSpecs } from "./helpers/command-specs.ts";
 export { loadFreshEsm } from "./helpers/esm.ts";
+export { recordArtifactCompletions } from "./helpers/lifecycle-evidence.ts";
 export type { PlatformSyncModule, SyncTemplatesModule, SyncTemplatesReport } from "./helpers/esm.ts";

@@ -8,8 +8,9 @@ import { gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import { renderArtifactSkeleton } from "../../../lib/task/artifact-schema.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 import {
   buildTaskContent,
   buildTaskFrontmatter,
@@ -108,8 +109,16 @@ function addCompletionFact(taskDir: string): void {
   const taskPath = path.join(taskDir, "task.md");
   const artifactPath = path.join(taskDir, "review-code.md");
   const inputPath = path.join(taskDir, "code.md");
+  const planPath = path.join(taskDir, "plan.md");
   fs.writeFileSync(inputPath, "# Code fixture\n");
+  fs.writeFileSync(planPath, "# Plan fixture\n");
   const report = fs.readFileSync(artifactPath, "utf8");
+  const code = fs.readFileSync(inputPath, "utf8");
+  const codeFact = {
+    event: "code.completed", output: "code.md", outputSha256: sha256File(inputPath),
+    semanticDigest: canonicalSemanticDigest(code), requestId: "code-test", result: "{}",
+    lifecycleInputs: [{ name: "plan.md", sha256: sha256File(planPath) }]
+  };
   const fact = {
     event: "review-code.completed",
     output: "review-code.md",
@@ -120,7 +129,16 @@ function addCompletionFact(taskDir: string): void {
     lifecycleInputs: [{ name: "code.md", sha256: sha256File(inputPath) }]
   };
   const task = fs.readFileSync(taskPath, "utf8");
-  fs.writeFileSync(taskPath, task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`));
+  const withFact = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([codeFact, fact]))}\n---\n`);
+  const withCodeLog = withFact.replace(
+    /(^- \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} — \*\*Review Code \(Round 1\)\*\* by codex — Verdict: .*→ review-code\.md)$/mu,
+    "- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1)** by codex — completed → code.md\n- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started\n$1"
+  );
+  const receipt = upsertArtifactReceipt(withCodeLog, {
+    event: "review-code.completed", output: "review-code.md", input: "code.md",
+    inputSha256: sha256File(inputPath), completedAt: "2026-01-01 00:00:00+00:00"
+  });
+  fs.writeFileSync(taskPath, upsertSection(withCodeLog, receipt).content);
 }
 
 test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async () => {

@@ -209,7 +209,7 @@ test('verification catalog is a closed mapping of all business events', async ()
 
 test('artifact lifecycle activity checks accept a current stage record after a downstream action', async () => {
   const stages = [
-    { skill: 'analyze-task', family: 'analysis', event: 'analysis.completed', action: 'Analyze Task', output: 'analysis.md', inputFamily: null, later: 'Plan Task (Round 1)' },
+    { skill: 'analyze-task', family: 'analysis', event: 'analyze.completed', action: 'Analyze Task', output: 'analysis.md', inputFamily: null, later: 'Plan Task (Round 1)' },
     { skill: 'plan-task', family: 'plan', event: 'plan.completed', action: 'Plan Task', output: 'plan.md', inputFamily: 'analysis', later: 'Code Task (Round 1)' },
     { skill: 'review-analysis', family: 'review-analysis', event: 'review-analysis.completed', action: 'Review Analysis', output: 'review-analysis.md', inputFamily: 'analysis', later: 'Plan Task (Round 1)' },
     { skill: 'review-plan', family: 'review-plan', event: 'review-plan.completed', action: 'Review Plan', output: 'review-plan.md', inputFamily: 'plan', later: 'Code Task (Round 1)' },
@@ -225,6 +225,15 @@ test('artifact lifecycle activity checks accept a current stage record after a d
       const outputPath = path.join(f.taskDir, stage.output);
       if (inputPath) fs.writeFileSync(inputPath, `# ${stage.inputFamily}\n`);
       fs.writeFileSync(outputPath, `# ${stage.family}\n`);
+      const prerequisiteAction = stage.inputFamily === 'analysis' ? 'Analyze Task'
+        : stage.inputFamily === 'plan' ? 'Plan Task'
+          : stage.inputFamily === 'code' ? 'Code Task' : null;
+      const prerequisiteFact = input && inputPath && prerequisiteAction ? {
+        event: stage.inputFamily === 'analysis' ? 'analyze.completed' : `${stage.inputFamily}.completed`,
+        output: input, outputSha256: sha256File(inputPath),
+        semanticDigest: canonicalSemanticDigest(fs.readFileSync(inputPath, 'utf8')),
+        requestId: `${f.taskId}:${stage.inputFamily}`, result: '{}', lifecycleInputs: []
+      } : null;
       const lifecycleInputs = inputPath
         ? [{ name: input!, sha256: sha256File(inputPath) }]
         : [];
@@ -241,13 +250,18 @@ test('artifact lifecycle activity checks accept a current stage record after a d
         '---',
         `id: ${f.taskId}`,
         'status: active',
-        `completion_facts: '${JSON.stringify([fact])}'`,
+        `completion_facts: '${JSON.stringify(prerequisiteFact ? [prerequisiteFact, fact] : [fact])}'`,
         '---',
         '',
         '## Activity Log',
         '',
-        `- 2026-01-01 00:00:00+00:00 — **${stage.action} (Round 1)** by codex — Completed → ${stage.output}`,
-        `- 2026-01-01 00:00:01+00:00 — **${stage.later}** by codex — Later independent stage`
+        ...(prerequisiteFact ? [
+          `- 2026-01-01 00:00:00+00:00 — **${prerequisiteAction} (Round 1) [started]** by codex — started`,
+          `- 2026-01-01 00:00:01+00:00 — **${prerequisiteAction} (Round 1)** by codex — Completed → ${input}`
+        ] : []),
+        `- 2026-01-01 00:00:02+00:00 — **${stage.action} (Round 1) [started]** by codex — started`,
+        `- 2026-01-01 00:00:03+00:00 — **${stage.action} (Round 1)** by codex — Completed → ${stage.output}`,
+        `- 2026-01-01 00:00:04+00:00 — **${stage.later}** by codex — Later independent stage`
       ].join('\n'));
 
       const result = await verifyInProcess({
@@ -267,6 +281,11 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
   const outputPath = path.join(f.taskDir, 'plan.md');
   fs.writeFileSync(inputPath, '# Analysis\n');
   fs.writeFileSync(outputPath, '# Plan\n');
+  const analysisFact = {
+    event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(inputPath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(inputPath, 'utf8')),
+    requestId: `${f.taskId}:analysis`, result: '{}', lifecycleInputs: []
+  };
   const fact = {
     event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(outputPath),
     semanticDigest: canonicalSemanticDigest(fs.readFileSync(outputPath, 'utf8')),
@@ -274,9 +293,13 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
     lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(inputPath) }]
   };
   const taskPath = path.join(f.taskDir, 'task.md');
-  const taskContent = (rows: string[], facts = [fact]) => [
-    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify(facts)}'`, '---',
-    '', '## Activity Log', '', ...rows
+  const analysisRows = [
+    '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started',
+    '- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — Completed → analysis.md'
+  ];
+  const taskContent = (rows: string[], facts = [fact], extraFacts: typeof fact[] = []) => [
+    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([analysisFact, ...facts, ...extraFacts])}'`, '---',
+    '', '## Activity Log', '', ...analysisRows, ...rows
   ].join('\n');
   const verify = async (artifactFile = 'plan.md') => verifyInProcess({
     mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir,
@@ -284,8 +307,9 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
   });
   try {
     fs.writeFileSync(taskPath, taskContent([
-      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
-      '- 2026-01-01 00:00:01+00:00 — **Code Task (Round 1)** by codex — Later downstream stage'
+      '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+      '- 2026-01-01 00:00:03+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
+      '- 2026-01-01 00:00:04+00:00 — **Code Task (Round 1)** by codex — Later downstream stage'
     ]));
     fs.writeFileSync(inputPath, '# Analysis changed\n');
     let result = await verify();
@@ -294,24 +318,38 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
 
     fs.writeFileSync(inputPath, '# Analysis\n');
     fs.writeFileSync(taskPath, taskContent([
-      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md'
+      '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+      '- 2026-01-01 00:00:03+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md'
     ], []));
     result = await verify();
     assert.equal(result.status, 'fail');
-    assert.match(result.message, /Completion fact for 'plan\.md' is missing/);
+    assert.match(result.message, /Current plan artifact is unavailable/);
 
-    fs.writeFileSync(path.join(f.taskDir, 'plan-r2.md'), '# New Plan\n');
+    const planR2Path = path.join(f.taskDir, 'plan-r2.md');
+    fs.writeFileSync(planR2Path, '# New Plan\n');
+    const planR2Fact = {
+      event: 'plan.completed', output: 'plan-r2.md', outputSha256: sha256File(planR2Path),
+      semanticDigest: canonicalSemanticDigest(fs.readFileSync(planR2Path, 'utf8')),
+      requestId: `${f.taskId}:plan-r2`, result: '{}',
+      lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(inputPath) }]
+    };
+    fs.writeFileSync(taskPath, taskContent([
+      '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+      '- 2026-01-01 00:00:03+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
+      '- 2026-01-01 00:00:04+00:00 — **Plan Task (Round 2) [started]** by codex — started',
+      '- 2026-01-01 00:00:05+00:00 — **Plan Task (Round 2)** by codex — Completed → plan-r2.md'
+    ], [fact], [planR2Fact]));
     result = await verify('plan.md');
     assert.equal(result.status, 'fail');
     assert.match(result.message, /not the current plan artifact/);
 
     fs.rmSync(path.join(f.taskDir, 'plan-r2.md'));
     fs.writeFileSync(taskPath, taskContent([
-      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — Resuming → plan.md'
+      '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — Resuming → plan.md'
     ]));
     result = await verify();
     assert.equal(result.status, 'fail');
-    assert.match(result.message, /No completed Activity Log row records 'plan\.md'/);
+    assert.match(result.message, /Current plan artifact is unavailable/);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -323,6 +361,11 @@ test('plan activity checks keep the latest human decision branch', async () => {
   const planPath = path.join(f.taskDir, 'plan.md');
   fs.writeFileSync(analysisPath, '# Analysis\n');
   fs.writeFileSync(planPath, '# Plan\n');
+  const analysisFact = {
+    event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(analysisPath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(analysisPath, 'utf8')),
+    requestId: `${f.taskId}:analysis`, result: '{}', lifecycleInputs: []
+  };
   const fact = {
     event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(planPath),
     semanticDigest: canonicalSemanticDigest(fs.readFileSync(planPath, 'utf8')),
@@ -330,10 +373,13 @@ test('plan activity checks keep the latest human decision branch', async () => {
     lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(analysisPath) }]
   };
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
-    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([fact])}'`, '---',
+    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([analysisFact, fact])}'`, '---',
     '', '## Activity Log', '',
-    '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
-    '- 2026-01-01 00:00:01+00:00 — **Human Decision** by human — Accepted plan'
+    '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started',
+    '- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — Completed → analysis.md',
+    '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+    '- 2026-01-01 00:00:03+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
+    '- 2026-01-01 00:00:04+00:00 — **Human Decision** by human — Accepted plan'
   ].join('\n'));
   try {
     const result = await verifyInProcess({

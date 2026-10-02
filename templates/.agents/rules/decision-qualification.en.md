@@ -18,6 +18,6 @@ Any analysis, plan, implementation, or review that decides whether a human decis
 
 ## Invalidation and review
 
-When a lifecycle artifact is replaced, start from the old artifact and follow verified input edges in the task receipts to find and invalidate every downstream consumer. Exclude the new artifact from the old graph. If any relation is missing, identity or SHA-256 does not match, or the graph cannot be verified, use the existing static downstream invalidation scope.
+The current artifact is the latest successfully completed report with a matching completion fact, current file digest, and paired completion log. A filename round or modification time alone does not prove completion. Downstream reports must continue to verify lifecycle receipts, and review-code must verify the reviewed snapshot identity. Resume an open started round in place; pending rework intent determines the return stage. Existing “Artifact Invalidation” sections are historical text only and do not affect current reports, authorization, routing, or recovery. Editing them does not change the task-input digest.
 
 When a qualification audit is present, missing or unknown references and digest mismatches block finalization. Audits in the old format with an upstream-relations table must be regenerated in the current format. Formatting-only changes must not change semantic digests; changes to meaning, provenance, status, or candidates require a new audit.

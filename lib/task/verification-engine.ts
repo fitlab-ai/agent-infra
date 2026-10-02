@@ -29,7 +29,7 @@ import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { parseImplementationInputs, type ImplementationInput } from "./implementation-inputs.ts";
 import { scanVisibleMarkdown } from "./markdown.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
-import { inspectActivityLog } from "./activity-log.ts";
+import { inspectActivityLog, pairEntries } from "./activity-log.ts";
 import { parseWorkflowWarnings } from "./workflow-warnings.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
 import type { OrchestrationRun } from "./orchestration.ts";
@@ -714,7 +714,7 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
 }
 
 const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
-  "analyze-task": { family: "analysis", event: "analysis.completed" },
+  "analyze-task": { family: "analysis", event: "analyze.completed" },
   "plan-task": { family: "plan", event: "plan.completed" },
   "review-analysis": { family: "review-analysis", event: "review-analysis.completed" },
   "review-plan": { family: "review-plan", event: "review-plan.completed" },
@@ -1000,7 +1000,12 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   //    belong to an earlier round's entry and misorder the standard path.
   const inspectedLog = inspectActivityLog(task.content);
   if (!inspectedLog.section) return failResult("manual-validation", "Activity Log is missing or invalid");
-  const reviewDoneIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === `Review Code (Round ${review.round})`);
+  const reviewRow = pairEntries(inspectedLog.section.entries).find((row) =>
+    row.step === `Review Code (Round ${review.round})` && row.started !== '' && row.done !== ''
+  );
+  const reviewDoneIndex = reviewRow
+    ? inspectedLog.section.entries.findIndex((entry) => entry.step === reviewRow.step && entry.time === reviewRow.done)
+    : -1;
   const completedIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === "Complete Manual Validation"
     && entry.note.includes(`Manual validation passed → ${artifactName};`)
         && entry.note.includes(`transaction=${receipt.transactionId};`)

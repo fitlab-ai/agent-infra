@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { resolveArtifactContext, hasOpenArtifactRound } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
@@ -83,7 +84,15 @@ export function executeArtifactCommand(
   const input = { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskDir, family: schema.family, artifact };
   if (operation === 'init') {
     const context = resolveArtifactContext(taskRef, family, { repoRoot: resolved.repoRoot });
-    if (context.status !== 'ready' || (context.next?.name !== artifact && !hasOpenArtifactRound(fs.readFileSync(resolved.taskMdPath, 'utf8'), family, parsed.round))) {
+    const existingCandidate = path.join(taskDir, artifact);
+    let matchingInitializedSkeleton = false;
+    try {
+      const existing = fs.readFileSync(existingCandidate, 'utf8');
+      matchingInitializedSkeleton = existing.includes(`<!-- artifact-context:${resolved.taskId}:${family}:${parsed.round} -->`);
+    } catch { /* an absent candidate is created only for the selected identity */ }
+    if ((context.status !== 'ready' && !matchingInitializedSkeleton) || (context.next?.name !== artifact
+      && !hasOpenArtifactRound(fs.readFileSync(resolved.taskMdPath, 'utf8'), family, parsed.round)
+      && !matchingInitializedSkeleton)) {
       return fail('ARTIFACT_INIT_CONTEXT_INVALID', context.error?.message ?? `artifact '${artifact}' is not the next ${family} artifact`);
     }
     return { ...initializeArtifactSkeleton({ ...input, ...(locale ? { locale } : {}) }), ...identity };
