@@ -189,7 +189,7 @@ agent-infra-internal git-workflow commit --input {checkpoint-input}
 
 该调用只创建本地 checkpoint，不访问远端。core 会在 commit 前写入 durable intent，并在 task writer 成功后清理 intent。checkpoint 失败或 task 状态未闭合时，不得发送 `code.completed`。
 
-checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；同步失败时记录 warning，继续完成本地代码阶段。`complete-task` 在归档前补齐并核验该证据。
+checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；同步失败时记录 warning，继续完成本地代码阶段。PR 阶段计算并同步最终 `in:` 标签。
 
 随后执行 finalizer：
 

@@ -100,7 +100,7 @@ function commitExplicitPaths(input: { cwd: string; paths: readonly string[]; mes
     const tree = value(runner, input.cwd, ['write-tree']);
     if (tree !== input.expectedTree) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'applied' as const }], error: { code: 'GIT_TREE_MISMATCH', message: `Expected staged tree ${input.expectedTree}, received ${tree ?? 'unavailable'}` } };
   }
-  const commit = run(runner, input.cwd, ['commit', '-m', input.message]);
+  const commit = run(runner, input.cwd, ['commit', '--cleanup=verbatim', '-m', input.message]);
   const after = inspectGitWorkflow(input.cwd, runner);
   if (commit.status !== 0) return { status: 'failed' as const, changed: false, snapshot: after.snapshot, operations: [{ name: 'commit', status: 'failed' as const, message: commit.stderr.trim() }], error: { code: 'GIT_COMMIT_FAILED', message: commit.stderr.trim() } };
   return { status: 'applied' as const, changed: true, snapshot: after.snapshot, operations: [{ name: 'stage', status: 'applied' as const }, { name: 'commit', status: 'applied' as const }], error: null };

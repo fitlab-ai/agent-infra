@@ -263,9 +263,7 @@ function writeTaskBoundCleanupEvidence(
     "utf8"
   );
 
-  const intentDir = path.join(config.repoRoot, ".agents", "workspace", ".task-commit-intents");
-  fs.mkdirSync(intentDir, { recursive: true });
-  const intentPath = path.join(intentDir, `${taskId}.json`);
+  const intentPath = path.join(taskDir, ".checkpoint-intent.json");
   fs.writeFileSync(intentPath, "{\"version\":1}\n", "utf8");
 
   const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;
@@ -1080,7 +1078,8 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
     fs.renameSync(completedDir, activeDir);
     addActiveTask(config.repoRoot, taskId, branch, "07");
 
-    const intentBytes = fs.readFileSync(evidence.intentPath);
+    const activeIntentPath = path.join(activeDir, ".checkpoint-intent.json");
+    const intentBytes = fs.readFileSync(activeIntentPath);
     const taskBytes = fs.readFileSync(path.join(activeDir, "task.md"));
     await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
       assumeYes: true,
@@ -1093,7 +1092,7 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
       target: evidence.target
     }));
     assert.equal(fs.existsSync(evidence.controlRoot), false);
-    assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
+    assert.deepEqual(fs.readFileSync(activeIntentPath), intentBytes);
     assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json"), "utf8")).ids,

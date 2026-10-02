@@ -909,12 +909,10 @@ async function prepareUnderLock(
     const taskFrontmatter = parseTaskFrontmatter(taskContent);
     const issueIdentity = taskIssueIdentity(taskFrontmatter);
     if (issueIdentity) {
-      const base = typeof taskFrontmatter.delivery_base_ref === 'string' ? taskFrontmatter.delivery_base_ref.trim() : '';
       let synced: IssueResult;
       try {
         synced = await issueSync(taskId, {
-          agent: request.agent, cwd: repoRoot, requirements: true, issueType: true, fields: true,
-          ...(base ? { inLabels: 'from-diff', base } : {}), dependency: 'required'
+          agent: request.agent, cwd: repoRoot, requirements: true, issueType: true, fields: true, dependency: 'required'
         } satisfies IssueSyncOptions);
       } catch (error) {
         const detail = errorOf(error, 'FINALIZATION_ISSUE_METADATA_FAILED', true);
@@ -922,7 +920,7 @@ async function prepareUnderLock(
       }
       const issueOperations = synced.operations as Array<{ name: string; status: string; reasonCode: string | null; value?: unknown }>;
       const badOperation = issueOperations?.find((operation) =>
-        ['requirements', 'issue-type', 'fields', ...(base ? ['labels:in'] : [])].includes(operation.name)
+        ['requirements', 'issue-type', 'fields'].includes(operation.name)
         && operation.status !== 'applied' && operation.status !== 'no-op'
         && !(operation.name === 'requirements' && operation.status === 'skipped' && operation.reasonCode === 'NO_REQUIREMENTS_ANCHOR')
       );
@@ -945,7 +943,7 @@ async function prepareUnderLock(
           retryable: true
         });
       }
-      for (const name of ['requirements', 'issue-type', 'fields', ...(base ? ['labels:in'] : [])]) {
+      for (const name of ['requirements', 'issue-type', 'fields']) {
         const operation = issueOperations?.find((candidate) => candidate.name === name);
         if (!operation) return failed(taskId, {
           code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
@@ -962,12 +960,6 @@ async function prepareUnderLock(
           const expected = typeof operation.value === 'string' ? operation.value : before?.issueType;
           if (!expected || remote.issueType !== expected) return failed(taskId, {
             code: 'FINALIZATION_ISSUE_TYPE_UNCONFIRMED', message: 'Issue Type did not match the verified target', retryable: true
-          });
-        } else if (name === 'labels:in') {
-          const expected = Array.isArray(operation.value) ? operation.value as string[] : before?.labels;
-          if (!expected || expected.filter((label) => label.startsWith('in:')).sort().join('\0')
-            !== remote.labels.filter((label) => label.startsWith('in:')).sort().join('\0')) return failed(taskId, {
-            code: 'FINALIZATION_IN_LABELS_UNCONFIRMED', message: 'Issue in-labels did not match the verified target', retryable: true
           });
         } else {
           const expected = operation.value && typeof operation.value === 'object'
