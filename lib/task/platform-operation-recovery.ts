@@ -290,9 +290,16 @@ async function recoverPlatformOperationsOnce(
   }
   const candidates = journal.operations.filter((operation) => operation.id !== options.excludeId
     && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')))
-    .filter((operation) => selection === 'all' || operation.dependency === selection);
+      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')));
   if (!candidates.length) return result('no-op', [], []);
+  const head = candidates[0]!;
+  if (selection !== 'all' && head.dependency !== selection) {
+    return result('blocked', [], candidates.map((operation) => operation.id), {
+      code: 'PLATFORM_OPERATION_RECOVERY_PENDING',
+      message: 'The first unresolved platform operation belongs to another recovery selection',
+      retryable: true
+    });
+  }
   const limit = options.limit === undefined ? candidates.length : Math.max(1, options.limit);
   const recovered: string[] = [];
   const pending: string[] = [];
@@ -431,8 +438,7 @@ async function recoverPlatformOperations(
   }
   const eligible = (operation: typeof initial.operations[number]) => operation.id !== options.excludeId
     && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED'))
-    && (selection === 'all' || operation.dependency === selection);
+      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED'));
   const first = initial.operations.filter(eligible);
   if (!first.length) return result('no-op', [], []);
   const operationLimit = options.limit === undefined ? first.length : Math.max(1, options.limit);
@@ -451,6 +457,14 @@ async function recoverPlatformOperations(
     }
     const head = latest.operations.find(eligible);
     if (!head) break;
+    if (selection !== 'all' && head.dependency !== selection) {
+      const pending = latest.operations.filter(eligible).map((operation) => operation.id);
+      return result('blocked', recovered, pending, {
+        code: 'PLATFORM_OPERATION_RECOVERY_PENDING',
+        message: 'The first unresolved platform operation belongs to another recovery selection',
+        retryable: true
+      });
+    }
     let last: RecoveryResult | null = null;
     for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
       last = await recoverPlatformOperationsOnce(taskRef, selection, { ...options, limit: 1 });
