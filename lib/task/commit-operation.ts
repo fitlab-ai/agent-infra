@@ -306,7 +306,7 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
     ? (() => {
       const identity = checkpointIdentity(input, task!, delivery);
       try {
-        pendingIntent = readCheckpointIntent(task!.repoRoot, task!.taskId);
+        pendingIntent = readCheckpointIntent(task!.taskDir, task!.taskId);
       } catch (error) {
         return {
           status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
@@ -314,13 +314,17 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
         };
       }
       if (pendingIntent && !sameCheckpointIntent(pendingIntent, identity)) {
+        if (pendingIntent.state !== 'prepared') return {
+          status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+          error: { code: 'COMMIT_INTENT_INVALID', message: 'A committed checkpoint intent must be recovered with its original request' }
+        };
         const timestamp = checkpointTimestamp();
         pendingIntent = {
           version: 1, ...identity,
           digest: checkpointIntentDigest(identity),
           state: 'prepared', committedHead: null, createdAt: timestamp, updatedAt: timestamp
         };
-        try { writeCheckpointIntent(task!.repoRoot, pendingIntent); }
+        try { writeCheckpointIntent(task!.taskDir, pendingIntent); }
         catch (error) {
           return {
             status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
@@ -328,13 +332,18 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
           };
         }
       }
+      if (pendingIntent && pendingIntent.state !== 'prepared'
+        && !checkpointCommitMatches(task!.repoRoot, pendingIntent, pendingIntent.committedHead!)) return {
+        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+        error: { code: 'COMMIT_INTENT_INVALID', message: 'Committed checkpoint intent does not match its Git commit' }
+      };
       if (!pendingIntent) {
         const timestamp = checkpointTimestamp();
         pendingIntent = {
           version: 1, ...identity, digest: checkpointIntentDigest(identity), state: 'prepared',
           committedHead: null, createdAt: timestamp, updatedAt: timestamp
         };
-        try { writeCheckpointIntent(task!.repoRoot, pendingIntent); }
+        try { writeCheckpointIntent(task!.taskDir, pendingIntent); }
         catch (error) {
           return {
             status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
@@ -358,7 +367,7 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
         pendingIntent = updateCheckpointIntent(pendingIntent, {
           state: 'committed', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
         });
-        writeCheckpointIntent(task!.repoRoot, pendingIntent);
+        writeCheckpointIntent(task!.taskDir, pendingIntent);
         return {
           status: 'no-op' as const, changed: false, snapshot: inspected.snapshot,
           operations: [{ name: 'commit', status: 'no-op' as const }], error: null
@@ -377,9 +386,9 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
         pendingIntent = updateCheckpointIntent(pendingIntent, {
           state: 'committed', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
         });
-        writeCheckpointIntent(task!.repoRoot, pendingIntent);
+        writeCheckpointIntent(task!.taskDir, pendingIntent);
       } else if (created.status === 'no-op') {
-        removeCheckpointIntent(task!.repoRoot, task!.taskId);
+        removeCheckpointIntent(task!.taskDir, task!.taskId);
         pendingIntent = null;
       }
       return created;
@@ -466,8 +475,8 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
       const synced = updateCheckpointIntent(pendingIntent, {
         state: 'synced', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
       });
-      writeCheckpointIntent(task.repoRoot, synced);
-      removeCheckpointIntent(task.repoRoot, task.taskId);
+      writeCheckpointIntent(task.taskDir, synced);
+      removeCheckpointIntent(task.taskDir, task.taskId);
     }
   }
   return {
