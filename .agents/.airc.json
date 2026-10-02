@@ -129,7 +129,7 @@
     ],
     "managedBaselines": {
       ".github/workflows/metadata-sync.yml": "sha256:6372ce9f924220ec6042c48d4ea9148aadc48878c67c63e1e21ab073417774d2",
-      ".github/workflows/pr-label.yml": "sha256:8438d56392b63fe365d487b586bb2b242eb142dc3bbd24dd631e18b60e2e0a89",
+      ".github/workflows/pr-label.yml": "sha256:89d5cd84f038044afee2cfae4d14a6749a48cd69f92e8f76091812b8a4420409",
       ".github/workflows/status-label.yml": "sha256:c6939f9f86cdfedbc36b1c87b857ca41c0e8b4d6563c1bcd83a895e324e8f726",
       ".claude/commands/update-agent-infra.md": "sha256:812379def35ef59a3739fbb199c2c4e63e83cdf7b4e252ce0c2bab832a3099bc",
       ".opencode/commands/update-agent-infra.md": "sha256:0fa83403ed7be5936cebca647f48e94796728fe2fed85d8e4390df3b4380267f",
