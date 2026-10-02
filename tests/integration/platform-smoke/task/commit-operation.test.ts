@@ -431,6 +431,43 @@ test('task-bound local retry accepts the original multiline commit message after
   }
 });
 
+test('task-bound local retry preserves Git-significant whitespace in commit messages', () => {
+  const messages = [
+    'fix: checkpoint  \n\nExplain the change  ',
+    '\nfix: checkpoint'
+  ];
+  for (const [index, message] of messages.entries()) {
+    const root = fixture();
+    const taskId = `TASK-20260101-00001${5 + index}`;
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    try {
+      fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+      fs.writeFileSync(path.join(root, 'change.txt'), `message variant ${index}\n`);
+      const request = input(root, {
+        taskRef: taskId, agent: 'codex', round: 3, message,
+        delivery: { mode: 'local' }, push: undefined
+      });
+
+      const first = executeCommitOperation(request);
+      assert.equal(first.result, 'committed_with_warnings');
+      assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
+      assert.equal(readCheckpointIntent(taskDir, taskId)?.state, 'committed');
+
+      fs.appendFileSync(path.join(taskDir, 'task.md'), '\n## Activity Log\n');
+      const retry = executeCommitOperation(request);
+
+      assert.equal(retry.result, 'no_op', `message variant ${index} should recover`);
+      assert.equal(retry.warnings.length, 0);
+      assert.equal(readCheckpointIntent(taskDir, taskId), null);
+      assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /checkpoint_commit: [a-f0-9]{40}/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test('task-bound local retry accepts directory pathspecs after a sync warning', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000012';
