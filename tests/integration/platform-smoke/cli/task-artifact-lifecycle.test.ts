@@ -455,6 +455,10 @@ test('change-request reviews create only while they target the latest artifact',
   ];
   for (const scenario of scenarios) {
     const f = fixture(scenario.files);
+    if (scenario.family === 'plan') addReceipt(f, {
+      event: 'plan.completed', output: 'plan-r2.md', input: 'analysis.md',
+      inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
     const review = `${scenario.reviewFamily}.md`;
     addReceipt(f, {
       event: `${scenario.reviewFamily}.completed`, output: review, input: scenario.reviewed,

@@ -80,12 +80,24 @@ function seedLifecycleReceipts(f: ReturnType<typeof fixture>) {
     inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt
   });
   addReceipt(f.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'review-analysis.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
     inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt
   });
   addReceipt(f.taskDir, {
     event: 'code.completed', output: 'code.md', input: 'plan.md',
     inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
+    event: 'code.completed', output: 'code.md', input: 'review-plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'review-plan.md')), completedAt
   });
   addReceipt(f.taskDir, {
     event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
@@ -567,6 +579,14 @@ test('route selects one fresh role from existing lifecycle facts', () => {
   addReceipt(code.taskDir, {
     event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
     inputSha256: sha256File(path.join(code.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(code.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(code.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(code.taskDir, {
+    event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md',
+    inputSha256: sha256File(path.join(code.taskDir, 'review-analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
   addReceipt(code.taskDir, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',

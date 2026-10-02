@@ -9,7 +9,7 @@ import { parseImplementationInputs, selectPendingImplementationInput } from './i
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
-import { receiptForOutput, sha256File } from './artifact-receipts.ts';
+import { receiptForOutput, receiptsForOutput, sha256File } from './artifact-receipts.ts';
 import { artifactCompletionOrder, hasArtifactCompletionFact, hasArtifactCompletionLog, parseCompletionFacts } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
@@ -18,6 +18,7 @@ import type { LifecyclePathState } from './lifecycle-path.ts';
 import { parseReworkIntentDocument } from './rework-intent.ts';
 import { selectArtifactDisposition } from './artifact-selection.ts';
 import type { ArtifactSelection } from './artifact-selection.ts';
+import { executionInputsMatchLatest } from './execution-inputs.ts';
 
 const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
 const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
@@ -353,10 +354,22 @@ function hasSelectionEvidence(
   content: string,
   family: ArtifactFamily,
   options: InspectOptions,
-  context: ArtifactContextResult
+  context: ArtifactContextResult,
+  pathState: LifecyclePathState
 ): boolean {
   if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) return true;
   if (options.reasonCode === 'new-requirement' || options.reasonCode === 'upstream-fact-doubt') return true;
+  if ((family === 'plan' || family === 'code') && context.latest) {
+    const latestInputs = Object.fromEntries(context.inputs.map((input) => [input.family, input.name]));
+    const capturedInputs = receiptsForOutput(content, context.latest.name)
+      .filter((receipt) => receipt.event === `${family}.completed`)
+      .filter((receipt) => {
+        try { return sha256File(path.join(context.taskDir!, receipt.input)) === receipt.inputSha256; }
+        catch { return false; }
+      })
+      .map((receipt) => receipt.input);
+    if (!executionInputsMatchLatest(family, pathState, latestInputs, capturedInputs)) return true;
+  }
   if (family.startsWith('review-')) {
     const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
     const currentInput = context.inputs.find((input) => input.family === reviewedFamily);
@@ -421,7 +434,7 @@ function attachArtifactSelection(
     path: path.join(context.taskDir, artifactName(family, openRound)), size: 0, mtimeMs: 0
   };
   try {
-    const hasChangeEvidence = hasSelectionEvidence(taskContent, family, options, context);
+    const hasChangeEvidence = hasSelectionEvidence(taskContent, family, options, context, pathState);
     const selection = selectArtifactDisposition({
       next: { family, round: selectedIdentity.round, name: selectedIdentity.name },
       latest: context.latest,

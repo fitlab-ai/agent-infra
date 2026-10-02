@@ -121,6 +121,14 @@ function approvedRouteFixture(
     event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
     inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt
   });
+  addReceipt(dir, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt
+  });
+  addReceipt(dir, {
+    event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md',
+    inputSha256: sha256File(path.join(dir, 'review-analysis.md')), completedAt
+  });
   if (through !== 'plan') {
     fs.writeFileSync(path.join(dir, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
     addReceipt(dir, {
@@ -131,6 +139,10 @@ function approvedRouteFixture(
     addReceipt(dir, {
       event: 'code.completed', output: 'code.md', input: 'plan.md',
       inputSha256: sha256File(path.join(dir, 'plan.md')), completedAt
+    });
+    addReceipt(dir, {
+      event: 'code.completed', output: 'code.md', input: 'review-plan.md',
+      inputSha256: sha256File(path.join(dir, 'review-plan.md')), completedAt
     });
   }
   if (through === 'review-code') {
@@ -483,6 +495,42 @@ test('task-orchestration CLI resumes valid plan and code chains across independe
       assert.deepEqual(payload.next, { ...next, requestedModel: null, requestedReasoningEffort: null });
     }
     assert.deepEqual(persistedArtifactState(f.dir), before);
+  }
+});
+
+test('task-orchestration returns to plan then code after upstream reports change', () => {
+  const f = approvedRouteFixture('disabled');
+  try {
+    const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env);
+    assert.equal(begun.status, 0, begun.stderr || begun.stdout);
+
+    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), FULL_ANALYSIS);
+    fs.writeFileSync(path.join(f.dir, 'review-analysis-r2.md'), '# Review\n\n- **审查输入**：`analysis-r2.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+    addReceipt(f.dir, {
+      event: 'review-analysis.completed', output: 'review-analysis-r2.md', input: 'analysis-r2.md',
+      inputSha256: sha256File(path.join(f.dir, 'analysis-r2.md')), completedAt: '2026-01-02 00:00:00+00:00'
+    });
+    seedCompletionEvidence(f.dir);
+    const planRoute = run(f.root, [f.id, 'route'], f.env);
+    assert.equal(planRoute.status, 0, planRoute.stderr || planRoute.stdout);
+    assert.equal(JSON.parse(planRoute.stdout).next?.action, 'plan-task', planRoute.stdout);
+
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), '# Plan 2\n');
+    fs.writeFileSync(path.join(f.dir, 'review-plan-r2.md'), '# Review\n\n- **审查输入**：`plan-r2.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+    for (const input of ['analysis-r2.md', 'review-analysis-r2.md']) addReceipt(f.dir, {
+      event: 'plan.completed', output: 'plan-r2.md', input,
+      inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-03 00:00:00+00:00'
+    });
+    addReceipt(f.dir, {
+      event: 'review-plan.completed', output: 'review-plan-r2.md', input: 'plan-r2.md',
+      inputSha256: sha256File(path.join(f.dir, 'plan-r2.md')), completedAt: '2026-01-03 00:00:00+00:00'
+    });
+    seedCompletionEvidence(f.dir);
+    const codeRoute = run(f.root, [f.id, 'route'], f.env);
+    assert.equal(codeRoute.status, 0, codeRoute.stderr || codeRoute.stdout);
+    assert.equal(JSON.parse(codeRoute.stdout).next?.action, 'code-task', codeRoute.stdout);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 

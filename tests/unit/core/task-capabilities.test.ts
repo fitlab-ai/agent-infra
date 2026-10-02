@@ -6,12 +6,13 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
-import { sha256File } from '../../../lib/task/artifact-receipts.ts';
+import { sha256File, upsertArtifactReceipt, type ArtifactReceiptEvent } from '../../../lib/task/artifact-receipts.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { parseLifecyclePathDecision } from '../../../lib/task/lifecycle-path.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
+import { buildStatusModel } from '../../../lib/task/commands/status.ts';
 
 function recordCompletedReports(taskDir: string, content: string): string {
   const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name)).sort((left, right) => {
@@ -45,6 +46,22 @@ function recordCompletedReports(taskDir: string, content: string): string {
   return logHeading.test(withFacts)
     ? withFacts.replace(/## (?:活动日志|Activity Log)\n[\s\S]*$/u, `## Activity Log\n\n${entries.join('\n')}\n`)
     : `${withFacts}\n## Activity Log\n\n${entries.join('\n')}\n`;
+}
+
+function addReceipt(taskDir: string, event: ArtifactReceiptEvent, output: string, input: string): void {
+  const taskPath = path.join(taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const mutation = upsertArtifactReceipt(content, {
+    event, output, input, inputSha256: sha256File(path.join(taskDir, input)), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+}
+
+function completeReports(taskDir: string): string {
+  const taskPath = path.join(taskDir, 'task.md');
+  const content = recordCompletedReports(taskDir, fs.readFileSync(taskPath, 'utf8'));
+  fs.writeFileSync(taskPath, content);
+  return content;
 }
 
 const trigger: ExplicitTrigger = {
@@ -285,6 +302,134 @@ test('recommendation is derived from lifecycle facts rather than current_step', 
   assert.equal(recommendNext(withAnalysis).action, 'review-analysis');
 });
 
+test('upstream completion requires new direct execution and review receipts before lifecycle completion', () => {
+  const state = {
+    ...facts('review-code'), pathState: pathState('完整路径'),
+    artifacts: {
+      analysis: ['analysis.md', 'analysis-r2.md'],
+      'review-analysis': ['review-analysis.md', 'review-analysis-r2.md'],
+      plan: ['plan.md', 'plan-r2.md'],
+      'review-plan': ['review-plan.md', 'review-plan-r2.md'],
+      code: ['code.md'], 'review-code': ['review-code.md']
+    },
+    reviewedInputs: {
+      'review-analysis': 'analysis-r2.md', 'review-plan': 'plan-r2.md', 'review-code': 'code.md'
+    },
+    executionInputs: {
+      plan: ['analysis.md', 'review-analysis.md'],
+      code: ['plan.md', 'review-plan.md']
+    },
+    reviews: { 'review-analysis': 'approved', 'review-plan': 'approved', 'review-code': 'approved' }
+  } satisfies LifecycleFacts;
+
+  assert.equal(recommendNext(state).action, 'plan');
+  assert.equal(canStart('review-plan', state, { ...trigger, requestedAction: 'review-plan' }).reasonCode, 'PLAN_INPUT_STALE');
+  const currentPlan = {
+    ...state,
+    executionInputs: { plan: ['analysis-r2.md', 'review-analysis-r2.md'], code: ['plan.md', 'review-plan.md'] },
+    reviewedInputs: { ...state.reviewedInputs, 'review-plan': 'plan-r2.md' }
+  } satisfies LifecycleFacts;
+  assert.equal(recommendNext(currentPlan).action, 'code');
+  assert.equal(canStart('review-code', currentPlan, { ...trigger, requestedAction: 'review-code' }).reasonCode, 'CODE_INPUT_STALE');
+
+  const currentCode = {
+    ...currentPlan,
+    artifacts: { ...currentPlan.artifacts, code: ['code.md', 'code-r2.md'] },
+    executionInputs: { ...currentPlan.executionInputs, code: ['plan-r2.md', 'review-plan-r2.md'] }
+  } satisfies LifecycleFacts;
+  assert.equal(recommendNext(currentCode).action, 'review-code');
+  assert.equal(recommendNext({
+    ...currentCode, reviewedInputs: { ...currentCode.reviewedInputs, 'review-code': 'code-r2.md' }
+  }).reasonCode, 'LIFECYCLE_REVIEWED');
+});
+
+test('streamlined routing compares code against analysis when plan is not selected', () => {
+  const state = {
+    ...facts('review-code'), pathState: pathState('精简路径'),
+    artifacts: {
+      analysis: ['analysis.md', 'analysis-r2.md'], 'review-analysis': ['review-analysis.md'],
+      code: ['code.md'], 'review-code': ['review-code.md']
+    },
+    reviewedInputs: { 'review-analysis': 'analysis.md', 'review-code': 'code.md' },
+    executionInputs: { code: ['analysis.md'] },
+    reviews: { 'review-analysis': 'approved', 'review-code': 'approved' }
+  } satisfies LifecycleFacts;
+  assert.equal(recommendNext(state).action, 'code');
+  const currentCode = {
+    ...state,
+    artifacts: { ...state.artifacts, code: ['code.md', 'code-r2.md'] },
+    executionInputs: { code: ['analysis-r2.md'] }
+  } satisfies LifecycleFacts;
+  assert.equal(recommendNext(currentCode).action, 'review-code');
+});
+
+test('lifecycle facts route to re-execution after newly completed upstream reports', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-upstream-rework-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const analysis = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需要独立审查。\n- **未满足的更高路径条件**：已选最高路径。\n- **升级触发条件**：无。\n';
+    const review = (input: string) => `# Review\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`;
+    const reports: Record<string, string> = {
+      'analysis.md': analysis, 'review-analysis.md': review('analysis.md'),
+      'plan.md': '# Plan 1\n', 'review-plan.md': review('plan.md'),
+      'code.md': '# Code 1\n', 'review-code.md': review('code.md')
+    };
+    for (const [name, content] of Object.entries(reports)) fs.writeFileSync(path.join(taskDir, name), content);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), '---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\n---\n\n# Task\n');
+    addReceipt(taskDir, 'review-analysis.completed', 'review-analysis.md', 'analysis.md');
+    addReceipt(taskDir, 'plan.completed', 'plan.md', 'analysis.md');
+    addReceipt(taskDir, 'plan.completed', 'plan.md', 'review-analysis.md');
+    addReceipt(taskDir, 'review-plan.completed', 'review-plan.md', 'plan.md');
+    addReceipt(taskDir, 'code.completed', 'code.md', 'plan.md');
+    addReceipt(taskDir, 'code.completed', 'code.md', 'review-plan.md');
+    addReceipt(taskDir, 'review-code.completed', 'review-code.md', 'code.md');
+    let content = completeReports(taskDir);
+    let result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(recommendNext(result.facts).reasonCode, 'LIFECYCLE_REVIEWED');
+
+    fs.writeFileSync(path.join(taskDir, 'analysis-r2.md'), analysis);
+    fs.writeFileSync(path.join(taskDir, 'review-analysis-r2.md'), review('analysis-r2.md'));
+    addReceipt(taskDir, 'review-analysis.completed', 'review-analysis-r2.md', 'analysis-r2.md');
+    content = completeReports(taskDir);
+    result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(recommendNext(result.facts).action, 'plan');
+    assert.equal(buildStatusModel({
+      taskId: 'TASK-20260101-000001', taskDir, taskMdPath: path.join(taskDir, 'task.md'), repoRoot: root,
+      run: () => { throw new Error('git unavailable in fixture'); }
+    }).recommendation, 'plan');
+
+    fs.writeFileSync(path.join(taskDir, 'plan-r2.md'), '# Plan 2\n');
+    fs.writeFileSync(path.join(taskDir, 'review-plan-r2.md'), review('plan-r2.md'));
+    addReceipt(taskDir, 'plan.completed', 'plan-r2.md', 'analysis-r2.md');
+    addReceipt(taskDir, 'plan.completed', 'plan-r2.md', 'review-analysis-r2.md');
+    addReceipt(taskDir, 'review-plan.completed', 'review-plan-r2.md', 'plan-r2.md');
+    content = completeReports(taskDir);
+    result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(recommendNext(result.facts).action, 'code');
+    assert.equal(canStart('code', result.facts, { ...trigger, requestedAction: 'code' }).allowed, true);
+
+    fs.writeFileSync(path.join(taskDir, 'code-r2.md'), '# Code 2\n');
+    fs.writeFileSync(path.join(taskDir, 'review-code-r2.md'), review('code-r2.md'));
+    addReceipt(taskDir, 'code.completed', 'code-r2.md', 'plan-r2.md');
+    addReceipt(taskDir, 'code.completed', 'code-r2.md', 'review-plan-r2.md');
+    addReceipt(taskDir, 'review-code.completed', 'review-code-r2.md', 'code-r2.md');
+    content = completeReports(taskDir);
+    result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(recommendNext(result.facts).reasonCode, 'LIFECYCLE_REVIEWED');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('qualification diagnostics do not change lifecycle routing', () => {
   const stale = {
     ...facts('code'),
@@ -437,7 +582,11 @@ test('lifecycle facts use completed review receipts rather than review body form
       '| event | output | input | input_sha256 | completed_at |',
       '| --- | --- | --- | --- | --- |',
       receipt('review-analysis.completed', 'review-analysis.md', 'analysis.md'),
+      receipt('plan.completed', 'plan.md', 'analysis.md'),
+      receipt('plan.completed', 'plan.md', 'review-analysis.md'),
       receipt('review-plan.completed', 'review-plan.md', 'plan.md'),
+      receipt('code.completed', 'code.md', 'plan.md'),
+      receipt('code.completed', 'code.md', 'review-plan.md'),
       receipt('review-code.completed', 'review-code.md', 'code.md'),
       '', '## Activity Log', ''
     ].join('\n'));
