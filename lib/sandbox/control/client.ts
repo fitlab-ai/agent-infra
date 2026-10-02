@@ -27,6 +27,7 @@ import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
 import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/short-id.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
+const SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS = 5 * 60_000;
 
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
@@ -347,13 +348,20 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
         } else if (now - malformedResponseObservedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
           clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted, requestId);
         }
-        sleep(25);
+        const remainingMs = deadline - Date.now();
+        if (remainingMs > 0) sleep(Math.min(25, Math.ceil(remainingMs)));
         continue;
       }
-      if (response.phase === 'accepted') accepted = true;
-      else return response;
+      if (response.phase === 'accepted') {
+        accepted = true;
+      } else if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') {
+        accepted = true;
+      } else {
+        return response;
+      }
     }
-    sleep(25);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs > 0) sleep(Math.min(25, Math.ceil(remainingMs)));
   }
   clientError(
     'SANDBOX_CONTROL_RESULT_UNKNOWN',
@@ -399,6 +407,7 @@ export function requestSandboxTaskFinalization(params: Readonly<{
   token?: string;
   generation?: string;
   timeoutMs?: number;
+  recoveryBudgetMs?: number;
 }>): SandboxControlResponse {
   const agent = normalizeAgentToken(params.agent);
   if (!agent) clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization agent is invalid', false);
@@ -420,7 +429,48 @@ export function requestSandboxTaskFinalization(params: Readonly<{
     controllerProcess: null,
     controllerProof: null
   };
-  return exchangeSandboxControl(request, params);
+  let response: SandboxControlResponse;
+  try {
+    response = exchangeSandboxControl(request, params);
+  } catch (error) {
+    if (!(error instanceof SandboxControlClientError)
+      || error.detail.code !== 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+      || !error.accepted || !error.requestId) throw error;
+    return recoverAcceptedTaskFinalization(error.requestId, params);
+  }
+  if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') {
+    return recoverAcceptedTaskFinalization(response.id, params);
+  }
+  return response;
+}
+
+export function recoverAcceptedTaskFinalization(
+  requestId: string,
+  params: Readonly<{ channelDir?: string; recoveryBudgetMs?: number }>,
+  recover: typeof recoverSandboxControl = recoverSandboxControl
+): SandboxControlResponse {
+  const deadline = Date.now() + (params.recoveryBudgetMs ?? SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS);
+  while (Date.now() < deadline) {
+    const timeoutMs = Math.min(30_000, deadline - Date.now());
+    if (timeoutMs <= 0) break;
+    try {
+      const response = recover(requestId, { channelDir: params.channelDir, timeoutMs });
+      if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') continue;
+      return response;
+    } catch (error) {
+      if (error instanceof SandboxControlClientError
+        && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+        && error.requestId === requestId) continue;
+      throw error;
+    }
+  }
+  clientError(
+    'SANDBOX_CONTROL_RESULT_UNKNOWN',
+    'accepted finalization request remained unknown after the automatic recovery budget; inspect the receipt and resume by request id',
+    false,
+    true,
+    requestId
+  );
 }
 
 type CodexControllerClosed = Readonly<{

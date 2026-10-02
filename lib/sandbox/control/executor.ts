@@ -12,6 +12,7 @@ import {
   type TaskCreateResult
 } from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
+import { serializeTaskFinalizationEnvelope } from '../../task/finalization-envelope.ts';
 import {
   bindSandboxControlTask,
   validateSandboxControlRequest,
@@ -535,10 +536,14 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
     result = request.family === 'task-finalization'
       ? {
         exitCode: 1,
-        stdout: `${JSON.stringify({
-          version: 1, status: 'failed', changed: false, accepted: true, result: null,
+        stdout: serializeTaskFinalizationEnvelope({
+          status: code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? 'unknown' : 'failed',
+          changed: code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? null : false,
+          accepted: true,
+          requestId: request.id,
+          result: null,
           error: { code, message: detail, retryable: false }
-        })}\n`,
+        }),
         stderr: ''
       }
       : request.family === 'task-create'

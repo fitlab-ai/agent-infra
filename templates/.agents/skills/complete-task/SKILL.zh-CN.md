@@ -185,23 +185,29 @@ finalization 按允许的 artifact backfill → lifecycle → task 评论 → co
 
 场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新核对允许的 artifact 回填、终态 task 评论、完成校验，并使用保留的 durable staging record 重做 summary seal；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若回填、task 评论、summary seal 或校验因网络问题返回 `blocked`，保留 receipt、durable staging record 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
 
-完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。`completed` 或 `completed_with_warnings` 才允许继续；`failed` / `blocked` / `unknown` 必须保留 receipt 并停止，之后通过同一 finalization 入口重试。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
+完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。只有 `completed` 或 `completed_with_warnings` 允许继续。`failed` / `blocked` 是宿主明确返回的失败或阻塞结果：保留 receipt，停止当前流程，并按宿主返回的状态和错误处理；只有宿主状态允许且原因已修复时，才重新调用 finalization。若 `accepted=true` 的请求结果为 `unknown`，保留 receipt 和原 request ID；不得重发 task-finalization，只能通过 `sandbox-control recover <同一 request-id>` 查询原请求。只有请求在 accepted 之前被拒绝，且错误允许重试时，才可创建新请求。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
 
 ### accepted 后的 sandbox-control 结果恢复
 
-如果本技能在沙箱内执行，且 control client 报告请求已经 accepted 但没有
-terminal result，必须保留原 request identity。此时 client 会在 stderr 输出
-`SANDBOX_CONTROL_REQUEST_ID: <request-id>`。broker 恢复健康后，使用同一个
-request ID 读取 terminal response：
+如果本技能在沙箱内执行，且 task-finalization 请求已经 accepted 但暂时没有
+terminal result，client 会从首次 unknown 开始自动按同一个 request ID 恢复，
+总预算为 5 分钟，每次 recover 最多 30 秒；published unknown 会在当前调用中
+按 25ms 间隔重读，预算用尽后立即继续 recover，不额外等待。client 会在 stderr
+输出 `SANDBOX_CONTROL_REQUEST_ID: <request-id>`。
+
+5 分钟后仍没有 terminal result 时，必须保留 receipt 和 request ID，并将结果视为
+pending/unknown；不得重发 task-finalization。broker 恢复健康后，只能继续查询原
+request ID：
 
 ```bash
 agent-infra-internal sandbox-control recover <request-id>
 ```
 
-accepted 的 task finalization 不得提交新请求。broker 的
-`processing/<request-id>/result.json` 只是私有 transport evidence，不是 task
-receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验仍是
-权威。如果请求在 accepted 之前已被拒绝，则可依据错误的 retryability 使用
+accepted 的 task finalization 不得提交新请求。若 request ID 缺失或 receipt 无法
+读取，保持 pending；只从 stderr、handoff 或 receipt 中恢复原 ID，不按 task key
+查询。broker 的 `processing/<request-id>/result.json` 只是私有 transport evidence，
+不是 task receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验
+仍是权威。只有请求在 accepted 之前已被拒绝，才可依据错误的 retryability 使用
 新的 request ID。
 
 ### 8. 告知用户

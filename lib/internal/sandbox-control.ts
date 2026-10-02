@@ -9,6 +9,7 @@ import { serveSandboxControl } from '../sandbox/control/server.ts';
 import { runSandboxControlExecutor } from '../sandbox/control/executor.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { parseTaskCreateResult, taskCreateExitCode } from '../task/create-service.ts';
+import { serializeTaskFinalizationEnvelope, type TaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
 
 type FinalizationStatus = 'completed' | 'failed' | 'blocked' | 'unknown';
 
@@ -16,10 +17,11 @@ function writeFinalizationEnvelope(
   status: FinalizationStatus,
   accepted: boolean,
   error: { code: string; message: string; retryable: boolean },
-  changed = false,
-  result: unknown = null
+  changed: boolean | null = false,
+  result: unknown = null,
+  requestId: string | null = null
 ): void {
-  process.stdout.write(`${JSON.stringify({ version: 1, status, changed, accepted, result, error })}\n`);
+  process.stdout.write(serializeTaskFinalizationEnvelope({ status, changed, accepted, requestId, result, error }));
 }
 
 function finalizationErrorStatus(error: { retryable: boolean; code: string }): FinalizationStatus {
@@ -43,6 +45,28 @@ function recoveredExitCode(response: Awaited<ReturnType<typeof recoverSandboxCon
   return response.exitCode ?? 1;
 }
 
+function finalizationResponseOutput(response: Awaited<ReturnType<typeof requestSandboxTaskFinalization>>): string {
+  try {
+    const value = JSON.parse(response.stdout) as Partial<TaskFinalizationEnvelope>;
+    if (value.version === 2
+      && value.status
+      && ['completed', 'failed', 'blocked', 'unknown'].includes(value.status)
+      && (typeof value.changed === 'boolean' || value.changed === null)) {
+      return serializeTaskFinalizationEnvelope({
+        status: value.status,
+        changed: value.changed,
+        accepted: true,
+        requestId: response.id,
+        result: value.result ?? null,
+        error: value.error ?? null
+      });
+    }
+  } catch {
+    // Preserve non-envelope output for diagnostics from the executor.
+  }
+  return response.stdout;
+}
+
 function sandboxFinalizationClient(args: string[]): void {
   if (args.length !== 4 || !args[0] || args[1] !== 'complete' || args[2] !== '--agent' || !args[3]) {
     const error = { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'task ref, complete intent, and --agent are required', retryable: false };
@@ -63,7 +87,8 @@ function sandboxFinalizationClient(args: string[]): void {
     response = requestSandboxTaskFinalization({ agent });
   } catch (error) {
     if (!(error instanceof SandboxControlClientError)) throw error;
-    writeFinalizationEnvelope(finalizationErrorStatus(error.detail), error.accepted, error.detail);
+    const status = finalizationErrorStatus(error.detail);
+    writeFinalizationEnvelope(status, error.accepted, error.detail, status === 'unknown' ? null : false, null, error.requestId);
     writeClientError(error);
     process.exitCode = error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? 1 : error.detail.retryable ? 2 : 1;
     return;
@@ -74,12 +99,20 @@ function sandboxFinalizationClient(args: string[]): void {
       message: 'sandbox control rejected the finalization request',
       retryable: false
     };
-    writeFinalizationEnvelope(finalizationErrorStatus(error), error.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN', error);
+    const status = finalizationErrorStatus(error);
+    writeFinalizationEnvelope(
+      status,
+      error.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN',
+      error,
+      status === 'unknown' ? null : false,
+      null,
+      response.id
+    );
     process.stderr.write(`${error.message}\n`);
     process.exitCode = error.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? 1 : error.retryable ? 2 : 1;
     return;
   }
-  process.stdout.write(response.stdout);
+  process.stdout.write(finalizationResponseOutput(response));
   process.stderr.write(response.stderr);
   process.exitCode = response.exitCode ?? 1;
 }

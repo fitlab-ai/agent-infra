@@ -9,6 +9,7 @@ import {
   requestCodexControllerOpen,
   requestCodexControllerVerify,
   recoverSandboxControl,
+  recoverAcceptedTaskFinalization,
   requestSandboxControl,
   SandboxControlClientError,
   requestSandboxTaskCreate
@@ -42,6 +43,7 @@ import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { createLocalTask } from '../../../lib/task/create.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
+import { serializeTaskFinalizationEnvelope } from '../../../lib/task/finalization-envelope.ts';
 import { prepareTaskFinalization } from '../../../lib/task/finalization.ts';
 import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
@@ -277,6 +279,7 @@ function runTaskFinalizationClient(params: {
   token: string;
   generation: string;
   timeoutMs: number;
+  recoveryBudgetMs?: number;
   repoRoot?: string;
   taskId?: string;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
@@ -295,12 +298,13 @@ function runTaskFinalizationClient(params: {
     '    statusDir: process.env.TEST_STATUS_DIR,',
     '    token: process.env.TEST_TOKEN,',
     '    generation: process.env.TEST_GENERATION,',
-    '    timeoutMs: Number(process.env.TEST_TIMEOUT_MS)',
+    '    timeoutMs: Number(process.env.TEST_TIMEOUT_MS),',
+    '    recoveryBudgetMs: Number(process.env.TEST_RECOVERY_BUDGET_MS),',
     '  });',
-    "  process.stdout.write(JSON.stringify({ phase: response.phase, exitCode: response.exitCode, stdout: response.stdout, stderr: response.stderr, error: response.error }) + '\\n');",
+    "  process.stdout.write(JSON.stringify({ id: response.id, phase: response.phase, exitCode: response.exitCode, stdout: response.stdout, stderr: response.stderr, error: response.error }) + '\\n');",
     '} catch (error) {',
     '  const value = error;',
-    "  process.stdout.write(JSON.stringify({ error: value.detail ?? { code: 'CLIENT_FAILED', message: String(value), retryable: false }, accepted: value.accepted ?? false }) + '\\n');",
+    "  process.stdout.write(JSON.stringify({ error: value.detail ?? { code: 'CLIENT_FAILED', message: String(value), retryable: false }, accepted: value.accepted ?? false, requestId: value.requestId ?? null }) + '\\n');",
     '  process.exitCode = 1;',
     '}'
   ].join('\n');
@@ -321,6 +325,7 @@ function runTaskFinalizationClient(params: {
         TEST_TOKEN: params.token,
         TEST_GENERATION: params.generation,
         TEST_TIMEOUT_MS: String(params.timeoutMs),
+        TEST_RECOVERY_BUDGET_MS: String(params.recoveryBudgetMs ?? params.timeoutMs),
         TEST_REPO_ROOT: params.repoRoot,
         TEST_TASK_ID: params.taskId
       },
@@ -341,6 +346,46 @@ function runTaskFinalizationClient(params: {
       }
     });
   });
+}
+
+function runRecoverSandboxControl(params: {
+  channelDir: string;
+  requestId: string;
+  timeoutMs: number;
+  readyPath: string;
+}): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
+  const script = [
+    "import { recoverSandboxControl, SandboxControlClientError } from './lib/sandbox/control/client.ts';",
+    "import fs from 'node:fs';",
+    "fs.writeFileSync(process.env.TEST_READY_PATH, 'ready');",
+    'try {',
+    '  process.stdout.write(JSON.stringify(recoverSandboxControl(process.env.TEST_REQUEST_ID, {',
+    '    channelDir: process.env.TEST_CHANNEL_DIR,',
+    '    timeoutMs: Number(process.env.TEST_TIMEOUT_MS)',
+    "  })) + '\\n');",
+    '} catch (error) {',
+    '  const value = error;',
+    "  process.stdout.write(JSON.stringify({ error: value.detail ?? { code: 'CLIENT_FAILED', message: String(value), retryable: false }, accepted: value.accepted ?? false, requestId: value.requestId ?? null }) + '\\n');",
+    '  process.exitCode = 1;',
+    '}'
+  ].join('\n');
+  const child = collectChild(spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', '--input-type=module', '--eval', script], {
+    cwd: path.resolve('.'),
+    env: {
+      ...process.env,
+      AGENT_INFRA_CONTROL_DIR: undefined,
+      TEST_CHANNEL_DIR: params.channelDir,
+      TEST_REQUEST_ID: params.requestId,
+      TEST_TIMEOUT_MS: String(params.timeoutMs),
+      TEST_READY_PATH: params.readyPath
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  }));
+  return child.result.then(({ exitCode, stdout, stderr }) => ({
+    exitCode,
+    payload: JSON.parse(stdout) as Record<string, unknown>,
+    stderr
+  }));
 }
 
 function monotonicNowMs(): number {
@@ -1368,7 +1413,138 @@ test('sandbox control recovery reads the retained terminal response by request i
   }
 });
 
-test('task-finalization client exposes accepted result loss as a structured unknown result', async () => {
+test('sandbox control recovery waits for a published unknown response to become terminal', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-unknown-'));
+  const responsesDir = path.join(root, 'responses');
+  const readyPath = path.join(root, 'recover-ready');
+  const requestId = '44444444-4444-4444-8444-444444444444';
+  const responsePath = path.join(responsesDir, `${requestId}.json`);
+  fs.mkdirSync(responsesDir, { recursive: true });
+  fs.writeFileSync(responsePath, `${JSON.stringify({
+    version: 2, id: requestId, phase: 'rejected', exitCode: null,
+    stdout: '', stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  })}\n`);
+  const terminalResponse = {
+    version: 2, id: requestId, phase: 'completed', exitCode: 0,
+    stdout: 'finalization completed\n', stderr: '', error: null
+  };
+  const recovery = runRecoverSandboxControl({ channelDir: root, requestId, timeoutMs: 500, readyPath });
+  waitForFile(readyPath, 2_000);
+  const publishTerminal = new Promise<void>((resolve) => setTimeout(() => {
+    fs.writeFileSync(responsePath, `${JSON.stringify(terminalResponse)}\n`);
+    resolve();
+  }, 75));
+  try {
+    const result = await recovery;
+    await publishTerminal;
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(result.payload, terminalResponse);
+  } finally {
+    await publishTerminal;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control recovery times out on a stable published unknown with identity intact', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-stable-unknown-'));
+  const responsesDir = path.join(root, 'responses');
+  const readyPath = path.join(root, 'recover-ready');
+  const requestId = '66666666-6666-4666-8666-666666666666';
+  fs.mkdirSync(responsesDir, { recursive: true });
+  fs.writeFileSync(path.join(responsesDir, `${requestId}.json`), `${JSON.stringify({
+    version: 2, id: requestId, phase: 'rejected', exitCode: null,
+    stdout: '', stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  })}\n`);
+  try {
+    const result = await runRecoverSandboxControl({ channelDir: root, requestId, timeoutMs: 100, readyPath });
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(result.payload, {
+      error: {
+        code: 'SANDBOX_CONTROL_RESULT_UNKNOWN',
+        message: 'SANDBOX_CONTROL_RESULT_UNKNOWN: request did not produce a final result; inspect domain state before retrying',
+        retryable: false
+      },
+      accepted: true,
+      requestId
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control recovery polls a published unknown at the bounded cadence', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-cadence-'));
+  const responsesDir = path.join(root, 'responses');
+  const requestId = '77777777-7777-4777-8777-777777777777';
+  const responsePath = path.join(responsesDir, `${requestId}.json`);
+  fs.mkdirSync(responsesDir, { recursive: true });
+  fs.writeFileSync(responsePath, `${JSON.stringify({
+    version: 2, id: requestId, phase: 'rejected', exitCode: null,
+    stdout: '', stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  })}\n`);
+
+  let now = 1_000;
+  let responseReads = 0;
+  const waits: number[] = [];
+  const readFile = fs.readFileSync;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(Atomics, 'wait', (_array: Int32Array, _index: number, _value: number, timeout: number) => {
+    waits.push(timeout);
+    now += timeout;
+    return 'timed-out';
+  });
+  t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
+    if (String(args[0]) === responsePath) responseReads += 1;
+    return readFile(...args);
+  });
+
+  try {
+    assert.throws(
+      () => recoverSandboxControl(requestId, { channelDir: root, timeoutMs: 100 }),
+      (error: unknown) => error instanceof SandboxControlClientError
+        && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+        && error.accepted
+        && error.requestId === requestId
+    );
+    assert.deepEqual(waits, [25, 25, 25, 25]);
+    assert.equal(responseReads, 4);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('accepted finalization recovery bounds each call by the original total deadline', (t) => {
+  const requestId = '88888888-8888-4888-8888-888888888888';
+  let now = 1_000;
+  const timeoutCalls: number[] = [];
+  t.mock.method(Date, 'now', () => now);
+  const recover: typeof recoverSandboxControl = (id, params) => {
+    assert.equal(id, requestId);
+    const timeoutMs = params?.timeoutMs ?? 0;
+    timeoutCalls.push(timeoutMs);
+    now += timeoutMs;
+    throw new SandboxControlClientError({
+      code: 'SANDBOX_CONTROL_RESULT_UNKNOWN',
+      message: 'result unknown',
+      retryable: false
+    }, true, requestId);
+  };
+
+  assert.throws(
+    () => recoverAcceptedTaskFinalization(requestId, { recoveryBudgetMs: 75_000 }, recover),
+    (error: unknown) => error instanceof SandboxControlClientError
+      && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+      && error.accepted
+      && error.requestId === requestId
+  );
+  assert.deepEqual(timeoutCalls, [30_000, 30_000, 15_000]);
+  assert.equal(now, 76_000);
+});
+
+test('task-finalization client recovers a published accepted unknown without submitting another request', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-unknown-'));
   const channelDir = path.join(root, 'channel');
   const requestsDir = path.join(channelDir, 'requests');
@@ -1427,24 +1603,105 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
       error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
     })}\n`);
-    const result = await client.result;
-    assert.equal(result.exitCode, 1, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      version: 1,
-      status: 'unknown',
-      changed: false,
+    const recoveredFinalization = {
+      version: 2,
+      status: 'completed',
+      changed: true,
       accepted: true,
-      result: null,
-      error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
-    });
-    assert.match(result.stderr, /result unknown/);
+      requestId: requestName.slice(0, -5),
+      result: { status: 'completed' },
+      error: null
+    };
+    const publishTerminal = new Promise<void>((resolve) => setTimeout(() => {
+      fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+        version: 2,
+        id: requestName.slice(0, -5),
+        phase: 'completed',
+        exitCode: 0,
+        stdout: `${JSON.stringify(recoveredFinalization)}\n`,
+        stderr: '',
+        error: null
+      })}\n`);
+      resolve();
+    }, 75));
+    const result = await client.result;
+    await publishTerminal;
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), recoveredFinalization);
+    assert.equal(fs.readdirSync(requestsDir).filter((name) => name.endsWith('.json')).length, 1);
   } finally {
     await stopCollectedChild(client);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('task-bound finalization accepts a new request after accepted response loss', async () => {
+test('task-finalization unknown envelope preserves uncertainty and request identity', () => {
+  assert.deepEqual(JSON.parse(serializeTaskFinalizationEnvelope({
+    status: 'unknown',
+    changed: null,
+    accepted: true,
+    requestId: '55555555-5555-4555-8555-555555555555',
+    result: null,
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  })), {
+    version: 2,
+    status: 'unknown',
+    changed: null,
+    accepted: true,
+    requestId: '55555555-5555-4555-8555-555555555555',
+    result: null,
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  });
+});
+
+test('task-finalization recovery budget expires with the accepted request identity intact', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-recovery-budget-'));
+  const channelDir = path.join(root, 'channel');
+  const requestsDir = path.join(channelDir, 'requests');
+  const responsesDir = path.join(channelDir, 'responses');
+  const statusDir = path.join(root, 'public');
+  fs.mkdirSync(requestsDir, { recursive: true });
+  fs.mkdirSync(responsesDir);
+  fs.mkdirSync(statusDir);
+  const startTime = getProcessStartTime(process.pid);
+  assert.ok(startTime);
+  const generation = 'finalization-recovery-budget-generation';
+  fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+    version: 3, generation,
+    broker: { pid: process.pid, startTime, brokerId: 'finalization-broker' },
+    state: 'healthy', reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView()
+  })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
+  });
+  try {
+    const client = runTaskFinalizationClient({
+      channelDir, statusDir, token: 'finalization-secret', generation,
+      timeoutMs: 100, recoveryBudgetMs: 100
+    });
+    const requestName = await waitForRequestAsync(requestsDir, 2_000);
+    const requestId = requestName.slice(0, -5);
+    fs.writeFileSync(path.join(responsesDir, `${requestId}.accepted.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+    })}\n`);
+    const result = await client;
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(result.payload, {
+      error: {
+        code: 'SANDBOX_CONTROL_RESULT_UNKNOWN',
+        message: 'SANDBOX_CONTROL_RESULT_UNKNOWN: accepted finalization request remained unknown after the automatic recovery budget; inspect the receipt and resume by request id',
+        retryable: false
+      },
+      accepted: true,
+      requestId
+    });
+    assert.equal(fs.readdirSync(requestsDir).filter((name) => name.endsWith('.json')).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound finalization recovers the original request after accepted response loss', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-compensation-'));
   const taskId = 'TASK-20260809-010203';
   const token = 'lifecycle-secret';
@@ -1513,8 +1770,10 @@ test('task-bound finalization accepts a new request after accepted response loss
       }
     }, 250);
 
-    const serveOne = async (dropCompletedResponse: boolean) => {
+    let submissionCount = 0;
+    const serveFinalization = async () => {
       const requestName = await waitForRequestAsync(requestsDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+      submissionCount += 1;
       const requestPath = path.join(requestsDir, requestName);
       const request = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as { id: string; family: string; operation: string; agent: string };
       assert.equal(request.id, requestName.slice(0, -5));
@@ -1533,35 +1792,30 @@ test('task-bound finalization accepts a new request after accepted response loss
       })}\n`);
       prepared.start();
       const executionResult = await prepared.completion;
-      if (!dropCompletedResponse) {
-        fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
-          version: 2, id: request.id, phase: 'completed', exitCode: executionResult.exitCode,
-          stdout: executionResult.stdout, stderr: executionResult.stderr, error: null
-        })}\n`);
-      }
+      fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+        version: 2, id: request.id, phase: 'rejected', exitCode: null,
+        stdout: '', stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+        error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+      })}\n`);
+      await new Promise<void>((resolve) => setTimeout(resolve, 75));
+      fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+        version: 2, id: request.id, phase: 'completed', exitCode: executionResult.exitCode,
+        stdout: executionResult.stdout, stderr: executionResult.stderr, error: null
+      })}\n`);
       fs.rmSync(path.join(root, 'processing', request.id), { recursive: true, force: true });
       fs.rmSync(requestPath, { force: true });
       return executionResult;
     };
 
-    const firstBroker = serveOne(true);
-    const firstClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500, repoRoot: root, taskId });
-    const firstExecution = await firstBroker;
-    assert.equal(firstClient.exitCode, 1);
-    assert.equal((firstClient.payload.error as { code?: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
-    assert.equal(firstClient.payload.accepted, true);
-    assert.ok(firstExecution.stdout, firstExecution.stderr);
-    assert.equal(JSON.parse(firstExecution.stdout).status, 'completed', firstExecution.stdout);
+    const broker = serveFinalization();
+    const client = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500, repoRoot: root, taskId });
+    const execution = await broker;
+    assert.equal(client.exitCode, 0, client.stderr);
+    assert.equal(client.payload.phase, 'completed');
+    assert.ok(execution.stdout, execution.stderr);
+    assert.equal(JSON.parse(execution.stdout).status, 'completed', execution.stdout);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
-
-    const secondBroker = serveOne(false);
-    const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS, repoRoot: root, taskId });
-    const secondExecution = await secondBroker;
-    assert.equal(secondClient.exitCode, 0, secondClient.stderr);
-    assert.equal(secondClient.payload.exitCode, 0);
-    assert.equal(secondClient.payload.phase, 'completed');
-    assert.equal((JSON.parse(String(secondClient.payload.stdout)) as { status: string }).status, 'completed');
-    assert.equal(JSON.parse(secondExecution.stdout).status, 'completed');
+    assert.equal(submissionCount, 1);
   } finally {
     if (heartbeat) clearInterval(heartbeat);
     fs.rmSync(root, { recursive: true, force: true });
@@ -1853,9 +2107,10 @@ test('task-finalization reports unknown when shutdown precedes broker result pub
     controller.abort();
     await server;
     const client = await clientResult;
-    assert.equal(client.exitCode, 0, client.stderr);
-    assert.equal(client.payload.phase, 'rejected');
+    assert.equal(client.exitCode, 1);
     assert.equal((client.payload.error as { code: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(client.payload.accepted, true);
+    assert.equal(client.payload.requestId, processingEntries[0]);
     assert.equal(fs.readdirSync(manifest.processingDir).length, 1);
     assert.equal(resultReleased, false);
   } finally {
@@ -1923,9 +2178,10 @@ test('task-finalization preserves unknown result evidence when executor terminat
     controller.abort();
     await server;
     const client = await clientResult;
-    assert.equal(client.exitCode, 0, client.stderr);
-    assert.equal(client.payload.phase, 'rejected');
+    assert.equal(client.exitCode, 1);
     assert.equal((client.payload.error as { code: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(client.payload.accepted, true);
+    assert.equal(client.payload.requestId, requestId);
     assert.equal(terminateCalls, 1);
     assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`)), true);
     assert.equal(fs.existsSync(path.join(manifest.processingDir, requestId)), true);
