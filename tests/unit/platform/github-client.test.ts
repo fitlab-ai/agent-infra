@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import semver from 'semver';
 
-import { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse } from '../../../lib/platform/github-client.ts';
+import { createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse } from '../../../lib/platform/github-client.ts';
 
 test('GitHub client reads the CLI version without shell parsing', () => {
   const calls: string[][] = [];
@@ -39,22 +39,32 @@ test('GitHub client preserves argv and stdin without a shell', () => {
   }]);
 });
 
-test('GitHub failure classification distinguishes auth, permission and retryable failures', () => {
-  assert.equal(classifyGitHubFailure({ status: 1, stdout: '', stderr: 'HTTP 401: Bad credentials' }).code, 'AUTH_REQUIRED');
-  assert.equal(classifyGitHubFailure({ status: 1, stdout: '', stderr: 'HTTP 403: Resource not accessible' }).code, 'PERMISSION_DENIED');
-  const transient = classifyGitHubFailure({ status: 1, stdout: '', stderr: 'HTTP 429: rate limit' });
-  assert.equal(transient.code, 'NETWORK_TRANSIENT');
-  assert.equal(transient.retryable, true);
-  assert.equal(classifyGitHubFailure({ status: 1, stdout: '', stderr: 'dial tcp: i/o timeout' }).retryable, true);
-  assert.equal(classifyGitHubFailure({ status: 1, stdout: '', stderr: 'HTTP 422: validation failed' }).retryable, false);
+test('GitHub failure classification distinguishes auth, permission and transient failures', () => {
+  const classify = (stderr: string) => {
+    const result = createGitHubClient({
+      runner() { return { status: 1, stdout: '', stderr }; },
+      retryDelaysMs: []
+    }).json(['api', 'user'], { method: 'POST' });
+    assert.equal(result.ok, false);
+    return result.ok ? null : result.error.code;
+  };
+
+  assert.equal(classify('HTTP 401: Bad credentials'), 'AUTH_REQUIRED');
+  assert.equal(classify('HTTP 403: Resource not accessible'), 'PERMISSION_DENIED');
+  assert.equal(classify('HTTP 429: rate limit'), 'NETWORK_TRANSIENT');
+  assert.equal(classify('HTTP 422: validation failed'), 'PLATFORM_REQUEST_INVALID');
 });
 
 test('GitHub failure diagnostics redact token-shaped credentials before classification', () => {
-  const failure = classifyGitHubFailure({
-    status: 1,
-    stdout: '',
-    stderr: 'Bearer ghp_example_secret token short-secret https://example.test/?access_token=url-secret'
-  });
+  const result = createGitHubClient({
+    runner() {
+      return { status: 1, stdout: '', stderr: 'Bearer ghp_example_secret token short-secret https://example.test/?access_token=url-secret' };
+    },
+    retryDelaysMs: []
+  }).json(['api', 'user'], { method: 'POST' });
+  assert.equal(result.ok, false);
+  const failure = result.ok ? null : result.error;
+  assert.ok(failure);
   assert.doesNotMatch(failure.message, /ghp_example_secret|short-secret|url-secret/);
   assert.match(failure.message, /Bearer \[REDACTED_TOKEN\]/);
   assert.match(failure.message, /token \[REDACTED_TOKEN\]/);
@@ -63,10 +73,32 @@ test('GitHub failure diagnostics redact token-shaped credentials before classifi
 
 test('GitHub failure classification rejects output overflow without replaying or echoing response bodies', () => {
   const error = Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
-  const failure = classifyGitHubFailure({ status: null, stdout: 'private-response-body'.repeat(100_000), stderr: '', error });
+  const result = createGitHubClient({
+    runner() { return { status: null, stdout: 'private-response-body'.repeat(100_000), stderr: '', error }; },
+    retryDelaysMs: []
+  }).json(['api', 'user'], { method: 'POST' });
+  assert.equal(result.ok, false);
+  const failure = result.ok ? null : result.error;
+  assert.ok(failure);
   assert.equal(failure.code, 'PLATFORM_OUTPUT_TOO_LARGE');
-  assert.equal(failure.retryable, false);
   assert.equal(failure.message, 'GitHub CLI output exceeded the configured limit');
+});
+
+test('GitHub client keeps request retry classification inside the client result boundary', () => {
+  let attempts = 0;
+  const result = createGitHubClient({
+    runner() {
+      attempts += 1;
+      return { status: 1, stdout: '', stderr: 'HTTP 401: Bad credentials' };
+    },
+    retryDelaysMs: []
+  }).json(['api', 'user']);
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: { code: 'AUTH_REQUIRED', message: 'HTTP 401: Bad credentials' }
+  });
+  assert.equal(attempts, 1);
 });
 
 test('GitHub client retries reads but does not blindly replay posts', () => {

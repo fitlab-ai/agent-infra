@@ -10,6 +10,7 @@ import { applyWorkflowWarningIntent } from '../task/workflow-warning-intents.ts'
 import { captureTaskWriteMetadata } from '../task/write.ts';
 import { syncPlatformComment } from './issue-comments.ts';
 import type { PlatformClient } from './context.ts';
+import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import { taskIssueIdentity } from './task-identities.ts';
@@ -151,7 +152,7 @@ async function backfillCompletionComments(
     })));
     artifacts.push({ artifact: artifact.name, status: latest.status });
     if (latest.status === 'failed' || latest.status === 'blocked') return result({ ...latest, operations }, artifacts, []);
-    if (latest.error) return result(platformResult(latest.error.retryable ? 'blocked' : 'failed', {
+    if (latest.error) return result(platformResult(latest.error.retryable || providerErrorRetryable(latest.error.code) ? 'blocked' : 'failed', {
       platform: latest.platform,
       resource: latest.resource,
       capabilities: latest.capabilities,

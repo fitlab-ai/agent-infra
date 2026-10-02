@@ -367,7 +367,7 @@ function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
   return { ok: true, value: { changed: true, remoteId } };
 }
 
-function partialFailure<T>(response: { ok: false; error: PlatformError }, value: T): ProviderResult<T> {
+function partialFailure<T>(response: { ok: false; error: PlatformError | ProviderError }, value: T): ProviderResult<T> {
   return { ok: false, error: providerError(response.error), value };
 }
 
