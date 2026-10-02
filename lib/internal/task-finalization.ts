@@ -3,10 +3,8 @@ import {
   dispatchTaskControlOperation,
   parseTaskControlOperation
 } from '../task/control-authority.ts';
-import { applyTaskFinalization, bindTaskFinalizationReceipt, prepareTaskFinalization } from '../task/finalization.ts';
-import { publishTaskFinalizationHandoff } from '../task/finalization-handoff.ts';
+import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
-import { verifyTaskEvent } from '../task/verification.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
 import { requestSandboxTaskFinalization, SandboxControlClientError } from '../sandbox/control/client.ts';
 import { serializeTaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
@@ -81,22 +79,9 @@ async function taskFinalization(args: string[] = []): Promise<void> {
   };
   const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
   if (transport.kind === 'sandbox-local') {
-    const prepared = await prepareTaskFinalization(boundOperation.request, {
-      repoRoot,
-      preflight: (request, options) => verifyTaskEvent({ ...request, event: 'complete-task.hard-preflight' }, options)
-    });
-    if (prepared.status !== 'prepared') {
-      process.stdout.write(envelope(prepared.status, prepared.changed, true, prepared, prepared.error));
-      process.exitCode = exitCode(prepared.status);
-      return;
-    }
     try {
       const response = requestSandboxTaskFinalization({
-        agent: boundOperation.request.agent,
-        prepareHandoff: (binding) => {
-          const receipt = bindTaskFinalizationReceipt(repoRoot, boundOperation.request.taskRef, binding);
-          return publishTaskFinalizationHandoff('/share/branch', receipt, binding);
-        }
+        agent: boundOperation.request.agent
       });
       process.stdout.write(response.stdout);
       process.stderr.write(response.stderr);

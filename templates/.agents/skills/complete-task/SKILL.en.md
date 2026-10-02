@@ -207,14 +207,7 @@ original request ID:
 agent-infra-internal sandbox-control recover <request-id>
 ```
 
-If the request ID is missing or the receipt cannot be read, keep the result
-pending and recover the original ID only from stderr, a handoff, or the receipt;
-do not look it up by task key. The broker's
-`processing/<request-id>/result.json` is private transport evidence, not a task
-receipt, and cannot by itself prove completion. The finalization receipt and
-the host completion gate remain authoritative. Use a new request ID only when
-the request was rejected before acceptance and the error's retryability allows
-it.
+Do not submit a new request for an accepted task finalization. If the request ID is missing or the receipt cannot be read, keep the result pending and recover the original ID only from stderr, a handoff, or the receipt; do not look it up by task key. The broker's `processing/<request-id>/result.json` is private transport evidence, not a task receipt, and cannot by itself prove completion. The finalization receipt and host completion gate remain authoritative. If recovery with the same ID still has no terminal result, inspect broker and host executor activity. Stop and preserve the original request ID while a request is active, the broker is busy, or status is unknown. Retry with a new request ID only after confirming that the original request never started or its executor has ended; the new request performs the full prepare and commit after broker admission. Only a request rejected before acceptance may be retried directly with a new request ID according to the error's retryability.
 
 ### 8. Inform User
 

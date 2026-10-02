@@ -115,7 +115,8 @@ function preflight(
 }
 
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
-  if (request.family === 'task-lifecycle' || request.family === 'task-finalization') return 'progress';
+  if (request.family === 'task-lifecycle') return 'progress';
+  if (request.family === 'task-finalization') return 'recovery';
   return null;
 }
 
