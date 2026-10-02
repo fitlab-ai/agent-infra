@@ -185,7 +185,7 @@ finalization 按允许的 artifact backfill → lifecycle → task 评论 → co
 
 场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新核对允许的 artifact 回填、终态 task 评论、完成校验，并使用保留的 durable staging record 重做 summary seal；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若回填、task 评论、summary seal 或校验因网络问题返回 `blocked`，保留 receipt、durable staging record 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
 
-完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。`completed` 或 `completed_with_warnings` 才允许继续；`failed` / `blocked` / `unknown` 必须保留 receipt 并停止，之后通过同一 finalization 入口重试。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
+完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。只有 `completed` 或 `completed_with_warnings` 允许继续。`failed` / `blocked` 是宿主明确返回的失败或阻塞结果：保留 receipt，停止当前流程，并按宿主返回的状态和错误处理；只有宿主状态允许且原因已修复时，才重新调用 finalization。若 `accepted=true` 的请求结果为 `unknown`，保留 receipt 和原 request ID；不得重发 task-finalization，只能通过 `sandbox-control recover <同一 request-id>` 查询原请求。只有请求在 accepted 之前被拒绝，且错误允许重试时，才可创建新请求。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
 
 ### accepted 后的 sandbox-control 结果恢复
 

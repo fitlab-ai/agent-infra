@@ -9,6 +9,7 @@ import {
   requestCodexControllerOpen,
   requestCodexControllerVerify,
   recoverSandboxControl,
+  recoverAcceptedTaskFinalization,
   requestSandboxControl,
   SandboxControlClientError,
   requestSandboxTaskCreate
@@ -1471,6 +1472,76 @@ test('sandbox control recovery times out on a stable published unknown with iden
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('sandbox control recovery polls a published unknown at the bounded cadence', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-cadence-'));
+  const responsesDir = path.join(root, 'responses');
+  const requestId = '77777777-7777-4777-8777-777777777777';
+  const responsePath = path.join(responsesDir, `${requestId}.json`);
+  fs.mkdirSync(responsesDir, { recursive: true });
+  fs.writeFileSync(responsePath, `${JSON.stringify({
+    version: 2, id: requestId, phase: 'rejected', exitCode: null,
+    stdout: '', stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  })}\n`);
+
+  let now = 1_000;
+  let responseReads = 0;
+  const waits: number[] = [];
+  const readFile = fs.readFileSync;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(Atomics, 'wait', (_array: Int32Array, _index: number, _value: number, timeout: number) => {
+    waits.push(timeout);
+    now += timeout;
+    return 'timed-out';
+  });
+  t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
+    if (String(args[0]) === responsePath) responseReads += 1;
+    return readFile(...args);
+  });
+
+  try {
+    assert.throws(
+      () => recoverSandboxControl(requestId, { channelDir: root, timeoutMs: 100 }),
+      (error: unknown) => error instanceof SandboxControlClientError
+        && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+        && error.accepted
+        && error.requestId === requestId
+    );
+    assert.deepEqual(waits, [25, 25, 25, 25]);
+    assert.equal(responseReads, 4);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('accepted finalization recovery bounds each call by the original total deadline', (t) => {
+  const requestId = '88888888-8888-4888-8888-888888888888';
+  let now = 1_000;
+  const timeoutCalls: number[] = [];
+  t.mock.method(Date, 'now', () => now);
+  const recover: typeof recoverSandboxControl = (id, params) => {
+    assert.equal(id, requestId);
+    const timeoutMs = params?.timeoutMs ?? 0;
+    timeoutCalls.push(timeoutMs);
+    now += timeoutMs;
+    throw new SandboxControlClientError({
+      code: 'SANDBOX_CONTROL_RESULT_UNKNOWN',
+      message: 'result unknown',
+      retryable: false
+    }, true, requestId);
+  };
+
+  assert.throws(
+    () => recoverAcceptedTaskFinalization(requestId, { recoveryBudgetMs: 75_000 }, recover),
+    (error: unknown) => error instanceof SandboxControlClientError
+      && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+      && error.accepted
+      && error.requestId === requestId
+  );
+  assert.deepEqual(timeoutCalls, [30_000, 30_000, 15_000]);
+  assert.equal(now, 76_000);
 });
 
 test('task-finalization client recovers a published accepted unknown without submitting another request', async () => {

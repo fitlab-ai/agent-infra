@@ -444,16 +444,17 @@ export function requestSandboxTaskFinalization(params: Readonly<{
   return response;
 }
 
-function recoverAcceptedTaskFinalization(
+export function recoverAcceptedTaskFinalization(
   requestId: string,
-  params: Readonly<{ channelDir?: string; recoveryBudgetMs?: number }>
+  params: Readonly<{ channelDir?: string; recoveryBudgetMs?: number }>,
+  recover: typeof recoverSandboxControl = recoverSandboxControl
 ): SandboxControlResponse {
   const deadline = Date.now() + (params.recoveryBudgetMs ?? SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS);
   while (Date.now() < deadline) {
     const timeoutMs = Math.min(30_000, deadline - Date.now());
     if (timeoutMs <= 0) break;
     try {
-      const response = recoverSandboxControl(requestId, { channelDir: params.channelDir, timeoutMs });
+      const response = recover(requestId, { channelDir: params.channelDir, timeoutMs });
       if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') continue;
       return response;
     } catch (error) {
