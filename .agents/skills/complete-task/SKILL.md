@@ -189,19 +189,25 @@ finalization 按允许的 artifact backfill → lifecycle → task 评论 → co
 
 ### accepted 后的 sandbox-control 结果恢复
 
-如果本技能在沙箱内执行，且 control client 报告请求已经 accepted 但没有
-terminal result，必须保留原 request identity。此时 client 会在 stderr 输出
-`SANDBOX_CONTROL_REQUEST_ID: <request-id>`。broker 恢复健康后，使用同一个
-request ID 读取 terminal response：
+如果本技能在沙箱内执行，且 task-finalization 请求已经 accepted 但暂时没有
+terminal result，client 会从首次 unknown 开始自动按同一个 request ID 恢复，
+总预算为 5 分钟，每次 recover 最多 30 秒；published unknown 会在当前调用中
+按 25ms 间隔重读，预算用尽后立即继续 recover，不额外等待。client 会在 stderr
+输出 `SANDBOX_CONTROL_REQUEST_ID: <request-id>`。
+
+5 分钟后仍没有 terminal result 时，必须保留 receipt 和 request ID，并将结果视为
+pending/unknown；不得重发 task-finalization。broker 恢复健康后，只能继续查询原
+request ID：
 
 ```bash
 agent-infra-internal sandbox-control recover <request-id>
 ```
 
-accepted 的 task finalization 不得提交新请求。broker 的
-`processing/<request-id>/result.json` 只是私有 transport evidence，不是 task
-receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验仍是
-权威。如果请求在 accepted 之前已被拒绝，则可依据错误的 retryability 使用
+accepted 的 task finalization 不得提交新请求。若 request ID 缺失或 receipt 无法
+读取，保持 pending；只从 stderr、handoff 或 receipt 中恢复原 ID，不按 task key
+查询。broker 的 `processing/<request-id>/result.json` 只是私有 transport evidence，
+不是 task receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验
+仍是权威。只有请求在 accepted 之前已被拒绝，才可依据错误的 retryability 使用
 新的 request ID。
 
 ### 8. 告知用户

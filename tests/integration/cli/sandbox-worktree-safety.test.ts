@@ -333,7 +333,7 @@ function writeTaskBoundCleanupEvidence(
     id: requestId,
     phase: "completed",
     exitCode: 0,
-    stdout: `${JSON.stringify({ version: 1, status: "completed", changed: false, accepted: true, result, error: null })}\n`,
+    stdout: `${JSON.stringify({ version: 2, status: "completed", changed: false, accepted: true, requestId: null, result, error: null })}\n`,
     stderr: "",
     error: null
   })}\n`, "utf8");

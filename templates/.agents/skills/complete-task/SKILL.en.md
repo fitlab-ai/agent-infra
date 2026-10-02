@@ -188,23 +188,33 @@ Both Scenario A and Scenario B `finalization-retry` run the same `task-finalizat
 
 Consume the structured finalization result, receipt, and warning projection directly. Continue only for `completed` or `completed_with_warnings`; preserve the receipt and stop for `failed`, `blocked`, or `unknown`, then retry through the same finalization entry point. Do not run `ls completed` or `task-verify complete-task.completed` from a stale sandbox mount, and do not let that local result overrule the host result.
 
-### Accepted sandbox-control result recovery
+### Recovering an accepted sandbox-control result
 
-When this skill is invoked from a sandbox and the control client reports an
-accepted request without a terminal result, preserve the request identity. The
-client prints `SANDBOX_CONTROL_REQUEST_ID: <request-id>` on stderr for this
-case. After the broker is healthy again, recover the same terminal response:
+When this skill runs in a sandbox and an accepted task-finalization request has
+no terminal result yet, the client automatically recovers under the same
+request ID. The five-minute total budget starts with the first unknown result;
+each recover call is limited to 30 seconds. While a published unknown response
+is present, the client rereads it every 25 ms during that call. When a recover
+call times out with unknown, the client continues immediately without an extra
+wait. The client prints `SANDBOX_CONTROL_REQUEST_ID: <request-id>` on stderr.
+
+If no terminal result arrives within five minutes, preserve the receipt and
+request ID and treat the result as pending/unknown. Do not resubmit
+task-finalization. Once the broker is healthy, continue querying only the
+original request ID:
 
 ```bash
 agent-infra-internal sandbox-control recover <request-id>
 ```
 
-Do not submit a new request for an accepted task finalization. The broker's
-`processing/<request-id>/result.json` is private transport evidence; it is not
-a task receipt and cannot by itself prove completion. The finalization receipt
-and the host completion gate remain authoritative. If the request was rejected
-before acceptance, a new request ID may be used according to the error's
-retryability.
+If the request ID is missing or the receipt cannot be read, keep the result
+pending and recover the original ID only from stderr, a handoff, or the receipt;
+do not look it up by task key. The broker's
+`processing/<request-id>/result.json` is private transport evidence, not a task
+receipt, and cannot by itself prove completion. The finalization receipt and
+the host completion gate remain authoritative. Use a new request ID only when
+the request was rejected before acceptance and the error's retryability allows
+it.
 
 ### 8. Inform User
 

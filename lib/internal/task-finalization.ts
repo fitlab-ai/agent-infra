@@ -9,6 +9,7 @@ import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { verifyTaskEvent } from '../task/verification.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
 import { requestSandboxTaskFinalization, SandboxControlClientError } from '../sandbox/control/client.ts';
+import { serializeTaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-finalization <N | TASK-id> complete --agent <agent>\n';
@@ -17,12 +18,13 @@ type FinalizationError = Readonly<{ code: string; message: string; retryable: bo
 
 function envelope(
   status: 'completed' | 'failed' | 'blocked' | 'unknown',
-  changed: boolean,
+  changed: boolean | null,
   accepted: boolean,
   result: Awaited<ReturnType<typeof applyTaskFinalization>> | null,
-  error: FinalizationError | null
+  error: FinalizationError | null,
+  requestId: string | null = null
 ): string {
-  return `${JSON.stringify({ version: 1, status, changed, accepted, result, error })}\n`;
+  return serializeTaskFinalizationEnvelope({ status, changed, accepted, requestId, result, error });
 }
 
 function exitCode(status: 'completed' | 'failed' | 'blocked' | 'unknown'): number {
@@ -101,11 +103,16 @@ async function taskFinalization(args: string[] = []): Promise<void> {
       process.exitCode = response.exitCode ?? 1;
       return;
     } catch (error) {
-      const detail = error instanceof SandboxControlClientError
-        ? error.detail
+      const clientError = error instanceof SandboxControlClientError ? error : null;
+      const detail = clientError
+        ? clientError.detail
         : { code: 'SANDBOX_CONTROL_CLIENT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false };
-      process.stdout.write(envelope(detail.retryable ? 'blocked' : 'failed', false, false, null, detail));
-      process.exitCode = detail.retryable ? 2 : 1;
+      const status = detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
+        ? 'unknown'
+        : detail.retryable ? 'blocked' : 'failed';
+      const changed = status === 'unknown' ? null : false;
+      process.stdout.write(envelope(status, changed, clientError?.accepted ?? false, null, detail, clientError?.requestId ?? null));
+      process.exitCode = exitCode(status);
       return;
     }
   }
