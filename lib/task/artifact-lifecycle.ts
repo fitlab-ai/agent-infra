@@ -358,7 +358,8 @@ function hasSelectionEvidence(
   pathState: LifecyclePathState
 ): boolean {
   if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) return true;
-  if (options.reasonCode === 'new-requirement' || options.reasonCode === 'upstream-fact-doubt') return true;
+  if (options.reasonCode === 'new-requirement' || options.reasonCode === 'upstream-fact-doubt'
+    || family === 'review-code' && options.reasonCode === 'manual-review-supplement') return true;
   if ((family === 'plan' || family === 'code') && context.latest) {
     const latestInputs = Object.fromEntries(context.inputs.map((input) => [input.family, input.name]));
     const capturedInputs = receiptsForOutput(content, context.latest.name)

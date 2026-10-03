@@ -31,6 +31,8 @@ The core reads the path decision from the latest analysis and selects the lifecy
 > - `rev_max == code_max`: AI fix round (`review-code` reviews the same-numbered code artifact produced by `code-task`).
 > - `rev_max > code_max`: human-supplemented review round — after a PR is opened a maintainer appends a `review-code-r{N}` round against the existing latest code. `fix` mode then uses `next_round = code_max + 1`.
 >
+> To add human opinions against the same code snapshot, first run `task-artifact inspect --family review-code --reason-code manual-review-supplement` to open a review round, then record `review-code.started` with `--initiator human --reason-code manual-review-supplement`. Findings in the new report enter the regular `code-task` fix mode.
+>
 > If the latest `review-code` verdict cannot be parsed, the script still returns `error` (exit 2) as the retained anomaly guard.
 
 ## Verdict Parsing

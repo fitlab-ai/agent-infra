@@ -9,7 +9,7 @@ description: >
 # 代码审查
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 summary finalizer 与 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。生命周期事件还必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request` 或 `review-finding`；started 与 completed 使用同一组值。
+若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 summary finalizer 与 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。生命周期事件还必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，普通调用的 `{reason-code}` 使用 `user-request` 或 `review-finding`；仅用户明确要求补充审查时，使用 `--initiator human --reason-code manual-review-supplement`。started 与 completed 使用同一组值。
 
 审查最新代码轮次，并产出 `review-code.md` 或 `review-code-r{N}.md`。
 
@@ -59,7 +59,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} review-code.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`。
+确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} review-code.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`。人工补充轮次使用 `--initiator human --reason-code manual-review-supplement`，并在报告中逐项记录人工意见、核实证据和 finding 处置。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -70,7 +70,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 2. 解析审查上下文
 
-运行 `agent-infra-internal task-artifact {task-id} inspect --family review-code`。仅当结果为 `ready` 时继续。若 `selection.disposition` 为 `reuse`，复用 `selection.artifact`，不得执行 started、init 或写入新产物，并直接进入完成校验与下一步提示。其他状态从 `inputs` 读取可用的最新 `{code-artifact}` 和 `{plan-artifact}`，从 `next.round` / `next.name` 取得 `{review-round}` / `{review-artifact}`；不得自行扫描轮次或拼装文件名。若没有 code 或 plan artifact，直接审查 Git 差异，并在报告中说明缺少的上下文。随后执行 started 事件并复核返回身份。
+正常审查运行 `agent-infra-internal task-artifact {task-id} inspect --family review-code`。当用户明确要求将人工补充意见作为新一轮检视，或在当前请求中提供了需要核实的人工检视意见时，使用 `--reason-code manual-review-supplement` 检查并开启补充轮次。该原因仅允许人工发起的 `review-code`；不得仅因普通审查重复运行而使用。仅当结果为 `ready` 时继续。正常审查若 `selection.disposition` 为 `reuse`，复用 `selection.artifact`，不得执行 started、init 或写入新产物，并直接进入完成校验与下一步提示。补充审查得到 `create` 时按新轮次继续。其他状态从 `inputs` 读取可用的最新 `{code-artifact}` 和 `{plan-artifact}`，从 `next.round` / `next.name` 取得 `{review-round}` / `{review-artifact}`；不得自行扫描轮次或拼装文件名。若没有 code 或 plan artifact，直接审查 Git 差异，并在报告中说明缺少的上下文。随后执行 started 事件并复核返回身份。
 
 ### 3. 阅读实现与修复上下文
 

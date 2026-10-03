@@ -107,6 +107,21 @@ test('review-code authorization does not require a code lifecycle artifact', () 
   assert.equal(result.allowed, true);
 });
 
+test('manual review supplement requires a human-initiated review-code event', () => {
+  const state = {
+    ...facts('code-review'), pathState: pathState('标准路径'),
+    artifacts: { ...facts('code-review').artifacts, analysis: ['analysis.md'], plan: ['plan.md'] }
+  } satisfies LifecycleFacts;
+  const triggerForSupplement = {
+    ...trigger, requestedAction: 'review-code' as const, reasonCode: 'manual-review-supplement' as const
+  };
+  assert.equal(canStart('review-code', state, { ...triggerForSupplement, initiator: 'human' }).allowed, true);
+  assert.equal(canStart('review-code', state, { ...triggerForSupplement, initiator: 'model' }).reasonCode,
+    'MANUAL_REVIEW_SUPPLEMENT_REQUIRES_HUMAN_REVIEW_CODE');
+  assert.equal(canStart('code', state, { ...triggerForSupplement, requestedAction: 'code', initiator: 'human' }).reasonCode,
+    'MANUAL_REVIEW_SUPPLEMENT_REQUIRES_HUMAN_REVIEW_CODE');
+});
+
 test('pending rework pauses authorization except for an explicit new requirement', () => {
   const paused = {
     ...facts('code'),

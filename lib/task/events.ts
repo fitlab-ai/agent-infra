@@ -169,7 +169,7 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
   if (request.verdict && !['approved', 'changes-requested', 'rejected'].includes(request.verdict)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'verdict is invalid' };
   if (request.initiator && !['human', 'model', 'orchestrator'].includes(request.initiator)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'initiator is invalid' };
   if (request.requestId !== undefined && (!request.requestId.trim() || /[\r\n]/.test(request.requestId))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'requestId must be a non-empty single line' };
-  if (request.reasonCode && !['user-request', 'new-requirement', 'upstream-fact-doubt', 'review-finding', 'retry', 'validation-rerun'].includes(request.reasonCode)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'reasonCode is invalid' };
+  if (request.reasonCode && !['user-request', 'new-requirement', 'upstream-fact-doubt', 'review-finding', 'manual-review-supplement', 'retry', 'validation-rerun'].includes(request.reasonCode)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'reasonCode is invalid' };
   for (const [name, value] of [['sourceFinding', request.sourceFinding], ['sourceArtifact', request.sourceArtifact], ['sourceSha256', request.sourceSha256]] as const) {
     if (value !== undefined && (!value.trim() || /[\r\n]/.test(value))) return { code: 'EVENT_PAYLOAD_INVALID', message: `${name} must be a non-empty single line` };
   }

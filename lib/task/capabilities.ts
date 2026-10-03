@@ -26,7 +26,7 @@ type LifecycleAction =
   | 'analysis' | 'review-analysis' | 'plan' | 'review-plan'
   | 'code' | 'review-code' | 'manual-validation' | 'validation-run';
 type TriggerInitiator = 'human' | 'model' | 'orchestrator';
-type TriggerReason = 'user-request' | 'new-requirement' | 'upstream-fact-doubt' | 'review-finding' | 'retry' | 'validation-rerun';
+type TriggerReason = 'user-request' | 'new-requirement' | 'upstream-fact-doubt' | 'review-finding' | 'manual-review-supplement' | 'retry' | 'validation-rerun';
 type ExplicitTrigger = {
   initiator: TriggerInitiator;
   requestId: string;
@@ -73,7 +73,7 @@ type LifecycleFactsResult =
   | { ok: false; code: 'TASK_CAPABILITY_FACTS_INVALID'; message: string };
 
 const REASONS = new Set<TriggerReason>([
-  'user-request', 'new-requirement', 'upstream-fact-doubt', 'review-finding', 'retry', 'validation-rerun'
+  'user-request', 'new-requirement', 'upstream-fact-doubt', 'review-finding', 'manual-review-supplement', 'retry', 'validation-rerun'
 ]);
 
 function deny(reasonCode: string, ...evidence: string[]): CapabilityResult {
@@ -97,6 +97,9 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   if (!trigger || trigger.requestedAction !== action) return deny('TRIGGER_ACTION_MISMATCH', `requested=${trigger?.requestedAction ?? 'missing'}`);
   if (!trigger.requestId || !trigger.requestId.trim()) return deny('TRIGGER_REQUEST_ID_REQUIRED');
   if (!REASONS.has(trigger.reasonCode)) return deny('TRIGGER_REASON_INVALID');
+  if (trigger.reasonCode === 'manual-review-supplement' && (action !== 'review-code' || trigger.initiator !== 'human')) {
+    return deny('MANUAL_REVIEW_SUPPLEMENT_REQUIRES_HUMAN_REVIEW_CODE');
+  }
   if (trigger.sourceArtifact && !trigger.sourceSha256) return deny('SOURCE_ARTIFACT_HASH_REQUIRED');
   if (trigger.sourceSha256 && !trigger.sourceArtifact) return deny('SOURCE_ARTIFACT_REQUIRED');
   if (trigger.sourceArtifact && trigger.sourceSha256) {
