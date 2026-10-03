@@ -55,6 +55,10 @@ const codexAdapter = defineAgentClientAdapter({
       versionCmd: 'codex --version',
       setupHint: 'Run codex once inside the container and choose Device Code login if needed.',
       tmpfs: { size: '512m', seed: ['config.toml', 'model-catalogs'], exec: true },
+      hostStateMounts: [{
+        hostSubdir: 'packages/app-server-daemon',
+        containerSubpath: 'packages/app-server-daemon'
+      }],
       hostLiveMounts: [
         {
           hostPath: hostJoin(home, '.codex', 'auth.json'),

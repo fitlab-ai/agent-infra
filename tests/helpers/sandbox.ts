@@ -80,6 +80,7 @@ function writeSandboxEngineFixture(
       id: adapter.id,
       containerMount: tool.containerMount,
       hostLiveMounts: tool.hostLiveMounts ?? [],
+      hostStateMounts: tool.hostStateMounts ?? [],
       tmpfs: tool.tmpfs ?? null
     };
   });
@@ -299,6 +300,11 @@ function writeSandboxEngineFixture(
       "        const source = live.hostPath.replace(fixtureHome, home);",
       "        const destination = path.posix.join(fixture.containerMount, live.containerSubpath);",
       "        if (fs.existsSync(source)) defaults.push({ Type: 'bind', Source: source, Destination: destination, RW: true });",
+      "      }",
+      "      for (const stateMount of fixture.hostStateMounts) {",
+      "        const source = path.join(home, '.agent-infra', 'sandboxes', toolId, project, branchDir, stateMount.hostSubdir);",
+      "        const destination = path.posix.join(fixture.containerMount, stateMount.containerSubpath);",
+      "        defaults.push({ Type: 'bind', Source: source, Destination: destination, RW: true });",
       "      }",
       "    }",
       "    for (const mount of defaults.filter((mount) => mount.Type === 'bind' && !fs.existsSync(mount.Source))) {",

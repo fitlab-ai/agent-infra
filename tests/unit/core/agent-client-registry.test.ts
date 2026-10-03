@@ -569,6 +569,7 @@ test('Codex adapter owns its lifecycle and recovery capabilities', () => {
     [
       { id: 'command-available', repairKind: 'hard-failure' },
       { id: 'state-writable', repairKind: 'permissions' },
+      { id: 'app-server-package-writable', repairKind: 'hard-failure' },
       { id: 'prompts-link', repairKind: 'builtin-link' }
     ]
   );

@@ -800,6 +800,15 @@ function expectedMounts(params: {
       hostPaths: toolConfigDirCandidates(tool, config.project, branch),
       expectedRW: true
     }));
+  const hostState = tools.flatMap((tool) =>
+    (tool.hostStateMounts ?? []).map(({ hostSubdir, containerSubpath }) => ({
+      path: path.posix.join(tool.containerMount, containerSubpath),
+      expectedType: 'bind' as const,
+      hostPaths: toolConfigDirCandidates(tool, config.project, branch)
+        .map((candidate) => path.join(candidate, hostSubdir)),
+      expectedRW: true
+    }))
+  );
   const staging = tools.flatMap((tool) =>
     (tool.tmpfs?.seed ?? []).flatMap((seedEntry, index) => {
       const stagingPath = `/run/agent-infra/tmpfs-seeds/${tool.id}/${index}`;
@@ -817,6 +826,7 @@ function expectedMounts(params: {
     ...core,
     ...persistentTools,
     ...live,
+    ...hostState,
     ...staging,
     ...tools
       .filter((tool) => tool.tmpfs)

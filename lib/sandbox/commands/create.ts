@@ -1251,6 +1251,9 @@ export async function create(
         task: async () => {
           for (const { tool, dir } of effectiveResolvedTools) {
             fs.mkdirSync(dir, { recursive: true });
+            for (const { hostSubdir } of tool.hostStateMounts ?? []) {
+              fs.mkdirSync(path.join(dir, hostSubdir), { recursive: true });
+            }
 
             for (const { hostPath, sandboxName } of tool.hostPreSeedFiles ?? []) {
               const destination = path.join(dir, sandboxName);
@@ -1518,6 +1521,12 @@ export async function create(
                   volumeArg(engine, hostPath, path.posix.join(tool.containerMount, containerSubpath))
                 ])
             );
+            const hostStateMountVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
+              (tool.hostStateMounts ?? []).flatMap(({ hostSubdir, containerSubpath }) => [
+                '-v',
+                volumeArg(engine, path.join(dir, hostSubdir), path.posix.join(tool.containerMount, containerSubpath))
+              ])
+            );
 
             fs.mkdirSync(shareCommon, { recursive: true });
             fs.mkdirSync(shareBranch, { recursive: true });
@@ -1582,6 +1591,7 @@ export async function create(
               ...tmpfsArgs,
               ...tmpfsSeedPlan.flatMap(({ volumeArgs }) => volumeArgs),
               ...liveMountVolumes,
+              ...hostStateMountVolumes,
               ...envFile.dockerArgs,
               ...tzFlags,
               '-w',
