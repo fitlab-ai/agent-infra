@@ -43,6 +43,7 @@ test('sandbox workflow and orchestration commands execute locally without publis
     })}\n`);
     const env = {
       ...sandboxControlSafeEnv(gitEnv),
+      AGENT_INFRA_SANDBOX: '1',
       AGENT_INFRA_TASK_ID: TASK_ID,
       AGENT_INFRA_CONTROL_TOKEN: 'local-token',
       AGENT_INFRA_CONTROL_GENERATION: generation,

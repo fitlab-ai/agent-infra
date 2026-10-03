@@ -9,6 +9,7 @@ import {
   requestCodexControllerOpen,
   requestCodexControllerVerify,
   recoverSandboxControl,
+  recoverSandboxControlFromChannel,
   recoverAcceptedTaskFinalization,
   requestSandboxControl,
   SandboxControlClientError,
@@ -36,7 +37,13 @@ import {
   writeSandboxControlResultEvidence,
   writeSandboxControlTerminalResult
 } from '../../../lib/sandbox/control/state.ts';
-import { writeSandboxControlTransition } from '../../../lib/sandbox/control/audit.ts';
+import {
+  appendCriticalAudit,
+  appendDiagnosticAudit,
+  createSandboxControlAuditContext,
+  writeSandboxControlTransition
+} from '../../../lib/sandbox/control/audit.ts';
+import { recoverSandboxControlFromHost } from '../../../lib/sandbox/control/host-recovery.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
@@ -250,6 +257,7 @@ async function waitForRequestAsync(
 
 const SANDBOX_CONTROL_TEST_TIMEOUT_MS = 5_000;
 const SANDBOX_CONTROL_ENV_KEYS = [
+  'AGENT_INFRA_SANDBOX',
   'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_ROOT_ID', 'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR',
   'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE'
@@ -262,6 +270,26 @@ function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDB
     delete process.env[key];
   }
   for (const [key, value] of Object.entries(overrides)) process.env[key] = value;
+  if (overrides.AGENT_INFRA_CONTROL_STATUS_DIR && overrides.AGENT_INFRA_SANDBOX === undefined) {
+    const statusDir = overrides.AGENT_INFRA_CONTROL_STATUS_DIR;
+    const identity = JSON.parse(fs.readFileSync(path.join(statusDir, 'identity.json'), 'utf8')) as {
+      mode: 'task-bound' | 'branch-only'; taskId: string | null; generation: string; controlRootId: string;
+    };
+    const root = path.dirname(statusDir);
+    process.env.AGENT_INFRA_SANDBOX = '1';
+    process.env.AGENT_INFRA_CONTROL_STATUS_DIR ??= statusDir;
+    process.env.AGENT_INFRA_CONTROL_DIR ??= path.join(root, 'channel');
+    process.env.AGENT_INFRA_CONTROL_GENERATION ??= identity.generation;
+    process.env.AGENT_INFRA_CONTROL_ROOT_ID ??= identity.controlRootId;
+    if (identity.mode === 'task-bound') {
+      process.env.AGENT_INFRA_TASK_ID ??= identity.taskId ?? undefined;
+      process.env.AGENT_INFRA_RUNTIME_DIR ??= path.join(root, 'runtime');
+    }
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')) as { token?: unknown };
+      if (typeof manifest.token === 'string') process.env.AGENT_INFRA_CONTROL_TOKEN ??= manifest.token;
+    } catch { /* A focused test may use only the mounted identity files. */ }
+  }
   try {
     return callback();
   } finally {
@@ -283,6 +311,9 @@ function runTaskFinalizationClient(params: {
   repoRoot?: string;
   taskId?: string;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
+  const identity = JSON.parse(fs.readFileSync(path.join(params.statusDir, 'identity.json'), 'utf8')) as {
+    taskId: string | null; mode: 'task-bound' | 'branch-only';
+  };
   const script = [
     "import { requestSandboxTaskFinalization } from './lib/sandbox/control/client.ts';",
     "import { bindTaskFinalizationReceipt } from './lib/task/finalization.ts';",
@@ -313,13 +344,14 @@ function runTaskFinalizationClient(params: {
       cwd: path.resolve('.'),
       env: {
         ...process.env,
-        AGENT_INFRA_TASK_ID: undefined,
-        AGENT_INFRA_CONTROL_TOKEN: undefined,
-        AGENT_INFRA_CONTROL_GENERATION: undefined,
-        AGENT_INFRA_CONTROL_ROOT_ID: undefined,
-        AGENT_INFRA_CONTROL_DIR: undefined,
-        AGENT_INFRA_CONTROL_STATUS_DIR: undefined,
-        AGENT_INFRA_RUNTIME_DIR: undefined,
+        AGENT_INFRA_SANDBOX: '1',
+        AGENT_INFRA_TASK_ID: params.taskId ?? identity.taskId ?? undefined,
+        AGENT_INFRA_CONTROL_TOKEN: params.token,
+        AGENT_INFRA_CONTROL_GENERATION: params.generation,
+        AGENT_INFRA_CONTROL_ROOT_ID: JSON.parse(fs.readFileSync(path.join(params.statusDir, 'identity.json'), 'utf8')).controlRootId,
+        AGENT_INFRA_CONTROL_DIR: params.channelDir,
+        AGENT_INFRA_CONTROL_STATUS_DIR: params.statusDir,
+        AGENT_INFRA_RUNTIME_DIR: identity.mode === 'task-bound' ? path.join(path.dirname(params.statusDir), 'runtime') : undefined,
         TEST_CHANNEL_DIR: params.channelDir,
         TEST_STATUS_DIR: params.statusDir,
         TEST_TOKEN: params.token,
@@ -355,11 +387,11 @@ function runRecoverSandboxControl(params: {
   readyPath: string;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
   const script = [
-    "import { recoverSandboxControl, SandboxControlClientError } from './lib/sandbox/control/client.ts';",
+    "import { recoverSandboxControlFromChannel, SandboxControlClientError } from './lib/sandbox/control/client.ts';",
     "import fs from 'node:fs';",
     "fs.writeFileSync(process.env.TEST_READY_PATH, 'ready');",
     'try {',
-    '  process.stdout.write(JSON.stringify(recoverSandboxControl(process.env.TEST_REQUEST_ID, {',
+    '  process.stdout.write(JSON.stringify(recoverSandboxControlFromChannel(process.env.TEST_REQUEST_ID, {',
     '    channelDir: process.env.TEST_CHANNEL_DIR,',
     '    timeoutMs: Number(process.env.TEST_TIMEOUT_MS)',
     "  })) + '\\n');",
@@ -397,6 +429,7 @@ function runSandboxLocalTaskFinalization(root: string, manifest: ReturnType<type
     env: {
       ...process.env,
       AGENT_INFRA_TASK_ID: taskId,
+      AGENT_INFRA_SANDBOX: '1',
       AGENT_INFRA_CONTROL_TOKEN: manifest.token,
       AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
       AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
@@ -418,6 +451,7 @@ function runSandboxLocalTaskFinalizationAsync(root: string, manifest: ReturnType
     env: {
       ...process.env,
       AGENT_INFRA_TASK_ID: taskId,
+      AGENT_INFRA_SANDBOX: '1',
       AGENT_INFRA_CONTROL_TOKEN: manifest.token,
       AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
       AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
@@ -547,6 +581,55 @@ test('sandbox control lifecycle fails closed when a manifest has no owner eviden
       /SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING/
     );
     assert.equal(fs.existsSync(root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('host sandbox-control recovery resolves one accepted request from managed manifests and audit evidence', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-'));
+  const managedRoot = path.join(root, 'demo');
+  const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
+  const requestId = '12121212-1212-4212-8212-121212121212';
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(controlRoot, branch, 'host-recovery-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'recovered\n', stderr: '' });
+    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'completed', exitCode: 0, stdout: '', stderr: '', error: null,
+      outputState: 'available', payload: {
+        version: payload.version, id: payload.id, generation: payload.generation,
+        stdoutBytes: payload.stdoutBytes, stderrBytes: payload.stderrBytes,
+        stdoutSha256: payload.stdoutSha256, stderrSha256: payload.stderrSha256
+      }
+    })}\n`);
+    appendCriticalAudit(manifest, createSandboxControlAuditContext(manifest, {
+      requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
+    }));
+    appendDiagnosticAudit(manifest, 'executor-result-published', {
+      requestId, requestGeneration: manifest.generation, exitCode: 0,
+      outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
+      outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
+    });
+
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+    const unknownId = '13131313-1313-4313-8313-131313131313';
+    assert.equal(
+      recoverSandboxControlFromHost(unknownId, { managedRoot, timeoutMs: 30 }).error?.code,
+      'SANDBOX_CONTROL_RESULT_UNKNOWN'
+    );
+    fs.renameSync(path.join(controlRoot, 'audit.ndjson'), path.join(controlRoot, 'audit.ndjson.1'));
+    fs.writeFileSync(path.join(controlRoot, 'audit.ndjson'), '');
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+    fs.appendFileSync(path.join(controlRoot, 'audit.ndjson'), `${JSON.stringify({
+      version: 2, event: 'accepted-authorized', phase: 'accepted-authorized', requestId,
+      generation: 'stale-generation', identityDigest: 'f'.repeat(64)
+    })}\n`);
+    assert.throws(
+      () => recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }),
+      /SANDBOX_CONTROL_AUDIT_IDENTITY_MISMATCH/u
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1449,7 +1532,7 @@ test('sandbox control recovery reads the retained terminal response by request i
   };
   fs.writeFileSync(path.join(responsesDir, `${requestId}.json`), `${JSON.stringify(response)}\n`);
   try {
-    assert.deepEqual(recoverSandboxControl(requestId, { channelDir: root, timeoutMs: 100 }), response);
+    assert.deepEqual(recoverSandboxControlFromChannel(requestId, { channelDir: root, timeoutMs: 100 }), response);
     assert.equal(fs.existsSync(path.join(responsesDir, `${requestId}.json`)), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1546,7 +1629,7 @@ test('sandbox control recovery polls a published unknown at the bounded cadence'
 
   try {
     assert.throws(
-      () => recoverSandboxControl(requestId, { channelDir: root, timeoutMs: 100 }),
+      () => recoverSandboxControlFromChannel(requestId, { channelDir: root, timeoutMs: 100 }),
       (error: unknown) => error instanceof SandboxControlClientError
         && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
         && error.accepted
@@ -1613,18 +1696,19 @@ test('task-finalization client recovers a published accepted unknown without sub
   });
   const client = collectChild(spawn(process.execPath, [
     '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
-    'sandbox-control', 'client', 'task-finalization', '08', 'complete', '--agent', 'codex'
+    'sandbox-control', 'client', 'task-finalization', 'TASK-20260809-010203', 'complete', '--agent', 'codex'
   ], {
     cwd: path.resolve('.'),
     env: {
       ...process.env,
+      AGENT_INFRA_SANDBOX: '1',
       AGENT_INFRA_CONTROL_TOKEN: 'finalization-secret',
       AGENT_INFRA_CONTROL_GENERATION: generation,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_DIR: channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
-      AGENT_INFRA_TASK_ID: undefined,
-      AGENT_INFRA_RUNTIME_DIR: undefined
+      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
+      AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }));
@@ -1925,7 +2009,7 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     await server;
     assert.equal(JSON.parse(terminal).outputState, 'available');
     assert.equal(JSON.parse(terminal).stderr, '');
-    const response = recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 });
+    const response = recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 });
     assert.equal(response.stdout, output);
     assert.equal(response.stderr, childStderr);
 
@@ -1945,7 +2029,7 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     assert.equal(fs.existsSync(processingDir), false);
     assert.equal(fs.existsSync(acceptedPath), false);
     assert.equal(fs.readFileSync(terminalPath, 'utf8'), terminal);
-    assert.equal(recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, output);
+    assert.equal(recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, output);
   } finally {
     controller.abort();
     await server?.catch(() => undefined);
@@ -2591,7 +2675,8 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   const fakeBin = path.join(root, 'bin-fixture');
   for (const directory of [channelDir, statusDir, processingDir, fakeBin]) fs.mkdirSync(directory, { recursive: true });
   const branch = initializeRepository(root);
-  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.9.9-alpha.0' }));
+  const packageVersion = (JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as { version: string }).version;
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: packageVersion }));
   for (const relative of [
     '.codex/hooks.json',
     '.codex/agents/agent-infra-lifecycle-executor.toml',
@@ -3081,7 +3166,7 @@ test('broker recovery returns inspectable task-create output when the payload is
     assert.equal(result.task.id, null);
     assert.equal(result.task.shortId, null);
     assert.equal(result.task.state, null);
-    assert.equal(recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, response.stdout);
+    assert.equal(recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, response.stdout);
     assert.equal(fs.existsSync(processingDirectory), false);
     controller.abort();
     await server;
@@ -3094,13 +3179,19 @@ test('broker recovery returns inspectable task-create output when the payload is
       env: {
         ...process.env,
         AGENT_INFRA_CONTROL_TOKEN: manifest.token,
+        AGENT_INFRA_SANDBOX: '1',
+        AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
         AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
         AGENT_INFRA_CONTROL_DIR: manifest.channelDir,
-        AGENT_INFRA_CONTROL_STATUS_DIR: manifest.publicStatusDir
+        AGENT_INFRA_CONTROL_STATUS_DIR: manifest.publicStatusDir,
+        AGENT_INFRA_TASK_ID: manifest.taskId ?? '',
+        AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
+        AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined,
+        AGENT_INFRA_EXECUTOR_MANIFEST: undefined
       }
     });
     assert.equal(recovered.status, 1, recovered.stderr || recovered.stdout);
-    assert.equal(recovered.stdout, response.stdout);
+    assert.equal(recovered.stdout, response.stdout, recovered.stderr);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

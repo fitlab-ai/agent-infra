@@ -227,6 +227,7 @@ test('direct-host task-control routes complete with a process result', () => {
 
 test('branch-only control markers keep non-task public commands on the host entry', () => {
   const result = runPublic(['version'], cleanEnv({
+    AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
@@ -239,6 +240,7 @@ test('branch-only control markers keep non-task public commands on the host entr
 
 test('top-level usage and version aliases remain available in task-bound environments', () => {
   const env = cleanEnv({
+    AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
@@ -256,6 +258,7 @@ test('top-level usage and version aliases remain available in task-bound environ
 
 test('task orchestration validates the mounted identity before local execution', () => {
   const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
+    AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
@@ -282,6 +285,7 @@ test('partial sandbox or executor markers fail closed before task parsing', () =
 
 test('task-bound marker requires its runtime binding before entering the client', () => {
   const result = run('task-finalization', ['--help'], cleanEnv({
+    AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
@@ -293,31 +297,48 @@ test('task-bound marker requires its runtime binding before entering the client'
 });
 
 test('shared sandbox control transport selection is fail-closed and distinguishes workspace modes', () => {
-  const options = { statusMountPath: path.join(os.tmpdir(), `task-control-absent-${process.pid}`) };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-transport-'));
+  const statusDir = path.join(root, 'status');
+  const generation = 'generation';
+  const controlRootId = 'a'.repeat(96);
+  fs.mkdirSync(statusDir);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'branch-only', taskId: null, generation, controlRootId
+  });
+  const options = { statusMountPath: path.join(root, 'absent') };
   const base = {
+    AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_CONTROL_TOKEN: 'token',
-    AGENT_INFRA_CONTROL_GENERATION: 'generation',
-    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-    AGENT_INFRA_CONTROL_DIR: '/control',
-    AGENT_INFRA_CONTROL_STATUS_DIR: '/status'
+    AGENT_INFRA_CONTROL_GENERATION: generation,
+    AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
+    AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
+    AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
   };
-  assert.equal(resolveSandboxControlTransport(cleanEnv(), options).kind, 'direct-host');
-  assert.equal(resolveSandboxControlTransport(cleanEnv(base), options).kind, 'broker-client');
-  assert.equal(resolveSandboxControlTransport(cleanEnv({
-    ...base,
-    AGENT_INFRA_TASK_ID: TASK_ID,
-    AGENT_INFRA_RUNTIME_DIR: '/runtime'
-  }), options).kind, 'broker-client');
+  try {
+    assert.equal(resolveSandboxControlTransport(cleanEnv(), options).kind, 'direct-host');
+    assert.equal(resolveSandboxControlTransport(cleanEnv(base), options).kind, 'broker-client');
+    writeSandboxControlIdentitySentinel(statusDir, {
+      version: 1, mode: 'task-bound', taskId: TASK_ID, generation, controlRootId
+    });
+    assert.equal(resolveSandboxControlTransport(cleanEnv({
+      ...base,
+      AGENT_INFRA_TASK_ID: TASK_ID,
+      AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
+    }), options).kind, 'broker-client');
 
-  for (const env of [
-    { AGENT_INFRA_CONTROL_TOKEN: 'token' },
-    { AGENT_INFRA_TASK_ID: TASK_ID },
-    { ...base, AGENT_INFRA_RUNTIME_DIR: '/runtime' },
-    { ...base, AGENT_INFRA_TASK_ID: TASK_ID },
-    { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
-    { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' }
-  ]) {
-    assert.equal(resolveSandboxControlTransport(cleanEnv(env), options).kind, 'fail-closed');
+    for (const env of [
+      { AGENT_INFRA_CONTROL_TOKEN: 'token' },
+      { AGENT_INFRA_TASK_ID: TASK_ID },
+      { ...base, AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime') },
+      { ...base, AGENT_INFRA_TASK_ID: TASK_ID },
+      { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
+      { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' },
+      { ...base, AGENT_INFRA_SANDBOX: undefined }
+    ]) {
+      assert.equal(resolveSandboxControlTransport(cleanEnv(env), options).kind, 'fail-closed');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -406,6 +427,7 @@ function runSandboxClient(
     cwd: fixture.root,
     env: {
       ...cleanEnv(),
+      AGENT_INFRA_SANDBOX: '1',
       AGENT_INFRA_TASK_ID: TASK_ID,
       AGENT_INFRA_CONTROL_DIR: fixture.channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: fixture.statusDir,
