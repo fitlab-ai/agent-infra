@@ -328,6 +328,22 @@ test('PR summary passes an opaque bound identity through context and summary val
   }
 });
 
+test('summary context does not adopt a display number from a mismatched provider identity', async () => {
+  const fixture = summaryFixture();
+  try {
+    configureOpaquePullRequest(fixture, 99, { identityValue: 'pr-other' });
+
+    const context = await summaryContext(fixture.taskId, { cwd: fixture.root });
+
+    assert.equal(context.task.prNumber, null);
+    assert.equal(context.pullRequest, null);
+    assert.equal(context.changeReport.status, 'stale');
+    assert.match(context.changeReport.reason ?? '', /No bound pull request snapshot/u);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('manual-validation pending summary uses the opaque PR snapshot number and checks its transaction', async () => {
   const fixture = summaryFixture();
   try {

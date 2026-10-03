@@ -25,7 +25,7 @@ function changeRequest(value = 'pr-42', config = {}) {
   const baseSha = config.baseSha || '2222222';
   return {
     id: value,
-    identity: identity(value),
+    identity: identity(config.identityValue || value),
     ...(config.number === undefined ? {} : { number: config.number }),
     title: 'Opaque change request',
     body: '',

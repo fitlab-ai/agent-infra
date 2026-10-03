@@ -196,6 +196,13 @@ async function inspectBoundPullRequest(
     return { ok: false, status: inspectionError(error), error };
   }
   const remote: ChangeRequestSnapshot = inspected.value;
+  if (remote.identity && !resourceIdentityEquals(remote.identity, prIdentity)) {
+    return {
+      ok: false,
+      status: 'failed',
+      error: { code: 'PR_IDENTITY_MISMATCH', message: 'Provider returned a different pull request identity than requested', retryable: false }
+    };
+  }
   const number = remote.number ?? resourceIdentityNumber(remote.identity) ?? resourceIdentityNumber(prIdentity) ?? 0;
   const head = remote.head || { repository: context.platform.repository, ref: '', sha: remote.headSha || '' };
   const base = remote.base || { repository: context.platform.repository, ref: '', sha: remote.baseSha || '' };

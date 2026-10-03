@@ -164,7 +164,8 @@ test('finding review accepts every legal disposition and rejects every other dis
     accepted: ['closed', 'open', 'needs-human-decision'],
     adjusted: ['confirmed', 'open', 'needs-human-decision'],
     refuted: ['confirmed', 'open', 'needs-human-decision'],
-    'cannot-judge': ['open', 'needs-human-decision']
+    'cannot-judge': ['open', 'needs-human-decision'],
+    open: ['open']
   } as const;
   const dispositions = ['confirmed', 'closed', 'open', 'needs-human-decision'] as const;
   for (const [response, allowed] of Object.entries(matrix)) {
@@ -181,6 +182,20 @@ test('finding review accepts every legal disposition and rejects every other dis
       } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
     }
   }
+});
+
+test('finding review can refresh evidence without closing an open finding', () => {
+  const f = fixture(['| CD-1 | code | 6 | minor | open | review-code-r6.md#old-anchor |']);
+  try {
+    const result = applyLedgerIntent({
+      kind: 'finding-review', taskRef: f.taskId, id: 'CD-1', status: 'open',
+      evidence: 'review-code-r6.md#corrected-anchor'
+    }, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+
+    assert.equal(result.status, 'applied');
+    assert.equal(result.after?.status, 'open');
+    assert.equal(result.after?.evidence, 'review-code-r6.md#corrected-anchor');
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 
 test('finding responses cover all executor states and reopening remains evidence-driven across rounds', () => {
