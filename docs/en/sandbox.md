@@ -383,8 +383,19 @@ child close
 If the broker restarts after a valid result record but before terminal cleanup,
 generic process-control families can converge to a terminal response with
 output unavailable. Task finalization is stricter: a successful exit code is
-not proof of task completion; the canonical host finalization receipt remains
-the business authority. If result evidence is absent or malformed, the broker
+not proof of task completion; the canonical finalization receipt at
+`.agents/workspace/<state>/<task-id>/.task-finalization.json` remains the business
+authority. The sandbox and host executor update that same task-local receipt.
+For workspaces that still have receipts in the old shared directory, inspect and
+apply the one-time migration. Invalid receipts, missing tasks, and destination
+conflicts are preserved and reported for manual resolution. Run the dry-run first:
+
+```bash
+node --experimental-strip-types bin/migrate-finalization-receipts.ts --dry-run
+node --experimental-strip-types bin/migrate-finalization-receipts.ts
+```
+
+If result evidence is absent or malformed, the broker
 keeps the request uncertain/unknown and does not create a new ID or replay a
 mutation.
 
@@ -480,7 +491,7 @@ that times out after acceptance should use the same request ID with the control
 recovery operation; it must not submit a new request for an irreversible
 finalization.
 
-The current protocol uses request version 3 and response version 2. Older
+The current protocol uses request version 4 and response version 2. Older
 response layouts are not adapted or dual-written; an invalid or mixed
 generation must fail closed and the sandbox should be recreated from its
 current manifest. Payload records are addressed only by the same request ID

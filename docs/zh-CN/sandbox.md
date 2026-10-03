@@ -312,8 +312,17 @@ child close
 
 如果 broker 在 result record 有效、terminal 清理前重启，普通 process-control family
 可以收敛为带有“output unavailable”语义的 terminal response。task-finalization 更严格：
-成功的 exit code 不能证明 task 已完成，canonical 宿主 finalization receipt 仍是业务
-authority。如果 result evidence 缺失或格式错误，broker 会保持 uncertain/unknown，不能
+成功的 exit code 不能证明 task 已完成；`.agents/workspace/<state>/<task-id>/.task-finalization.json`
+中的任务目录回执仍是业务 authority。沙箱与宿主 executor 会更新同一份任务目录回执。
+若工作区仍在旧共享目录保存回执，先检查并执行一次性迁移。无效回执、缺少对应任务或
+目标冲突会保留原记录并报告，供人工处理。先运行 dry-run：
+
+```bash
+node --experimental-strip-types bin/migrate-finalization-receipts.ts --dry-run
+node --experimental-strip-types bin/migrate-finalization-receipts.ts
+```
+
+若 result evidence 缺失或格式错误，broker 会保持 uncertain/unknown，不能
 创建新的 request ID，也不能重放 mutation。
 
 每类记录的 authority 和生命周期刻意不同：
@@ -388,7 +397,7 @@ terminal 及其引用的 payload 保留在 generation 内。没有被 terminal �
 路径或原始 terminal 输出复制到 Issue、审计附件或普通日志中。client 在 accepted 后超时，
 应使用同一个 request ID 执行 control recovery；不可为不可逆的 finalization 提交新请求。
 
-当前协议使用 request version 3 和 response version 2。旧 response layout 不做 adapter、
+当前协议使用 request version 4 和 response version 2。旧 response layout 不做 adapter、
 双写或长期迁移；invalid 或 generation 混用必须 fail closed，并根据当前 manifest 重建
 沙箱。payload 只能通过同一 request ID 和 generation 的 terminal 引用定位；它不能从
 `result.json` 推断出来，也不能授权任何 task mutation。

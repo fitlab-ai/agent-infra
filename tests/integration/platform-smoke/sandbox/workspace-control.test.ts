@@ -551,7 +551,7 @@ test('typed controller verify returns only the live task binding without spawnin
     controllerProcess: opened.lease.controllerProcess
   };
   const request = {
-    version: 3 as const,
+    version: 4 as const,
     id: '12345678-1234-1234-1234-123456789abc',
     token: manifest.token,
     generation: manifest.generation,
@@ -595,7 +595,7 @@ test('typed controller verify requires matching process proof', () => {
     controllerProcess: { pid: 100, startTime: 10 }
   };
   assert.throws(() => validateSandboxControlRequest({
-    version: 3,
+    version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: manifest.token,
     generation: manifest.generation,
@@ -620,7 +620,7 @@ test('TypeScript control entries retain explicit strip-types startup', () => {
 
 test('control requests are restricted to allowed families and rebound to the manifest task', () => {
   const request = validateSandboxControlRequest({
-    version: 3,
+    version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: 'secret',
     generation: 'generation-1',
@@ -645,7 +645,7 @@ test('control requests are restricted to allowed families and rebound to the man
 
 test('task finalization uses a typed task-bound request with manifest authority', () => {
   const request = validateSandboxControlRequest({
-    version: 3,
+    version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: manifest.token,
     generation: manifest.generation,
@@ -654,7 +654,6 @@ test('task finalization uses a typed task-bound request with manifest authority'
     family: 'task-finalization',
     operation: 'complete',
     agent: 'codex',
-    handoffSha256: '0'.repeat(64),
     args: [],
     controllerProcess: null,
     controllerProof: null
@@ -718,7 +717,7 @@ test('sandbox executor finalizes only the manifest task and returns no control a
     });
     bindTaskFinalizationReceipt(root, taskId, { generation: manifest.generation, requestId });
     const result = await executeRequest(boundManifest, manifestPath, {
-      version: 3,
+      version: 4,
       id: requestId,
       token: manifest.token,
       generation: manifest.generation,
@@ -727,8 +726,7 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       family: 'task-finalization',
       operation: 'complete',
       agent: 'codex',
-      handoffSha256: '0'.repeat(64),
-      args: [],
+        args: [],
       controllerProcess: null,
       controllerProof: null
     });
@@ -746,7 +744,7 @@ test('sandbox executor finalizes only the manifest task and returns no control a
 
 test('control protocol rejects request v2 and controller result parser enforces exact wire phases', () => {
   const request = {
-    version: 3,
+    version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: 'secret',
     generation: 'generation-1',
@@ -816,7 +814,7 @@ test('control protocol rejects request v2 and controller result parser enforces 
 
 test('branch-only sandboxes and incorrect tokens fail closed', () => {
   const request = {
-    version: 3,
+    version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: 'secret',
     generation: 'generation-1',
@@ -905,7 +903,7 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
   };
   for (const mode of ['task-bound', 'branch-only'] as const) {
     const request = validateSandboxControlRequest({
-      version: 3,
+      version: 4,
       id: '12345678-1234-1234-1234-123456789abc',
       token: 'secret',
       generation: 'generation-1',
@@ -1234,7 +1232,7 @@ test('cutover snapshot detects replaced generation evidence before materializati
 
 test('control request deadline and generation fail closed', () => {
   const request = {
-    version: 3,
+    version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: 'secret',
     generation: 'generation-1',

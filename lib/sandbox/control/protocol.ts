@@ -57,7 +57,7 @@ export type SandboxControlExecutorGateV2 = Readonly<{
   requestId: string;
 }>;
 type RequestBase = Readonly<{
-  version: 3; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
+  version: 4; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
   controllerProcess: ProcessIdentity | null;
   controllerProof: CodexControllerLeaseProofV1 | null;
 }>;
@@ -65,7 +65,7 @@ export type SandboxTaskCommandRequest = RequestBase & Readonly<{
   family: 'task-lifecycle'; args: string[];
 }>;
 export type SandboxTaskFinalizationRequest = RequestBase & Readonly<{
-  family: 'task-finalization'; operation: 'complete'; agent: string; handoffSha256: string; args: [];
+  family: 'task-finalization'; operation: 'complete'; agent: string; args: [];
 }>;
 export type SandboxTaskCreateRequest = RequestBase & Readonly<{
   family: 'task-create'; candidate: TaskCreateCandidateV1;
@@ -233,7 +233,7 @@ export function validateSandboxControlRequest(
   }
   const request = value as Record<string, unknown>;
   if (
-    request.version !== 3 || typeof request.id !== 'string'
+    request.version !== 4 || typeof request.id !== 'string'
     || !/^[a-f0-9-]{16,64}$/.test(request.id) || request.token !== manifest.token
     || typeof request.family !== 'string' || !isSandboxControlFamily(request.family)
     || !Number.isSafeInteger(request.issuedAt) || !Number.isSafeInteger(request.expiresAt)
@@ -279,12 +279,11 @@ export function validateSandboxControlRequest(
     return request as SandboxCodexControllerRequest;
   }
   if (request.family === 'task-finalization') {
-    const expected = ['agent', 'args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'handoffSha256', 'id', 'issuedAt', 'operation', 'token', 'version'];
+    const expected = ['agent', 'args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'operation', 'token', 'version'];
     if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
       || request.operation !== 'complete'
       || !Array.isArray(request.args) || request.args.length !== 0
       || typeof request.agent !== 'string' || normalizeAgentToken(request.agent) !== request.agent
-      || typeof request.handoffSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(request.handoffSha256)
       || request.controllerProcess !== null || request.controllerProof !== null) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization request schema or authorization is invalid');
     }

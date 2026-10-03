@@ -238,12 +238,11 @@ function writeTaskBoundCleanupEvidence(
     `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n`,
     "utf8"
   );
-  const finalizationDir = path.join(config.repoRoot, ".agents", "workspace", ".task-finalization");
-  fs.mkdirSync(finalizationDir, { recursive: true });
+  const receiptDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
   const generation = "task-bound-generation";
   const requestId = "a".repeat(16);
   fs.writeFileSync(
-    path.join(finalizationDir, `${taskId}.json`),
+    path.join(receiptDir, ".task-finalization.json"),
     `${JSON.stringify({
       version: 4,
       taskId,
@@ -356,7 +355,7 @@ function writeTaskBoundCleanupEvidence(
 }
 
 function makeCompletedUnboundDigestMismatch(config: SandboxConfig, taskId: string): void {
-  const receiptPath = path.join(config.repoRoot, ".agents", "workspace", ".task-finalization", `${taskId}.json`);
+  const receiptPath = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, ".task-finalization.json");
   const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
   delete receipt.controlBinding;
   fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`, "utf8");

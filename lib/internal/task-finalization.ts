@@ -80,9 +80,7 @@ async function taskFinalization(args: string[] = []): Promise<void> {
   const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
   if (transport.kind === 'sandbox-local') {
     try {
-      const response = requestSandboxTaskFinalization({
-        agent: boundOperation.request.agent
-      });
+      const response = requestSandboxTaskFinalization({ agent: boundOperation.request.agent });
       process.stdout.write(response.stdout);
       process.stderr.write(response.stderr);
       process.exitCode = response.exitCode ?? 1;
