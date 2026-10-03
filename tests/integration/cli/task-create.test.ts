@@ -143,6 +143,7 @@ async function runControlledTaskCreate(
     env: {
       ...hostEnvironment,
       ...homeEnvironment(root),
+      AGENT_INFRA_SANDBOX: '1',
       AGENT_INFRA_CONTROL_TOKEN: 'task-create-test-token',
       AGENT_INFRA_CONTROL_GENERATION: generation,
       AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
@@ -402,21 +403,29 @@ test('task-create internal CLI rejects symbolic-link input without writing', () 
 test('task-create internal CLI returns controlled recovery evidence when the broker is unavailable', () => {
   const root = fixture();
   const input = path.join(root, 'candidate.json');
+  const statusDir = path.join(root, 'status');
+  const generation = 'controlled-generation';
+  const controlRootId = 'a'.repeat(96);
   fs.writeFileSync(input, JSON.stringify(candidate()));
+  fs.mkdirSync(statusDir);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'branch-only', taskId: null, generation, controlRootId
+  });
   try {
     const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
       cwd: root,
       encoding: 'utf8',
       env: {
         ...hostEnvironment,
+        AGENT_INFRA_SANDBOX: '1',
         AGENT_INFRA_CONTROL_TOKEN: 'controlled-token',
-        AGENT_INFRA_CONTROL_GENERATION: 'controlled-generation',
-        AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+        AGENT_INFRA_CONTROL_GENERATION: generation,
+        AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
         AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
-        AGENT_INFRA_CONTROL_STATUS_DIR: path.join(root, 'status')
+        AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
       }
     });
-    assert.equal(result.status, 2);
+    assert.equal(result.status, 2, result.stderr || result.stdout);
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.status, 'blocked');
     assert.equal(payload.error.code, 'SANDBOX_CONTROL_BROKER_UNAVAILABLE');

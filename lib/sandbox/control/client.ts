@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import { hasTaskBoundMarker } from '../../internal/task-operation-registry.ts';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -25,6 +24,9 @@ import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
 import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
 import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/short-id.ts';
+import { hasTaskBoundMarker, isSandbox } from '../environment.ts';
+import { loadConfig } from '../config.ts';
+import { recoverSandboxControlFromHost } from './host-recovery.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 const SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS = 5 * 60_000;
@@ -133,7 +135,7 @@ function parseResponse(raw: string, id: string, accepted = false): SandboxContro
   return response;
 }
 
-function readPublishedResponse(raw: string, id: string, channelDir: string, accepted = false): SandboxControlResponse {
+function readPublishedResponse(raw: string, id: string, channelDir: string, accepted: boolean, generation: string): SandboxControlResponse {
   const response = parseResponse(raw, id, accepted);
   if (response.outputState !== 'available') return response;
   const filePath = path.join(channelDir, 'responses', `${id}.payload.json`);
@@ -145,6 +147,7 @@ function readPublishedResponse(raw: string, id: string, channelDir: string, acce
   }
   if (!response.payload || response.payload.version !== payload.version
     || response.payload.id !== payload.id || response.payload.generation !== payload.generation
+    || payload.generation !== generation
     || response.payload.stdoutBytes !== payload.stdoutBytes || response.payload.stderrBytes !== payload.stderrBytes
     || response.payload.stdoutSha256 !== payload.stdoutSha256 || response.payload.stderrSha256 !== payload.stderrSha256) {
     clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker payload reference is invalid', false, true, id);
@@ -254,7 +257,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       try {
         // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
         accepted = true;
-        response = readPublishedResponse(raw, request.id, channelDir, accepted);
+        response = readPublishedResponse(raw, request.id, channelDir, accepted, request.generation);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
@@ -312,13 +315,50 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
 }
 
 export function recoverSandboxControl(requestId: string, params: Readonly<{
-  channelDir?: string;
   timeoutMs?: number;
 }> = {}): SandboxControlResponse {
   if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) {
     clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'request id is invalid', false, true);
   }
-  const channelDir = params.channelDir ?? process.env.AGENT_INFRA_CONTROL_DIR ?? '/run/agent-infra/control';
+  try {
+    if (!isSandbox()) {
+      const config = loadConfig();
+      const response = recoverSandboxControlFromHost(requestId, {
+        managedRoot: path.join(config.controlBase, config.project),
+        timeoutMs: params.timeoutMs
+      });
+      if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') {
+        clientError(
+          'SANDBOX_CONTROL_RESULT_UNKNOWN',
+          'recovery evidence is unavailable; inspect domain state before retrying',
+          false, true, requestId
+        );
+      }
+      return response;
+    }
+    const channelDir = process.env.AGENT_INFRA_CONTROL_DIR!;
+    const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR!;
+    const identity = readSandboxControlIdentitySentinel(statusDir);
+    return recoverSandboxControlFromChannel(requestId, {
+      channelDir, generation: identity.generation, timeoutMs: params.timeoutMs
+    });
+  } catch (error) {
+    if (error instanceof SandboxControlClientError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'SANDBOX_CONTROL_RECOVERY_INVALID';
+    clientError(code, 'sandbox control recovery evidence is invalid or unavailable', false, true, requestId);
+  }
+}
+
+// Low-level channel reader for control integration tests and internal callers
+// that already hold a manifest-bound channel path.
+export function recoverSandboxControlFromChannel(requestId: string, params: Readonly<{
+  channelDir: string; generation: string; timeoutMs?: number;
+}>): SandboxControlResponse {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) {
+    clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'request id is invalid', false, true);
+  }
+  const { channelDir } = params;
   const responsePath = path.join(channelDir, 'responses', `${requestId}.json`);
   const deadline = Date.now() + (params.timeoutMs ?? 30_000);
   let accepted = false;
@@ -338,7 +378,7 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
       try {
         // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
         accepted = true;
-        response = readPublishedResponse(raw, requestId, channelDir, accepted);
+        response = readPublishedResponse(raw, requestId, channelDir, accepted, params.generation);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
@@ -447,7 +487,7 @@ export function requestSandboxTaskFinalization(params: Readonly<{
 
 export function recoverAcceptedTaskFinalization(
   requestId: string,
-  params: Readonly<{ channelDir?: string; recoveryBudgetMs?: number }>,
+  params: Readonly<{ recoveryBudgetMs?: number }>,
   recover: typeof recoverSandboxControl = recoverSandboxControl
 ): SandboxControlResponse {
   const deadline = Date.now() + (params.recoveryBudgetMs ?? SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS);
@@ -455,7 +495,7 @@ export function recoverAcceptedTaskFinalization(
     const timeoutMs = Math.min(30_000, deadline - Date.now());
     if (timeoutMs <= 0) break;
     try {
-      const response = recover(requestId, { channelDir: params.channelDir, timeoutMs });
+      const response = recover(requestId, { timeoutMs });
       if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') continue;
       return response;
     } catch (error) {

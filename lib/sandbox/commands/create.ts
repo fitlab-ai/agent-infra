@@ -1561,6 +1561,8 @@ export async function create(
               `${sandboxBranchLabel(effectiveConfig)}=${branch}`,
               '--label',
               `${sandboxWorkspaceModeLabel(effectiveConfig)}=${target.workspace.mode}`,
+              '-e',
+              'AGENT_INFRA_SANDBOX=1',
               ...(target.workspace.mode === 'task-bound'
                 ? [
                   '--label',
