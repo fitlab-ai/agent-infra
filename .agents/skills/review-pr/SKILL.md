@@ -174,7 +174,7 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
   agent-infra-internal pr-review-grade verify-artifact --artifact-file {pr-review-artifact} [--cwd <path>]
   ```
 
-退出码 0 通过；1 按输出修复后重跑；2 保留 blocked 并检查当次摘要。不得把未完成的 PR 审查或正式 Review 写入报告为完成；只继续独立的本地审查工作，必要的授权或缺失事实才交由用户提供。
+退出码 0 通过；1 按输出修复后重跑；2（阻塞）保留阻塞状态并检查当次摘要。不得把未完成的 PR 审查或正式 Review 写入报告为完成；只继续独立的本地审查工作，必要的授权或缺失事实才交由用户提供。
 
 ### 9. 告知用户
 
