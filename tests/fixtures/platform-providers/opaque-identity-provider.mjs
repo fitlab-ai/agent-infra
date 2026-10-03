@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 function identity(value) {
   return { kind: 'id', value };
 }
@@ -49,7 +51,16 @@ function receipt(value = 'receipt') {
 export default async function createPlatformProvider(input) {
   const summaries = new Map();
   const config = input.config || {};
+  let failedFinalWrite = false;
   const parentKey = (parent) => JSON.stringify(parent);
+  if (config.initialSummaryBody) summaries.set(parentKey(identity('pr-42')), [{
+    id: 'comment-1',
+    author: { id: 'opaque-user' },
+    body: config.initialSummaryBody,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    createdSequence: 1
+  }]);
   const context = {
     type: input.providerType,
     scope: { id: 'opaque/project', label: 'opaque/project' },
@@ -72,8 +83,16 @@ export default async function createPlatformProvider(input) {
       async update() { return receipt('issue-updated'); }
     },
     comments: {
-      async list(request) { return { ok: true, value: [...(summaries.get(parentKey(request.parent)) || [])] }; },
+      async list(request) {
+        if (config.callsPath) fs.appendFileSync(config.callsPath, 'list\n');
+        return { ok: true, value: [...(summaries.get(parentKey(request.parent)) || [])] };
+      },
       async write(request) {
+        if (config.callsPath) fs.appendFileSync(config.callsPath, 'write\n');
+        if (config.failFinalOnce && !failedFinalWrite && /^###\s+✅\s+Manual Validation Passed\s*$/mu.test(request.body)) {
+          failedFinalWrite = true;
+          return { ok: false, error: { code: 'INJECTED_FINAL_SUMMARY_WRITE', message: 'Injected retryable final summary failure', retryable: true } };
+        }
         const key = parentKey(request.parent);
         const current = summaries.get(key) || [];
         const id = request.existingComment?.value || 'comment-1';
@@ -99,7 +118,10 @@ export default async function createPlatformProvider(input) {
       }
     },
     changeRequests: {
-      async inspect(request) { return { ok: true, value: changeRequest(request.target.value, config) }; },
+      async inspect(request) {
+        if (config.callsPath) fs.appendFileSync(config.callsPath, 'inspect\n');
+        return { ok: true, value: changeRequest(request.target.value, config) };
+      },
       async listClosing() { return { ok: true, value: [] }; },
       async create() { return receipt('pr-created'); },
       async update() { return receipt('pr-updated'); },

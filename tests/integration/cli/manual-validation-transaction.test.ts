@@ -15,7 +15,7 @@ import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
-import { archiveManualValidationGeneration, createManualValidationTransaction, manualValidationTransactionPath, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
+import { archiveManualValidationGeneration, createManualValidationTransaction, manualValidationTransactionPath, readManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../../../lib/task/manual-validation-transaction.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
@@ -245,6 +245,37 @@ function values(fixture: Fixture, prepare = false): Record<string, string> {
   };
 }
 
+function configureOpaqueIdentity(fixture: Fixture, config: Record<string, unknown> = {}): void {
+  const taskContent = fs.readFileSync(fixture.taskPath, 'utf8');
+  const fact = encodePrDeliveryFact(buildBoundFact({
+    identity: {
+      resource: { kind: 'id', value: 'mr:42' },
+      repository: 'acme/widgets',
+      url: 'https://opaque.example/changes/mr:42',
+      head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha },
+      base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha }
+    },
+    source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+  }));
+  fs.writeFileSync(fixture.taskPath, taskContent.replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(fact)}`));
+  const source = path.resolve(process.cwd(), 'tests/fixtures/platform-providers/opaque-identity-provider.mjs');
+  fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
+    platform: { type: 'trae', providers: { trae: { source, config: {
+      repository: 'acme/widgets', number: 42, baseSha: fixture.baseSha, headSha: fixture.headSha, ...config
+    } } } }
+  }));
+  const digest = taskIntentDigest(fs.readFileSync(fixture.taskPath, 'utf8'));
+  if (!digest.ok) throw new Error(digest.error.message);
+  const mechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, fixture.headSha);
+  const report = buildPrChangeReport({
+    repository: 'acme/widgets', resource: { kind: 'id', value: 'mr:42' },
+    base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha },
+    head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha }
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  if (!report.ok) throw new Error(report.error.message);
+  writePrChangeReportAtomic(fixture.reportPath, report.value);
+}
+
 function countStarted(taskPath: string): number {
   return (fs.readFileSync(taskPath, 'utf8').match(/Complete Manual Validation \[started\]/gu) || []).length;
 }
@@ -418,6 +449,42 @@ test('actual coordinator execution converges on replay without repeated remote w
   assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
   assert.equal(state.writes, writesAfterFirst);
   assert.equal(countStarted(fixture.taskPath), 1);
+});
+
+test('opaque PR identity completes the manual-validation transaction lifecycle', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  configureOpaqueIdentity(fixture);
+
+  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root);
+
+  assert.equal(first.status, 'applied', JSON.stringify(first));
+  assert.equal(first.transaction?.phase, 'committed');
+  assert.equal(first.transaction?.prNumber, 42);
+  assert.equal(first.receipt?.prNumber, 42);
+  assert.equal(first.receipt?.prHeadSha, fixture.headSha);
+  assert.match(fs.readFileSync(fixture.taskPath, 'utf8'), /\*\*Complete Manual Validation\*\* by codex — Manual validation passed/u);
+});
+
+test('opaque PR identity recovers a failed final summary promotion on coordinator retry', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  configureOpaqueIdentity(fixture, { failFinalOnce: true });
+
+  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root);
+  assert.equal(first.status, 'failed');
+  const failedTransaction = readManualValidationTransaction(fixture.taskDir);
+  assert.equal(failedTransaction.ok, true);
+  if (!failedTransaction.ok) return;
+  assert.equal(failedTransaction.value.phase, 'recovery-required');
+
+  const retry = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root);
+
+  assert.equal(retry.status, 'applied', JSON.stringify(retry));
+  assert.equal(retry.transaction?.phase, 'committed');
+  assert.equal(retry.transaction?.prNumber, 42);
+  assert.equal(retry.receipt?.prNumber, 42);
+  assert.equal(retry.receipt?.prHeadSha, fixture.headSha);
 });
 
 test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {

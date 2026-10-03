@@ -747,7 +747,11 @@ async function syncPullRequestSummary(
         target: JSON.stringify(prIdentity),
         expectedDigest: createHash('sha256').update(desired).digest('hex'),
         dependency: 'deferred' as const,
-        pullRequestSummary: { body: options.body, changeReportFile: options.changeReportFile! }
+        pullRequestSummary: {
+          body: options.body,
+          changeReportFile: options.changeReportFile!,
+          ...(manual?.transactionId ? { manualValidation: { ...manual, transactionId: manual.transactionId } } : {})
+        }
       };
       if (options.skipQueue) return publish();
       return coordinatePlatformWrite({
