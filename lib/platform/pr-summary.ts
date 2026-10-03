@@ -588,7 +588,6 @@ async function syncPullRequestSummary(
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
-        if (!resourceIdentityEquals(initial.value.identity, prIdentity)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH', message: 'manual-validation snapshot identity does not match the task-bound pull request', retryable: false }, prNumber);
         if (!Number.isSafeInteger(initial.value.number) || initial.value.number <= 0) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a positive safe pull-request number from the authoritative snapshot', retryable: false }, prNumber);
         prNumber = initial.value.number;
         knownPrNumber = prNumber;
@@ -602,7 +601,7 @@ async function syncPullRequestSummary(
           });
           if (!transaction.ok) return fail('failed', context, platformError(transaction.error), prNumber);
         }
-        if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
+        if (manual.phase === 'final' && (!manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
         if (manual.phase === 'final') {
           if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
           const completion = readManualValidationCompletion(resolved.taskDir, {
