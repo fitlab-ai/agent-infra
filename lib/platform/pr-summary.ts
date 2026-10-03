@@ -343,13 +343,18 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
     artifacts: []
   };
   const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
-  const prNumber = resourceIdentityNumber(prIdentity);
+  let prNumber = resourceIdentityNumber(prIdentity);
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   let pullRequest: PlatformChangeRequestSnapshot | null = null;
   if (loaded.ok && prIdentity && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
     const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
-    if (inspected.ok) pullRequest = inspected.value;
+    if (inspected.ok) {
+      pullRequest = inspected.value;
+      if (Number.isSafeInteger(inspected.value.number) && inspected.value.number > 0) {
+        prNumber = inspected.value.number;
+      }
+    }
   }
   const report = summaryReportStatus(reportPath, pullRequest, taskContent, resolved.repoRoot);
   return {

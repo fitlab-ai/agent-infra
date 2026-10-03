@@ -20,6 +20,8 @@
 | `refuted` | 核实后判定不成立 / 幻觉 / 基于错误 `file:line` | 反证（`file:line` 或命令原文）；待检视方确认 |
 | `cannot-judge` | 证据不足，无法判断 | 已尝试的核实路径；交检视方/人工 |
 
+`finding-respond --round` 使用 finding 自身的握手轮次，不使用当前 code/plan/analysis artifact 的轮次。执行方先从 `task-ledger stage-status --stage {stage}` 读取该 finding 当前账本 `round`，响应时传入当前值加一；不同 finding 的响应轮次可能不同。
+
 ## 检视方回交义务（`review-*` 技能，对执行方响应复核时）
 
 执行方给出 `adjusted` / `refuted` / `cannot-judge` 后，检视方必须逐条回应，不得复读原意见或无视：

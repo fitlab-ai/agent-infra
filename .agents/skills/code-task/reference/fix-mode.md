@@ -4,7 +4,7 @@
 
 ## 规划修复
 
-**先逐条核实（动手前必做）**：对 `{review-artifact}` 的每一条发现，先 Read/Grep 其引用的 `file:line` 与对应 `git diff`，确认问题真实存在，再按 `.agents/rules/review-handshake.md` 的四态处置；记录每条待写入的响应及相称证据，等 code 报告 preflight 通过后，再逐条调用 `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {code-round} --status {四态} --evidence {相称证据}`（“接受”不是零成本默认）：
+**先逐条核实（动手前必做）**：对 `{review-artifact}` 的每一条发现，先 Read/Grep 其引用的 `file:line` 与对应 `git diff`，确认问题真实存在，再按 `.agents/rules/review-handshake.md` 的四态处置；通过 `agent-infra-internal task-ledger {task-id} stage-status --stage code` 读取每条账本记录的当前 `round`。code artifact 的 `{code-round}` 与 finding 的响应轮次相互独立；每条 finding 的 `finding-respond --round` 必须取该 finding 当前账本 `round + 1`，不得直接使用 `{code-round}`。记录每条待写入的响应及相称证据，等 code 报告 preflight 通过后，再逐条调用 `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {finding-response-round} --status {四态} --evidence {相称证据}`（“接受”不是零成本默认）：
 - `accepted` → 纳入下方分类与修复，证据指向修复点 `file:line`
 - `adjusted` → 采用替代修法，附理由，待 review-code 复核确认
 - `refuted` → 核实判定不成立 / 基于错误 `file:line` / 幻觉 → 不改代码，在报告 `## 对审查发现的逐条核实` 给出反证，待 review-code 复核确认

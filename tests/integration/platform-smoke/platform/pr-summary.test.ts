@@ -306,12 +306,12 @@ test('PR summary passes an opaque bound identity through context and summary val
     fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(opaqueFact)}`));
     const providerSource = path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs');
     fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
-      platform: { type: 'trae', providers: { trae: { source: providerSource, config: {} } } }
+      platform: { type: 'trae', providers: { trae: { source: providerSource, config: { number: 42 } } } }
     }));
 
     const context = await summaryContext(fixture.taskId, { cwd: fixture.root });
     assert.deepEqual(context.pullRequest?.identity, { kind: 'id', value: 'pr-42' });
-    assert.equal(context.task.prNumber, null);
+    assert.equal(context.task.prNumber, 42);
 
     const result = await syncPullRequestSummary(fixture.taskId, {
       cwd: fixture.root,

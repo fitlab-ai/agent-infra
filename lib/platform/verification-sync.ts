@@ -579,7 +579,7 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
 }
 
 function checkPrTypeLabel(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.audit.enabled || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
+  if (!context.audit.enabled || !context.hasTriage || !context.prIdentity || remoteData.prLabels === undefined || remoteData.prLabels === null) {
     return infoResult('PR type-label audit is not applicable because the required PR metadata or capability is unavailable');
   }
 
@@ -589,17 +589,17 @@ function checkPrTypeLabel(context: any, remoteData: any, shared: VerificationSha
   }
 
   if (remoteData.prLabels.includes(expectedLabel)) {
-    return shared.passResult(CHECK_TYPE, `PR #${context.prNumber} has expected type label '${expectedLabel}'`);
+    return shared.passResult(CHECK_TYPE, `${pullRequestLabel(context)} has expected type label '${expectedLabel}'`);
   }
 
   return shared.failResult(CHECK_TYPE,
-    `Expected type label '${expectedLabel}' not found on PR #${context.prNumber}`,
+    `Expected type label '${expectedLabel}' not found on ${pullRequestLabel(context)}`,
     "check_failed"
   );
 }
 
 function checkInLabelsMatchPr(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.audit.enabled || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
+  if (!context.audit.enabled || !context.hasTriage || !context.prIdentity || remoteData.prLabels === undefined || remoteData.prLabels === null) {
     return infoResult('PR in: label audit is not applicable because the required PR metadata or capability is unavailable');
   }
 
@@ -611,13 +611,17 @@ function checkInLabelsMatchPr(context: any, remoteData: any, shared: Verificatio
     .sort();
 
   if (arraysEqual(issueInLabels, prInLabels)) {
-    return shared.passResult(CHECK_TYPE, `PR #${context.prNumber} in: labels match Issue #${context.issueNumber}`);
+    return shared.passResult(CHECK_TYPE, `${pullRequestLabel(context)} in: labels match Issue #${context.issueNumber}`);
   }
 
   return shared.failResult(CHECK_TYPE,
-    `in: labels mismatch — PR #${context.prNumber} has [${formatLabelList(prInLabels)}], Issue #${context.issueNumber} has [${formatLabelList(issueInLabels)}]`,
+    `in: labels mismatch — ${pullRequestLabel(context)} has [${formatLabelList(prInLabels)}], Issue #${context.issueNumber} has [${formatLabelList(issueInLabels)}]`,
     "check_failed"
   );
+}
+
+function pullRequestLabel(context: any): string {
+  return context.prNumber ? `PR #${context.prNumber}` : 'Pull request';
 }
 
 function checkInLabelsComputed(context: any, remoteData: any, shared: VerificationShared): any {
@@ -760,18 +764,18 @@ function checkIssueFields(context: any, remoteData: any, shared: VerificationSha
 }
 
 function checkPrAssignee(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.audit.enabled || !context.hasPush || !context.prNumber) {
+  if (!context.audit.enabled || !context.hasPush || !context.prIdentity || remoteData.prAssignees === undefined || remoteData.prAssignees === null) {
     return infoResult('PR assignee audit is not applicable because it is disabled or required PR metadata/capability is unavailable');
   }
 
-  if (!remoteData.prAssignees || remoteData.prAssignees.length === 0) {
+  if (remoteData.prAssignees.length === 0) {
     return shared.failResult(CHECK_TYPE,
-      `PR #${context.prNumber} has no assignee`,
+      `${pullRequestLabel(context)} has no assignee`,
       "check_failed"
     );
   }
 
-  return shared.passResult(CHECK_TYPE, `PR #${context.prNumber} has an assignee`);
+  return shared.passResult(CHECK_TYPE, `${pullRequestLabel(context)} has an assignee`);
 }
 
 function checkMilestone(context: any, remoteData: any, shared: VerificationShared): any {
@@ -786,9 +790,9 @@ function checkMilestone(context: any, remoteData: any, shared: VerificationShare
     );
   }
 
-  if (context.prNumber && remoteData.prMilestone !== undefined && !remoteData.prMilestone?.title) {
+  if (context.prIdentity && remoteData.prMilestone !== undefined && !remoteData.prMilestone?.title) {
     return shared.failResult(CHECK_TYPE,
-      `PR #${context.prNumber} has no milestone set`,
+      `${pullRequestLabel(context)} has no milestone set`,
       "check_failed"
     );
   }
@@ -801,9 +805,9 @@ function checkMilestone(context: any, remoteData: any, shared: VerificationShare
         "check_failed"
       );
     }
-    if (context.prNumber && remoteData.prMilestone?.title && VERSION_LINE_REGEX.test(remoteData.prMilestone.title)) {
+    if (context.prIdentity && remoteData.prMilestone?.title && VERSION_LINE_REGEX.test(remoteData.prMilestone.title)) {
       return shared.failResult(CHECK_TYPE,
-        `PR #${context.prNumber} milestone '${remoteData.prMilestone.title}' is a release line; narrow to a specific version before continuing`,
+        `${pullRequestLabel(context)} milestone '${remoteData.prMilestone.title}' is a release line; narrow to a specific version before continuing`,
         "check_failed"
       );
     }

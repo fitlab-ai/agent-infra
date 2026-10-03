@@ -22,7 +22,7 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr bind <task-ref> --pr <token> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr skip <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-pr sync-in-labels --pr <N> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr sync-in-labels --pr <token> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr change-report <task-ref> --agent <agent> --mechanical-file <path> --precheck-file <path> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --change-report-file <path> --result <pr_created|pr_reused|no_op> [--manual-phase pending|final ...] [--strict] [--dry-run] [--cwd <path>]
@@ -89,10 +89,9 @@ async function platformPr(args: string[] = []): Promise<void> {
     const values = parsed.values;
     const unexpected = Object.keys(values).find((name) => !['cwd', 'pr', 'dryRun'].includes(name));
     if (unexpected) { fail(`sync-in-labels does not accept --${unexpected}`); return; }
-    const pr = Number(values.pr);
-    if (!Number.isInteger(pr) || pr <= 0) { fail('sync-in-labels requires a positive --pr'); return; }
+    if (typeof values.pr !== 'string' || !values.pr || values.pr.trim() !== values.pr) { fail('sync-in-labels requires a non-empty --pr token'); return; }
     const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
-    finish(await syncPlatformPullRequestInLabels(pr, { cwd, dryRun: values.dryRun === true }));
+    finish(await syncPlatformPullRequestInLabels(values.pr, { cwd, dryRun: values.dryRun === true }));
     return;
   }
   const taskRef = args[1];

@@ -597,27 +597,38 @@ function inLabelResource(
   before: string[],
   expected: string[],
   after: string[] | null,
-  effect: 'no-op' | 'applied' | 'unknown'
+  effect: 'no-op' | 'applied' | 'unknown',
+  displayNumber = resourceIdentityNumber(identity)
 ) {
-  return { kind, number: resourceIdentityNumber(identity), identity, before: [...before].sort(), expected: [...expected].sort(), after: after ? [...after].sort() : null, effect };
+  return { kind, number: displayNumber, identity, before: [...before].sort(), expected: [...expected].sort(), after: after ? [...after].sort() : null, effect };
 }
 
-async function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
+async function syncPlatformPullRequestInLabels(prToken: string | number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
+  const token = String(prToken);
   const loaded = await resolvePlatformProviderContext({ cwd, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
-  if (!loaded.ok || !usable) return result(context.status, null, null, prNumber, {
+  if (!loaded.ok || !usable) return result(context.status, null, null, null, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
   });
-  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) return result('failed', null, null, prNumber, {
+  if (!token || token.trim() !== token) return result('failed', null, null, null, {
     platform: context.platform, capabilities: context.capabilities,
-    error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
+    error: { code: 'PR_IDENTITY_INVALID', message: 'PR identity token must be non-empty and trimmed', retryable: false }
   });
   const provider = loaded.value.provider;
   const operationContext = providerOperationContext(loaded.value);
   const repository = context.platform.repository!;
-  const pullRequestIdentity = providerResourceToken(provider, 'pull-request', String(prNumber));
+  let pullRequestIdentity: ResourceIdentity;
+  try {
+    pullRequestIdentity = providerResourceToken(provider, 'pull-request', token);
+  } catch (error) {
+    return result('failed', null, null, null, {
+      platform: context.platform, capabilities: context.capabilities,
+      error: { code: 'PR_IDENTITY_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    });
+  }
+  let prNumber = resourceIdentityNumber(pullRequestIdentity);
   const providerFailure = (error: { code: string; message: string; retryable: boolean }): PullRequestResult => result(
     error.code === 'PLATFORM_CAPABILITY_UNSUPPORTED' ? 'degraded' : providerStatus(error),
     null,
@@ -634,7 +645,10 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
     ? await provider.changeRequests.inspect({ context: operationContext, target: pullRequestIdentity })
     : unsupportedProviderOperation(provider, 'changeRequests.inspect');
   if (!inspected.ok) return providerFailure(inspected.error);
-  const fetched = normalizeProviderPullRequest(inspected.value, repository, prNumber);
+  if (Number.isSafeInteger(inspected.value.number) && (inspected.value.number as number) > 0) {
+    prNumber = inspected.value.number as number;
+  }
+  const fetched = normalizeProviderPullRequest(inspected.value, repository, prNumber ?? 0);
   const files = provider.changeRequests?.listFiles
     ? await provider.changeRequests.listFiles({ context: operationContext, target: pullRequestIdentity })
     : unsupportedProviderOperation(provider, 'changeRequests.listFiles');
@@ -705,7 +719,8 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
     item.snapshot.labels,
     item.plan.target,
     item.plan.changed && willWrite ? null : item.snapshot.labels,
-    item.plan.changed && willWrite ? 'unknown' : 'no-op'
+    item.plan.changed && willWrite ? 'unknown' : 'no-op',
+    item.number
   ));
   if (options.dryRun || !context.capabilities.triage) return result(
     !context.capabilities.triage || association.value.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
@@ -779,7 +794,7 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
       evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueIdentities },
       error: { code: 'IN_LABEL_SYNC_PARTIAL', message: `${item.kind} ${resourceIdentityLabel(item.identity)} did not converge to the expected in: labels`, retryable: true }
     });
-    if (item.kind === 'pull-request') currentPullRequest = normalizeProviderPullRequest(reread.value as ProviderChangeRequestSnapshot, repository, prNumber, currentPullRequest);
+    if (item.kind === 'pull-request') currentPullRequest = normalizeProviderPullRequest(reread.value as ProviderChangeRequestSnapshot, repository, prNumber ?? currentPullRequest.number, currentPullRequest);
   }
   return result(association.value.length !== 1 ? 'degraded' : successfulWrites > 0 ? 'applied' : 'no-op', null, issueNumber, prNumber, {
     changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,

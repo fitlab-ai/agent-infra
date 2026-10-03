@@ -20,6 +20,8 @@ For each finding in the latest `review-*`, first Read/Grep the cited `file:line`
 | `refuted` | After verification, judged invalid / hallucinated / based on a wrong `file:line` | counter-evidence (`file:line` or raw command output); awaits reviewer confirmation |
 | `cannot-judge` | Insufficient evidence to decide | the verification path attempted; handed to reviewer/human |
 
+`finding-respond --round` is the finding's handshake round, independent of the current code/plan/analysis artifact round. The executor reads each finding's current ledger `round` from `task-ledger stage-status --stage {stage}` and submits current value plus one; different findings may require different response rounds.
+
 ## Reviewer hand-back duty (`review-*` skills, when re-reviewing the executor response)
 
 After the executor gives `adjusted` / `refuted` / `cannot-judge`, the reviewer must respond per item — never re-reading the original finding nor ignoring the hand-back:

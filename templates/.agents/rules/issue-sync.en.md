@@ -35,7 +35,7 @@ The task comment synchronizes only a deterministic current-task projection. Proc
 
 Recovery comments use `recovery-action`, `recovery-prepare`, and `recovery-commit` markers with a stable recovery id and a body file. Task sync publishes prepare, action, a task snapshot that is written and re-read, and then commit. Replaying identical content is a no-op; conflicting immutable content fails with `RECOVERY_IMMUTABLE_CONFLICT`. Restore accepts only an author-consistent, complete, phase/digest/marker-valid transaction bound to the current task comment body SHA-256.
 
-PR event `in:` synchronization uses `agent-infra-internal platform-pr sync-in-labels --pr <N> [--cwd <path>]`. PR files are the event evidence; a unique closing Issue is written and re-read before the PR. Zero or multiple closing Issues update only the PR and return `degraded`; unknown side effects or failed convergence return `blocked` with `IN_LABEL_SYNC_PARTIAL`.
+PR event `in:` synchronization uses `agent-infra-internal platform-pr sync-in-labels --pr <token> [--cwd <path>]`. The shared entry turns the token into a resource identity using the provider declaration, then passes that identity to the provider; the provider interprets the token for its platform. PR files are the event evidence; a unique closing Issue is written and re-read before the PR. Zero or multiple closing Issues update only the PR and return `degraded`; unknown side effects or failed convergence return `blocked` with `IN_LABEL_SYNC_PARTIAL`.
 
 `planned|applied|no-op|degraded` exit 0; `failed` exits 1; `blocked` exits 2.
 
