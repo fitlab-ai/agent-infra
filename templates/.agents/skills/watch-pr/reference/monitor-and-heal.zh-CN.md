@@ -63,7 +63,7 @@ unsafe: help
 进入求助出口时，向用户输出以下固定结构（不写入产物文件）：
 
 ```
-PR #{pr#} 监控阻塞，需人工介入。
+PR #{pr#} 监控处于 blocked 状态；请根据下方证据处理具体阻塞项。
 
 阻塞原因：{非代码层 / 达修复上限 / run 不可定位 / readiness 未知 / rebase 或安全更新失败}
 PR head/base：{repository/ref/SHA}

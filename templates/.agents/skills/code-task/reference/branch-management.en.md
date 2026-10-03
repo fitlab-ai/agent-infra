@@ -39,7 +39,7 @@ git ls-remote --heads origin {branch-name}
 - only remote branch exists: `git switch --track origin/{branch-name}`
 - neither exists: `git switch -c {branch-name}`
 
-If switching fails, stop and ask the user to resolve the branch or working tree conflict first.
+If switching fails, inspect stderr, `git status`, and conflicting paths to distinguish an Agent branch/command error from user workspace changes. Fix only Agent-owned errors; never stash, reset, or overwrite user content. Continue safe read-only work independent of the branch switch and record any remaining branch condition.
 
 ## task.md Write-back
 

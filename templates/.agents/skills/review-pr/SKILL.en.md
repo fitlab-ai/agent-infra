@@ -174,7 +174,7 @@ Present the verification summary per `.agents/rules/validation-output.md`, retai
   agent-infra-internal pr-review-grade verify-artifact --artifact-file {pr-review-artifact} [--cwd <path>]
   ```
 
-Exit code 0 passes; 1 means fix per the output and re-run; 2 means stop and ask for human intervention.
+Exit code 0 passes; 1 means fix per the output and re-run; 2 means preserve the blocked state and inspect the structured summary and recovery condition. Continue independent local review work; request user input only for missing user-specific facts or authorization, or when safe recovery is unavailable.
 
 ### 9. Inform the user
 

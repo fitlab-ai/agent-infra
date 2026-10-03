@@ -22,7 +22,7 @@ Ensure the project has been built before running integration tests.
 # mvn package -DskipTests  (Maven)
 ```
 
-If build artifacts don't exist, prompt user to run the test skill first.
+If build artifacts don't exist, run the configured build step within the current task scope. Inspect its failure output and fix diagnosable local issues; retain a block only when the build needs a missing environment or authorization.
 
 ## 2. Run Integration Tests
 
@@ -46,7 +46,7 @@ Report results:
 If tests fail:
 - Output failure details
 - Check for environment issues (ports in use, services not running, etc.)
-- Do NOT auto-fix - wait for user decision
+- For an in-scope, diagnosable failure, inspect evidence and fix problems introduced by this task, then rerun the same tests. Record a block and continue independent work for out-of-scope design choices, user-data conflicts, or required authorization.
 
 ## Next Steps
 
@@ -67,3 +67,6 @@ Next step - commit changes:
 2. **Environment**: Integration tests may require external services (databases, APIs, etc.)
 3. **Timeouts**: Integration tests typically take longer; be patient
 4. **Cleanup**: Ensure test environment is cleaned up after tests complete
+
+
+For an in-scope, diagnosable failure, inspect the error evidence, identify the cause, fix it, and retry with the same verifier; do not stop or ask merely because an ordinary attempt failed. Preserve a blocked state for user data/template conflicts, design choices beyond approved scope, required human validation/authorization, or unsafe recovery, and continue independent work.

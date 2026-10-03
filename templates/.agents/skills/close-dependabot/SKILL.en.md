@@ -143,3 +143,6 @@ Next step - complete and archive the task if a related task exists:
 - Already closed: output "Alert #{number} is already {state}"
 - Permission error: output "No permission to modify alerts"
 - User canceled: output "Cancellation acknowledged"
+
+
+Security responsibility boundary: preserve the accurate disposition reason, impact explanation, and required confirmation before closing. Do not infer that risk is gone, confirm on behalf of an authorized person, or bypass platform security confirmation to keep moving. Independent local preparation may continue.

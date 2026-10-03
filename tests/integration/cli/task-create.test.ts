@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../../../lib/task/create.ts';
+import { taskCreate } from '../../../lib/internal/task-create.ts';
 import { createTask } from '../../../lib/task/create-service.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
@@ -282,6 +283,61 @@ test('task-create internal CLI rejects an invalid qualification template before 
     assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json')), false);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create marks transport-preceding candidate schema rejection as unaccepted and repairable', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify({ ...candidate(), unexpected: true }));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'failed');
+    assert.equal(payload.error.code, 'TASK_CREATE_PAYLOAD_INVALID');
+    assert.deepEqual(payload.control, {
+      requestId: null,
+      accepted: false,
+      recovery: 'new-request-id'
+    });
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create file read failure does not become an unaccepted schema rejection', async () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify(candidate()));
+  const originalLstat = fs.lstatSync;
+  const originalWrite = process.stdout.write;
+  const originalExitCode = process.exitCode;
+  let stdout = '';
+  try {
+    (fs as unknown as { lstatSync: typeof fs.lstatSync }).lstatSync = ((filePath: fs.PathLike, options?: { bigint?: boolean }) => {
+      const stat = originalLstat(filePath, options);
+      if (path.resolve(String(filePath)) === input) fs.unlinkSync(input);
+      return stat;
+    }) as typeof fs.lstatSync;
+    (process.stdout as unknown as { write: typeof process.stdout.write }).write = ((chunk: string | Uint8Array) => {
+      stdout += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    await taskCreate(['--input', input]);
+    const payload = JSON.parse(stdout);
+    assert.equal(process.exitCode, 1);
+    assert.equal(payload.status, 'failed');
+    assert.equal(payload.error.code, 'ENOENT');
+    assert.equal('control' in payload, false);
+  } finally {
+    (fs as unknown as { lstatSync: typeof fs.lstatSync }).lstatSync = originalLstat;
+    process.stdout.write = originalWrite;
+    process.exitCode = originalExitCode;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

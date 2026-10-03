@@ -34,7 +34,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 脚本输出 JSON 到 stdout，解析并记录报告内容。
 
 **关键字段**：
-- `error`：错误信息（如非空则停止并报告）
+- `error`：错误信息（如非空，先检查诊断并修复任务范围内可恢复的问题；未解决时保留阻塞状态并报告具体原因）
 - `templateVersion`：模板源包的精确 `v` 前缀 SemVer（可包含 prerelease 或 build metadata）
 - `templateRoot`：模板文件根目录绝对路径
 - `templateSources.conflicts`：外部模板源冲突列表；报告中必须显式展示，说明哪些文件因内置模板或后续外部源获胜而被忽略
@@ -141,3 +141,6 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 ```
 
 输出报告后**停止**，不要对项目做其他更改。
+
+
+遇到任务范围内且可诊断的失败，先读取错误证据、定位根因、修复并按同一验证器重试；不要仅因一次普通失败就停止或提问。若涉及用户数据/模板冲突、超出批准范围的设计选择、必要人工验证/授权或无法安全恢复，则保留阻塞事实并继续独立工作。

@@ -57,6 +57,15 @@ SKILLs currently covered by this exemption:
 
 - `run-task`: may collect only the atomic model policy explicitly required by core
 
+### Exemption 6: Necessary facts or security accountability that cannot be inferred
+
+Only when the executor has checked the current task, configuration, code, Git, and platform records and still cannot safely infer a user-specific fact or security-accountability information required to proceed may it ask the user for that missing information. Keep the question limited to the missing fact itself. Do not ask for ordinary implementation preferences that existing evidence can resolve, and do not turn an exhausted recovery budget into general permission to ask.
+
+SKILLs currently covered by this exemption:
+
+- `create-pr`: may request the target base branch when it cannot be derived from user input, configuration, Git history, or PR facts
+- `close-codescan` and `close-dependabot`: may request the reason or accountability statement required for a security-alert disposition; the final dismissal still follows its dedicated confirmation gate
+
 ## No-Mid-Flow-Questions Clause (default behavior)
 
 For every SKILL execution context not covered by any exemption above, the default behavior is:
@@ -97,6 +106,16 @@ A mandatory human review checkpoint means:
 If a key decision needs human judgment during execution, follow the rule above and register the detail identity through the structured `decision-next-id` / `decision-upsert` commands for the user to address at the review checkpoint; ordinary open questions still go to `## Open Questions` / `未决问题`.
 
 The `run-task` orchestrator may continue after a child skill artifact only when core mechanical state permits it; this does not bypass human decisions. When core reports a human decision, manual validation, or another stable pause condition, the orchestrator must stop without asking mid-flow or approving it itself.
+
+## Error diagnosis and recovery order
+
+When a tool, gate, platform, or local operation fails, read the complete error and structured result first. Determine state from the operation identity, acceptance status, side effects, receipt, and explicit retryability. Do not infer network failure, non-execution, or a need for user intervention from an exit code, wording, or temporary lack of output alone.
+
+1. Correct Agent-generated formatting/schema errors explicitly rejected by a validator; preserve domain meaning, revalidate with the same validator, then retry within bounds.
+2. For operations explicitly known not to have executed and marked retryable, fix the diagnosed cause first and preserve the idempotency identity required by the contract; obey existing no-progress, repeated-diagnostic, and self-healing budgets.
+3. For accepted operations, unknown outcomes, or possible side effects, retain the original request identity and receipt and follow typed recovery to inspect or recover; do not change the payload, issue another business write, or claim success.
+4. For temporary blocks, record the exact state and recovery condition. Continue read-only, local, or other independent work that does not depend on the blocked operation. A blocked step remains incomplete and must not be treated as success.
+5. Ask for user action only when a safety boundary cannot be verified, recovery requires user-specific facts or authorization, user workspace changes cannot be safely preserved, or the allowed recovery budget is exhausted with no safe independent work remaining; necessary facts or security-accountability information follow the scope of Exemption 6. Continue to honor domain hard gates for security, permissions, human review, manual validation, explicit publish authorization, and delivery stages.
 
 ## Anchor Location
 

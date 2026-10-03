@@ -95,7 +95,7 @@ Present the verification summary per `.agents/rules/validation-output.md`, retai
 Handle the result:
 - exit code 0 (all passed) -> continue to "Inform User"
 - exit code 1 (verification failed) -> fix per the output and re-run the gate
-- exit code 2 (network interruption) -> stop and tell the user manual intervention is needed
+- exit code 2 (blocked) -> retain the blocked state and inspect this run's summary; continue only local work independent of the blocked gate, and do not claim stage completion or infer a network cause from the exit code alone. Ask for user action only when user-specific facts or authorization are missing, or recovery cannot be made safe.
 
 Keep the gate output in your reply as the verification evidence. Without current gate output, do not declare completion.
 
@@ -151,5 +151,5 @@ Stop immediately after the checklist. The green exit waits for the user to run `
 ## Error Handling
 
 - Cannot locate a PR (task short id resolves but task.md has no verified bound `pr_delivery_fact`, and no `--pr` was passed and the current branch has no PR): prompt "Run `create-pr` first, or specify the PR with `--pr <number>`", then stop.
-- Platform CLI not authenticated or API unavailable: prompt that manual intervention is needed, then stop.
+- Classify unauthenticated/insufficient permissions separately from temporary network/API unavailability. Run safe read-only auth/API diagnostics and retain the exact result; use existing credentials to recover when possible. If monitoring depends on the platform, retain pending/blocked, do not replay remote writes, and continue local work that does not depend on the platform. Ask for user action only when user-specific credentials/authorization are missing or recovery cannot be made safe.
 - Short-id resolution failure: pass through `task-short-id.js`'s exit code and error message; do not rewrite it.

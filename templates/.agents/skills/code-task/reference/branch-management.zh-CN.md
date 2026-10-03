@@ -40,7 +40,7 @@ git ls-remote --heads origin {branch-name}
 - 仅远程分支存在：`git switch --track origin/{branch-name}`
 - 本地和远程都不存在：`git switch -c {branch-name}`
 
-如果切换失败，立即停止并提示用户先处理工作区冲突或未解决的分支问题。
+如果切换失败，读取 stderr、`git status` 与冲突路径，区分 Agent 自身的分支/命令错误和用户工作区冲突。只修复 Agent 自身错误；不得 stash、reset 或覆盖用户内容。安全时继续不依赖切换的只读工作，并记录无法完成的分支条件。
 
 ## task.md 回写要求
 

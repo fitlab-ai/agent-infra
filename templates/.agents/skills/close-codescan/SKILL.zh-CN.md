@@ -135,3 +135,6 @@ ai sandbox rm {branch}
 - 已关闭：提示 "Alert #{number} is already {state}"
 - 权限错误：提示 "No permission to modify alerts"
 - 用户取消：提示 "Cancellation acknowledged"
+
+
+安全责任边界：关闭前必须保留准确的处置理由、影响说明和所需确认。不得为追求继续执行而推断风险已消失、代替授权人确认，或绕过平台要求的安全确认；其他可独立完成的本地整理仍可继续。

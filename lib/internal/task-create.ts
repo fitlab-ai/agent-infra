@@ -7,7 +7,7 @@ import {
   SandboxControlClientError
 } from '../sandbox/control/client.ts';
 import { SANDBOX_CONTROL_MAX_BYTES } from '../sandbox/control/protocol.ts';
-import { validateTaskCreateCandidate } from '../task/create.ts';
+import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../task/create.ts';
 import {
   createTask,
   parseTaskCreateResult,
@@ -82,7 +82,20 @@ async function taskCreate(args: string[]): Promise<void> {
     const stat = fs.lstatSync(inputPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_INPUT_INVALID: input must be a regular file');
     if (stat.size > SANDBOX_CONTROL_MAX_BYTES) throw new Error('TASK_CREATE_INPUT_TOO_LARGE: input exceeds the control limit');
-    const candidate = validateTaskCreateCandidate(JSON.parse(fs.readFileSync(inputPath, 'utf8')));
+    const inputContent = fs.readFileSync(inputPath, 'utf8');
+    let candidate: TaskCreateCandidateV1;
+    try {
+      candidate = validateTaskCreateCandidate(JSON.parse(inputContent));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_INPUT_INVALID';
+      output(failed(code, message, false, {
+        requestId: null,
+        accepted: false,
+        recovery: 'new-request-id'
+      }));
+      return;
+    }
     const environment = resolveSandboxControlTransport();
     if (environment.kind === 'fail-closed') {
       output(failed(environment.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID', 'sandbox client control configuration is invalid'));

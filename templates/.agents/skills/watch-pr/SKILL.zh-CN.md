@@ -93,7 +93,7 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 处理结果：
 - 退出码 0（全部通过）-> 继续到「告知用户」步骤
 - 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+- 退出码 2（阻塞）-> 保留阻塞状态并读取当次摘要；只继续与该校验无依赖的本地工作，不得宣称阶段完成，也不得仅凭退出码归因为网络故障。仅在缺少用户专属事实/授权或无法安全恢复时请求用户动作。
 
 按 `.agents/rules/validation-output.md` 展示当次校验摘要；没有当次校验输出，不得声明完成。
 
@@ -149,5 +149,5 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 ## 错误处理
 
 - 无法定位 PR（任务短号命中但 task.md 无 verified bound `pr_delivery_fact`，且未传 `--pr`、当前分支也无 PR）：提示「请先运行 `create-pr`，或用 `--pr <number>` 指定 PR」，停止。
-- 平台 CLI 未认证或 API 不可用：提示需人工介入，停止。
+- 平台 CLI 未认证/权限不足与网络/API 暂不可用分别分类。先执行安全的只读认证/API 诊断并保留准确结果；若可通过当前已有凭据恢复则自行处理。远端监控依赖平台时保留 pending/blocked，不重放远端写入，继续不依赖平台的本地工作。只有缺少用户独有凭据/授权或无法安全恢复时才请求对应动作。
 - 短号解析失败：透传 `task-short-id.js` 的退出码与错误信息，不重写。

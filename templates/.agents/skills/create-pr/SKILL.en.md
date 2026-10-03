@@ -107,7 +107,7 @@ Present the verification summary per `.agents/rules/validation-output.md`, retai
 Handle the result as follows:
 - exit code 0 (all checks passed) -> continue to the "Inform User" step
 - exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
+- exit code 2 (blocked) -> retain the blocked state and inspect this run's summary; continue only local work independent of the blocked gate, and do not claim stage completion or infer a network cause from the exit code alone. Ask for user action only when user-specific facts or authorization are missing, or recovery cannot be made safe.
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
