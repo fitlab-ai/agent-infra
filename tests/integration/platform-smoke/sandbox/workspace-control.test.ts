@@ -54,6 +54,7 @@ import {
   nodeEntryArgs
 } from '../../../../lib/sandbox/control/executor.ts';
 import { bindTaskFinalizationReceipt, prepareTaskFinalization } from '../../../../lib/task/finalization.ts';
+import { createTask } from '../../../../lib/task/create-service.ts';
 import { platformResult } from '../../../../lib/platform/types.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
@@ -958,6 +959,78 @@ test('task-create executor preserves request identity when the host service thro
     recovery: 'inspect-domain-state'
   });
   assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CREATE_TEST_ESCAPED_EXCEPTION');
+});
+
+test('task-create executor preserves accepted terminal status when the host service returns a qualification failure', async () => {
+  const root = testRoot('task-create-terminal-failure-');
+  const requestId = '12345678-1234-4234-8234-123456789abc';
+  const taskTemplateDir = path.join(root, '.agents', 'templates');
+  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
+  fs.mkdirSync(taskTemplateDir, { recursive: true });
+  fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    project: 'demo', task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' }
+  }));
+  fs.copyFileSync('.agents/templates/task.md', path.join(taskTemplateDir, 'task.md'));
+  fs.copyFileSync('.agents/skills/create-task/config/verify.json', path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
+  const templatePath = path.join(taskTemplateDir, 'task.md');
+  fs.writeFileSync(templatePath, fs.readFileSync(templatePath, 'utf8').replace(
+    '| candidate_id | statement | status | constraint_ids | impact | evidence |',
+    '| candidate_id | statement | status | constraint_ids | impact |'
+  ));
+  const boundManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    processingDir: path.join(root, 'processing'),
+    publicStatusDir: path.join(root, 'public'),
+    runtimeDir: path.join(root, 'runtime')
+  };
+  const candidate = {
+    version: 1,
+    idempotencyKey: requestId,
+    agent: 'codex',
+    title: 'Create a qualified sandbox task',
+    type: 'feature',
+    branchSlug: 'qualified-sandbox-task',
+    priority: 'Medium',
+    effort: 'Low',
+    description: 'Verify the executor projection of a host-side qualification failure.',
+    taskInput: {
+      sources: ['User request'], facts: [], constraints: ['Keep lifecycle routing deterministic.'], decisions: [],
+      alternatives: ['Use the canonical task renderer.', 'Add a second qualification writer.'],
+      acceptanceCriteria: ['The task qualification is validated before publishing task state.'], openQuestions: []
+    }
+  } as const;
+  const request = validateSandboxControlRequest({
+    version: 3,
+    id: requestId,
+    token: boundManifest.token,
+    generation: boundManifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'task-create',
+    candidate,
+    controllerProcess: null,
+    controllerProof: null
+  }, boundManifest, { now: 2_000 });
+
+  try {
+    const result = await executeRequest(boundManifest, '/manifest.json', request, {
+      createTask: (value, options) => createTask(value, {
+        ...options,
+        repoRoot: root,
+        dependencies: { createIssue: async () => { throw new Error('platform issue creation must not run'); } }
+      })
+    });
+    const output = JSON.parse(result.stdout);
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(output.control, { requestId, accepted: true, recovery: 'none' });
+    assert.equal(output.error.code, 'TASK_CREATE_QUALIFICATION_INVALID');
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('control broker ownership is acquired exclusively', onPlatforms('linux', 'darwin'), async () => {
