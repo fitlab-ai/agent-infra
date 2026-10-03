@@ -11,11 +11,11 @@ import {
   PUBLIC_OPERATION_DESCRIPTORS,
   guardTaskOperation,
   resolveSandboxControlTransport,
-  SANDBOX_CONTROL_STATUS_MOUNT,
   resolveDelegatedTaskOperation,
   resolveTaskOperation,
   type TaskOperationDescriptor
 } from '../../../../lib/internal/task-operation-registry.ts';
+import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../../lib/sandbox/environment.ts';
 import {
   INTERNAL_HANDLER_ROUTE_SELECTORS,
   INTERNAL_CLI_ROUTE_SELECTORS,

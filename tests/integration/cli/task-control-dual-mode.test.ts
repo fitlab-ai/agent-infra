@@ -14,7 +14,8 @@ import {
 } from '../../../lib/task/control-authority.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { resolveSandboxControlTransport, SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
+import { resolveSandboxControlTransport } from '../../../lib/internal/task-operation-registry.ts';
+import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.ts';
 
 function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {

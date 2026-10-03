@@ -135,7 +135,7 @@ function parseResponse(raw: string, id: string, accepted = false): SandboxContro
   return response;
 }
 
-function readPublishedResponse(raw: string, id: string, channelDir: string, accepted = false, generation?: string): SandboxControlResponse {
+function readPublishedResponse(raw: string, id: string, channelDir: string, accepted: boolean, generation: string): SandboxControlResponse {
   const response = parseResponse(raw, id, accepted);
   if (response.outputState !== 'available') return response;
   const filePath = path.join(channelDir, 'responses', `${id}.payload.json`);
@@ -147,7 +147,7 @@ function readPublishedResponse(raw: string, id: string, channelDir: string, acce
   }
   if (!response.payload || response.payload.version !== payload.version
     || response.payload.id !== payload.id || response.payload.generation !== payload.generation
-    || (generation !== undefined && payload.generation !== generation)
+    || payload.generation !== generation
     || response.payload.stdoutBytes !== payload.stdoutBytes || response.payload.stderrBytes !== payload.stderrBytes
     || response.payload.stdoutSha256 !== payload.stdoutSha256 || response.payload.stderrSha256 !== payload.stderrSha256) {
     clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker payload reference is invalid', false, true, id);
@@ -353,7 +353,7 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
 // Low-level channel reader for control integration tests and internal callers
 // that already hold a manifest-bound channel path.
 export function recoverSandboxControlFromChannel(requestId: string, params: Readonly<{
-  channelDir: string; generation?: string; timeoutMs?: number;
+  channelDir: string; generation: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) {
     clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'request id is invalid', false, true);

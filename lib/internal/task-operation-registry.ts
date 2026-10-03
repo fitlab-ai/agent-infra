@@ -14,8 +14,8 @@ import {
   PUBLIC_CLI_SELECTOR_ALIASES,
   internalRouteSelector
 } from './cli-route-inventory.ts';
-import { hasSandboxControlMarker, hasTaskBoundMarker, resolveSandboxControlTransport, sandboxTaskMarkerState } from '../sandbox/environment.ts';
-export { hasTaskBoundMarker, resolveSandboxControlTransport, SANDBOX_CONTROL_STATUS_MOUNT } from '../sandbox/environment.ts';
+import { hasSandboxControlMarker, resolveSandboxControlTransport, sandboxTaskMarkerState } from '../sandbox/environment.ts';
+export { resolveSandboxControlTransport } from '../sandbox/environment.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
 export type TaskOperationScope = 'task-bound' | 'non-task' | 'conditional';

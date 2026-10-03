@@ -385,6 +385,7 @@ function runTaskFinalizationClient(params: {
 function runRecoverSandboxControl(params: {
   channelDir: string;
   requestId: string;
+  generation: string;
   timeoutMs: number;
   readyPath: string;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
@@ -394,7 +395,7 @@ function runRecoverSandboxControl(params: {
     "fs.writeFileSync(process.env.TEST_READY_PATH, 'ready');",
     'try {',
     '  process.stdout.write(JSON.stringify(recoverSandboxControlFromChannel(process.env.TEST_REQUEST_ID, {',
-    '    channelDir: process.env.TEST_CHANNEL_DIR,',
+    '    channelDir: process.env.TEST_CHANNEL_DIR, generation: process.env.TEST_GENERATION,',
     '    timeoutMs: Number(process.env.TEST_TIMEOUT_MS)',
     "  })) + '\\n');",
     '} catch (error) {',
@@ -410,6 +411,7 @@ function runRecoverSandboxControl(params: {
       AGENT_INFRA_CONTROL_DIR: undefined,
       TEST_CHANNEL_DIR: params.channelDir,
       TEST_REQUEST_ID: params.requestId,
+      TEST_GENERATION: params.generation,
       TEST_TIMEOUT_MS: String(params.timeoutMs),
       TEST_READY_PATH: params.readyPath
     },
@@ -1658,7 +1660,7 @@ test('sandbox control recovery reads the retained terminal response by request i
   };
   fs.writeFileSync(path.join(responsesDir, `${requestId}.json`), `${JSON.stringify(response)}\n`);
   try {
-    assert.deepEqual(recoverSandboxControlFromChannel(requestId, { channelDir: root, timeoutMs: 100 }), response);
+    assert.deepEqual(recoverSandboxControlFromChannel(requestId, { channelDir: root, generation: 'test-generation', timeoutMs: 100 }), response);
     assert.equal(fs.existsSync(path.join(responsesDir, `${requestId}.json`)), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1681,7 +1683,7 @@ test('sandbox control recovery waits for a published unknown response to become 
     version: 2, id: requestId, phase: 'completed', exitCode: 0,
     stdout: 'finalization completed\n', stderr: '', error: null
   };
-  const recovery = runRecoverSandboxControl({ channelDir: root, requestId, timeoutMs: 500, readyPath });
+  const recovery = runRecoverSandboxControl({ channelDir: root, requestId, generation: 'test-generation', timeoutMs: 500, readyPath });
   waitForFile(readyPath, 2_000);
   const publishTerminal = new Promise<void>((resolve) => setTimeout(() => {
     fs.writeFileSync(responsePath, `${JSON.stringify(terminalResponse)}\n`);
@@ -1710,7 +1712,7 @@ test('sandbox control recovery times out on a stable published unknown with iden
     error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
   })}\n`);
   try {
-    const result = await runRecoverSandboxControl({ channelDir: root, requestId, timeoutMs: 100, readyPath });
+    const result = await runRecoverSandboxControl({ channelDir: root, requestId, generation: 'test-generation', timeoutMs: 100, readyPath });
     assert.equal(result.exitCode, 1);
     assert.deepEqual(result.payload, {
       error: {
@@ -1755,7 +1757,7 @@ test('sandbox control recovery polls a published unknown at the bounded cadence'
 
   try {
     assert.throws(
-      () => recoverSandboxControlFromChannel(requestId, { channelDir: root, timeoutMs: 100 }),
+      () => recoverSandboxControlFromChannel(requestId, { channelDir: root, generation: 'test-generation', timeoutMs: 100 }),
       (error: unknown) => error instanceof SandboxControlClientError
         && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
         && error.accepted
@@ -2135,9 +2137,16 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     await server;
     assert.equal(JSON.parse(terminal).outputState, 'available');
     assert.equal(JSON.parse(terminal).stderr, '');
-    const response = recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 });
+    const response = recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, generation: manifest.generation, timeoutMs: 100 });
     assert.equal(response.stdout, output);
     assert.equal(response.stderr, childStderr);
+    assert.throws(
+      () => recoverSandboxControlFromChannel(requestId, {
+        channelDir: manifest.channelDir, generation: 'stale-generation', timeoutMs: 100
+      }),
+      (error: unknown) => error instanceof SandboxControlClientError
+        && error.detail.code === 'SANDBOX_CONTROL_RESPONSE_INVALID'
+    );
 
     // Restore the durable state from the terminal-published, pre-cleanup boundary.
     fs.mkdirSync(processingDir, { recursive: true });
@@ -2155,7 +2164,7 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     assert.equal(fs.existsSync(processingDir), false);
     assert.equal(fs.existsSync(acceptedPath), false);
     assert.equal(fs.readFileSync(terminalPath, 'utf8'), terminal);
-    assert.equal(recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, output);
+    assert.equal(recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, generation: manifest.generation, timeoutMs: 100 }).stdout, output);
   } finally {
     controller.abort();
     await server?.catch(() => undefined);
@@ -3292,7 +3301,7 @@ test('broker recovery returns inspectable task-create output when the payload is
     assert.equal(result.task.id, null);
     assert.equal(result.task.shortId, null);
     assert.equal(result.task.state, null);
-    assert.equal(recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, response.stdout);
+    assert.equal(recoverSandboxControlFromChannel(requestId, { channelDir: manifest.channelDir, generation: manifest.generation, timeoutMs: 100 }).stdout, response.stdout);
     assert.equal(fs.existsSync(processingDirectory), false);
     controller.abort();
     await server;

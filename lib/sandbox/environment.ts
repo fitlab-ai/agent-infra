@@ -58,7 +58,7 @@ function nativeDirectoryProbe(candidate: string): NativeDirectoryProbe {
   }
 }
 
-export type TaskMarkerState = 'none' | 'branch-only' | 'task-bound' | 'incomplete';
+type TaskMarkerState = 'none' | 'branch-only' | 'task-bound' | 'incomplete';
 
 export function sandboxTaskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
   const present = (key: typeof TASK_MARKER_KEYS[number]) => Boolean(env[key]);
