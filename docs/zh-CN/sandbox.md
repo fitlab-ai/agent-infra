@@ -316,16 +316,8 @@ child close
 中的任务目录回执仍是业务 authority。只有宿主 direct-host finalization 和宿主侧
 sandbox-control broker 可以写入任务目录回执。沙箱 client 通过 control protocol 请求宿主
 执行 finalization，沙箱读取器从同一挂载的任务目录读取回执。
-若工作区仍在旧共享目录保存回执，必须在停止 finalization 写入期间执行一次性迁移。
-迁移前停止 finalization broker 和完成 worker，部署协议版本匹配的宿主与沙箱代码，并保持
-finalization 停用。运行 dry-run 并审阅报告，再执行迁移并处理报告中的失败项。确认所有
-有效 v4 回执均已迁入且冲突已处理后，才能重新启用 broker 和完成 worker。无效回执、缺少
-对应任务或目标冲突会保留原记录并报告，供人工处理。先运行 dry-run：
-
-```bash
-node --experimental-strip-types bin/migrate-finalization-receipts.ts --dry-run
-node --experimental-strip-types bin/migrate-finalization-receipts.ts
-```
+发布此目录布局变更前，先完成或关闭所有进行中的任务。新版本只读取任务目录内的回执，
+不会导入旧共享目录中的回执。新建任务使用任务目录布局。
 
 若 result evidence 缺失或格式错误，broker 会保持 uncertain/unknown，不能
 创建新的 request ID，也不能重放 mutation。

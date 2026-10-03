@@ -388,19 +388,10 @@ not proof of task completion; the canonical finalization receipt at
 authority. Direct-host finalization and the host-side sandbox-control broker are
 the only writers of that task-local receipt. The sandbox client requests
 finalization through the control protocol, and sandbox readers observe the same
-mounted task-local file. For workspaces that still have receipts in the old
-shared directory, migrate while finalization is stopped. Before migration, stop
-the finalization broker and completion workers, deploy matching host and sandbox
-control-protocol versions, and keep finalization disabled. Run the dry-run and
-review its report, then migrate and resolve reported failures. Confirm that all
-valid v4 receipts have moved and conflicts are resolved before re-enabling the
-broker and completion workers. Invalid receipts, missing tasks, and destination
-conflicts are preserved and reported for manual resolution. Run the dry-run first:
-
-```bash
-node --experimental-strip-types bin/migrate-finalization-receipts.ts --dry-run
-node --experimental-strip-types bin/migrate-finalization-receipts.ts
-```
+mounted task-local file. Before releasing this layout change, complete or close
+all in-progress tasks. The new version reads task-local receipts only and does
+not import receipts from the old shared directory. New tasks use the task-local
+layout.
 
 If result evidence is absent or malformed, the broker
 keeps the request uncertain/unknown and does not create a new ID or replay a

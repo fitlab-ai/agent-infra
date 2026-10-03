@@ -85,7 +85,6 @@ test("package metadata supports scoped npm publishing", () => {
     "dist/",
     "!dist/**/*.map",
     "bin/cli.ts",
-    "bin/migrate-finalization-receipts.ts",
     "bin/internal-cli.sh",
     "lib/",
     "runtime/",
