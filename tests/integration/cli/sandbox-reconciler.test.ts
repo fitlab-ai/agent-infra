@@ -64,6 +64,7 @@ test('capability plan selects clients only from installInSandbox while preservin
     [
       'codex:command-available',
       'codex:state-writable',
+      'codex:app-server-package-writable',
       'codex:prompts-link'
     ]
   );
@@ -175,6 +176,10 @@ test('runtime signature is host-path independent and changes with selected capab
       {
         keys: ['adapterId', 'id', 'probe', 'finding'],
         finding: { repairKind: 'permissions', path: '/home/devuser/.codex' }
+      },
+      {
+        keys: ['adapterId', 'id', 'probe', 'finding'],
+        finding: { repairKind: 'hard-failure', path: '/home/devuser/.codex/packages/app-server-daemon' }
       },
       {
         keys: ['adapterId', 'id', 'when', 'probe', 'finding', 'repair'],

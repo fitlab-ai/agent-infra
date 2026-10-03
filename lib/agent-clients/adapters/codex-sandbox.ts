@@ -286,6 +286,19 @@ const codexRecoveryChecks: readonly AgentClientSandboxRecoveryCheck[] = [
     }
   },
   {
+    id: 'app-server-package-writable',
+    probe: {
+      script: 'probe="$1/.agent-infra-app-server-package-$$"; trap \'rm -f -- "$probe"\' EXIT; : > "$probe"',
+      args: ['/home/devuser/.codex/packages/app-server-daemon'],
+      user: 'devuser'
+    },
+    finding: {
+      repairKind: 'hard-failure',
+      message: 'Codex app-server package directory is not writable by devuser.',
+      path: '/home/devuser/.codex/packages/app-server-daemon'
+    }
+  },
+  {
     id: 'prompts-link',
     when: {
       script: 'test -d "$1"',

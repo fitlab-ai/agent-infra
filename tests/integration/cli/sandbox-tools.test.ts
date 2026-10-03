@@ -1140,6 +1140,10 @@ test("codex tool declares a tmpfs mount so its high-churn logs stay in RAM", asy
   });
 
   assert.deepEqual(required(maybeTool).tmpfs, { size: "512m", seed: ["config.toml", "model-catalogs"], exec: true });
+  assert.deepEqual(required(maybeTool).hostStateMounts, [{
+    hostSubdir: "packages/app-server-daemon",
+    containerSubpath: "packages/app-server-daemon"
+  }]);
 });
 
 test("non-tmpfs builtin tools leave the tmpfs field unset", async () => {

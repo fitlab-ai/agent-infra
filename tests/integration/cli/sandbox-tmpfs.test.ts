@@ -146,7 +146,8 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
     path.join(config.shareBase, "common"),
     path.join(config.shareBase, "branches", branchDir),
     path.join(config.shellConfigBase, branchDir),
-    path.join(config.home, ".agent-infra", "sandboxes", "codex", project, branchDir, "model-catalogs")
+    path.join(config.home, ".agent-infra", "sandboxes", "codex", project, branchDir, "model-catalogs"),
+    path.join(config.home, ".agent-infra", "sandboxes", "codex", project, branchDir, "packages", "app-server-daemon")
   ]) {
     fs.mkdirSync(directory, { recursive: true });
   }
@@ -212,7 +213,8 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
     { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
     { Type: "tmpfs", Source: "", Destination: "/home/devuser/.codex", RW: true },
     { Type: "bind", Source: path.join(seedDir, "config.toml"), Destination: "/run/agent-infra/tmpfs-seeds/codex/0", RW: false },
-    { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false }
+    { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false },
+    { Type: "bind", Source: path.join(seedDir, "packages", "app-server-daemon"), Destination: "/home/devuser/.codex/packages/app-server-daemon", RW: true }
   ];
 }
 
@@ -273,7 +275,8 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
     { Type: "tmpfs", Source: "", Destination: "/home/devuser/.codex", RW: true },
     { Type: "bind", Source: path.join(seedDir, "config.toml"), Destination: "/run/agent-infra/tmpfs-seeds/codex/0", RW: false },
-    { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false }
+    { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false },
+    { Type: "bind", Source: path.join(seedDir, "packages", "app-server-daemon"), Destination: "/home/devuser/.codex/packages/app-server-daemon", RW: true }
   ];
   return {
     labels: recoveryLabels(config, {
@@ -442,6 +445,7 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
       [
         { adapterId: 'codex', checkId: 'command-available', applicable: true, healthy: true },
         { adapterId: 'codex', checkId: 'state-writable', applicable: true, healthy: true },
+        { adapterId: 'codex', checkId: 'app-server-package-writable', applicable: true, healthy: true },
         { adapterId: 'codex', checkId: 'prompts-link', applicable: true, healthy: true }
       ]
     );
@@ -1042,8 +1046,10 @@ test("recovery rejects mount and identity hard failures before writes", async ()
   const wrongWorktreeSource = path.join(tmpDir, "wrong-worktree");
   fs.mkdirSync(wrongWorktreeSource, { recursive: true });
   const liveSource = path.join(config.home, ".codex", "auth.json");
+  const wrongPackageSource = path.join(tmpDir, "wrong-app-server-package");
   fs.mkdirSync(path.dirname(liveSource), { recursive: true });
   fs.writeFileSync(liveSource, "{}\n", "utf8");
+  fs.mkdirSync(wrongPackageSource, { recursive: true });
   const baseMounts = recoveryFixtureMounts(config);
   baseMounts.push({
     Type: "bind",
@@ -1057,6 +1063,7 @@ test("recovery rejects mount and identity hard failures before writes", async ()
     labels: Record<string, string>;
     mounts: Array<Record<string, unknown>>;
     unavailableSource?: string;
+    packageProbeFailure?: boolean;
   }> = [
     {
       name: "wrong worktree source",
@@ -1088,6 +1095,31 @@ test("recovery rejects mount and identity hard failures before writes", async ()
       name: "missing live mount",
       labels: recoveryLabels(config),
       mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/auth.json")
+    },
+    {
+      name: "wrong app-server package source",
+      labels: recoveryLabels(config),
+      mounts: baseMounts.map((mount) => mount.Destination === "/home/devuser/.codex/packages/app-server-daemon"
+        ? { ...mount, Source: wrongPackageSource }
+        : mount)
+    },
+    {
+      name: "read-only app-server package mount",
+      labels: recoveryLabels(config),
+      mounts: baseMounts.map((mount) => mount.Destination === "/home/devuser/.codex/packages/app-server-daemon"
+        ? { ...mount, RW: false }
+        : mount)
+    },
+    {
+      name: "missing app-server package mount",
+      labels: recoveryLabels(config),
+      mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/packages/app-server-daemon")
+    },
+    {
+      name: "app-server package is not writable by devuser",
+      labels: recoveryLabels(config),
+      mounts: baseMounts,
+      packageProbeFailure: true
     },
     {
       name: "missing branch label",
@@ -1124,7 +1156,8 @@ test("recovery rejects mount and identity hard failures before writes", async ()
                 Config: { Labels: scenario.labels },
                 Mounts: scenario.mounts
               }]),
-              runOk: () => true,
+              runOk: (_engine, _cmd, args) => !scenario.packageProbeFailure
+                || args.at(-1) !== "/home/devuser/.codex/packages/app-server-daemon",
               runVerbose: () => { writes += 1; }
             }
           }),
@@ -1769,6 +1802,7 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
     fs.mkdirSync(path.join(codexSandboxDir, "mcp"), { recursive: true });
     fs.mkdirSync(path.join(codexSandboxDir, "sessions"), { recursive: true });
     fs.mkdirSync(path.join(codexSandboxDir, "model-catalogs"), { recursive: true });
+    fs.mkdirSync(path.join(codexSandboxDir, "packages", "app-server-daemon"), { recursive: true });
     fs.writeFileSync(path.join(codexSandboxDir, "logs_2.sqlite"), "stale\n", "utf8");
     fs.writeFileSync(path.join(codexSandboxDir, "mcp.json"), "{}\n", "utf8");
     fs.writeFileSync(path.join(codexSandboxDir, "mcp", "server.json"), "{}\n", "utf8");
@@ -1790,6 +1824,11 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
     assert.ok(
       runCall.some((arg, index) => arg === "--tmpfs" && runCall[index + 1] === "/home/devuser/.codex:rw,exec,size=512m"),
       `expected docker run to receive --tmpfs for codex, got ${JSON.stringify(runCall)}`
+    );
+    assert.ok(
+      runCall.some((arg, index) => runCall[index - 1] === "-v"
+        && arg === `${path.join(codexSandboxDir, "packages", "app-server-daemon")}:/home/devuser/.codex/packages/app-server-daemon`),
+      `expected branch-local app-server package bind mount, got ${JSON.stringify(runCall)}`
     );
     assert.equal(
       runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex")),
@@ -1889,6 +1928,42 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
       false,
       `expected opencode to NOT be tmpfs, got ${JSON.stringify(runCall)}`
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create gives each branch a distinct Codex app-server package source", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-package-branches-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
+    });
+    commitInitialFile(fixture.repoDir);
+    const sources: string[] = [];
+
+    for (const branch of ["feature-x", "feature-y"]) {
+      const result = spawnSandboxCli(
+        fixture,
+        tmpDir,
+        ["create", branch, "--cpu", "1", "--memory", "1"]
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const runCall = fixture.readDockerCalls().filter((call) => call[0] === "run").at(-1);
+      assert.ok(runCall, "expected sandbox create to call docker run");
+      const mount = runCall.find((arg, index) =>
+        runCall[index - 1] === "-v"
+        && arg.endsWith(":/home/devuser/.codex/packages/app-server-daemon")
+      );
+      assert.ok(mount, "expected app-server package bind mount");
+      sources.push(mount.slice(0, mount.indexOf(":/home/devuser/.codex/packages/app-server-daemon")));
+    }
+
+    assert.equal(sources[0], path.join(tmpDir, ".agent-infra", "sandboxes", "codex", "demo", "feature-x", "packages", "app-server-daemon"));
+    assert.equal(sources[1], path.join(tmpDir, ".agent-infra", "sandboxes", "codex", "demo", "feature-y", "packages", "app-server-daemon"));
+    assert.notEqual(sources[0], sources[1]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

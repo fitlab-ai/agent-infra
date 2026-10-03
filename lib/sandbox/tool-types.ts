@@ -16,6 +16,7 @@ type SandboxTool = {
   hostPreSeedDirs?: Array<{ hostDir: string; sandboxSubdir: string }>;
   pathRewriteFiles?: string[];
   hostLiveMounts?: Array<{ hostPath: string; containerSubpath: string }>;
+  hostStateMounts?: Array<{ hostSubdir: string; containerSubpath: string }>;
   postSetupCmds?: string[];
   tmpfs?: { size?: string; seed?: string[]; exec?: boolean };
 };

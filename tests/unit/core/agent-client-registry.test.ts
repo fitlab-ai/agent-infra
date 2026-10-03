@@ -569,6 +569,7 @@ test('Codex adapter owns its lifecycle and recovery capabilities', () => {
     [
       { id: 'command-available', repairKind: 'hard-failure' },
       { id: 'state-writable', repairKind: 'permissions' },
+      { id: 'app-server-package-writable', repairKind: 'hard-failure' },
       { id: 'prompts-link', repairKind: 'builtin-link' }
     ]
   );
@@ -771,6 +772,25 @@ test('sandbox descriptors validate ids, hooks, aliases, timeouts, and frozen out
       })
     }
   })).sandbox.createTool({ home: '/tmp', project: 'demo' }));
+
+  for (const hostStateMount of [
+    { hostSubdir: '../outside', containerSubpath: 'packages/app-server-daemon' },
+    { hostSubdir: 'packages/app-server-daemon', containerSubpath: '../../outside' }
+  ]) {
+    const invalidMountAdapter = defineAgentClientAdapter(adapterInput({
+      sandbox: {
+        ...adapterInput().sandbox,
+        createTool: () => ({
+          ...adapterInput().sandbox.createTool({ home: '/tmp', project: 'demo' }),
+          hostStateMounts: [hostStateMount]
+        })
+      }
+    }));
+    assert.throws(
+      () => invalidMountAdapter.sandbox.createTool({ home: '/tmp', project: 'demo' }),
+      /hostStateMounts/
+    );
+  }
 });
 
 test('single adapter and capability queries reject unknown runtime IDs', () => {

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   AGENT_CLIENT_CAPABILITY_IDS,
   AGENT_CLIENT_SUPPORT_LEVELS,
@@ -216,6 +217,26 @@ function freezeTool(tool: SandboxTool): SandboxTool {
   if (!tool.containerMount.startsWith('/')) {
     throw new Error(`Sandbox tool '${tool.id}' containerMount must be absolute`);
   }
+  if (tool.hostStateMounts !== undefined && !Array.isArray(tool.hostStateMounts)) {
+    throw new Error(`Agent Client '${tool.id}' hostStateMounts must be an array`);
+  }
+  const hostStateMounts = tool.hostStateMounts?.map((entry) => {
+    if (!entry || typeof entry.hostSubdir !== 'string' || typeof entry.containerSubpath !== 'string') {
+      throw new Error(`Agent Client '${tool.id}' hostStateMounts must contain relative path pairs`);
+    }
+    for (const value of [entry.hostSubdir, entry.containerSubpath]) {
+      const normalized = path.posix.normalize(value);
+      if (
+        value === ''
+        || path.posix.isAbsolute(value)
+        || normalized === '..'
+        || normalized.startsWith('../')
+      ) {
+        throw new Error(`Agent Client '${tool.id}' hostStateMounts must stay within the tool directories`);
+      }
+    }
+    return Object.freeze({ ...entry });
+  });
   if (!tool.versionCmd) {
     throw new Error(`Sandbox tool '${tool.id}' requires versionCmd`);
   }
@@ -233,6 +254,7 @@ function freezeTool(tool: SandboxTool): SandboxTool {
     ...(tool.hostLiveMounts ? {
       hostLiveMounts: Object.freeze(tool.hostLiveMounts.map((entry) => Object.freeze({ ...entry })))
     } : {}),
+    ...(hostStateMounts ? { hostStateMounts: Object.freeze(hostStateMounts) } : {}),
     ...(tool.postSetupCmds ? { postSetupCmds: Object.freeze([...tool.postSetupCmds]) } : {}),
     ...(tool.tmpfs ? {
       tmpfs: Object.freeze({
