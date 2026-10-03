@@ -343,7 +343,7 @@ function runTaskFinalizationClient(params: {
       env: {
         ...process.env,
         AGENT_INFRA_SANDBOX: '1',
-        AGENT_INFRA_TASK_ID: params.taskId ?? identity.taskId ?? undefined,
+        AGENT_INFRA_TASK_ID: identity.taskId ?? undefined,
         AGENT_INFRA_CONTROL_TOKEN: params.token,
         AGENT_INFRA_CONTROL_GENERATION: params.generation,
         AGENT_INFRA_CONTROL_ROOT_ID: JSON.parse(fs.readFileSync(path.join(params.statusDir, 'identity.json'), 'utf8')).controlRootId,

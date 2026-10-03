@@ -922,7 +922,7 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
 test('task-create executor preserves request identity when the host service throws', async () => {
   const requestId = '12345678-1234-4234-8234-123456789abc';
   const request = validateSandboxControlRequest({
-    version: 3,
+    version: 4,
     id: requestId,
     token: 'secret',
     generation: 'generation-1',
@@ -1001,7 +1001,7 @@ test('task-create executor preserves accepted terminal status when the host serv
     }
   } as const;
   const request = validateSandboxControlRequest({
-    version: 3,
+    version: 4,
     id: requestId,
     token: boundManifest.token,
     generation: boundManifest.generation,
