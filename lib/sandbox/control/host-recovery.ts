@@ -77,6 +77,31 @@ function auditProof(manifest: SandboxControlManifest, requestId: string): AuditR
   return related;
 }
 
+function publishedEvidence(records: AuditRecord[], generation: string): AuditRecord | null {
+  const publications = records.filter((record) => record.event === 'executor-result-published');
+  let selected: AuditRecord | null = null;
+  let selectedSummary: string | null = null;
+  for (const record of publications) {
+    if (record.version !== 2 || record.requestGeneration !== generation
+      || !Number.isSafeInteger(record.exitCode)
+      || !Number.isSafeInteger(record.outputBytes) || !Number.isSafeInteger(record.errorBytes)
+      || typeof record.outputDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(record.outputDigest)
+      || typeof record.errorDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(record.errorDigest)) {
+      throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+    }
+    const summary = JSON.stringify([
+      record.requestFamily ?? null, record.requestGeneration, record.exitCode,
+      record.outputBytes, record.errorBytes, record.outputDigest, record.errorDigest
+    ]);
+    if (selectedSummary !== null && summary !== selectedSummary) {
+      throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_CONFLICT');
+    }
+    selected ??= record;
+    selectedSummary ??= summary;
+  }
+  return selected;
+}
+
 function verifiedResponse(manifest: SandboxControlManifest, requestId: string, records: AuditRecord[]): SandboxControlResponse {
   assertDirectory(manifest.channelDir);
   const responsesDir = path.join(manifest.channelDir, 'responses');
@@ -92,12 +117,8 @@ function verifiedResponse(manifest: SandboxControlManifest, requestId: string, r
     || !['completed', 'rejected'].includes(response.phase)) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') return unknown(requestId);
   const evidencePath = path.join(manifest.processingDir, requestId, 'result.json');
-  const published = records.find((record) => record.event === 'executor-result-published');
-  if (!published || published.requestGeneration !== manifest.generation
-    || !Number.isSafeInteger(published.exitCode)
-    || !Number.isSafeInteger(published.outputBytes) || !Number.isSafeInteger(published.errorBytes)
-    || typeof published.outputDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(published.outputDigest)
-    || typeof published.errorDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(published.errorDigest)) return unknown(requestId);
+  const published = publishedEvidence(records, manifest.generation);
+  if (!published) return unknown(requestId);
   let evidence = null;
   if (fs.existsSync(evidencePath)) {
     evidence = readSandboxControlResultEvidence(evidencePath);

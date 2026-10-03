@@ -323,10 +323,18 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
   try {
     if (!isSandbox()) {
       const config = loadConfig();
-      return recoverSandboxControlFromHost(requestId, {
+      const response = recoverSandboxControlFromHost(requestId, {
         managedRoot: path.join(config.controlBase, config.project),
         timeoutMs: params.timeoutMs
       });
+      if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') {
+        clientError(
+          'SANDBOX_CONTROL_RESULT_UNKNOWN',
+          'recovery evidence is unavailable; inspect domain state before retrying',
+          false, true, requestId
+        );
+      }
+      return response;
     }
     const channelDir = process.env.AGENT_INFRA_CONTROL_DIR!;
     const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR!;

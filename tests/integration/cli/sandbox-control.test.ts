@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -622,6 +623,32 @@ test('host sandbox-control recovery resolves one accepted request from managed m
     fs.renameSync(path.join(controlRoot, 'audit.ndjson'), path.join(controlRoot, 'audit.ndjson.1'));
     fs.writeFileSync(path.join(controlRoot, 'audit.ndjson'), '');
     assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+
+    appendDiagnosticAudit(manifest, 'executor-result-published', {
+      requestId, requestGeneration: manifest.generation, exitCode: 0,
+      outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
+      outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
+    });
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+    appendDiagnosticAudit(manifest, 'executor-result-published', {
+      requestId, requestGeneration: manifest.generation, exitCode: 7,
+      outputBytes: Buffer.byteLength('conflict\n'), errorBytes: 0,
+      outputDigest: createHash('sha256').update('conflict\n').digest('hex'),
+      errorDigest: createHash('sha256').update('').digest('hex')
+    });
+    assert.throws(
+      () => recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }),
+      /SANDBOX_CONTROL_RESULT_EVIDENCE_CONFLICT/u
+    );
+    const validAudit = fs.readFileSync(path.join(controlRoot, 'audit.ndjson.1'), 'utf8');
+    const currentAudit = fs.readFileSync(path.join(controlRoot, 'audit.ndjson'), 'utf8');
+    fs.writeFileSync(path.join(controlRoot, 'audit.ndjson.1'), currentAudit);
+    fs.writeFileSync(path.join(controlRoot, 'audit.ndjson'), validAudit);
+    assert.throws(
+      () => recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }),
+      /SANDBOX_CONTROL_RESULT_EVIDENCE_CONFLICT/u
+    );
+
     fs.appendFileSync(path.join(controlRoot, 'audit.ndjson'), `${JSON.stringify({
       version: 2, event: 'accepted-authorized', phase: 'accepted-authorized', requestId,
       generation: 'stale-generation', identityDigest: 'f'.repeat(64)
@@ -630,6 +657,50 @@ test('host sandbox-control recovery resolves one accepted request from managed m
       () => recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }),
       /SANDBOX_CONTROL_AUDIT_IDENTITY_MISMATCH/u
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('host sandbox-control recover prints a request-scoped unknown error in the CLI', onPlatforms('linux', 'darwin'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-unknown-cli-'));
+  const requestId = '14141414-1414-4414-8414-141414141414';
+  try {
+    const branch = initializeRepository(root);
+    fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+      project: 'demo',
+      agentClients: ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
+        id, enabled: false, installInSandbox: false
+      }))
+    }));
+    const managedControlRoot = path.join(
+      root, '.agent-infra', 'sandbox-control', 'demo', 'demo-dev-feature', '0123456789abcdef'
+    );
+    const manifestPath = writeControlManifest(managedControlRoot, branch, 'host-recovery-unknown-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    fs.mkdirSync(path.join(manifest.channelDir, 'responses'), { recursive: true });
+    appendCriticalAudit(manifest, createSandboxControlAuditContext(manifest, {
+      requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
+    }));
+
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_')));
+    const simulateDirectHost = `const original=process.binding.bind(process);process.binding=(name)=>{const binding=original(name);if(name==='fs'){const stat=binding.internalModuleStat;binding.internalModuleStat=new Proxy(stat,{apply(target,thisArg,args){return args[0]==='/run/agent-infra/control-status'?-2:Reflect.apply(target,thisArg,args)}});}return binding;};`;
+    const recovered = spawnSync(process.execPath, [
+      '--experimental-strip-types', '--no-warnings', '--import',
+      `data:text/javascript,${encodeURIComponent(simulateDirectHost)}`,
+      path.resolve('bin/internal-cli.ts'),
+      'sandbox-control', 'recover', requestId
+    ], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...env, HOME: root, USERPROFILE: root }
+    });
+    assert.equal(recovered.status, 1, recovered.stderr || recovered.stdout);
+    assert.equal(recovered.stdout, '');
+    assert.match(recovered.stderr, /SANDBOX_CONTROL_RESULT_UNKNOWN/u);
+    assert.match(recovered.stderr, new RegExp(`SANDBOX_CONTROL_REQUEST_ID: ${requestId}`));
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'requests', `${requestId}.json`)), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
