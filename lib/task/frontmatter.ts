@@ -71,6 +71,30 @@ function serializeScalar(value: FrontmatterScalar): string {
   return serialized;
 }
 
+function stripInlineComment(value: string): string {
+  const first = value.search(/\S/u);
+  let activeQuote = first >= 0 && (value[first] === '"' || value[first] === "'") ? value[first] : null;
+  for (let index = activeQuote ? first + 1 : Math.max(first, 0); index < value.length; index += 1) {
+    const character = value[index]!;
+    if (activeQuote === '"' && character === '\\') {
+      index += 1;
+      continue;
+    }
+    if (activeQuote && character === activeQuote) {
+      if (activeQuote === "'" && value[index + 1] === "'") {
+        index += 1;
+        continue;
+      }
+      activeQuote = null;
+      continue;
+    }
+    if (!activeQuote && character === '#' && (index === 0 || /\s/u.test(value[index - 1]!))) {
+      return value.slice(0, index).trimEnd();
+    }
+  }
+  return value;
+}
+
 function parseTaskFrontmatter(content: string): Frontmatter {
   const result: Frontmatter = {};
   if (!content.startsWith('---')) return result;
@@ -83,7 +107,7 @@ function parseTaskFrontmatter(content: string): Frontmatter {
     const colon = line.indexOf(':');
     if (colon === -1) continue;
     const key = line.slice(0, colon).trim();
-    const value = line.slice(colon + 1).trim();
+    const value = stripInlineComment(line.slice(colon + 1).trim());
     if (key) result[key] = value;
   }
   return result;

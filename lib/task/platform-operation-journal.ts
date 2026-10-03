@@ -33,7 +33,18 @@ type PlatformPullRequestIntent = Readonly<{
   closingIssue?: boolean;
 }>;
 type PlatformIssueCreateIntent = Readonly<{ title: string; bodyDigest: string }>;
-type PlatformPullRequestSummaryIntent = Readonly<{ body: string; changeReportFile: string }>;
+type PlatformPullRequestSummaryManualValidationIntent = Readonly<{
+  phase: 'pending' | 'final';
+  transactionId: string;
+  receiptDigest?: string;
+  prHeadSha?: string;
+  authority?: 'coordinator';
+}>;
+type PlatformPullRequestSummaryIntent = Readonly<{
+  body: string;
+  changeReportFile: string;
+  manualValidation?: PlatformPullRequestSummaryManualValidationIntent;
+}>;
 type PlatformPullRequestReviewIntent = Readonly<{
   prNumber: string;
   resource: ResourceIdentity;
@@ -147,6 +158,22 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
         ? !item.pullRequestSummary || typeof item.pullRequestSummary.body !== 'string'
           || !item.pullRequestSummary.body.trim() || typeof item.pullRequestSummary.changeReportFile !== 'string'
           || !item.pullRequestSummary.changeReportFile.trim()
+          || (item.pullRequestSummary.manualValidation !== undefined && (
+            !item.pullRequestSummary.manualValidation
+            || typeof item.pullRequestSummary.manualValidation !== 'object'
+            || Array.isArray(item.pullRequestSummary.manualValidation)
+            || !['pending', 'final'].includes(item.pullRequestSummary.manualValidation.phase)
+            || typeof item.pullRequestSummary.manualValidation.transactionId !== 'string'
+            || !item.pullRequestSummary.manualValidation.transactionId.trim()
+            || (item.pullRequestSummary.manualValidation.receiptDigest !== undefined && !/^[a-f0-9]{64}$/u.test(item.pullRequestSummary.manualValidation.receiptDigest))
+            || (item.pullRequestSummary.manualValidation.prHeadSha !== undefined && !/^[a-f0-9]{40}$/u.test(item.pullRequestSummary.manualValidation.prHeadSha))
+            || (item.pullRequestSummary.manualValidation.authority !== undefined && item.pullRequestSummary.manualValidation.authority !== 'coordinator')
+            || (item.pullRequestSummary.manualValidation.phase === 'final' && (
+              !/^[a-f0-9]{64}$/u.test(item.pullRequestSummary.manualValidation.receiptDigest ?? '')
+              || !/^[a-f0-9]{40}$/u.test(item.pullRequestSummary.manualValidation.prHeadSha ?? '')
+              || item.pullRequestSummary.manualValidation.authority !== 'coordinator'
+            ))
+          ))
         : item.pullRequestSummary !== undefined)
       || (item.kind === 'pull-request-review'
         ? !item.pullRequestReview || typeof item.pullRequestReview.prNumber !== 'string'
@@ -234,4 +261,4 @@ function readPlatformOperationJournal(taskRef: string, cwd?: string): PlatformOp
 }
 
 export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, operationId, recordPlatformOperation, readPlatformOperationJournal };
-export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, RecordOperationInput };
+export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, PlatformPullRequestSummaryManualValidationIntent, RecordOperationInput };

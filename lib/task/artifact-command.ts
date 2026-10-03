@@ -7,6 +7,7 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { finalizeLocalArtifact, preflightLocalArtifact } from './local-artifact-finalization.ts';
 import { initializeArtifactSkeleton } from './artifact-operations.ts';
+import type { TriggerReason } from './capabilities.ts';
 
 export type ArtifactCommand = Readonly<{
   taskRef: string;
@@ -14,6 +15,7 @@ export type ArtifactCommand = Readonly<{
   family: string;
   artifact: string;
   locale?: 'zh-CN' | 'en';
+  reasonCode?: TriggerReason;
   sourceFinding?: string;
   sourceArtifact?: string;
   sourceSha256?: string;
@@ -27,7 +29,7 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   }
   const fields: Record<string, string> = {};
   const allowed = {
-    inspect: ['--family', '--source-finding', '--source-artifact', '--source-sha256'],
+    inspect: ['--family', '--reason-code', '--source-finding', '--source-artifact', '--source-sha256'],
     init: ['--family', '--artifact', '--locale'],
     'preflight': ['--family', '--artifact'],
     'finalize-local': ['--family', '--artifact']
@@ -44,9 +46,13 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   if (operation !== 'inspect' && !fields['--artifact']) throw new Error("option '--artifact' is required");
   const locale = fields['--locale'];
   if (locale !== undefined && locale !== 'zh-CN' && locale !== 'en') throw new Error("option '--locale' must be 'zh-CN' or 'en'");
+  const reasonCode = fields['--reason-code'];
+  if (reasonCode !== undefined && !['user-request', 'new-requirement', 'upstream-fact-doubt', 'review-finding', 'manual-review-supplement', 'retry', 'validation-rerun'].includes(reasonCode)) {
+    throw new Error("option '--reason-code' is invalid");
+  }
   return {
     taskRef, operation: operation as ArtifactCommand['operation'], family: fields['--family'] ?? '',
-    artifact: fields['--artifact'] ?? '', locale,
+    artifact: fields['--artifact'] ?? '', locale, reasonCode: reasonCode as TriggerReason | undefined,
     sourceFinding: fields['--source-finding'], sourceArtifact: fields['--source-artifact'],
     sourceSha256: fields['--source-sha256']
   };
@@ -61,6 +67,7 @@ export function executeArtifactCommand(
   if (operation === 'inspect') {
     const result = resolveArtifactContext(taskRef, family, {
       repoRoot: options.repoRoot,
+      reasonCode: command.reasonCode,
       sourceFinding: command.sourceFinding,
       sourceArtifact: command.sourceArtifact,
       sourceSha256: command.sourceSha256

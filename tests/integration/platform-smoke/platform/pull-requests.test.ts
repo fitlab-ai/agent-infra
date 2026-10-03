@@ -174,7 +174,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; prLabels?: string[] } = {}) {
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[] } = {}) {
   const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
@@ -193,7 +193,7 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
       if (args[0] === 'api' && args[1] === 'repos/o/r') {
         return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
       }
-      if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(42), labels: prLabels.map((name) => ({ name })) } };
+      if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(fixtureOptions.identityMismatch ? 43 : 42), labels: prLabels.map((name) => ({ name })) } };
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (/pulls\/42\/files\?/.test(endpoint)) return { ok: true, value: [[{ filename: 'lib/core.ts' }]] };
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
@@ -237,6 +237,8 @@ function boundPullRequestFixture(options: {
   milestoneFailure?: boolean;
   failPullRequestLabel?: boolean;
   injectConcurrentUnrelatedLabel?: boolean;
+  identityMismatch?: boolean;
+  identityMismatchOnReread?: boolean;
   prLabels?: string[];
 } = {}) {
   const root = prByNumberFixture();
@@ -272,6 +274,7 @@ function boundPullRequestFixture(options: {
   const issueMilestone = options.milestoneFailure ? '1.0.1' : '1.0.0';
   const writes: string[] = [];
   const issuePatchPayloads: Array<Record<string, unknown>> = [];
+  let pullRequestReads = 0;
   const client: GitHubClient = {
     version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], request: RequestOptions = {}) {
@@ -282,7 +285,11 @@ function boundPullRequestFixture(options: {
       if (args[0] === 'api' && args[1] === 'repos/o/r') {
         return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: false, admin: false } } };
       }
-      if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(42), body: prBody, labels: prLabels.map((name) => ({ name })) } };
+      if (/pulls\/42$/.test(args[1] || '')) {
+        pullRequestReads += 1;
+        const identityMismatch = options.identityMismatch || (options.identityMismatchOnReread && pullRequestReads > 1);
+        return { ok: true, value: { ...remote(identityMismatch ? 43 : 42), body: prBody, labels: prLabels.map((name) => ({ name })) } };
+      }
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
       if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
         number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/o/r/issues/7', state: 'open', title: 'Issue', body: '',
@@ -342,6 +349,35 @@ test('task-bound PR sync reads milestone prerequisites before writing Issue labe
     assert.equal(result.status, 'blocked');
     assert.equal(result.error?.code, 'NETWORK_TRANSIENT');
     assert.deepEqual(fixture.writes, []);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound PR metadata sync rejects a snapshot identity mismatch before writes', async () => {
+  const fixture = boundPullRequestFixture({ identityMismatch: true });
+  try {
+    const result = await syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_IDENTITY_MISMATCH');
+    assert.deepEqual(fixture.writes, []);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound PR metadata sync reports a post-write identity mismatch as partial', async () => {
+  const fixture = boundPullRequestFixture({ identityMismatchOnReread: true, prLabels: ['in: core', 'type: bug'] });
+  try {
+    const result = await syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.equal(result.changed, true);
+    assert.ok(fixture.writes.some((write) => write.includes('/issues/42/labels')));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -410,6 +446,18 @@ test('in-label PR sync updates only the PR when no unique closing Issue exists',
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
+  }
+});
+
+test('in-label PR sync rejects a snapshot identity mismatch before writes', async () => {
+  const fixture = prOnlyInLabelFixture([], { identityMismatch: true });
+  try {
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_IDENTITY_MISMATCH');
+    assert.deepEqual(fixture.calls.filter((call) => /POST|PATCH|DELETE/.test(call)), []);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 

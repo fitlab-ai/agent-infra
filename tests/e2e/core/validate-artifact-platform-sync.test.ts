@@ -53,12 +53,53 @@ function assertSoftAudit(result: Awaited<ReturnType<typeof runValidator>>, check
 }
 import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
 import { COMMENT_BYTE_LIMIT, renderTaskComment } from "../../../lib/platform/issue-comments.ts";
+import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
 const taskId = "TASK-20260328-000001";
 const summaryComment = "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good.";
 const summaryCommentWithSha = (sha: string) => (
   `<!-- sync-pr:TASK-20260328-000001:summary -->\n<!-- last-commit: ${sha} -->\n## Review Summary\n\nLooks good.`
 );
+
+test("validate-artifact audits PR metadata for an opaque canonical identity", () => withTempRoot("agent-infra-platform-sync-opaque-pr-", async (tempRoot) => {
+  const ctx = setupPlatformSyncEnv(tempRoot);
+  const prIdentity = { kind: "id" as const, value: "pr-42" };
+  const issueIdentity = { kind: "id" as const, value: "issue-42" };
+  const fact = JSON.stringify(encodePrDeliveryFact(buildBoundFact({
+    identity: {
+      resource: prIdentity,
+      repository: "opaque/project",
+      url: "https://opaque.example/changes/pr-42",
+      head: { repository: "opaque/project", ref: "feature", sha: "1111111" },
+      base: { repository: "opaque/project", ref: "main", sha: "2222222" }
+    },
+    source: "created",
+    verifiedAt: "2026-01-01T00:00:00.000Z",
+    issueIdentity,
+    remoteState: "open"
+  })));
+  write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+    platform: {
+      type: "trae",
+      providers: {
+        trae: { source: filePath("tests/fixtures/platform-providers/opaque-identity-provider.mjs"), config: { number: 42 } }
+      }
+    }
+  }));
+  write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
+    type: "feature",
+    platform_issue_identity: `'${JSON.stringify(issueIdentity)}'`,
+    pr_delivery_fact: fact
+  }));
+
+  const result = await runPlatformSyncAdapter(ctx.taskDir, { when: "pr_fact_bound", skillName: "create-pr" }, {}, tempRoot);
+  const checks = (result.subchecks ?? []) as Array<{ checkId: string; status: string; message: string }>;
+  for (const checkId of ["platform.pr-type-label", "platform.pr-assignee", "platform.milestone"]) {
+    const audit = checks.find((item) => item.checkId === checkId);
+    assert.equal(audit?.status, "fail", `${checkId} was skipped: ${JSON.stringify({ audit, result })}`);
+    assert.doesNotMatch(audit?.message || "", /not applicable/u);
+  }
+}));
 
 test(
   "platform-sync preserves shell metacharacters through Windows .cmd and PATHEXT lookup",

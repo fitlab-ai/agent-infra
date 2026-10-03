@@ -18,11 +18,11 @@ export default async function createPlatformProvider(input) {
       }
     },
     changeRequests: {
-      async inspect() {
+      async inspect(request) {
         return {
           ok: true,
           value: {
-            id: 'cr-1', identity: { kind: 'id', value: 'cr-1' }, state: 'open', title: 'External CR', body: '',
+            id: request.target.value, identity: request.target, state: 'open', title: 'External CR', body: '',
             headSha: '1111111', baseSha: '2222222', displayUrl: 'https://external.example/cr-1', draft: false,
             labels: [], assignees: [], milestone: null, mergedAt: null, mergeCommitSha: null,
             head: { repository: 'external/project', ref: 'feature', sha: '1111111' },

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 function identity(value) {
   return { kind: 'id', value };
 }
@@ -17,17 +19,21 @@ function issue(value = 'issue-42') {
   };
 }
 
-function changeRequest(value = 'pr-42') {
+function changeRequest(value = 'pr-42', config = {}) {
+  const repository = config.repository || 'opaque/project';
+  const headSha = config.headSha || '1111111';
+  const baseSha = config.baseSha || '2222222';
   return {
     id: value,
-    identity: identity(value),
+    ...(config.omitIdentity ? {} : { identity: identity(config.identityValue || value) }),
+    ...(config.number === undefined ? {} : { number: config.number }),
     title: 'Opaque change request',
     body: '',
     state: 'open',
-    headSha: '1111111',
-    baseSha: '2222222',
-    head: { repository: 'opaque/project', ref: 'feature', sha: '1111111' },
-    base: { repository: 'opaque/project', ref: 'main', sha: '2222222' },
+    headSha,
+    baseSha,
+    head: { repository, ref: 'feature', sha: headSha },
+    base: { repository, ref: 'main', sha: baseSha },
     displayUrl: `https://opaque.example/changes/${value}`,
     draft: false,
     labels: [],
@@ -43,6 +49,18 @@ function receipt(value = 'receipt') {
 }
 
 export default async function createPlatformProvider(input) {
+  const summaries = new Map();
+  const config = input.config || {};
+  let failedFinalWrite = false;
+  const parentKey = (parent) => JSON.stringify(parent);
+  if (config.initialSummaryBody) summaries.set(parentKey(identity('pr-42')), [{
+    id: 'comment-1',
+    author: { id: 'opaque-user' },
+    body: config.initialSummaryBody,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    createdSequence: 1
+  }]);
   const context = {
     type: input.providerType,
     scope: { id: 'opaque/project', label: 'opaque/project' },
@@ -54,7 +72,10 @@ export default async function createPlatformProvider(input) {
     type: input.providerType,
     contractVersion: input.contractVersion,
     identity: { issue: 'id', 'pull-request': 'id', comment: 'id', release: 'key' },
-    context: { async resolve() { return { ok: true, value: context }; } },
+    context: { async resolve() {
+      const repository = config.repository || 'opaque/project';
+      return { ok: true, value: { ...context, scope: { id: repository, label: repository } } };
+    } },
     issues: {
       async describeRepository() { return { ok: true, value: { repository: { identity: identity('repository'), name: 'opaque/project', url: 'https://opaque.example/project' }, labels: [], milestones: [], issueTypes: [], fields: [] } }; },
       async inspect(request) { return { ok: true, value: issue(request.target.value) }; },
@@ -62,12 +83,45 @@ export default async function createPlatformProvider(input) {
       async update() { return receipt('issue-updated'); }
     },
     comments: {
-      async list() { return { ok: true, value: [] }; },
-      async write() { return receipt('comment-written'); },
-      async delete() { return receipt('comment-deleted'); }
+      async list(request) {
+        if (config.callsPath) fs.appendFileSync(config.callsPath, 'list\n');
+        return { ok: true, value: [...(summaries.get(parentKey(request.parent)) || [])] };
+      },
+      async write(request) {
+        if (config.callsPath) fs.appendFileSync(config.callsPath, 'write\n');
+        if (config.failFinalOnce && !failedFinalWrite && /^###\s+✅\s+Manual Validation Passed\s*$/mu.test(request.body)) {
+          failedFinalWrite = true;
+          return { ok: false, error: { code: 'INJECTED_FINAL_SUMMARY_WRITE', message: 'Injected retryable final summary failure', retryable: true } };
+        }
+        const key = parentKey(request.parent);
+        const current = summaries.get(key) || [];
+        const id = request.existingComment?.value || 'comment-1';
+        const next = {
+          id,
+          author: { id: 'opaque-user' },
+          body: request.body,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          createdSequence: 1
+        };
+        const index = current.findIndex((comment) => comment.id === id);
+        if (index >= 0) current[index] = next;
+        else current.push(next);
+        summaries.set(key, current);
+        return { ok: true, value: { remoteId: id, changed: true } };
+      },
+      async delete(request) {
+        const key = parentKey(request.parent);
+        const current = summaries.get(key) || [];
+        summaries.set(key, current.filter((comment) => comment.id !== request.comment.value));
+        return receipt('comment-deleted');
+      }
     },
     changeRequests: {
-      async inspect(request) { return { ok: true, value: changeRequest(request.target.value) }; },
+      async inspect(request) {
+        if (config.callsPath) fs.appendFileSync(config.callsPath, 'inspect\n');
+        return { ok: true, value: changeRequest(request.target.value, config) };
+      },
       async listClosing() { return { ok: true, value: [] }; },
       async create() { return receipt('pr-created'); },
       async update() { return receipt('pr-updated'); },

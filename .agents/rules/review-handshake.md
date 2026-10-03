@@ -20,6 +20,8 @@
 | `refuted` | 核实后判定不成立 / 幻觉 / 基于错误 `file:line` | 反证（`file:line` 或命令原文）；待检视方确认 |
 | `cannot-judge` | 证据不足，无法判断 | 已尝试的核实路径；交检视方/人工 |
 
+`finding-respond --round` 使用 finding 自身的握手轮次，不使用当前 code/plan/analysis artifact 的轮次。执行方先从 `task-ledger stage-status --stage {stage}` 读取该 finding 当前账本 `round`，响应时传入当前值加一；不同 finding 的响应轮次可能不同。
+
 ## 检视方回交义务（`review-*` 技能，对执行方响应复核时）
 
 执行方给出 `adjusted` / `refuted` / `cannot-judge` 后，检视方必须逐条回应，不得复读原意见或无视：
@@ -64,6 +66,7 @@
 - **终态集合（gate 放行）**：`{confirmed, closed, human-decided}`；其余为阻塞态。
 - **同轮 fix-and-close**：仅当检视方在当前审查轮当场修复 `minor` finding 时，可通过 `finding-review` 将该行从 `open` 直接置为 `closed`。此转换不增加 `round`，`evidence` 必须指向当前 review 产物中的修复证据；`blocker` / `major` 不适用。
 - **severity 与推进解耦**：`blocker` / `major` / `minor` 只表示影响大小。任何正式 finding 只要尚未进入终态就阻止当前阶段通过；review 结论、事件计数与下一步必须在全部写入后通过 `task-ledger stage-status --stage {stage}` 从同一语义导出。
+- **open finding 证据修正**：`finding-review` 可保持 finding 为 `open` 并更新证据锚点，以修正或细化未解决意见的报告引用；该操作不改变 finding 轮次或终态。
 - **非阻塞 advisory**：仅限不影响当前产物完整性、正确性和验收的后续优化。advisory 只写入报告的独立段落，不进入本账本、不进入 finding 计数、不影响 verdict；manual-validation 仍是独立分类。
 - **写入责任**：调用方只提交结构化意图，不扫描编号、不拼表格行、不自行判断机械状态迁移。`review-*` 用 `agent-infra-internal task-ledger {task-id} finding-upsert|finding-review ...`；`*-task` 用 `finding-respond ...`；人工裁决由 `ai decide` 原子完成。核心统一校验并通过一次任务写入提交。
 - **向后兼容**：task.md 无此段时，gate 视为无未决分歧而放行。

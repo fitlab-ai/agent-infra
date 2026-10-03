@@ -24,6 +24,17 @@ test('parseTaskFrontmatter handles values containing colons', () => {
   assert.equal(fm.created_at, '2026-06-12 16:27:37+08:00');
 });
 
+test('parseTaskFrontmatter strips inline comments and preserves hashes in values', () => {
+  const fm = parseTaskFrontmatter(
+    '---\npriority: Medium # issue field value\nquoted: "keep # inside" # trailing note\nurl: https://example.test/path#fragment\n---\n'
+  );
+  assert.deepEqual(fm, {
+    priority: 'Medium',
+    quoted: '"keep # inside"',
+    url: 'https://example.test/path#fragment'
+  });
+});
+
 test('parseTaskFrontmatter ignores body content after closing ---', () => {
   const fm = parseTaskFrontmatter('---\nid: x\n---\n# Title: with colon\nbody: should be ignored\n');
   assert.deepEqual(fm, { id: 'x' });

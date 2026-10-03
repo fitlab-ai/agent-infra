@@ -42,8 +42,8 @@ test('platform-pr CLI advertises all PR and summary intents', () => {
   }
 });
 
-test('platform-pr sync-in-labels validates the PR number before platform access', () => {
-  const output = run(['sync-in-labels', '--pr', '0']);
+test('platform-pr sync-in-labels requires a PR token before platform access', () => {
+  const output = run(['sync-in-labels']);
   assert.equal(output.status, 1);
   assert.equal(JSON.parse(output.stdout).error.code, 'PR_PAYLOAD_INVALID');
 });
@@ -96,13 +96,13 @@ for (const identityKind of ['id', 'key']) {
           providers: {
             trae: {
               source: filePath('tests/fixtures/platform-providers/in-label-provider.mjs'),
-              config: { callsPath: calls, identityKind }
+              config: { callsPath: calls, identityKind, changeRequestToken: 'mr:123' }
             }
           }
         },
         labels: { in: { core: ['lib/'] } }
       }));
-      const output = run(['sync-in-labels', '--pr', '1'], {
+      const output = run(['sync-in-labels', '--pr', 'mr:123'], {
         cwd: root,
         env: { AGENT_INFRA_GH_BIN: path.join(root, 'github-must-not-run') }
       });
@@ -111,9 +111,10 @@ for (const identityKind of ['id', 'key']) {
       assert.equal(payload.status, 'applied');
       assert.equal(payload.task.issueNumber, null);
       assert.deepEqual(payload.evidence.closingIssues, [{ kind: identityKind, value: `issue-7` }]);
+      assert.equal(payload.task.prNumber, 1);
       assert.deepEqual(payload.resources.map((resource: { identity: unknown; number: number | null }) => ({ identity: resource.identity, number: resource.number })), [
         { identity: { kind: identityKind, value: 'issue-7' }, number: null },
-        { identity: { kind: identityKind, value: '1' }, number: null }
+        { identity: { kind: identityKind, value: 'mr:123' }, number: 1 }
       ]);
       assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n'), [
         'context.resolve',

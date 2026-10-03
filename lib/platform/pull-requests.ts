@@ -450,6 +450,23 @@ function normalizeProviderPullRequest(
   return snapshot;
 }
 
+function inspectedPullRequestIdentityError(
+  remote: ProviderChangeRequestSnapshot,
+  requested: ResourceIdentity
+): { code: string; message: string; retryable: boolean } | null {
+  if (!remote.identity) return {
+    code: 'PR_IDENTITY_MISSING',
+    message: 'Provider pull-request inspection did not return a canonical identity',
+    retryable: false
+  };
+  if (!resourceIdentityEquals(remote.identity, requested)) return {
+    code: 'PR_IDENTITY_MISMATCH',
+    message: 'Provider returned a different pull request identity than requested',
+    retryable: false
+  };
+  return null;
+}
+
 function pullRequestIdentity(pullRequest: PullRequestSnapshot): ResourceIdentity {
   return pullRequest.identity || { kind: 'number', value: pullRequest.number };
 }
@@ -480,6 +497,8 @@ async function inspectExternalPullRequest(
     ? await base.provider.changeRequests.inspect({ context: providerOperationContext(base.loadedContext), target: prIdentity })
     : unsupportedProviderOperation(base.provider, 'changeRequests.inspect');
   if (!inspected.ok) return providerPullRequestError(base, inspected.error, prNumber);
+  const identityError = inspectedPullRequestIdentityError(inspected.value, prIdentity);
+  if (identityError) return providerPullRequestError(base, identityError, prNumber);
   const pullRequest = normalizeProviderPullRequest(inspected.value, base.context.platform.repository!, prNumber || 0, fallback);
   return result('no-op', base.resolved.taskId, base.issueNumber, prNumber, {
     platform: base.context.platform,
@@ -528,6 +547,11 @@ async function inspectPlatformPullRequestByNumber(prNumber: string | number, opt
     if (!inspected.ok) return result(providerStatus(inspected.error), null, null, number, {
       platform: context.platform, capabilities: context.capabilities,
       resource: { kind: 'pull-request', number, identity }, error: providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    });
+    const identityError = inspectedPullRequestIdentityError(inspected.value, identity);
+    if (identityError) return result('failed', null, null, number, {
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number, identity }, error: identityError
     });
     return result('no-op', null, null, number, {
       platform: context.platform, capabilities: context.capabilities,
@@ -597,27 +621,38 @@ function inLabelResource(
   before: string[],
   expected: string[],
   after: string[] | null,
-  effect: 'no-op' | 'applied' | 'unknown'
+  effect: 'no-op' | 'applied' | 'unknown',
+  displayNumber = resourceIdentityNumber(identity)
 ) {
-  return { kind, number: resourceIdentityNumber(identity), identity, before: [...before].sort(), expected: [...expected].sort(), after: after ? [...after].sort() : null, effect };
+  return { kind, number: displayNumber, identity, before: [...before].sort(), expected: [...expected].sort(), after: after ? [...after].sort() : null, effect };
 }
 
-async function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
+async function syncPlatformPullRequestInLabels(prToken: string | number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
+  const token = String(prToken);
   const loaded = await resolvePlatformProviderContext({ cwd, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
-  if (!loaded.ok || !usable) return result(context.status, null, null, prNumber, {
+  if (!loaded.ok || !usable) return result(context.status, null, null, null, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
   });
-  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) return result('failed', null, null, prNumber, {
+  if (!token || token.trim() !== token) return result('failed', null, null, null, {
     platform: context.platform, capabilities: context.capabilities,
-    error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
+    error: { code: 'PR_IDENTITY_INVALID', message: 'PR identity token must be non-empty and trimmed', retryable: false }
   });
   const provider = loaded.value.provider;
   const operationContext = providerOperationContext(loaded.value);
   const repository = context.platform.repository!;
-  const pullRequestIdentity = providerResourceToken(provider, 'pull-request', String(prNumber));
+  let pullRequestIdentity: ResourceIdentity;
+  try {
+    pullRequestIdentity = providerResourceToken(provider, 'pull-request', token);
+  } catch (error) {
+    return result('failed', null, null, null, {
+      platform: context.platform, capabilities: context.capabilities,
+      error: { code: 'PR_IDENTITY_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    });
+  }
+  let prNumber = resourceIdentityNumber(pullRequestIdentity);
   const providerFailure = (error: { code: string; message: string; retryable: boolean }): PullRequestResult => result(
     error.code === 'PLATFORM_CAPABILITY_UNSUPPORTED' ? 'degraded' : providerStatus(error),
     null,
@@ -634,7 +669,12 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
     ? await provider.changeRequests.inspect({ context: operationContext, target: pullRequestIdentity })
     : unsupportedProviderOperation(provider, 'changeRequests.inspect');
   if (!inspected.ok) return providerFailure(inspected.error);
-  const fetched = normalizeProviderPullRequest(inspected.value, repository, prNumber);
+  const identityError = inspectedPullRequestIdentityError(inspected.value, pullRequestIdentity);
+  if (identityError) return providerFailure(identityError);
+  if (Number.isSafeInteger(inspected.value.number) && (inspected.value.number as number) > 0) {
+    prNumber = inspected.value.number as number;
+  }
+  const fetched = normalizeProviderPullRequest(inspected.value, repository, prNumber ?? 0);
   const files = provider.changeRequests?.listFiles
     ? await provider.changeRequests.listFiles({ context: operationContext, target: pullRequestIdentity })
     : unsupportedProviderOperation(provider, 'changeRequests.listFiles');
@@ -705,7 +745,8 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
     item.snapshot.labels,
     item.plan.target,
     item.plan.changed && willWrite ? null : item.snapshot.labels,
-    item.plan.changed && willWrite ? 'unknown' : 'no-op'
+    item.plan.changed && willWrite ? 'unknown' : 'no-op',
+    item.number
   ));
   if (options.dryRun || !context.capabilities.triage) return result(
     !context.capabilities.triage || association.value.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
@@ -769,6 +810,15 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
       evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueIdentities },
       error: { ...providerError(reread.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'), code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
     });
+    if (item.kind === 'pull-request') {
+      const identityError = inspectedPullRequestIdentityError(reread.value as ProviderChangeRequestSnapshot, item.identity);
+      if (identityError) return result('blocked', null, issueNumber, prNumber, {
+        changed: true, platform: context.platform, capabilities: context.capabilities,
+        pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
+        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueIdentities },
+        error: { ...identityError, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${identityError.message}` }
+      });
+    }
     const after = reread.value.labels || [];
     const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
     state.after = after;
@@ -779,7 +829,7 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
       evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueIdentities },
       error: { code: 'IN_LABEL_SYNC_PARTIAL', message: `${item.kind} ${resourceIdentityLabel(item.identity)} did not converge to the expected in: labels`, retryable: true }
     });
-    if (item.kind === 'pull-request') currentPullRequest = normalizeProviderPullRequest(reread.value as ProviderChangeRequestSnapshot, repository, prNumber, currentPullRequest);
+    if (item.kind === 'pull-request') currentPullRequest = normalizeProviderPullRequest(reread.value as ProviderChangeRequestSnapshot, repository, prNumber ?? currentPullRequest.number, currentPullRequest);
   }
   return result(association.value.length !== 1 ? 'degraded' : successfulWrites > 0 ? 'applied' : 'no-op', null, issueNumber, prNumber, {
     changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
@@ -1030,9 +1080,12 @@ async function resolveExternalPullRequest(taskRef: string, options: ResolveExter
     ? await base.provider.changeRequests.inspect({
       context: providerOperationContext(base.loadedContext),
       target: pullRequestIdentity(selected.selected)
-    }).then((response) => response.ok
-      ? { ok: true as const, value: normalizeProviderPullRequest(response.value, base.context.platform.repository!, selected.selected.number, selected.selected) }
-      : response)
+    }).then((response) => {
+      if (!response.ok) return response;
+      const identityError = inspectedPullRequestIdentityError(response.value, pullRequestIdentity(selected.selected));
+      return identityError ? { ok: false as const, error: identityError }
+        : { ok: true as const, value: normalizeProviderPullRequest(response.value, base.context.platform.repository!, selected.selected.number, selected.selected) };
+    })
     : unsupportedProviderOperation(base.provider, 'changeRequests.inspect');
   if (!rechecked.ok || !rechecked.value) return externalResult(result(rechecked.ok ? 'failed' : rechecked.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities,
@@ -1318,6 +1371,8 @@ async function createExternalPullRequest(
     })
     : unsupportedProviderOperation(base.provider, 'changeRequests.inspect');
   if (!inspected.ok) return withCreation(providerPullRequestError(base, inspected.error, number), { kind: 'created', createdByCurrentOperation: true });
+  const identityError = inspectedPullRequestIdentityError(inspected.value, createdIdentity);
+  if (identityError) return withCreation(providerPullRequestError(base, identityError, number), { kind: 'created', createdByCurrentOperation: true });
   const pullRequest = normalizeProviderPullRequest(
     inspected.value,
     base.context.platform.repository!,
@@ -1502,6 +1557,12 @@ async function syncPlatformPullRequestImpl(taskRef: string, options: SyncOptions
         ...reread.error,
         code: 'IN_LABEL_SYNC_PARTIAL',
         message: `In-label synchronization is partial or unknown: ${reread.error.message}`
+      }, base.prNumber));
+      const identityError = inspectedPullRequestIdentityError(reread.value, base.prIdentity);
+      if (identityError) return softenFailure(providerPullRequestError(base, {
+        ...identityError,
+        code: 'IN_LABEL_SYNC_PARTIAL',
+        message: `Pull-request metadata synchronization is partial or unknown: ${identityError.message}`
       }, base.prNumber));
       finalPullRequest = normalizeProviderPullRequest(reread.value, base.context.platform.repository!, base.prNumber || 0, inspected.pullRequest);
       const expected = ((planned.find((operation) => operation.name === 'labels')?.value as string[] || [])

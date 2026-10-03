@@ -14,6 +14,7 @@ function wrongTarget(message) {
 
 function configuredIdentity(config, resource, number) {
   const kind = config.identityKind || 'number';
+  if (resource === 'change' && typeof config.changeRequestToken === 'string') return { kind, value: config.changeRequestToken };
   return kind === 'number' ? { kind, value: number } : { kind, value: resource === 'change' ? String(number) : `${resource}-${number}` };
 }
 

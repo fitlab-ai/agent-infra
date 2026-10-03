@@ -38,6 +38,7 @@ import type {
 } from './pr-change-report.ts';
 import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
+import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -195,6 +196,20 @@ async function inspectBoundPullRequest(
     return { ok: false, status: inspectionError(error), error };
   }
   const remote: ChangeRequestSnapshot = inspected.value;
+  if (!remote.identity) {
+    return {
+      ok: false,
+      status: 'failed',
+      error: { code: 'PR_IDENTITY_MISSING', message: 'Provider pull-request inspection did not return a canonical identity', retryable: false }
+    };
+  }
+  if (!resourceIdentityEquals(remote.identity, prIdentity)) {
+    return {
+      ok: false,
+      status: 'failed',
+      error: { code: 'PR_IDENTITY_MISMATCH', message: 'Provider returned a different pull request identity than requested', retryable: false }
+    };
+  }
   const number = remote.number ?? resourceIdentityNumber(remote.identity) ?? resourceIdentityNumber(prIdentity) ?? 0;
   const head = remote.head || { repository: context.platform.repository, ref: '', sha: remote.headSha || '' };
   const base = remote.base || { repository: context.platform.repository, ref: '', sha: remote.baseSha || '' };
@@ -203,7 +218,7 @@ async function inspectBoundPullRequest(
     value: {
       repository: context.platform.repository,
       number,
-      identity: remote.identity ?? prIdentity,
+      identity: remote.identity,
       nodeId: remote.id,
       url: remote.displayUrl || '',
       state: remote.state === 'closed' ? 'closed' : 'open',
@@ -342,13 +357,18 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
     artifacts: []
   };
   const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
-  const prNumber = resourceIdentityNumber(prIdentity);
+  let prNumber = resourceIdentityNumber(prIdentity);
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   let pullRequest: PlatformChangeRequestSnapshot | null = null;
   if (loaded.ok && prIdentity && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
     const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
-    if (inspected.ok) pullRequest = inspected.value;
+    if (inspected.ok) {
+      pullRequest = inspected.value;
+      if (Number.isSafeInteger(inspected.value.number) && inspected.value.number > 0) {
+        prNumber = inspected.value.number;
+      }
+    }
   }
   const report = summaryReportStatus(reportPath, pullRequest, taskContent, resolved.repoRoot);
   return {
@@ -559,7 +579,7 @@ async function syncPullRequestSummary(
       const prIdentity = boundFact.identity.resource;
       const boundPrNumber = resourceIdentityNumber(prIdentity);
       knownPrNumber = boundPrNumber;
-      const prNumber = boundPrNumber;
+      let prNumber = boundPrNumber;
       const initial = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
       const manual = options.manualValidation;
@@ -568,8 +588,20 @@ async function syncPullRequestSummary(
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
-        if (prNumber === null) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a numeric pull-request identity', retryable: false }, prNumber);
-        if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
+        if (!Number.isSafeInteger(initial.value.number) || initial.value.number <= 0) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a positive safe pull-request number from the authoritative snapshot', retryable: false }, prNumber);
+        prNumber = initial.value.number;
+        knownPrNumber = prNumber;
+        if (!manual.transactionId) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'manual-validation summary requires a transaction ID', retryable: false }, prNumber);
+        if (manual.phase === 'pending') {
+          const transaction = readManualValidationTransaction(resolved.taskDir, {
+            transactionId: manual.transactionId,
+            taskId: resolved.taskId,
+            prNumber,
+            prHeadSha: initial.value.head.sha
+          });
+          if (!transaction.ok) return fail('failed', context, platformError(transaction.error), prNumber);
+        }
+        if (manual.phase === 'final' && (!manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
         if (manual.phase === 'final') {
           if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
           const completion = readManualValidationCompletion(resolved.taskDir, {
@@ -733,7 +765,11 @@ async function syncPullRequestSummary(
         target: JSON.stringify(prIdentity),
         expectedDigest: createHash('sha256').update(desired).digest('hex'),
         dependency: 'deferred' as const,
-        pullRequestSummary: { body: options.body, changeReportFile: options.changeReportFile! }
+        pullRequestSummary: {
+          body: options.body,
+          changeReportFile: options.changeReportFile!,
+          ...(manual?.transactionId ? { manualValidation: { ...manual, transactionId: manual.transactionId } } : {})
+        }
       };
       if (options.skipQueue) return publish();
       return coordinatePlatformWrite({

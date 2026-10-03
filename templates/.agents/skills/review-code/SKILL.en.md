@@ -9,7 +9,7 @@ description: >
 # Code Review
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `review-finding`. Reuse the same values for started and completed.
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `review-finding` for ordinary reviews. Only an explicitly requested supplemental human review uses `--initiator human --reason-code manual-review-supplement`. Reuse the same values for started and completed.
 
 Review the latest code round and produce `review-code.md` or `review-code-r{N}.md`.
 
@@ -59,7 +59,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-code.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-code.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`. For a supplemental round, use `--initiator human --reason-code manual-review-supplement`, and record each human opinion, its verification evidence, and finding disposition in the report.
 
 ## Steps
 
@@ -71,7 +71,7 @@ Require:
 
 ### 2. Resolve the Artifact Context
 
-Run `agent-infra-internal task-artifact {task-id} inspect --family review-code`. Continue only for `ready`. When `selection.disposition` is `reuse`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise take any available latest `{code-artifact}` and `{plan-artifact}` from `inputs`, and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. If no code or plan artifact exists, review the Git diff and record the missing context in the report. Then run the started event and verify the returned identity.
+For a normal review, run `agent-infra-internal task-artifact {task-id} inspect --family review-code`. When the user explicitly asks to enter supplied human opinions as a new review round, use `--reason-code manual-review-supplement` to inspect and open that round. This reason is allowed only for a human-initiated `review-code`; do not use it to repeat an ordinary review. Continue only for `ready`. For a normal review, when `selection.disposition` is `reuse`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. When a supplemental review returns `create`, continue with the new round. Otherwise take any available latest `{code-artifact}` and `{plan-artifact}` from `inputs`, and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. If no code or plan artifact exists, review the Git diff and record the missing context in the report. Then run the started event and verify the returned identity.
 
 ### 3. Read Implementation and Refinement Context
 

@@ -31,6 +31,8 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 > - `rev_max == code_max`：AI 修复轮（`code-task` 产出代码后由 `review-code` 审查同号产物）。
 > - `rev_max > code_max`：人工补审轮——PR 创建后维护者追加一轮 `review-code-r{N}` 审查既有最新代码。此时 `fix` 模式的 `next_round = code_max + 1`。
 >
+> 对同一代码快照追加人工意见时，先用 `task-artifact inspect --family review-code --reason-code manual-review-supplement` 创建新的 review 轮次，并以 `--initiator human --reason-code manual-review-supplement` 记录 `review-code.started`。新报告中的 finding 随后按普通修复模式进入 `code-task`。
+>
 > 若最新 `review-code` 的 verdict 无法解析，仍返回 `error`（exit 2），作为保留的异常拦截。
 
 ## verdict 解析

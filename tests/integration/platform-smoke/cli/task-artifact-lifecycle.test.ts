@@ -19,6 +19,7 @@ import { upsertSection } from '../../../../lib/task/sections.ts';
 import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.ts';
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
+import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
 import { recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -195,6 +196,23 @@ test('review-code creates a new round when a completed report omits Reviewed Hea
   assert.equal(result.status, 'ready', JSON.stringify(result.error));
   assert.equal(result.selection?.disposition, 'create');
   assert.equal(result.selection?.artifact.name, 'review-code-r2.md');
+});
+
+test('review-code creates a supplemental round for an explicit human review opinion', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
+  completedReviewFixture(f);
+  const result = resolveArtifactContext(TASK_ID, 'review-code', {
+    repoRoot: f.repoRoot,
+    reasonCode: 'manual-review-supplement'
+  });
+  assert.equal(result.status, 'ready', JSON.stringify(result.error));
+  assert.equal(result.selection?.disposition, 'create');
+  assert.deepEqual(result.selection?.artifact, {
+    family: 'review-code', round: 2, name: 'review-code-r2.md'
+  });
+  assert.equal(parseArtifactCommand([
+    TASK_ID, 'inspect', '--family', 'review-code', '--reason-code', 'manual-review-supplement'
+  ]).reasonCode, 'manual-review-supplement');
 });
 
 test('inventory is byte, mtime, and directory-entry pure', () => {

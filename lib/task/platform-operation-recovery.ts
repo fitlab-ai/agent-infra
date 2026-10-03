@@ -187,6 +187,14 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
   let identity;
   try { identity = parseResourceIdentity(JSON.parse(operation.target), 'queued pull-request summary identity'); }
   catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary identity is invalid', retryable: false } }); }
+  const summary = operation.pullRequestSummary;
+  if (!summary) return platformResult('blocked', { error: {
+    code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
+  } });
+  const manualValidationHeading = /^###\s+(?:⏳\s+(?:Manual Validation Pending|人工验证待收尾)|✅\s+(?:Manual Validation Passed|人工验证已通过))\s*$/mu.test(summary.body);
+  if (manualValidationHeading && !summary.manualValidation) return platformResult('blocked', { error: {
+    code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'Queued manual-validation summary has no persisted transaction context', retryable: false
+  } });
   const resolved = await resolvePlatformProviderContext({ cwd, client });
   if (!resolved.ok) return resolved.context;
   const listed = resolved.value.provider.comments?.list
@@ -198,12 +206,9 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
   if (summaries.length > 1) return platformResult('blocked', { error: {
     code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple pull-request comments contain the queued summary marker', retryable: false
   } });
-  if (summaries.length === 1 && createHash('sha256').update(normalizeCommentContent(summaries[0]!.body)).digest('hex') === operation.expectedDigest) {
+  if (!summary.manualValidation && summaries.length === 1 && createHash('sha256').update(normalizeCommentContent(summaries[0]!.body)).digest('hex') === operation.expectedDigest) {
     return platformResult('no-op');
   }
-  if (!operation.pullRequestSummary) return platformResult('blocked', { error: {
-    code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
-  } });
   const bound = await inspectPlatformPullRequest(taskId, { cwd, client });
   if (!bound.pullRequest || !resourceIdentityEquals(bound.pullRequest.identity, identity)) return platformResult('blocked', { error: bound.error ?? {
     code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request differs from the queued summary target', retryable: false
@@ -212,8 +217,9 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
     agent,
     cwd,
     client,
-    body: operation.pullRequestSummary.body,
-    changeReportFile: operation.pullRequestSummary.changeReportFile,
+    body: summary.body,
+    changeReportFile: summary.changeReportFile,
+    ...(summary.manualValidation ? { manualValidation: summary.manualValidation } : {}),
     primaryResult: 'no_op',
     strict: true,
     skipQueue: true,

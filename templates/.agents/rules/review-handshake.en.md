@@ -20,6 +20,8 @@ For each finding in the latest `review-*`, first Read/Grep the cited `file:line`
 | `refuted` | After verification, judged invalid / hallucinated / based on a wrong `file:line` | counter-evidence (`file:line` or raw command output); awaits reviewer confirmation |
 | `cannot-judge` | Insufficient evidence to decide | the verification path attempted; handed to reviewer/human |
 
+`finding-respond --round` is the finding's handshake round, independent of the current code/plan/analysis artifact round. The executor reads each finding's current ledger `round` from `task-ledger stage-status --stage {stage}` and submits current value plus one; different findings may require different response rounds.
+
 ## Reviewer hand-back duty (`review-*` skills, when re-reviewing the executor response)
 
 After the executor gives `adjusted` / `refuted` / `cannot-judge`, the reviewer must respond per item — never re-reading the original finding nor ignoring the hand-back:
@@ -64,6 +66,7 @@ The single source of truth for disagreement state is the fixed `## 审查分歧�
 - **Terminal set (gate passes)**: `{confirmed, closed, human-decided}`; everything else is blocking.
 - **Same-round fix-and-close**: only when the reviewer fixes a `minor` finding during the current review round may `finding-review` move that row directly from `open` to `closed`. This transition does not increment `round`, and `evidence` must point to the fix in the current review artifact; it does not apply to `blocker` or `major` findings.
 - **Severity is independent from advancement**: `blocker` / `major` / `minor` express impact only. Every formal finding blocks approval until terminal. After all writes, review verdicts, event counts, and next steps must be derived from `task-ledger stage-status --stage {stage}`.
+- **Evidence correction on open findings**: `finding-review` may keep a finding `open` while updating its evidence anchor to correct or refine an unresolved report reference; this does not change the finding round or terminal state.
 - **Non-blocking advisories**: only future optimizations that do not affect the current artifact's completeness, correctness, or acceptance. Advisories stay in a separate report section and never enter this ledger, finding counts, or verdict; manual-validation remains a separate category.
 - **Write responsibility**: callers submit structured intents only; they do not scan ids, assemble table rows, or decide mechanical transitions. `review-*` uses `agent-infra-internal task-ledger {task-id} finding-upsert|finding-review ...`; `*-task` uses `finding-respond ...`; `ai decide` applies human rulings atomically. The core validates and commits each intent through one task write.
 - **Backward compatible**: when task.md has no such section the gate treats it as no open disagreements and passes.
