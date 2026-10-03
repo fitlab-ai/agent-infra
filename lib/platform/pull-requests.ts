@@ -1559,7 +1559,11 @@ async function syncPlatformPullRequestImpl(taskRef: string, options: SyncOptions
         message: `In-label synchronization is partial or unknown: ${reread.error.message}`
       }, base.prNumber));
       const identityError = inspectedPullRequestIdentityError(reread.value, base.prIdentity);
-      if (identityError) return softenFailure(providerPullRequestError(base, identityError, base.prNumber));
+      if (identityError) return softenFailure(providerPullRequestError(base, {
+        ...identityError,
+        code: 'IN_LABEL_SYNC_PARTIAL',
+        message: `Pull-request metadata synchronization is partial or unknown: ${identityError.message}`
+      }, base.prNumber));
       finalPullRequest = normalizeProviderPullRequest(reread.value, base.context.platform.repository!, base.prNumber || 0, inspected.pullRequest);
       const expected = ((planned.find((operation) => operation.name === 'labels')?.value as string[] || [])
         .filter((label) => label.startsWith('in:') || label.startsWith('type:'))).sort();
