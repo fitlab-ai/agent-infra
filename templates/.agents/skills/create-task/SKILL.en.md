@@ -83,7 +83,7 @@ date +%Y%m%d-%H%M%S
 
 - Generate one UUID v4 `idempotencyKey` and write the parsed fields to one JSON file.
 - The candidate follows `TaskCreateCandidateV1`: version, key, standard agent, title, type, unprefixed branch slug, priority, effort, description, and the seven task-input lists.
-- Write it once before the first request. A timeout retry must reuse the same file and let the client generate a new outer request id; do not rerun AI derivation.
+- Write it once before the first request. A timeout retry must reuse the same file and let the client generate a new outer request id; do not rerun AI derivation. If the client explicitly reports `accepted: false`, `recovery: new-request-id`, and `requestId: null` for a JSON/schema validation error, correct the Agent-generated structure while preserving domain meaning, then validate it with the same validator. Regenerate the idempotency key only when that key itself is invalid; preserve an already valid key. Do not invent missing domain facts or edit the candidate for other failures. Once accepted, keep the candidate and key unchanged and recover using the returned request identity.
 
 Invoke the single entry point:
 

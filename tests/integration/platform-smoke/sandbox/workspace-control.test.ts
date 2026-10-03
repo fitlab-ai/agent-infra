@@ -920,6 +920,46 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
   }
 });
 
+test('task-create executor preserves request identity when the host service throws', async () => {
+  const requestId = '12345678-1234-4234-8234-123456789abc';
+  const request = validateSandboxControlRequest({
+    version: 3,
+    id: requestId,
+    token: 'secret',
+    generation: 'generation-1',
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'task-create',
+    candidate: {
+      version: 1,
+      idempotencyKey: requestId,
+      agent: 'codex',
+      title: 'Create a sandbox task',
+      type: 'feature',
+      branchSlug: 'create-sandbox-task',
+      priority: 'Medium',
+      effort: 'Low',
+      description: 'Persist a new task on the host.',
+      taskInput: {
+        sources: [], facts: [], constraints: [], decisions: [], alternatives: [],
+        acceptanceCriteria: [], openQuestions: []
+      }
+    },
+    controllerProcess: null,
+    controllerProof: null
+  }, manifest, { now: 2_000 });
+  const result = await executeRequest(manifest, '/manifest.json', request, {
+    createTask: async () => { throw new Error('TASK_CREATE_TEST_ESCAPED_EXCEPTION'); }
+  });
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(JSON.parse(result.stdout).control, {
+    requestId,
+    accepted: true,
+    recovery: 'inspect-domain-state'
+  });
+  assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CREATE_TEST_ESCAPED_EXCEPTION');
+});
+
 test('control broker ownership is acquired exclusively', onPlatforms('linux', 'darwin'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');

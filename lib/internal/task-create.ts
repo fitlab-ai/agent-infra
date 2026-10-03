@@ -82,9 +82,10 @@ async function taskCreate(args: string[]): Promise<void> {
     const stat = fs.lstatSync(inputPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_INPUT_INVALID: input must be a regular file');
     if (stat.size > SANDBOX_CONTROL_MAX_BYTES) throw new Error('TASK_CREATE_INPUT_TOO_LARGE: input exceeds the control limit');
+    const inputContent = fs.readFileSync(inputPath, 'utf8');
     let candidate: TaskCreateCandidateV1;
     try {
-      candidate = validateTaskCreateCandidate(JSON.parse(fs.readFileSync(inputPath, 'utf8')));
+      candidate = validateTaskCreateCandidate(JSON.parse(inputContent));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_INPUT_INVALID';

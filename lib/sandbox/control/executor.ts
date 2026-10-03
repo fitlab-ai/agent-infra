@@ -304,6 +304,7 @@ function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalizat
 type ExecuteRequestOptions = Readonly<{
   buildIdentity?: typeof computeLifecycleBuildIdentity;
   resolveControllerBinding?: typeof resolveCodexControllerBinding;
+  createTask?: typeof createTask;
 }>;
 
 async function executeRequestInner(
@@ -314,7 +315,7 @@ async function executeRequestInner(
 ): Promise<SandboxControlExecutionResult> {
   if (request.family === 'task-create') {
     try {
-      const result = await createTask(request.candidate, { repoRoot: manifest.repoRoot });
+      const result = await (options.createTask ?? createTask)(request.candidate, { repoRoot: manifest.repoRoot });
       return taskCreateExecutionResult(projectTaskCreateResult(result, {
         requestId: request.id,
         accepted: true,
