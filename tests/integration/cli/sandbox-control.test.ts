@@ -89,23 +89,27 @@ function waitForAbsent(filePath: string, timeoutMs: number): void {
   throw new Error(`Timed out waiting for ${filePath} to disappear`);
 }
 
-async function waitForReceiptLifecycleDoneAsync(receiptPath: string, timeoutMs: number): Promise<void> {
+async function waitForReceiptLifecycleDoneAsync(root: string, taskId: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(root, '.agents', 'workspace', state, taskId, '.task-finalization.json'));
   while (Date.now() < deadline) {
     try {
-      if ((JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as { lifecycle?: unknown }).lifecycle === 'done') return;
+      if (receiptPaths.some((receiptPath) => { try { return (JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as { lifecycle?: unknown }).lifecycle === 'done'; } catch { return false; } })) return;
     } catch {
       // The receipt may still be between atomic updates.
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`Timed out waiting for completed finalization receipt at ${receiptPath}`);
+  throw new Error(`Timed out waiting for completed finalization receipt for ${taskId}`);
 }
 
-async function waitForReceiptTerminalAsync(receiptPath: string, timeoutMs: number): Promise<void> {
+async function waitForReceiptTerminalAsync(root: string, taskId: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(root, '.agents', 'workspace', state, taskId, '.task-finalization.json'));
   while (Date.now() < deadline) {
     try {
+      const receiptPath = receiptPaths.find((candidate) => fs.existsSync(candidate));
+      if (!receiptPath) throw new Error('receipt not found');
       const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as {
         lifecycle?: unknown;
         taskComment?: unknown;
@@ -121,7 +125,7 @@ async function waitForReceiptTerminalAsync(receiptPath: string, timeoutMs: numbe
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`Timed out waiting for terminal finalization receipt at ${receiptPath}`);
+  throw new Error(`Timed out waiting for terminal finalization receipt for ${taskId}`);
 }
 
 function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
@@ -310,23 +314,15 @@ function runTaskFinalizationClient(params: {
   generation: string;
   timeoutMs: number;
   recoveryBudgetMs?: number;
-  repoRoot?: string;
-  taskId?: string;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
   const identity = JSON.parse(fs.readFileSync(path.join(params.statusDir, 'identity.json'), 'utf8')) as {
     taskId: string | null; mode: 'task-bound' | 'branch-only';
   };
   const script = [
     "import { requestSandboxTaskFinalization } from './lib/sandbox/control/client.ts';",
-    "import { bindTaskFinalizationReceipt } from './lib/task/finalization.ts';",
-    "import { publishTaskFinalizationHandoff } from './lib/task/finalization-handoff.ts';",
     'try {',
     '  const response = requestSandboxTaskFinalization({',
     "    agent: 'codex',",
-    '    prepareHandoff: process.env.TEST_REPO_ROOT ? (binding) => {',
-    '      const receipt = bindTaskFinalizationReceipt(process.env.TEST_REPO_ROOT, process.env.TEST_TASK_ID, binding);',
-    '      return publishTaskFinalizationHandoff(process.env.TEST_REPO_ROOT, receipt, binding);',
-    '    } : undefined,',
     '    channelDir: process.env.TEST_CHANNEL_DIR,',
     '    statusDir: process.env.TEST_STATUS_DIR,',
     '    token: process.env.TEST_TOKEN,',
@@ -347,7 +343,7 @@ function runTaskFinalizationClient(params: {
       env: {
         ...process.env,
         AGENT_INFRA_SANDBOX: '1',
-        AGENT_INFRA_TASK_ID: params.taskId ?? identity.taskId ?? undefined,
+        AGENT_INFRA_TASK_ID: identity.taskId ?? undefined,
         AGENT_INFRA_CONTROL_TOKEN: params.token,
         AGENT_INFRA_CONTROL_GENERATION: params.generation,
         AGENT_INFRA_CONTROL_ROOT_ID: JSON.parse(fs.readFileSync(path.join(params.statusDir, 'identity.json'), 'utf8')).controlRootId,
@@ -360,8 +356,6 @@ function runTaskFinalizationClient(params: {
         TEST_GENERATION: params.generation,
         TEST_TIMEOUT_MS: String(params.timeoutMs),
         TEST_RECOVERY_BUDGET_MS: String(params.recoveryBudgetMs ?? params.timeoutMs),
-        TEST_REPO_ROOT: params.repoRoot,
-        TEST_TASK_ID: params.taskId
       },
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -2063,7 +2057,7 @@ test('task-bound finalization recovers the original request after accepted respo
     };
 
     const broker = serveFinalization();
-    const client = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500, repoRoot: root, taskId });
+    const client = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500 });
     const execution = await broker;
     assert.equal(client.exitCode, 0, client.stderr);
     assert.equal(client.payload.phase, 'completed');
@@ -2106,7 +2100,7 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     const issuedAt = Date.now();
     atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
-      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt, expiresAt: issuedAt + 2_000, family: 'task-lifecycle', args: ['08', 'complete', '--agent', 'codex'],
       controllerProcess: null, controllerProof: null
     });
@@ -2198,8 +2192,6 @@ test('task-finalization normal publication fails closed on a conflicting termina
       token: manifest.token,
       generation,
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
-      repoRoot: root,
-      taskId
     });
     const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`), `${JSON.stringify({
@@ -2243,7 +2235,7 @@ test('sandbox-local task-finalization has no receipt or request side effects whe
     const local = runSandboxLocalTaskFinalization(root, manifest, taskId);
     assert.notEqual(local.status, 0, local.stdout);
     assert.match(`${local.stdout}\n${local.stderr}`, /SANDBOX_CONTROL_(?:BROKER_UNAVAILABLE|RESULT_UNKNOWN)|SANDBOX_TASK_VIEW/u);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`)), false);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', taskId, '.task-finalization.json')), false);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-finalization')), false);
     assert.equal(fs.readdirSync(path.join(manifest.channelDir, 'requests')).length, 0);
   } finally {
@@ -2274,8 +2266,8 @@ test('sandbox-local task-finalization rejects concurrent full handlers during do
     writeFinalizationTaskFixture(root, taskId);
     const providerSource = path.join(root, '.agents', 'finalization-gated-provider.mjs');
     fs.copyFileSync(path.resolve('tests/fixtures/platform-providers/finalization-gated-provider.mjs'), providerSource);
-    const receiptDir = path.join(root, '.agents', 'workspace', '.task-finalization');
-    const receiptPath = path.join(receiptDir, `${taskId}.json`);
+    const receiptDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const receiptPath = path.join(receiptDir, '.task-finalization.json');
     const enteredPath = path.join(root, 'domain-prepare-entered');
     const releasePath = path.join(root, 'domain-prepare-release');
     const callsPath = path.join(root, 'platform-comment-calls');
@@ -2395,7 +2387,7 @@ test('sandbox-local task-finalization resumes a pending receipt after broker tea
     first = runSandboxLocalTaskFinalizationAsync(root, manifest, taskId);
     const firstResult = await first.result;
     assert.notEqual(firstResult.exitCode, 0, firstResult.stdout);
-    const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
+    const receiptPath = path.join(root, '.agents', 'workspace', 'active', taskId, '.task-finalization.json');
     const pendingReceipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as {
       lifecycle: string;
       controlBinding: { generation: string; requestId: string };
@@ -2422,7 +2414,7 @@ test('sandbox-local task-finalization resumes a pending receipt after broker tea
     const secondResult = await second.result;
     assert.equal(secondResult.exitCode, 0, secondResult.stderr || secondResult.stdout);
     assert.equal(JSON.parse(secondResult.stdout).status, 'completed', secondResult.stdout);
-    const resumedReceipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as {
+    const resumedReceipt = JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'completed', taskId, '.task-finalization.json'), 'utf8')) as {
       lifecycle: string;
       controlBinding: { generation: string; requestId: string };
     };
@@ -2465,11 +2457,9 @@ test('task-finalization publishes its executor result when the receipt disappear
       token: manifest.token,
       generation,
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
-      repoRoot: root,
-      taskId
     });
     const evidence = await resultEvidence;
-    fs.rmSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`));
+    fs.rmSync(path.join(root, '.agents', 'workspace', 'completed', taskId, '.task-finalization.json'));
     const client = await clientResult;
     assert.equal(client.exitCode, 0, client.stderr);
     assert.equal(client.payload.phase, 'completed');
@@ -2513,8 +2503,6 @@ test('task-finalization settles and commits the canonical terminal before gracef
       token: manifest.token,
       generation,
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
-      repoRoot: root,
-      taskId
     });
     const evidence = await resultEvidence;
     controller.abort();
@@ -2574,11 +2562,9 @@ test('task-finalization reports unknown when shutdown precedes broker result pub
       token: manifest.token,
       generation,
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
-      repoRoot: root,
-      taskId
     });
-    const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
-    await waitForReceiptTerminalAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    await waitForReceiptTerminalAsync(root, taskId, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const receiptPath = path.join(root, '.agents', 'workspace', 'completed', taskId, '.task-finalization.json');
     const processingEntries = fs.readdirSync(manifest.processingDir);
     assert.equal(processingEntries.length, 1);
     assert.equal(fs.existsSync(path.join(manifest.processingDir, processingEntries[0]!, 'result.json')), false);
@@ -2647,11 +2633,9 @@ test('task-finalization preserves unknown result evidence when executor terminat
       token: manifest.token,
       generation,
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
-      repoRoot: root,
-      taskId
     });
-    const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
-    await waitForReceiptLifecycleDoneAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    await waitForReceiptLifecycleDoneAsync(root, taskId, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const receiptPath = path.join(root, '.agents', 'workspace', 'completed', taskId, '.task-finalization.json');
     const processingEntries = fs.readdirSync(manifest.processingDir);
     assert.equal(processingEntries.length, 1);
     const requestId = processingEntries[0]!;
@@ -2965,7 +2949,7 @@ test('broker recovery accepts a controller close after the registration was dura
       controllerProcess: { pid: process.pid, startTime }
     };
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
       family: 'codex-controller', command: 'close', args: [],
       controllerProcess: proof.controllerProcess, controllerProof: proof
@@ -3025,7 +3009,7 @@ test('broker recovery terminates a live started executor before retaining unknow
     const startTime = getProcessStartTime(child.pid!);
     assert.ok(startTime);
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
       family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
       controllerProcess: null, controllerProof: null
@@ -3197,7 +3181,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     phase: 'running', updatedAt: Date.now()
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({
-    version: 3, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
+    version: 4, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
     expiresAt: Date.now() + 1_000, family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
     controllerProcess: null, controllerProof: null
   })}\n`);
@@ -3271,7 +3255,7 @@ test('broker recovery returns inspectable task-create output when the payload is
       }
     };
     fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
-      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
       controllerProcess: null, controllerProof: null
     })}\n`);
@@ -3359,7 +3343,7 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
       }
     };
     fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
-      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
       controllerProcess: null, controllerProof: null
     })}\n`);
@@ -3441,7 +3425,7 @@ test('broker recovery accepts a task-create no-op for a non-active task', async 
       else writeSandboxControlTransition(manifest, { requestId, phase });
     }
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000, family: 'task-create', candidate,
       controllerProcess: null, controllerProof: null
     })}\n`);

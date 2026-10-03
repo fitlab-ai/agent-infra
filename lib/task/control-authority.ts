@@ -387,7 +387,6 @@ export type TaskControlExecutionContext =
       generation: string;
       manifestPath: string;
       requestId: string;
-      handoffDirectory: string;
       controllerBinding?: TaskControlControllerBinding | null;
       lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
     }>;
@@ -472,7 +471,6 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
   generation: string;
   manifestPath: string;
   requestId: string;
-  handoffDirectory?: string;
   controllerBinding?: TaskControlControllerBinding | null;
   lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
 }>): TaskControlExecutionContext {
@@ -493,7 +491,6 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
     generation: params.generation,
     manifestPath: absolute('manifestPath', params.manifestPath),
     requestId: params.requestId,
-    handoffDirectory: absolute('handoffDirectory', params.handoffDirectory ?? path.join(params.worktreeRoot, '.agent-infra-handoff')),
     ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) }),
     ...(params.lifecycleRecoveryAttestation === undefined ? {} : {
       lifecycleRecoveryAttestation: params.lifecycleRecoveryAttestation === null
@@ -519,7 +516,6 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
   absolute('worktreeRoot', context.worktreeRoot);
   absolute('runtimeDir', context.runtimeDir);
   absolute('manifestPath', context.manifestPath);
-  absolute('handoffDirectory', context.handoffDirectory);
   if (path.resolve(context.runtimeDir) !== path.join(path.dirname(path.resolve(context.manifestPath)), 'runtime')) {
     invalidContext('runtimeDir is not bound to the manifest control root');
   }

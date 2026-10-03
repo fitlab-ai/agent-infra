@@ -431,7 +431,7 @@ export function requestSandboxControl(params: Readonly<{
   const auth = authority(params);
   const issuedAt = Date.now();
   const request: SandboxControlRequest = {
-    version: 3, id: randomUUID(), ...auth, issuedAt,
+    version: 4, id: randomUUID(), ...auth, issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
     family: params.family as 'task-lifecycle', args: params.args,
     controllerProcess: null,
@@ -442,7 +442,6 @@ export function requestSandboxControl(params: Readonly<{
 
 export function requestSandboxTaskFinalization(params: Readonly<{
   agent: string;
-  prepareHandoff?: (binding: Readonly<{ generation: string; requestId: string }>) => string;
   channelDir?: string;
   statusDir?: string;
   token?: string;
@@ -455,9 +454,8 @@ export function requestSandboxTaskFinalization(params: Readonly<{
   const auth = authority(params);
   const issuedAt = Date.now();
   const id = randomUUID();
-  const handoffSha256 = (params.prepareHandoff ?? (() => '0'.repeat(64)))({ generation: auth.generation, requestId: id });
   const request: SandboxTaskFinalizationRequest = {
-    version: 3,
+    version: 4,
     id,
     ...auth,
     issuedAt,
@@ -465,7 +463,6 @@ export function requestSandboxTaskFinalization(params: Readonly<{
     family: 'task-finalization',
     operation: 'complete',
     agent,
-    handoffSha256,
     args: [],
     controllerProcess: null,
     controllerProof: null
@@ -642,7 +639,7 @@ function requestCodexController(params: Readonly<{
   const auth = authority(params);
   const issuedAt = Date.now();
   const request: SandboxCodexControllerRequest = {
-    version: 3,
+    version: 4,
     id: randomUUID(),
     ...auth,
     issuedAt,
@@ -701,7 +698,7 @@ export function requestSandboxTaskCreate(params: Readonly<{
   const auth = authority(params);
   const issuedAt = Date.now();
   const request: SandboxTaskCreateRequest = {
-    version: 3, id: randomUUID(), ...auth, issuedAt,
+    version: 4, id: randomUUID(), ...auth, issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
     family: 'task-create', candidate: params.candidate,
     controllerProcess: null,
