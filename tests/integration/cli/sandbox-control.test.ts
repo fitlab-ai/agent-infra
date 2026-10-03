@@ -56,6 +56,7 @@ import { prepareTaskFinalization } from '../../../lib/task/finalization.ts';
 import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
 import { onPlatforms } from '../../helpers.ts';
+import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.ts';
 
 
 function waitForFile(filePath: string, timeoutMs: number): void {
@@ -662,7 +663,58 @@ test('host sandbox-control recovery resolves one accepted request from managed m
   }
 });
 
-test('host sandbox-control recover prints a request-scoped unknown error in the CLI', onPlatforms('linux', 'darwin'), () => {
+test('host sandbox-control recovery waits for an accepted response to become terminal', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-pending-'));
+  const managedRoot = path.join(root, 'demo');
+  const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
+  const requestId = '15151515-1515-4515-8515-151515151515';
+  let publisher: ReturnType<typeof spawn> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(controlRoot, branch, 'host-recovery-pending-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'recovered after wait\n', stderr: '' });
+    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    const terminalResponse = {
+      version: 2, id: requestId, phase: 'completed', exitCode: 0, stdout: '', stderr: '', error: null,
+      outputState: 'available', payload: {
+        version: payload.version, id: payload.id, generation: payload.generation,
+        stdoutBytes: payload.stdoutBytes, stderrBytes: payload.stderrBytes,
+        stdoutSha256: payload.stdoutSha256, stderrSha256: payload.stderrSha256
+      }
+    };
+    fs.writeFileSync(responsePath, `${JSON.stringify({ version: 2, id: requestId, phase: 'accepted' })}\n`);
+    appendCriticalAudit(manifest, createSandboxControlAuditContext(manifest, {
+      requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
+    }));
+    appendDiagnosticAudit(manifest, 'executor-result-published', {
+      requestId, requestGeneration: manifest.generation, exitCode: 0,
+      outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
+      outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
+    });
+    publisher = spawn(process.execPath, ['-e',
+      'setTimeout(() => require("node:fs").writeFileSync(process.argv[1], process.argv[2]), 75)',
+      responsePath, JSON.stringify(terminalResponse)
+    ], { stdio: 'ignore' });
+
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 1_000 }).stdout, 'recovered after wait\n');
+    fs.rmSync(responsePath);
+    assert.equal(
+      recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 30 }).error?.code,
+      'SANDBOX_CONTROL_RESULT_UNKNOWN'
+    );
+  } finally {
+    publisher?.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('host sandbox-control recover prints a request-scoped unknown error in the CLI', {
+  ...onPlatforms('linux', 'darwin'),
+  skip: fs.existsSync(SANDBOX_CONTROL_STATUS_MOUNT)
+    ? 'requires a host without the sandbox status mount'
+    : onPlatforms('linux', 'darwin').skip
+}, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-unknown-cli-'));
   const requestId = '14141414-1414-4414-8414-141414141414';
   try {
@@ -683,12 +735,15 @@ test('host sandbox-control recover prints a request-scoped unknown error in the 
     appendCriticalAudit(manifest, createSandboxControlAuditContext(manifest, {
       requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
     }));
+    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'rejected', exitCode: null, stdout: '', stderr: '',
+      error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'unknown', retryable: false },
+      outputState: 'unavailable', payload: null
+    })}\n`);
 
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_')));
-    const simulateDirectHost = `const original=process.binding.bind(process);process.binding=(name)=>{const binding=original(name);if(name==='fs'){const stat=binding.internalModuleStat;binding.internalModuleStat=new Proxy(stat,{apply(target,thisArg,args){return args[0]==='/run/agent-infra/control-status'?-2:Reflect.apply(target,thisArg,args)}});}return binding;};`;
     const recovered = spawnSync(process.execPath, [
-      '--experimental-strip-types', '--no-warnings', '--import',
-      `data:text/javascript,${encodeURIComponent(simulateDirectHost)}`,
+      '--experimental-strip-types', '--no-warnings',
       path.resolve('bin/internal-cli.ts'),
       'sandbox-control', 'recover', requestId
     ], {

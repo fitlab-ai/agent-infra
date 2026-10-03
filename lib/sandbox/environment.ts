@@ -32,6 +32,22 @@ const TASK_CONTROL_CONFIG_KEYS = [
 type NativeDirectoryProbe = 'present' | 'absent' | 'unknown';
 
 function nativeDirectoryProbe(candidate: string): NativeDirectoryProbe {
+  if (process.platform === 'linux') {
+    try {
+      // Linux sandboxes use this fixed mount as a host/sandbox trust anchor.
+      // Do not let a preload replace the ordinary node:fs probe and select host routing.
+      const binding = (process as unknown as {
+        binding(name: string): { internalModuleStat(filePath: string): number }
+      }).binding('fs');
+      if (!Function.prototype.toString.call(binding.internalModuleStat).includes('[native code]')) return 'unknown';
+      const result = binding.internalModuleStat(candidate);
+      if (result === 1) return 'present';
+      if (result === -2) return 'absent';
+      return 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
   try {
     const stat = fs.lstatSync(candidate);
     return stat.isDirectory() && !stat.isSymbolicLink() ? 'present' : 'unknown';

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { isSandbox } from '../../../lib/sandbox/environment.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 test('isSandbox distinguishes direct host from a verified mounted sandbox', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-'));
@@ -59,6 +60,23 @@ test('isSandbox fails closed when sandbox configuration or its explicit marker i
       /SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE/u
     );
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('isSandbox does not treat a mounted status directory as absent when fs.lstatSync is replaced', onPlatforms('linux'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-probe-'));
+  const originalLstatSync = fs.lstatSync;
+  const mutableFs = fs as unknown as { lstatSync: typeof fs.lstatSync };
+  fs.mkdirSync(path.join(root, 'status'));
+  try {
+    mutableFs.lstatSync = (() => { throw Object.assign(new Error('hidden by preload'), { code: 'ENOENT' }); }) as typeof fs.lstatSync;
+    assert.throws(
+      () => isSandbox({}, { statusMountPath: path.join(root, 'status') }),
+      /SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE/u
+    );
+  } finally {
+    mutableFs.lstatSync = originalLstatSync;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

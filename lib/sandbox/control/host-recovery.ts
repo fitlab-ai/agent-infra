@@ -102,19 +102,20 @@ function publishedEvidence(records: AuditRecord[], generation: string): AuditRec
   return selected;
 }
 
-function verifiedResponse(manifest: SandboxControlManifest, requestId: string, records: AuditRecord[]): SandboxControlResponse {
+function verifiedResponse(manifest: SandboxControlManifest, requestId: string, records: AuditRecord[]): SandboxControlResponse | null {
   assertDirectory(manifest.channelDir);
   const responsesDir = path.join(manifest.channelDir, 'responses');
   assertDirectory(responsesDir);
   const responsePath = path.join(responsesDir, `${requestId}.json`);
-  if (!fs.existsSync(responsePath)) return unknown(requestId);
+  if (!fs.existsSync(responsePath)) return null;
   const responseStat = fs.lstatSync(responsePath);
   if (!responseStat.isFile() || responseStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   const raw = fs.readFileSync(responsePath, 'utf8');
   let response: SandboxControlResponse;
   try { response = JSON.parse(raw) as SandboxControlResponse; } catch { throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID'); }
-  if (!response || response.version !== 2 || response.id !== requestId
-    || !['completed', 'rejected'].includes(response.phase)) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
+  if (!response || response.version !== 2 || response.id !== requestId) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
+  if (response.phase === 'accepted') return null;
+  if (!['completed', 'rejected'].includes(response.phase)) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') return unknown(requestId);
   const evidencePath = path.join(manifest.processingDir, requestId, 'result.json');
   const published = publishedEvidence(records, manifest.generation);
@@ -183,8 +184,12 @@ export function recoverSandboxControlFromHost(requestId: string, params: Readonl
       if (records.length) candidates.push({ manifest, records });
     }
     if (candidates.length > 1) throw new Error('SANDBOX_CONTROL_RECOVERY_AMBIGUOUS');
-    if (candidates.length === 1) return verifiedResponse(candidates[0]!.manifest, requestId, candidates[0]!.records);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    if (candidates.length === 1) {
+      const response = verifiedResponse(candidates[0]!.manifest, requestId, candidates[0]!.records);
+      if (response) return response;
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(25, remainingMs));
   }
   return unknown(requestId);
 }
