@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { migrateFinalizationReceipts } from '../lib/task/finalization-migration.ts';
 
 const USAGE = 'Usage: node --experimental-strip-types bin/migrate-finalization-receipts.ts [--dry-run] [--repo-root <path>]';
+const HELP = `${USAGE}\nStop finalization brokers and completion workers, keep finalization disabled, and use matching host and sandbox protocol versions. Run --dry-run, review and resolve reported failures, then migrate. Re-enable finalization only after all valid v4 receipts are migrated and conflicts are resolved.`;
 
 function run(args: readonly string[]): number {
   let dryRun = false;
@@ -16,7 +17,7 @@ function run(args: readonly string[]): number {
       repoRoot = path.resolve(args[index + 1]!);
       index += 1;
     } else if (arg === '--help' || arg === '-h') {
-      process.stdout.write(`${USAGE}\n`);
+      process.stdout.write(`${HELP}\n`);
       return 0;
     } else {
       process.stderr.write(`${USAGE}\n`);

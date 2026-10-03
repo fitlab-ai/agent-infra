@@ -385,9 +385,16 @@ generic process-control families can converge to a terminal response with
 output unavailable. Task finalization is stricter: a successful exit code is
 not proof of task completion; the canonical finalization receipt at
 `.agents/workspace/<state>/<task-id>/.task-finalization.json` remains the business
-authority. The sandbox and host executor update that same task-local receipt.
-For workspaces that still have receipts in the old shared directory, inspect and
-apply the one-time migration. Invalid receipts, missing tasks, and destination
+authority. Direct-host finalization and the host-side sandbox-control broker are
+the only writers of that task-local receipt. The sandbox client requests
+finalization through the control protocol, and sandbox readers observe the same
+mounted task-local file. For workspaces that still have receipts in the old
+shared directory, migrate while finalization is stopped. Before migration, stop
+the finalization broker and completion workers, deploy matching host and sandbox
+control-protocol versions, and keep finalization disabled. Run the dry-run and
+review its report, then migrate and resolve reported failures. Confirm that all
+valid v4 receipts have moved and conflicts are resolved before re-enabling the
+broker and completion workers. Invalid receipts, missing tasks, and destination
 conflicts are preserved and reported for manual resolution. Run the dry-run first:
 
 ```bash

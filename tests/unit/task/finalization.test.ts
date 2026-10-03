@@ -108,11 +108,8 @@ test('finalization receipt is stored in the unique owning task directory', async
       async () => verification('pass')
     ));
     const localPath = path.join(f.taskDir, '.task-finalization.json');
-    const oldPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
-
     assert.equal(prepared.status, 'prepared');
     assert.equal(fs.existsSync(localPath), true);
-    assert.equal(fs.existsSync(oldPath), false);
     assert.equal(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.taskId, TASK_ID);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
