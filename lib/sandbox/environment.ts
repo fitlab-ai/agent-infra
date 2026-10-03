@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { readSandboxControlIdentitySentinel } from './control/identity-sentinel.ts';
 
@@ -32,15 +33,11 @@ type NativeDirectoryProbe = 'present' | 'absent' | 'unknown';
 
 function nativeDirectoryProbe(candidate: string): NativeDirectoryProbe {
   try {
-    const binding = (process as unknown as {
-      binding(name: string): { internalModuleStat(filePath: string): number }
-    }).binding('fs');
-    if (!Function.prototype.toString.call(binding.internalModuleStat).includes('[native code]')) return 'unknown';
-    const result = binding.internalModuleStat(candidate);
-    if (result === 1) return 'present';
-    if (result === -2) return 'absent';
-    return 'unknown';
-  } catch {
+    const stat = fs.lstatSync(candidate);
+    return stat.isDirectory() && !stat.isSymbolicLink() ? 'present' : 'unknown';
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error
+      && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return 'absent';
     return 'unknown';
   }
 }
