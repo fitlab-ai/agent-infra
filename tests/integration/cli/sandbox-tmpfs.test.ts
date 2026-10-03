@@ -1046,8 +1046,10 @@ test("recovery rejects mount and identity hard failures before writes", async ()
   const wrongWorktreeSource = path.join(tmpDir, "wrong-worktree");
   fs.mkdirSync(wrongWorktreeSource, { recursive: true });
   const liveSource = path.join(config.home, ".codex", "auth.json");
+  const wrongPackageSource = path.join(tmpDir, "wrong-app-server-package");
   fs.mkdirSync(path.dirname(liveSource), { recursive: true });
   fs.writeFileSync(liveSource, "{}\n", "utf8");
+  fs.mkdirSync(wrongPackageSource, { recursive: true });
   const baseMounts = recoveryFixtureMounts(config);
   baseMounts.push({
     Type: "bind",
@@ -1061,6 +1063,7 @@ test("recovery rejects mount and identity hard failures before writes", async ()
     labels: Record<string, string>;
     mounts: Array<Record<string, unknown>>;
     unavailableSource?: string;
+    packageProbeFailure?: boolean;
   }> = [
     {
       name: "wrong worktree source",
@@ -1092,6 +1095,31 @@ test("recovery rejects mount and identity hard failures before writes", async ()
       name: "missing live mount",
       labels: recoveryLabels(config),
       mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/auth.json")
+    },
+    {
+      name: "wrong app-server package source",
+      labels: recoveryLabels(config),
+      mounts: baseMounts.map((mount) => mount.Destination === "/home/devuser/.codex/packages/app-server-daemon"
+        ? { ...mount, Source: wrongPackageSource }
+        : mount)
+    },
+    {
+      name: "read-only app-server package mount",
+      labels: recoveryLabels(config),
+      mounts: baseMounts.map((mount) => mount.Destination === "/home/devuser/.codex/packages/app-server-daemon"
+        ? { ...mount, RW: false }
+        : mount)
+    },
+    {
+      name: "missing app-server package mount",
+      labels: recoveryLabels(config),
+      mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/packages/app-server-daemon")
+    },
+    {
+      name: "app-server package is not writable by devuser",
+      labels: recoveryLabels(config),
+      mounts: baseMounts,
+      packageProbeFailure: true
     },
     {
       name: "missing branch label",
@@ -1128,7 +1156,8 @@ test("recovery rejects mount and identity hard failures before writes", async ()
                 Config: { Labels: scenario.labels },
                 Mounts: scenario.mounts
               }]),
-              runOk: () => true,
+              runOk: (_engine, _cmd, args) => !scenario.packageProbeFailure
+                || args.at(-1) !== "/home/devuser/.codex/packages/app-server-daemon",
               runVerbose: () => { writes += 1; }
             }
           }),
@@ -1899,6 +1928,42 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
       false,
       `expected opencode to NOT be tmpfs, got ${JSON.stringify(runCall)}`
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create gives each branch a distinct Codex app-server package source", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-package-branches-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
+    });
+    commitInitialFile(fixture.repoDir);
+    const sources: string[] = [];
+
+    for (const branch of ["feature-x", "feature-y"]) {
+      const result = spawnSandboxCli(
+        fixture,
+        tmpDir,
+        ["create", branch, "--cpu", "1", "--memory", "1"]
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const runCall = fixture.readDockerCalls().filter((call) => call[0] === "run").at(-1);
+      assert.ok(runCall, "expected sandbox create to call docker run");
+      const mount = runCall.find((arg, index) =>
+        runCall[index - 1] === "-v"
+        && arg.endsWith(":/home/devuser/.codex/packages/app-server-daemon")
+      );
+      assert.ok(mount, "expected app-server package bind mount");
+      sources.push(mount.slice(0, mount.indexOf(":/home/devuser/.codex/packages/app-server-daemon")));
+    }
+
+    assert.equal(sources[0], path.join(tmpDir, ".agent-infra", "sandboxes", "codex", "demo", "feature-x", "packages", "app-server-daemon"));
+    assert.equal(sources[1], path.join(tmpDir, ".agent-infra", "sandboxes", "codex", "demo", "feature-y", "packages", "app-server-daemon"));
+    assert.notEqual(sources[0], sources[1]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

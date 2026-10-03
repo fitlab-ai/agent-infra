@@ -772,6 +772,25 @@ test('sandbox descriptors validate ids, hooks, aliases, timeouts, and frozen out
       })
     }
   })).sandbox.createTool({ home: '/tmp', project: 'demo' }));
+
+  for (const hostStateMount of [
+    { hostSubdir: '../outside', containerSubpath: 'packages/app-server-daemon' },
+    { hostSubdir: 'packages/app-server-daemon', containerSubpath: '../../outside' }
+  ]) {
+    const invalidMountAdapter = defineAgentClientAdapter(adapterInput({
+      sandbox: {
+        ...adapterInput().sandbox,
+        createTool: () => ({
+          ...adapterInput().sandbox.createTool({ home: '/tmp', project: 'demo' }),
+          hostStateMounts: [hostStateMount]
+        })
+      }
+    }));
+    assert.throws(
+      () => invalidMountAdapter.sandbox.createTool({ home: '/tmp', project: 'demo' }),
+      /hostStateMounts/
+    );
+  }
 });
 
 test('single adapter and capability queries reject unknown runtime IDs', () => {

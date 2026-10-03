@@ -59,14 +59,6 @@ function validateTool(tool: SandboxTool): void {
   if (!tool.containerMount || !tool.containerMount.startsWith('/')) {
     throw new Error(`Sandbox tool ${tool.id} containerMount must be an absolute path`);
   }
-  for (const { hostSubdir, containerSubpath } of tool.hostStateMounts ?? []) {
-    for (const [field, value] of [['hostSubdir', hostSubdir], ['containerSubpath', containerSubpath]] as const) {
-      const normalized = path.posix.normalize(value);
-      if (!value || path.posix.isAbsolute(value) || normalized === '..' || normalized.startsWith('../')) {
-        throw new Error(`Sandbox tool ${tool.id} ${field} must stay within its tool directory: ${value}`);
-      }
-    }
-  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
