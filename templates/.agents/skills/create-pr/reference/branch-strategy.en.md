@@ -15,13 +15,13 @@ git log --oneline --decorate --first-parent -20
 Decision rules:
 - current branch is `main` or `trunk` -> use that branch
 - current branch is a feature branch -> infer the nearest parent branch from log decorations
-- cannot determine -> ask the user
+- cannot derive from current configuration, branch, or PR facts -> request only the missing target-branch fact; do not guess
 
 Feature-branch parent inference details:
 - inspect the nearest decorated ancestor in first-parent history
 - prefer `{major}.{minor}.x` release lines over `main` / `master` when the feature branch was cut from a release line
 - if both a release line and `main` seem plausible, choose the nearer ancestor in history
-- if no reliable parent can be inferred, stop and ask the user instead of guessing
+- if no reliable parent can be inferred, request only the missing target-branch fact; do not guess
 
 Next-step rule after PR creation:
 - `create-pr` already publishes the reviewer summary inline, so do not recommend an extra PR sync command

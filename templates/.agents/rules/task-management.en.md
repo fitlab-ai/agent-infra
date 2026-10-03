@@ -38,7 +38,7 @@ The seven internal commands (`task-event` / `task-lifecycle` / `task-finalizatio
 
 ## Platform Results and Skill Blocking Boundaries
 
-A `blocked` platform write means only that the operation is unfinished. Whether the skill stops depends on its delivery goal. The typed core handles write queuing, recovery, and idempotency; skills consume structured results and do not replay writes themselves.
+A `blocked` platform write or `task-verify` result means that operation or gate is incomplete; it does not by itself mean a network interruption, that the user must intervene, or success. Skills inspect the structured summary, preserve the blocked state and recovery condition, and continue only independent work. They do not replay platform writes; typed core owns their queuing, recovery, and idempotency.
 
 - `import-issue`: stop importing when the source Issue cannot be read.
 - `create-pr`: stop the creation flow when the PR was not created or its identity cannot be confirmed.

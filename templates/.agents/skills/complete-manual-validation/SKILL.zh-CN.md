@@ -119,7 +119,7 @@ agent-infra-internal task-verify {task-id} manual-validation.completed --artifac
 处理结果：
 - 退出码 0 -> 告知用户
 - 退出码 1 -> 修复问题后重新运行
-- 退出码 2 -> 停止并告知需要人工介入
+- 退出码 2（blocked）-> 保留未完成状态并检查当次摘要；不得伪造人工验证证据。若仍需真实环境或权限验证，说明具体待验证项，等待授权人员完成后再重试。
 
 ### 9. 告知用户
 

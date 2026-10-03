@@ -119,7 +119,7 @@ agent-infra-internal task-verify {task-id} manual-validation.completed --artifac
 Handle the result:
 - Exit code 0 -> tell the user
 - Exit code 1 -> fix the reported problem and rerun
-- Exit code 2 -> stop and report that manual intervention is required
+- Exit code 2 (blocked) -> retain the incomplete state and inspect this run's summary; do not fabricate manual-validation evidence. If real-environment or permission validation is still required, state the specific pending check and wait for an authorized person to complete it before retrying.
 
 ### 9. Tell the User
 

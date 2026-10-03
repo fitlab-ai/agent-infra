@@ -82,7 +82,7 @@ date +%Y%m%d-%H%M%S
 
 - 生成随机 UUID v4 作为 `idempotencyKey`，并把步骤 1 的结果写入单个 JSON 文件。
 - candidate 必须符合宿主 `TaskCreateCandidateV1`：`version`、`idempotencyKey`、标准 `agent`、`title`、`type`、不带项目前缀的 `branchSlug`、`priority`、`effort`、`description` 和 `taskInput` 七类列表。
-- 首次提交前只写一次 candidate；等待终态期间不得重新运行 AI 推导或改写文件。超时重试必须复用同一文件，由客户端生成新的 outer request ID。
+- 首次提交前校验 candidate。只有客户端在 `requestSandboxTaskCreate` 前明确返回 `accepted: false`、`recovery: new-request-id` 的 schema/JSON 校验拒绝，才可修正 Agent 自身生成的结构或格式问题，并用同一 validator 再校验；不得补造缺失领域事实。若 `idempotencyKey` 本身不是 UUID v4，因请求未提交，可重新生成合法 UUID v4；已有合法 key 必须保留。其余未接纳失败按原错误根因处理，不自动假定可改 candidate。请求一经接纳，candidate 与 key 不得修改；按原 `requestId` 和 control recovery 事实检查或恢复。
 
 调用统一入口：
 
@@ -127,8 +127,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 
 受控调用可能在结果中返回 `control` 请求证据：`accepted: true` 且
 `recovery: none` 表示可以消费当前结果；`accepted: false` 且
-`recovery: new-request-id` 表示请求尚未受理，暂态问题恢复后才能用同一份
-candidate 和新的 outer request ID 重试；`recovery: same-request-id` 或
+`recovery: new-request-id` 仅当证据表明错误来自 transport 前 JSON/schema validator 时，才允许修正自身格式错误，并通过同一 validator 后使用新的 outer request ID；其他未接纳失败按错误证据诊断，不自动改写 candidate。`recovery: same-request-id` 或
 `recovery: inspect-domain-state` 表示请求已经受理，不得创建新的 candidate 或
 自动重放，必须先使用原 request 检查结果或宿主任务状态。
 
@@ -154,7 +153,7 @@ agent-infra-internal task-verify {task-id} create-task.completed --format text
 处理结果：
 - 退出码 0（全部通过）-> 继续到「告知用户」步骤
 - 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+- 退出码 2（blocked）-> 保留阻塞状态并读取当次摘要；只继续与该校验无依赖的本地工作，不得宣称阶段完成，也不得仅凭退出码归因为网络故障。仅在缺少用户专属事实/授权或无法安全恢复时请求用户动作。
 
 按 `.agents/rules/validation-output.md` 展示当次校验摘要；没有当次校验输出，不得声明完成。
 

@@ -40,7 +40,7 @@ sources. Conflicts are recorded in the report. The script then performs:
 The script outputs JSON to stdout. Parse and record the report.
 
 **Key fields**:
-- `error`: error message (if non-empty, stop and report)
+- `error`: error message (if non-empty, inspect diagnostics and fix recoverable in-scope problems first; if unresolved, retain the blocked state and report the specific cause)
 - `templateVersion`: exact `v`-prefixed SemVer of the template source package (including prerelease or build metadata)
 - `templateRoot`: absolute path to the template file root directory
 - `templateSources.conflicts`: external template source conflicts; explicitly
@@ -157,3 +157,6 @@ Next step - commit changes:
 ```
 
 Output the report, then **STOP** — do not make other changes to the project.
+
+
+For an in-scope, diagnosable failure, inspect the error evidence, identify the cause, fix it, and retry with the same verifier; do not stop or ask merely because an ordinary attempt failed. Preserve a blocked state for user data/template conflicts, design choices beyond approved scope, required human validation/authorization, or unsafe recovery, and continue independent work.

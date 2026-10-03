@@ -296,6 +296,37 @@ test('local task creation rejects an invalid qualification template before publi
   }
 });
 
+test('service-captured host qualification failure remains an accepted terminal result', async () => {
+  const root = fixture();
+  try {
+    const templatePath = path.join(root, '.agents', 'templates', 'task.md');
+    const template = fs.readFileSync(templatePath, 'utf8');
+    fs.writeFileSync(templatePath, template.replace(
+      '| candidate_id | statement | status | constraint_ids | impact | evidence |',
+      '| candidate_id | statement | status | constraint_ids | impact |'
+    ));
+    const domainResult = await createTask(qualificationCandidate, {
+      repoRoot: root,
+      agentInfraVersion: 'v0.9.5'
+    });
+    assert.equal(domainResult.status, 'failed');
+    assert.equal(domainResult.error?.code, 'TASK_CREATE_QUALIFICATION_INVALID');
+    const projected = projectTaskCreateResult(domainResult, {
+      requestId: '0123456789abcdef0123456789abcdef',
+      accepted: true,
+      recovery: 'none'
+    });
+    assert.deepEqual(projected.control, {
+      requestId: '0123456789abcdef0123456789abcdef',
+      accepted: true,
+      recovery: 'none'
+    });
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    cleanupFixture(root);
+  }
+});
+
 test('local task creation safely restores missing runtime workspace directories', () => {
   const root = fixture();
   try {

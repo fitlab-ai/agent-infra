@@ -76,7 +76,7 @@ Next step - commit changes:
 
 1. **No auto-commit**: Do NOT automatically commit changes
 2. **Major version upgrades**: Warn about potential breaking changes
-3. **Test failures**: Report the failure details and wait for user decision
+3. **Test failures**: Inspect evidence and fix diagnosable in-scope issues, then rerun the same verifier; record a block and continue independent work for out-of-scope design, user-data conflicts, or required authorization
 4. **Lock files**: If the project uses lock files (package-lock.json, yarn.lock, etc.), ensure they are updated
 5. **Transitive dependencies**: Note if the upgrade affects transitive dependencies
 
@@ -84,4 +84,7 @@ Next step - commit changes:
 
 - Package not found: Prompt "Package {name} not found in dependency files"
 - Build failure: Output errors and suggest checking for breaking changes
-- Test failure: Output test errors and suggest checking migration guide
+- Test failure: Diagnose and fix recoverable in-scope issues, then rerun the same verifier; report migration-guide risks when relevant
+
+
+For an in-scope, diagnosable failure, inspect the error evidence, identify the cause, fix it, and retry with the same verifier; do not stop or ask merely because an ordinary attempt failed. Preserve a blocked state for user data/template conflicts, design choices beyond approved scope, required human validation/authorization, or unsafe recovery, and continue independent work.

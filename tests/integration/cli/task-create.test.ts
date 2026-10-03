@@ -286,6 +286,29 @@ test('task-create internal CLI rejects an invalid qualification template before 
   }
 });
 
+test('task-create marks transport-preceding candidate schema rejection as unaccepted and repairable', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify({ ...candidate(), unexpected: true }));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'failed');
+    assert.equal(payload.error.code, 'TASK_CREATE_PAYLOAD_INVALID');
+    assert.deepEqual(payload.control, {
+      requestId: null,
+      accepted: false,
+      recovery: 'new-request-id'
+    });
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('task-create preserves controlled candidate content without changing the raw candidate digest', () => {
   const root = fixture();
   const input = path.join(root, 'candidate.json');

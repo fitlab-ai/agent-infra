@@ -63,7 +63,7 @@ unsafe: help
 When entering the help exit, output the following fixed structure to the user (not written to any artifact file):
 
 ```
-PR #{pr#} monitoring is blocked; manual intervention needed.
+PR #{pr#} monitoring is blocked; use the evidence below to determine the required recovery action.
 
 Blocker: {non-code layer / cap reached / run unlocatable / readiness unknown / unsafe rebase or update}
 PR head/base: {repository/ref/SHA}
