@@ -376,6 +376,33 @@ test('manual-validation pending summary uses the opaque PR snapshot number and c
   }
 });
 
+test('manual-validation pending summary fails closed when the provider omits PR identity', async () => {
+  const fixture = summaryFixture();
+  const callsPath = path.join(fixture.root, 'provider-calls.log');
+  try {
+    const taskDir = configureOpaquePullRequest(fixture, 42, { callsPath, omitIdentity: true });
+    fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+    const transactionId = 'mv-opaque-missing-identity';
+    writeManualValidationTransactionAtomic(taskDir, createManualValidationTransaction({
+      transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest: 'a'.repeat(64),
+      summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
+      pendingSummaryDigest: 'b'.repeat(64), finalSummaryDigest: 'c'.repeat(64), artifact: 'manual-validation.md', attempt: 1,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    }));
+
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body: '### ⏳ Manual Validation Pending\n\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath, primaryResult: 'no_op', strict: true,
+      manualValidation: { phase: 'pending', transactionId }
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(fs.existsSync(callsPath) && fs.readFileSync(callsPath, 'utf8').includes('write'), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('manual-validation pending summary fails closed when its transaction number differs from the PR snapshot', async () => {
   const fixture = summaryFixture();
   const callsPath = path.join(fixture.root, 'provider-calls.log');

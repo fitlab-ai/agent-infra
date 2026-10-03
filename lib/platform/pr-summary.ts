@@ -196,7 +196,14 @@ async function inspectBoundPullRequest(
     return { ok: false, status: inspectionError(error), error };
   }
   const remote: ChangeRequestSnapshot = inspected.value;
-  if (remote.identity && !resourceIdentityEquals(remote.identity, prIdentity)) {
+  if (!remote.identity) {
+    return {
+      ok: false,
+      status: 'failed',
+      error: { code: 'PR_IDENTITY_MISSING', message: 'Provider pull-request inspection did not return a canonical identity', retryable: false }
+    };
+  }
+  if (!resourceIdentityEquals(remote.identity, prIdentity)) {
     return {
       ok: false,
       status: 'failed',
@@ -211,7 +218,7 @@ async function inspectBoundPullRequest(
     value: {
       repository: context.platform.repository,
       number,
-      identity: remote.identity ?? prIdentity,
+      identity: remote.identity,
       nodeId: remote.id,
       url: remote.displayUrl || '',
       state: remote.state === 'closed' ? 'closed' : 'open',
