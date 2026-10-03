@@ -22,11 +22,6 @@ export type TaskOperationScope = 'task-bound' | 'non-task' | 'conditional';
 export type TaskOperationEffect = TaskViewAccessEffect;
 export type TaskRefSource = 'argv' | 'environment' | 'none' | 'delegated' | 'input';
 
-export type SandboxControlTransportDecision = Readonly<{
-  kind: 'direct-host' | 'sandbox-local' | 'broker-client' | 'fail-closed';
-  reasonCode: string | null;
-}>;
-
 export type TaskOperationDescriptor = Readonly<{
   dispatcher: TaskOperationDispatcher;
   command: string;
