@@ -206,7 +206,7 @@ async function executeManualValidationTransactionLocked(
     if (transaction.phase === 'prepared') {
       const staged = await syncPullRequestSummary(taskRef, {
         cwd, client: options.client, agent, body: pendingBody, changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', strict: true,
-        manualValidation: { phase: 'pending' }, lockAlreadyHeld: true
+        manualValidation: { phase: 'pending', transactionId: transaction.transactionId }, lockAlreadyHeld: true
       });
       if (!['applied', 'no-op'].includes(staged.status)) transactionFailure(staged.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'pending summary staging failed' });
       transitionAndPersist('summary-staged');
@@ -264,7 +264,7 @@ async function executeManualValidationTransactionLocked(
       try {
         await syncPullRequestSummary(taskRef, {
           cwd, client: options.client, agent, body: pendingBody, changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', strict: true,
-          manualValidation: { phase: 'pending' }, lockAlreadyHeld: true
+          manualValidation: { phase: 'pending', transactionId: transaction.transactionId }, lockAlreadyHeld: true
         });
       } catch {
         // Preserve recovery-required when pending compensation cannot be confirmed.

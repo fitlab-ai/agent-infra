@@ -99,6 +99,39 @@ function summaryFixture(): { root: string; taskId: string; reportPath: string; b
   return { root, taskId, reportPath, baseSha, headSha };
 }
 
+function configureOpaquePullRequest(fixture: ReturnType<typeof summaryFixture>, number?: number): string {
+  const taskDir = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId);
+  const taskPath = path.join(taskDir, 'task.md');
+  const taskContent = fs.readFileSync(taskPath, 'utf8');
+  const fact = encodePrDeliveryFact(buildBoundFact({
+    identity: {
+      resource: { kind: 'id', value: 'pr-42' }, repository: 'opaque/project', url: 'https://opaque.example/changes/pr-42',
+      head: { repository: 'opaque/project', ref: 'feature', sha: fixture.headSha },
+      base: { repository: 'opaque/project', ref: 'main', sha: fixture.baseSha }
+    }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+  }));
+  fs.writeFileSync(taskPath, taskContent.replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(fact)}`));
+  const providerSource = path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs');
+  fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
+    platform: { type: 'trae', providers: { trae: { source: providerSource, config: {
+      repository: 'opaque/project', headSha: fixture.headSha, baseSha: fixture.baseSha,
+      ...(number === undefined ? {} : { number })
+    } } } }
+  }));
+  const updatedTask = fs.readFileSync(taskPath, 'utf8');
+  const digest = taskIntentDigest(updatedTask);
+  if (!digest.ok) throw new Error(digest.error.message);
+  const mechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, fixture.headSha);
+  const report = buildPrChangeReport({
+    repository: 'opaque/project', resource: { kind: 'id', value: 'pr-42' },
+    base: { repository: 'opaque/project', ref: 'main', sha: fixture.baseSha },
+    head: { repository: 'opaque/project', ref: 'feature', sha: fixture.headSha }
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  if (!report.ok) throw new Error(report.error.message);
+  writePrChangeReportAtomic(fixture.reportPath, report.value);
+  return taskDir;
+}
+
 type ResolvedContextClientOptions = {
   onContextResolved?: () => void;
   headSequence?: string[];
@@ -268,6 +301,99 @@ test('PR summary passes an opaque bound identity through context and summary val
     });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'PR_CHANGE_REPORT_STALE');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('manual-validation pending summary uses the opaque PR snapshot number and checks its transaction', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskDir = configureOpaquePullRequest(fixture, 42);
+    fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+    const transactionId = 'mv-opaque-number';
+    const transaction = createManualValidationTransaction({
+      transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest: 'a'.repeat(64),
+      summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
+      pendingSummaryDigest: 'b'.repeat(64), finalSummaryDigest: 'c'.repeat(64), artifact: 'manual-validation.md', attempt: 1,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    });
+    writeManualValidationTransactionAtomic(taskDir, transaction);
+
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: '### ⏳ Manual Validation Pending\n\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      strict: true,
+      manualValidation: { phase: 'pending', transactionId }
+    });
+
+    assert.equal(result.status, 'applied');
+    assert.equal(result.resource.number, 42);
+    assert.equal(result.error, null);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('manual-validation pending summary fails closed when its transaction number differs from the PR snapshot', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskDir = configureOpaquePullRequest(fixture, 42);
+    fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+    const transactionId = 'mv-opaque-mismatch';
+    const transaction = createManualValidationTransaction({
+      transactionId, taskId: fixture.taskId, prNumber: 43, prHeadSha: fixture.headSha, evidenceDigest: 'a'.repeat(64),
+      summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
+      pendingSummaryDigest: 'b'.repeat(64), finalSummaryDigest: 'c'.repeat(64), artifact: 'manual-validation.md', attempt: 1,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    });
+    writeManualValidationTransactionAtomic(taskDir, transaction);
+
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: '### ⏳ Manual Validation Pending\n\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      strict: true,
+      manualValidation: { phase: 'pending', transactionId }
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('manual-validation pending summary requires a positive number from an opaque PR snapshot', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskDir = configureOpaquePullRequest(fixture);
+    fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+    const transactionId = 'mv-opaque-missing-number';
+    writeManualValidationTransactionAtomic(taskDir, createManualValidationTransaction({
+      transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest: 'a'.repeat(64),
+      summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
+      pendingSummaryDigest: 'b'.repeat(64), finalSummaryDigest: 'c'.repeat(64), artifact: 'manual-validation.md', attempt: 1,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    }));
+
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: '### ⏳ Manual Validation Pending\n\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      strict: true,
+      manualValidation: { phase: 'pending', transactionId }
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

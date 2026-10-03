@@ -38,6 +38,7 @@ import type {
 } from './pr-change-report.ts';
 import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
+import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -559,7 +560,7 @@ async function syncPullRequestSummary(
       const prIdentity = boundFact.identity.resource;
       const boundPrNumber = resourceIdentityNumber(prIdentity);
       knownPrNumber = boundPrNumber;
-      const prNumber = boundPrNumber;
+      let prNumber = boundPrNumber;
       const initial = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
       const manual = options.manualValidation;
@@ -568,7 +569,20 @@ async function syncPullRequestSummary(
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
-        if (prNumber === null) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a numeric pull-request identity', retryable: false }, prNumber);
+        if (!resourceIdentityEquals(initial.value.identity, prIdentity)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH', message: 'manual-validation snapshot identity does not match the task-bound pull request', retryable: false }, prNumber);
+        if (!Number.isSafeInteger(initial.value.number) || initial.value.number <= 0) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a positive safe pull-request number from the authoritative snapshot', retryable: false }, prNumber);
+        prNumber = initial.value.number;
+        knownPrNumber = prNumber;
+        if (!manual.transactionId) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'manual-validation summary requires a transaction ID', retryable: false }, prNumber);
+        if (manual.phase === 'pending') {
+          const transaction = readManualValidationTransaction(resolved.taskDir, {
+            transactionId: manual.transactionId,
+            taskId: resolved.taskId,
+            prNumber,
+            prHeadSha: initial.value.head.sha
+          });
+          if (!transaction.ok) return fail('failed', context, platformError(transaction.error), prNumber);
+        }
         if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
         if (manual.phase === 'final') {
           if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
