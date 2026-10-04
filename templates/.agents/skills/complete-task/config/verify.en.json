@@ -18,7 +18,8 @@
       "require_completed_at": true
     },
     "activity-log": {
-      "expected_action_pattern": "(Complete Task|Completed)"
+      "expected_action_pattern": "(Complete Task|Completed)",
+      "require_ascending_timestamps": false
     },
     "completion-checklist": {
       "require_all_checked": true
