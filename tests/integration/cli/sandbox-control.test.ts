@@ -2511,6 +2511,12 @@ test('task-finalization settles and commits the canonical terminal before gracef
     assert.equal(client.exitCode, 0, `${client.stderr}\n${JSON.stringify(client.payload)}`);
     assert.equal(client.payload.phase, 'completed');
     assert.equal((JSON.parse(String(client.payload.stdout)) as { result: { result: string } }).result.result, 'completed');
+    const status = JSON.parse(fs.readFileSync(path.join(manifest.publicStatusDir, 'status.json'), 'utf8')) as {
+      taskView: { state: string; observedSource: string | null; receipt: { requestId: string } | null };
+    };
+    assert.equal(status.taskView.state, 'current', JSON.stringify(status.taskView));
+    assert.equal(status.taskView.observedSource, 'completed');
+    assert.equal(status.taskView.receipt?.requestId, evidence.requestId);
     assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`)), true);
     assert.equal(fs.existsSync(path.join(manifest.processingDir, evidence.requestId)), false);
     assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.accepted.json`)), false);

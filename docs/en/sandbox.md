@@ -389,9 +389,7 @@ authority. Direct-host finalization and the host-side sandbox-control broker are
 the only writers of that task-local receipt. The sandbox client requests
 finalization through the control protocol, and sandbox readers observe the same
 mounted task-local file. Before releasing this layout change, complete or close
-all in-progress tasks. The new version reads task-local receipts only and does
-not import receipts from the old shared directory. New tasks use the task-local
-layout.
+all in-progress tasks. The task-local receipt is the canonical receipt location.
 
 If result evidence is absent or malformed, the broker
 keeps the request uncertain/unknown and does not create a new ID or replay a
@@ -489,12 +487,12 @@ that times out after acceptance should use the same request ID with the control
 recovery operation; it must not submit a new request for an irreversible
 finalization.
 
-The current protocol uses request version 4 and response version 2. Older
-response layouts are not adapted or dual-written; an invalid or mixed
-generation must fail closed and the sandbox should be recreated from its
-current manifest. Payload records are addressed only by the same request ID
-and generation as their terminal reference; they are not inferred from
-`result.json` and cannot authorize a task mutation.
+The current protocol uses request version 4 and response version 2. Requests
+must match the active manifest and generation; invalid requests fail closed,
+and the sandbox should be recreated from its current manifest. Payload records
+are addressed only by the same request ID and generation as their terminal
+reference; they are not inferred from `result.json` and cannot authorize a task
+mutation.
 
 ## User-level dotfiles channel
 
