@@ -70,7 +70,7 @@ When the action is non-empty, perform only this literal action-to-skill conversi
 | `code` | `code-task` |
 | any other action | same-named skill |
 
-When the action is empty, do not invoke the helper; state that no next skill is currently recommended. Before rendering the final output, read `.agents/rules/next-step-output.md`; invoke `agent-infra-internal agent-client next-steps --skill {next-skill} --task-ref {task-ref}` and render stdout verbatim as `{next-step-commands}`. Append the `Completed at` trailing line last.
+When the action is empty, do not invoke the helper; state that no next skill is currently recommended. Before rendering the final output, read `.agents/rules/next-step-output.md`; invoke `agent-infra-internal agent-client next-steps --skill {next-skill} --task-ref {task-ref}` and render stdout verbatim as `{next-step-commands}`.
 
 ## Notes
 

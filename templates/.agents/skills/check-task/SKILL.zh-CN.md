@@ -70,7 +70,7 @@ ai task status --task {task-id}
 | `code` | `code-task` |
 | 其他 action | 同名 skill |
 
-`action` 为空时不调用 helper，只说明当前没有可推荐的下一技能。渲染最终输出前先读取 `.agents/rules/next-step-output.md`；helper 命令为 `agent-infra-internal agent-client next-steps --skill {next-skill} --task-ref {task-ref}`，stdout 原样作为 `{next-step-commands}` 下一步命令。最后追加 `Completed at` 收尾行。
+`action` 为空时不调用 helper，只说明当前没有可推荐的下一技能。渲染最终输出前先读取 `.agents/rules/next-step-output.md`；helper 命令为 `agent-infra-internal agent-client next-steps --skill {next-skill} --task-ref {task-ref}`，stdout 原样作为 `{next-step-commands}` 下一步命令。
 
 ## 注意事项
 

@@ -1,11 +1,10 @@
 # 下一步输出规则
 
-本文件定义 skill「告知用户 / 下一步」输出的四类**相互独立**的规则（第 3 类仅 review-* 适用）；渲染最终输出前先读取本文件并落实其中适用的规则：
+本文件定义 skill「告知用户 / 下一步」输出的三类**相互独立**的规则（第 2 类仅 review-* 适用）；渲染最终输出前先读取本文件并落实其中适用的规则：
 
 1. **下一步输出结构**：「下一步」命令与「任务信息」段如何呈现任务 ID 形态（占位符 / 取短号 / 回退）。
-2. **Agent 输出收尾行（Completed at）**：面向用户输出的**绝对最后一行**，**独立于「下一步」块**，正常 / 错误 / 早退路径都适用。
-3. **人工裁决待办前置块**：仅 `review-analysis` / `review-plan` / `review-code`，且本阶段存在待裁决项（`{h} > 0`）时适用——在「下一步」命令前展开待裁决项并提示先完成裁决。
-4. **Workflow Warnings 输出块**：当前 task.md 存在 `status=open` 的 `## 工作流告警` 行时适用——在所有常规信息和「下一步」命令之后、`Completed at` 之前输出告警摘要。
+2. **人工裁决待办前置块**：仅 `review-analysis` / `review-plan` / `review-code`，且本阶段存在待裁决项（`{h} > 0`）时适用——在「下一步」命令前展开待裁决项并提示先完成裁决。
+3. **Workflow Warnings 输出块**：当前 task.md 存在 `status=open` 的 `## 工作流告警` 行时适用——在所有常规信息和「下一步」命令之后输出告警摘要。
 
 ## 占位符语义
 
@@ -34,7 +33,7 @@ agent-infra-internal agent-client next-steps \
 - 静态传入当前已选场景的下一 skill 名；只有命令需要任务引用时才传 `--task-ref`。
 - 只有版本化发布命令需要版本时才传 `--version`；值必须是以数字开头且 `semver.valid(raw) === raw` 的规范 SemVer。不得传 action、完整命令、shell 片段、空白或 `v` / `V` / `=` 前缀。
 - helper 展示 `.agents/.airc.json` 中 `agentClients` 已启用的内建客户端，并按 `sandbox.tools.ids` 顺序追加具有有效 `invoke` 的已选自定义沙箱工具。
-- 将非空 stdout 原样放入当前“下一步”标题后的 `{next-step-commands}`；stdout 为空时省略整个客户端命令块，但继续输出提醒、告警和 `Completed at`。
+- 将非空 stdout 原样放入当前“下一步”标题后的 `{next-step-commands}`；stdout 为空时省略整个客户端命令块，但继续输出提醒和告警。
 - helper 写 stderr 或返回非零时，按当前 skill 的错误路径报告并停止；禁止回退到硬编码客户端表。
 - 复杂 skill 先选定唯一场景，再只为该场景调用一次 helper，不得提前渲染所有分支。
 
@@ -69,21 +68,9 @@ process.stdout.write(hit?hit[0]:full);
 
 短号统一渲染为零填充裸数字 `NN`。已移除的 `#NN` 语法不得生成或接受，避免 bash 将其解释为注释。
 
-## Agent 输出收尾行（Completed at）
-
-本节是与「下一步输出结构」**并列的独立规则**，不隶属于「下一步」块。任何向用户渲染输出的 skill 都必须在面向用户输出的**绝对最后一行**追加完成时间收尾行——包括**声明「不渲染下一步命令」的 complete-task**，以及前置条件未满足而提前 return 的**错误 / 早退路径**。便于用户在 tmux 多窗口扫视时一眼判断各 Agent 的完成先后：
-
-```text
-Completed at: YYYY-MM-DD HH:mm:ss
-```
-
-- 取值命令（本地时区、不带偏移）：`date "+%Y-%m-%d %H:%M:%S"`
-- 位置：必须是整段面向用户输出的最后一行，排在所有「下一步」命令之后。若某场景在命令之后还有条件性提醒行（如 manual-validation 提醒），收尾行排在该提醒行之后。
-- 该行只用于终端扫视，不写入任何产物文件或 Issue/PR 评论；完成时刻的单一事实源仍是 task.md 的 Activity Log。
-
 ## Workflow Warnings 输出块
 
-若当前任务的 `## 工作流告警` / `## Workflow Warnings` 表中存在 `status=open` 行，skill 最终输出必须在所有常规信息和「下一步」命令之后、`Completed at` 之前追加摘要块；无 open 告警时不输出本块。
+若当前任务的 `## 工作流告警` / `## Workflow Warnings` 表中存在 `status=open` 行，skill 最终输出必须在所有常规信息和「下一步」命令之后追加摘要块；无 open 告警时不输出本块。
 
 格式：
 
@@ -96,7 +83,7 @@ Completed at: YYYY-MM-DD HH:mm:ss
 
 ## 人工裁决待办前置块（review-* 专用，{h} > 0 时）
 
-本节是与上面两类规则**并列的第三类独立规则**，仅 `review-analysis` / `review-plan` / `review-code` 的「向用户汇报结论」步骤使用。
+本节是与下一步输出结构并列的第二类规则，仅 `review-analysis` / `review-plan` / `review-code` 的「向用户汇报结论」步骤使用。
 
 `{h}` 含义与各 review 技能 `reference/output-templates.md` 计数行一致：task.md `## 审查分歧账本` 中**本阶段**（`stage ∈ {analysis|plan|code}`）`status = needs-human-decision` 的行数——**只含待裁决项，不含已 `human-decided`**。
 

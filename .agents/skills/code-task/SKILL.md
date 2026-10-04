@@ -241,7 +241,7 @@ agent-infra-internal task-verify {task-id} code.completed --artifact {code-artif
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，并按 `reference/output-template.md` 或 `reference/fix-mode.md` 的已选场景调用统一 helper。
 
-> 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `NN`（取值与回退见该文件），其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染最终输出前先读取 `.agents/rules/next-step-output.md`，并将「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `NN`（取值与回退见该文件）；其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
 
 ## 完成检查清单
 
