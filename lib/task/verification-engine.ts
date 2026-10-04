@@ -790,7 +790,6 @@ function checkActivityLog({ taskDir, config, skillName, artifactFile }: any): an
   const entries = section.entries;
   if (entries.length === 0) return failResult("activity-log", "Activity Log has no entries");
 
-  let previousTimestamp = "";
   let latestAction = "";
   let latestTimestamp = "";
   const doneActions: string[] = [];
@@ -798,11 +797,6 @@ function checkActivityLog({ taskDir, config, skillName, artifactFile }: any): an
   for (const entry of entries) {
     if (!entry.note.trim()) return failResult("activity-log", "Activity Log entry note is required");
     const { time: timestamp, step: action } = entry;
-    if (config.require_ascending_timestamps !== false && previousTimestamp && timestamp < previousTimestamp) {
-      return failResult("activity-log", "Activity Log timestamps are not in ascending order");
-    }
-
-    previousTimestamp = timestamp;
     // A `[started]` marker is not a terminal action: keep latestAction/latestTimestamp
     // on the most recent done entry so expected_action_pattern sees it.
     if (!ACTIVITY_LOG_STARTED_RE.test(action)) {

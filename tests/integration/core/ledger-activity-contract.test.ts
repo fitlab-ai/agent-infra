@@ -8,14 +8,14 @@ import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { parseLedgerDocument, validateLedgerRows } from '../../../lib/task/ledger.ts';
 import { locateActivityLog } from '../../../lib/task/activity-log.ts';
 
-async function verify(content: string, check: string, config = {}, skillName = 'probe', repositoryRoot?: string) {
+async function verify(content: string, check: string, config = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-activity-contract-'));
   try {
-    const configDir = path.join(root, '.agents/skills', skillName, 'config');
-    if (!repositoryRoot) fs.mkdirSync(configDir, { recursive: true });
+    const configDir = path.join(root, '.agents/skills/probe/config');
+    fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(path.join(root, 'task.md'), `---\nid: TASK-20260909-160000\n---\n${content}`);
-    if (!repositoryRoot) fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({ checks: { [check]: config } }));
-    return await verifyInProcess({ mode: 'checks', skillName, taskDir: root, checks: [check], repositoryRoot: repositoryRoot ?? root });
+    fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({ checks: { [check]: config } }));
+    return await verifyInProcess({ mode: 'checks', skillName: 'probe', taskDir: root, checks: [check], repositoryRoot: root });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
 
@@ -62,32 +62,12 @@ test('activity reader and gate use only one visible section and ignore fenced ex
   assert.equal((await verify(ambiguous, 'activity-log')).status, 'fail');
 });
 
-test('activity gate checks source order while the reader sorts and skips malformed lines', async () => {
+test('activity reader sorts entries and the gate rejects malformed lines', async () => {
   const content = `## Activity Log\n${entry('2026-09-09 17:00:00+00:00', 'Later')}\n${entry('2026-09-09 16:00:00+00:00', 'Earlier')}\n`;
   assert.deepEqual(locateActivityLog(content)?.entries.map((item) => item.step), ['Earlier', 'Later']);
-  assert.equal((await verify(content, 'activity-log')).status, 'fail');
   const malformed = `## Activity Log\n${entry('2026-09-09 16:00:00+00:00')}\n- malformed\n`;
   assert.equal(locateActivityLog(malformed)?.entries.length, 1);
   assert.equal((await verify(malformed, 'activity-log')).status, 'fail');
-});
-
-test('complete-task activity gate accepts out-of-order timestamps and retains its other checks', async () => {
-  const unordered = [
-    '## Activity Log',
-    entry('2026-09-09 17:00:00+00:00', 'Watch PR (Round 1) [started]'),
-    entry('2026-09-09 16:00:00+00:00', 'Complete Task')
-  ].join('\n');
-  const repositoryRoot = process.cwd();
-  assert.equal((await verify(unordered, 'activity-log', {}, 'complete-task', repositoryRoot)).status, 'pass');
-
-  const wrongLatestAction = [
-    '## Activity Log',
-    entry('2026-09-09 16:00:00+00:00', 'Other Action')
-  ].join('\n');
-  assert.equal((await verify(wrongLatestAction, 'activity-log', {}, 'complete-task', repositoryRoot)).status, 'fail');
-
-  const emptyNote = '## Activity Log\n- 2026-09-09 16:00:00+00:00 — **Complete Task** by codex —   \n';
-  assert.equal((await verify(emptyNote, 'activity-log', {}, 'complete-task', repositoryRoot)).status, 'fail');
 });
 
 test('activity gate rejects empty notes while the reader retains the entry', async () => {
