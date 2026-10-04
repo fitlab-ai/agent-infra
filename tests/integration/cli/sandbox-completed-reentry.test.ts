@@ -25,7 +25,7 @@ function fixture(t: TestContext) {
   const receipt = { version: 4, taskId, intent: 'complete', receiptId: 'fixture-receipt', revision: 3,
     lifecycle: 'done', taskComment: 'skipped', verification: 'done', summary: 'skipped', warningProjection: 'done', warnings: [],
     controlBinding: { generation, requestId }, updatedAt: new Date().toISOString(), lastError: null };
-  const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', taskId + '.json');
+  const receiptPath = path.join(source, '.task-finalization.json');
   fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
   fs.writeFileSync(receiptPath, JSON.stringify(receipt));
   const stale = taskViewAfterFinalization({ taskId, generation, requestId, receipt });

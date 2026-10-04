@@ -312,8 +312,13 @@ child close
 
 如果 broker 在 result record 有效、terminal 清理前重启，普通 process-control family
 可以收敛为带有“output unavailable”语义的 terminal response。task-finalization 更严格：
-成功的 exit code 不能证明 task 已完成，canonical 宿主 finalization receipt 仍是业务
-authority。如果 result evidence 缺失或格式错误，broker 会保持 uncertain/unknown，不能
+成功的 exit code 不能证明 task 已完成；`.agents/workspace/<state>/<task-id>/.task-finalization.json`
+中的任务目录回执仍是业务 authority。只有宿主 direct-host finalization 和宿主侧
+sandbox-control broker 可以写入任务目录回执。沙箱 client 通过 control protocol 请求宿主
+执行 finalization，沙箱读取器从同一挂载的任务目录读取回执。
+发布此目录布局变更前，先完成或关闭所有进行中的任务。任务目录内的回执是唯一规范位置。
+
+若 result evidence 缺失或格式错误，broker 会保持 uncertain/unknown，不能
 创建新的 request ID，也不能重放 mutation。
 
 每类记录的 authority 和生命周期刻意不同：
@@ -388,10 +393,10 @@ terminal 及其引用的 payload 保留在 generation 内。没有被 terminal �
 路径或原始 terminal 输出复制到 Issue、审计附件或普通日志中。client 在 accepted 后超时，
 应使用同一个 request ID 执行 control recovery；不可为不可逆的 finalization 提交新请求。
 
-当前协议使用 request version 3 和 response version 2。旧 response layout 不做 adapter、
-双写或长期迁移；invalid 或 generation 混用必须 fail closed，并根据当前 manifest 重建
-沙箱。payload 只能通过同一 request ID 和 generation 的 terminal 引用定位；它不能从
-`result.json` 推断出来，也不能授权任何 task mutation。
+当前协议使用 request version 4 和 response version 2。request 必须匹配当前 manifest 和
+generation；无效 request 必须 fail closed，并根据当前 manifest 重建沙箱。payload 只能通过
+同一 request ID 和 generation 的 terminal 引用定位；它不能从 `result.json` 推断出来，也
+不能授权任何 task mutation。
 
 ## 用户级 dotfiles 通道
 

@@ -76,6 +76,7 @@ import { readCodexControllerRegistration } from './controller-registration.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
+  taskViewAfterFinalization,
   taskViewForManifest,
   type SandboxTaskView
 } from './task-view.ts';
@@ -89,6 +90,34 @@ type ActiveExecution = {
   failure: unknown;
   settled: boolean;
 };
+
+async function taskViewForFinalizationResult(
+  manifest: SandboxControlManifest,
+  request: SandboxControlRequest,
+  result: SandboxControlExecutionResult | null
+): Promise<SandboxTaskView | null> {
+  if (request.family !== 'task-finalization' || result?.exitCode !== 0 || !manifest.taskId) return null;
+  let receipt: unknown = null;
+  for (let attempt = 0; attempt < 100 && !receipt; attempt += 1) {
+    try {
+      receipt = readTaskFinalizationReceipt(manifest.repoRoot, manifest.taskId);
+    } catch {
+      // A missing or temporarily moving task directory is retried before publishing completion.
+    }
+    if (!receipt) await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const finalized = taskViewAfterFinalization({
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    requestId: request.id,
+    receipt
+  });
+  if (finalized.state === 'unknown') return finalized;
+  const canonical = taskViewForManifest({ ...manifest, receipt });
+  return canonical.state === 'current' && canonical.observedSource === 'completed'
+    ? canonical
+    : finalized;
+}
 
 function appendBrokerAudit(
   manifest: SandboxControlManifest,
@@ -837,6 +866,7 @@ export async function serveSandboxControl(
     // A fresh control root has no previous task-view projection.
   }
   let lastState = '';
+  let lastTaskView = '';
   let lastStatusAt = 0;
   let nextBindingCheckAt = 0;
   let nextContainerHeartbeatAt = Date.now() + timing.containerHeartbeatMs;
@@ -936,6 +966,10 @@ export async function serveSandboxControl(
         settledExecution = active;
         active = null;
       }
+      const finalizationView = settledExecution
+        ? await taskViewForFinalizationResult(manifest, settledExecution.request, settledExecution.result)
+        : null;
+      if (finalizationView) taskView = finalizationView;
 
       let reasonCode: string | null = null;
       try {
@@ -974,9 +1008,11 @@ export async function serveSandboxControl(
       }
       const state = reasonCode ? 'parked' : active ? 'busy' : 'healthy';
       const stateKey = `${state}:${reasonCode ?? ''}:${active?.request.id ?? ''}`;
-      if (brokerOwns() && (stateKey !== lastState || now - lastStatusAt >= timing.controlTickMs)) {
+      const taskViewKey = JSON.stringify(taskView);
+      if (brokerOwns() && (stateKey !== lastState || taskViewKey !== lastTaskView || now - lastStatusAt >= timing.controlTickMs)) {
         writeSandboxControlStatus(manifest, broker, state, reasonCode, active?.request.id ?? null, now, taskView);
         lastStatusAt = now;
+        lastTaskView = taskViewKey;
       }
       if (brokerOwns() && stateKey !== lastState) {
         appendBrokerAudit(manifest, 'broker-state', { state, reasonCode, requestId: active?.request.id ?? null });
@@ -1233,6 +1269,11 @@ export async function serveSandboxControl(
         }
       }
       if (owned && active.result && active.resultEvidenceWritten) {
+        const finalizationView = await taskViewForFinalizationResult(manifest, active.request, active.result);
+        if (finalizationView) {
+          taskView = finalizationView;
+          writeSandboxControlStatus(manifest, broker, 'healthy', null, null, Date.now(), taskView);
+        }
         if (publishExecutionResult(manifest, active.request, active.result, brokerOwns)) {
           if (brokerOwns()) {
             removeAcceptedResponse(manifest, active.request.id);

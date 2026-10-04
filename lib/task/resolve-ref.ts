@@ -139,13 +139,18 @@ function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string 
  */
 function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: string; state: TaskWorkspaceState }[] {
   const out: { taskId: string; taskDir: string; state: TaskWorkspaceState }[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   const add = (taskId: string, taskDir: string, state: TaskWorkspaceState) => {
     if (!TASK_ID_RE.test(taskId)) return;
     const stat = fs.lstatSync(taskDir);
     if (!stat.isDirectory() || stat.isSymbolicLink() || !fs.existsSync(path.join(taskDir, 'task.md'))) return;
-    if (seen.has(taskId)) throw new Error(`duplicate task identity: ${taskId}`);
-    seen.add(taskId);
+    const canonicalDir = fs.realpathSync.native(taskDir);
+    const previousDir = seen.get(taskId);
+    if (previousDir !== undefined) {
+      if (previousDir === canonicalDir) return;
+      throw new Error(`duplicate task identity: ${taskId}`);
+    }
+    seen.set(taskId, canonicalDir);
     out.push({ taskId, taskDir, state });
   };
 
