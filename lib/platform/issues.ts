@@ -516,7 +516,8 @@ async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Pro
   let providerMetadata: RepositoryMetadataSnapshot | null = null;
   let repositoryLabels: string[] = [];
   let milestones: string[] = [];
-  if (base.context.capabilities.triage && (options.status !== undefined || options.inLabels !== undefined || options.milestone !== undefined || options.issueType || options.fields)) {
+  if (base.context.capabilities.triage && (options.status !== undefined || options.inLabels !== undefined || options.milestone !== undefined
+    || (base.context.capabilities.push && (options.issueType || options.fields)))) {
     const metadata = base.provider.issues?.describeRepository
       ? await base.provider.issues.describeRepository({ context: providerOperationContext(base.loadedContext) })
       : unsupportedProviderOperation(base.provider, 'issues.describeRepository');
@@ -592,15 +593,26 @@ async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Pro
     }
   }
   if (options.issueType || options.fields) {
-    plan.operations.push(...(providerMetadata
-      ? planProviderMetadata(inspected.value, providerMetadata, base.frontmatter, options, base.context.capabilities)
-      : [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }]));
+    plan.operations.push(...(!base.context.capabilities.push
+      ? [
+        ...(options.issueType ? [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : []),
+        ...(options.fields ? [{ name: 'fields', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : [])
+      ]
+      : providerMetadata
+        ? planProviderMetadata(inspected.value, providerMetadata, base.frontmatter, options, base.context.capabilities)
+        : [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }]));
   }
   const failure = plan.operations.find((operation) => operation.status === 'failed');
   if (failure) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: { code: failure.reasonCode || 'ISSUE_SYNC_FAILED', message: `Operation ${failure.name} failed`, retryable: false } });
   const planned = plan.operations.filter((operation) => operation.status === 'planned');
-  if (options.dryRun) return result(planned.length ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: null });
-  if (planned.length === 0) return result('no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: null });
+  if (options.dryRun) return result(planned.length ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities,
+    issue: snapshot, operations: plan.operations, error: null
+  });
+  if (planned.length === 0) return result('no-op', base.resolved.taskId, base.issueNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities,
+    issue: snapshot, operations: plan.operations, error: null
+  });
   const payload = applyRestOperations(snapshot, planned) as Partial<{
     title: string; body: string; labels: string[]; assignees: string[];
     milestone: string | null; state: 'open' | 'closed'; fields: Record<string, string | number | null>;

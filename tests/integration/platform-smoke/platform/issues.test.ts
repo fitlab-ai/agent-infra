@@ -140,6 +140,39 @@ test('issue sync plans dry-run without writes and applies incremental label writ
   assert.equal(patches, 0);
 });
 
+test('issue metadata sync reports push-required skips when push and triage are unavailable', async () => {
+  const root = fixture('7');
+  try {
+    for (const triage of [true, false]) {
+      let repositoryMetadataReads = 0;
+      const client = clientFor((args) => {
+        const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+        if (endpoint === 'repos/acme/widgets') {
+          return { full_name: 'acme/widgets', permissions: { triage, push: false, admin: false } };
+        }
+        if (args[1] === 'graphql') return { data: { viewer: { login: 'codex' } } };
+        if (args.some((arg) => /issueTypes|repositoryMetadata/i.test(arg))) repositoryMetadataReads += 1;
+        return {
+          number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
+          state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null
+        };
+      });
+      const result = await syncPlatformIssue('TASK-20260101-000001', {
+        cwd: root, agent: 'codex', client, issueType: true, fields: true
+      });
+      assert.equal(result.status, 'no-op');
+      assert.equal(result.capabilities.push, false);
+      assert.deepEqual(result.operations.map(({ name, status, reasonCode }) => ({ name, status, reasonCode })), [
+        { name: 'issue-type', status: 'skipped', reasonCode: 'PUSH_REQUIRED' },
+        { name: 'fields', status: 'skipped', reasonCode: 'PUSH_REQUIRED' }
+      ]);
+      assert.equal(repositoryMetadataReads, 0);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('issue in-label sync requires the task-bound base and uses it for diff evidence', async () => {
   const missingBase = fixture('7');
   try {
