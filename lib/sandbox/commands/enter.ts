@@ -22,9 +22,9 @@ import { detectHostTimezone } from '../host-timezone.ts';
 import {
   fetchSandboxRows,
   selectSandboxContainer,
+  startSandboxContainer,
 } from './list-running.ts';
 import {
-  resolveSandboxReentryContext,
   resolveSandboxTarget
 } from '../workspace-identity.ts';
 
@@ -33,8 +33,9 @@ const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N> [cmd..
 N references an active task short id from
 .agents/workspace/active/.short-ids.json. They resolve only via that
 registry — they do not reference a container's row position in
-'ai sandbox ls' output. --recreate is a host recovery flag only before the
-target; the same token after the target is passed to the container command.`;
+'ai sandbox ls' output. --recreate rebuilds the matched container while
+preserving its task or branch identity. The same token after the target is
+passed to the container command.`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
 
 // Terminal-detection variables that interactive TUIs (e.g. claude-code)
@@ -126,10 +127,10 @@ export async function enter(args: string[]): Promise<number> {
   const config = loadConfig();
   const engine = detectEngine(config);
   const parsed = parseEnterArgs(args);
-  const target = resolveSandboxTarget(parsed.target, config.repoRoot);
-  const branch = target.branch;
-  assertValidBranchName(branch);
-
+  const fullTaskId = /^TASK-\d{8}-\d{6}$/.test(parsed.target);
+  const target = fullTaskId ? null : resolveSandboxTarget(parsed.target, config.repoRoot);
+  const branch = target?.branch ?? '';
+  if (branch) assertValidBranchName(branch);
   const { running, nonRunning } = fetchSandboxRows(
     engine,
     sandboxLabel(config),
@@ -139,40 +140,42 @@ export async function enter(args: string[]): Promise<number> {
       taskId: sandboxTaskIdLabel(config)
     }
   );
-  const found = selectSandboxContainer(
-    [...running, ...nonRunning],
-    containerNameCandidates(config, branch)
-  );
-
-  if (!found) {
-    throw new Error(
-      `No sandbox found for branch '${branch}'. Run 'ai sandbox create ${branch}' to create one.`
-    );
+  const rows = [...running, ...nonRunning];
+  const found = fullTaskId
+    ? rows.find((row) => row.taskId === parsed.target)
+    : rows.find((row) => row.branch === branch)
+      ?? selectSandboxContainer(rows, containerNameCandidates(config, branch));
+  if (!found) throw new Error(`No sandbox found for '${parsed.target}'.`);
+  const sandboxBranch = found.branch || branch;
+  if (sandboxBranch) assertValidBranchName(sandboxBranch);
+  if (target?.workspace.mode === 'task-bound' && found.taskId !== target.workspace.taskId) {
+    throw new Error(`Sandbox task mismatch for short id '${parsed.target}'.`);
   }
-  const containerWorkspace = found.workspaceMode === 'task-bound' && found.taskId
+  const workspace = found.workspaceMode === 'task-bound' && found.taskId
     ? { mode: 'task-bound' as const, taskId: found.taskId }
-    : found.workspaceMode === 'branch-only'
-      ? { mode: 'branch-only' as const }
-      : { mode: 'legacy-invalid' as const };
-  const reentry = resolveSandboxReentryContext({
-    target,
-    containerWorkspace,
-    repoRoot: config.repoRoot
-  });
-  const ready = await ensureSandboxReady({
-    config,
-    engine,
-    branch,
-    workspace: reentry.workspace,
-    reentry: reentry.reentry,
-    row: found,
-    allowRecreate: parsed.recreate,
-    recreate: async () => {
-      const { create } = await import('./create.ts');
-      await create([target.requestedRef, '--no-refresh'], { runProjectInitCommand: false });
-    }
-  });
-  const container = ready.container;
+    : { mode: 'branch-only' as const };
+  let container = found.name;
+  if (parsed.recreate) {
+    const ready = await ensureSandboxReady({
+      config,
+      engine,
+      branch: sandboxBranch,
+      workspace,
+      row: found,
+      allowRecreate: true,
+      forceRecreate: true,
+      recreate: async () => {
+        const { create } = await import('./create.ts');
+        await create([sandboxBranch, '--no-refresh'], {
+          runProjectInitCommand: false,
+          workspace
+        });
+      }
+    });
+    container = ready.container;
+  } else if (!found.running) {
+    startSandboxContainer(engine, found.name);
+  }
   const cmd = parsed.command;
   const capabilityPlan = createSandboxCapabilityPlan(config);
   const enterHookResults = await runSandboxHooks({

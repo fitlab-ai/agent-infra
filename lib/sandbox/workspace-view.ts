@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
+import { resolveTaskWorkspace } from './task-resolver.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
 import {
   createSandboxControlIdentitySentinel,
@@ -119,15 +120,36 @@ function assertSafeMountTargetPath(
 
 export function assertSandboxTaskSource(repoRoot: string, taskId: string): string {
   if (!/^TASK-\d{8}-\d{6}$/.test(taskId)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
-  const activeRoot = fs.realpathSync.native(path.join(repoRoot, '.agents', 'workspace', 'active'));
-  const source = path.join(activeRoot, taskId);
+  const activeSource = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  try {
+    const stat = fs.lstatSync(activeSource);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(`SANDBOX_TASK_SOURCE_INVALID: ${activeSource} must be a real directory`);
+    }
+    const canonical = fs.realpathSync.native(activeSource);
+    const activeRoot = fs.realpathSync.native(path.dirname(activeSource));
+    const workspaceRoot = fs.realpathSync.native(path.join(repoRoot, '.agents', 'workspace'));
+    const relative = path.relative(workspaceRoot, canonical);
+    if (path.dirname(canonical) !== activeRoot || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`SANDBOX_TASK_SOURCE_INVALID: ${activeSource} escapes the task workspace`);
+    }
+    return canonical;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const task = resolveTaskWorkspace(taskId, repoRoot);
+  const source = task.state === 'archive'
+    ? path.dirname(path.dirname(task.taskMd))
+    : path.dirname(task.taskMd);
   const stat = fs.lstatSync(source);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`SANDBOX_TASK_SOURCE_INVALID: ${source} must be a real directory`);
   }
   const canonical = fs.realpathSync.native(source);
-  if (path.dirname(canonical) !== activeRoot) {
-    throw new Error(`SANDBOX_TASK_SOURCE_INVALID: ${source} escapes the active workspace`);
+  const workspaceRoot = fs.realpathSync.native(path.join(repoRoot, '.agents', 'workspace'));
+  const relative = path.relative(workspaceRoot, canonical);
+  if (path.basename(canonical) !== taskId || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`SANDBOX_TASK_SOURCE_INVALID: ${source} escapes the task workspace`);
   }
   return canonical;
 }
@@ -154,7 +176,7 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
   base: string;
   project: string;
   container: string;
-  identity: SandboxWorkspaceIdentity;
+  identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
 }>): SandboxWorkspaceView {
   const projectRoot = path.resolve(params.base, params.project);
   const { root } = sandboxWorkspaceViewPaths(params);
@@ -168,10 +190,13 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
   }
 
   const active = path.join(root, 'active');
+  const shortId = params.identity.mode === 'task-bound' && 'shortId' in params.identity
+    ? params.identity.shortId
+    : null;
   const registry = {
     version: 1,
-    ids: params.identity.mode === 'task-bound'
-      ? { [params.identity.shortId]: params.identity.taskId }
+    ids: shortId !== null && params.identity.mode === 'task-bound'
+      ? { [shortId]: params.identity.taskId }
       : {}
   };
   fs.writeFileSync(path.join(active, '.short-ids.json'), `${JSON.stringify(registry)}\n`, {
@@ -188,7 +213,7 @@ export function materializeSandboxControl(params: Readonly<{
   project: string;
   container: string;
   branch: string;
-  identity: SandboxWorkspaceIdentity;
+  identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
   engine?: string;
   replacementLease?: Readonly<{
     root: string;

@@ -51,6 +51,7 @@ import {
   resolveSandboxTarget,
   sameSandboxWorkspaceIdentity
 } from '../workspace-identity.ts';
+import type { SandboxWorkspaceKey } from '../workspace-identity.ts';
 import {
   createSandboxCapabilityPlan,
   runSandboxHooks,
@@ -1030,7 +1031,10 @@ function writeProjectInitCommandDigest(controlRoot: string, commandSha256: strin
 
 export async function create(
   args: string[],
-  { runProjectInitCommand = true }: { runProjectInitCommand?: boolean } = {}
+  {
+    runProjectInitCommand = true,
+    workspace: workspaceOverride
+  }: { runProjectInitCommand?: boolean; workspace?: SandboxWorkspaceKey } = {}
 ): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
@@ -1058,7 +1062,13 @@ export async function create(
   validateSelinuxDisableEnv();
   const config = loadConfig();
   const [branchOrTaskId = '', base] = positionals;
-  const target = resolveSandboxTarget(branchOrTaskId, config.repoRoot);
+  const resolvedTarget = resolveSandboxTarget(branchOrTaskId, config.repoRoot);
+  const workspace = workspaceOverride?.mode === 'task-bound'
+    && resolvedTarget.workspace.mode === 'task-bound'
+    && workspaceOverride.taskId === resolvedTarget.workspace.taskId
+    ? resolvedTarget.workspace
+    : workspaceOverride ?? resolvedTarget.workspace;
+  const target = { ...resolvedTarget, workspace };
   const branch = target.branch;
   assertValidBranchName(branch);
   const effectiveConfig = {
