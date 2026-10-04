@@ -2046,7 +2046,7 @@ test('task-bound finalization recovers the original request after accepted respo
         stdout: '', stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
         error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
       })}\n`);
-      await new Promise<void>((resolve) => setTimeout(resolve, 75));
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
       fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
         version: 2, id: request.id, phase: 'completed', exitCode: executionResult.exitCode,
         stdout: executionResult.stdout, stderr: executionResult.stderr, error: null
@@ -2057,7 +2057,9 @@ test('task-bound finalization recovers the original request after accepted respo
     };
 
     const broker = serveFinalization();
-    const client = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500 });
+    const client = await runTaskFinalizationClient({
+      channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+    });
     const execution = await broker;
     assert.equal(client.exitCode, 0, client.stderr);
     assert.equal(client.payload.phase, 'completed');
