@@ -1,21 +1,33 @@
 import tseslint from 'typescript-eslint';
 
+export const lintContract = {
+  ignores: ['**/node_modules/**', 'tests/fixtures/**'],
+  scanFiles: ['bin/**/*.ts', 'lib/**/*.ts', 'tests/**/*.ts'],
+  files: ['**/*.ts'],
+  parserOptions: {
+    ecmaVersion: 'latest',
+    sourceType: 'module'
+  },
+  linterOptions: {
+    noInlineConfig: true
+  },
+  rules: {
+    complexity: ['error', 15],
+    'max-depth': ['error', 4]
+  }
+};
+
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', 'tests/fixtures/**']
+    ignores: lintContract.ignores
   },
   {
-    files: ['**/*.ts'],
+    files: lintContract.files,
     languageOptions: {
       parser: tseslint.parser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module'
-      }
+      parserOptions: lintContract.parserOptions
     },
-    rules: {
-      complexity: ['error', 15],
-      'max-depth': ['error', 4]
-    }
+    linterOptions: lintContract.linterOptions,
+    rules: lintContract.rules
   }
 );

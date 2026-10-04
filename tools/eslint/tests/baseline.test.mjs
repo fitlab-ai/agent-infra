@@ -1,7 +1,69 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { compareEntries, validateBaseline, violationEntry } from '../run-lint.mjs';
+
+const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function createLintFixture() {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'task05-lint-cli-'));
+  const toolDir = path.join(root, 'tools/eslint');
+  mkdirSync(toolDir, { recursive: true });
+  for (const file of ['run-lint.mjs', 'eslint.config.mjs', 'package.json']) {
+    copyFileSync(path.join(TOOL_DIR, '..', file), path.join(toolDir, file));
+  }
+  symlinkSync(path.join(TOOL_DIR, '../node_modules'), path.join(toolDir, 'node_modules'), 'dir');
+  for (const directory of ['bin', 'lib', 'tests']) {
+    mkdirSync(path.join(root, directory), { recursive: true });
+    writeFileSync(path.join(root, directory, 'simple.ts'), 'export const ok = 1;\n');
+  }
+  const run = (args = [], env = {}) => spawnSync(process.execPath, [path.join(toolDir, 'run-lint.mjs'), ...args], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, CI: '', GITHUB_ACTIONS: '', ...env }
+  });
+  const writeSource = (file, source) => {
+    const filePath = path.join(root, file);
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, source);
+  };
+  const baselinePath = path.join(toolDir, 'baseline.json');
+  const baselineHash = () => createHash('sha256').update(readFileSync(baselinePath)).digest('hex');
+  return { root, toolDir, run, writeSource, baselinePath, baselineHash };
+}
+
+function withLintFixture(callback) {
+  const fixture = createLintFixture();
+  try {
+    const seed = fixture.run(['--write-baseline']);
+    assert.equal(seed.status, 0, seed.stdout + seed.stderr);
+    return callback(fixture);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+}
+
+const complexitySource = `export function probe(x: number) {
+${Array.from({ length: 16 }, (_, index) => `  if (x === ${index}) return ${index};`).join('\n')}
+  return -1;
+}`;
+const depthSource = `export function probe(x: number) {
+  if (x > 0) {
+    if (x > 1) {
+      if (x > 2) {
+        if (x > 3) {
+          if (x > 4) return x;
+        }
+      }
+    }
+  }
+  return 0;
+}`;
 
 const entry = (normalizedMessage, anchorSha256 = 'a'.repeat(64), count = 1) => ({
   file: 'lib/example.ts',
@@ -67,4 +129,47 @@ test('configuration, toolchain, and malformed entries fail baseline validation',
   assert.equal(validateBaseline(valid, metadata), null);
   assert.match(validateBaseline({ ...valid, scopeDigest: 'other' }, metadata), /scopeDigest/);
   assert.match(validateBaseline({ ...valid, entries: [{ ...entry('complexity=16'), count: 0 }] }, metadata), /invalid violation/);
+});
+
+test('inline ESLint comments cannot suppress either gated complexity rule', () => {
+  withLintFixture(({ run, writeSource }) => {
+    const cases = [
+      ['complexity-disable', '/* eslint-disable complexity */\n', complexitySource, 'complexity'],
+      ['complexity-off', '/* eslint complexity: "off" */\n', complexitySource, 'complexity'],
+      ['max-depth-disable', '/* eslint-disable max-depth */\n', depthSource, 'max-depth'],
+      ['max-depth-off', '/* eslint max-depth: "off" */\n', depthSource, 'max-depth']
+    ];
+    for (const [name, comment, source, ruleId] of cases) {
+      writeSource(`lib/${name}.ts`, `${comment}${source}\n`);
+      const result = run();
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.match(result.stderr, new RegExp(`new: lib/${name}\\.ts ${ruleId} `));
+    }
+  });
+});
+
+test('an actual ESLint configuration change invalidates the stored baseline', () => {
+  withLintFixture(({ run, toolDir, writeSource, baselineHash }) => {
+    writeSource('lib/new/probe.ts', `${complexitySource}\n`);
+    const configPath = path.join(toolDir, 'eslint.config.mjs');
+    const config = readFileSync(configPath, 'utf8');
+    writeFileSync(configPath, config.replace("'tests/fixtures/**'", "'tests/fixtures/**', 'lib/new/**'"));
+    const before = baselineHash();
+    const result = run();
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /Invalid baseline: baseline configDigest does not match/);
+    assert.equal(baselineHash(), before);
+  });
+});
+
+test('CI refuses baseline writes without changing the baseline file', () => {
+  withLintFixture(({ run, baselineHash }) => {
+    const before = baselineHash();
+    for (const env of [{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }]) {
+      const result = run(['--write-baseline'], env);
+      assert.equal(result.status, 2, result.stdout + result.stderr);
+      assert.match(result.stderr, /Refusing to write the ESLint baseline in a CI environment/);
+      assert.equal(baselineHash(), before);
+    }
+  });
 });

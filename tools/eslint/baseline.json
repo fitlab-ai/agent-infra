@@ -5,8 +5,8 @@
     "typescriptEslint": "8.71.0",
     "typescript": "6.0.3"
   },
-  "configDigest": "e3c69d42d63f50fb748d09f814d04ba668321d567ac129b4106ec25e1326dbdb",
-  "scopeDigest": "ea06489959dfa3692450c409be54ef57447ab55983b5abbbf79a6090dea53999",
+  "configDigest": "afc84ea2bee44e6ebb914355ba64415c1bbbb080e0aa68402b7efaf87e085290",
+  "scopeDigest": "040bd30c2a679e8fbf8bdc8aa1f1788129f6bc6c0b05e0a9d6a0ef7842774c03",
   "entries": [
     {
       "file": "lib/agent-clients/adapters/codex-lifecycle/controller-context.ts",

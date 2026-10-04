@@ -6,13 +6,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import tseslint from 'typescript-eslint';
+import { lintContract } from './eslint.config.mjs';
 
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(TOOL_DIR, '../..');
 const BASELINE_PATH = path.join(TOOL_DIR, 'baseline.json');
-const RULES = { complexity: 15, 'max-depth': 4 };
-const SCOPE = ['bin/**/*.ts', 'lib/**/*.ts', 'tests/**/*.ts'];
-const IGNORES = ['tests/fixtures/**'];
+const RULES = Object.fromEntries(Object.keys(lintContract.rules).map((ruleId) => [ruleId, lintContract.rules[ruleId][1]]));
+const SCOPE = lintContract.scanFiles;
 const require = createRequire(import.meta.url);
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -51,8 +51,11 @@ export function metadata() {
   return {
     schemaVersion: 1,
     toolchain,
-    configDigest: sha256(stableJson({ rules: RULES, parser: toolchain.typescriptEslint })),
-    scopeDigest: sha256(stableJson({ files: SCOPE, ignores: IGNORES }))
+    configDigest: sha256(stableJson({
+      eslintConfig: sha256(readFileSync(path.join(TOOL_DIR, 'eslint.config.mjs'))),
+      parser: toolchain.typescriptEslint
+    })),
+    scopeDigest: sha256(stableJson({ files: SCOPE, ignores: lintContract.ignores, eslintFiles: lintContract.files }))
   };
 }
 
@@ -235,6 +238,11 @@ async function main() {
   const unknownArg = [...args].find((argument) => !allowedArgs.has(argument));
   if (unknownArg || (args.has('--scan') && args.has('--write-baseline'))) {
     process.stderr.write('Usage: node run-lint.mjs [--scan | --write-baseline]\n');
+    process.exitCode = 2;
+    return;
+  }
+  if (args.has('--write-baseline') && (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true')) {
+    process.stderr.write('Refusing to write the ESLint baseline in a CI environment.\n');
     process.exitCode = 2;
     return;
   }
