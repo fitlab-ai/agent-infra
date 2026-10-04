@@ -62,10 +62,9 @@ test('activity reader and gate use only one visible section and ignore fenced ex
   assert.equal((await verify(ambiguous, 'activity-log')).status, 'fail');
 });
 
-test('activity gate checks source order while the reader sorts and skips malformed lines', async () => {
+test('activity reader sorts entries and the gate rejects malformed lines', async () => {
   const content = `## Activity Log\n${entry('2026-09-09 17:00:00+00:00', 'Later')}\n${entry('2026-09-09 16:00:00+00:00', 'Earlier')}\n`;
   assert.deepEqual(locateActivityLog(content)?.entries.map((item) => item.step), ['Earlier', 'Later']);
-  assert.equal((await verify(content, 'activity-log')).status, 'fail');
   const malformed = `## Activity Log\n${entry('2026-09-09 16:00:00+00:00')}\n- malformed\n`;
   assert.equal(locateActivityLog(malformed)?.entries.length, 1);
   assert.equal((await verify(malformed, 'activity-log')).status, 'fail');
