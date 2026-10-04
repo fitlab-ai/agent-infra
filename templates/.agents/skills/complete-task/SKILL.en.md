@@ -213,8 +213,6 @@ Do not submit a new request for an accepted task finalization. If the request ID
 
 > Execute this step only after the verification gate passes.
 
-> The completion timestamp line (the last line of the whole output) uses `date "+%Y-%m-%d %H:%M:%S"` (local timezone, no offset) and always sits at the very end of the output for at-a-glance scanning across windows. This skill renders no "Next steps" commands, but it does render an **optional sandbox-cleanup hint** before the timestamp line (see the gate below), and still prints the line.
-
 > **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block in the output below only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. Use the full `{task-id}` for cleanup; do not substitute the branch name. This block is independent of "Next steps" semantics — it is not a workflow successor command.
 
 Output format:
@@ -234,7 +232,6 @@ Optional: clean up this task's sandbox
 
 ai sandbox rm {task-id}
 
-Completed at: {completion-time}
 ```
 
 

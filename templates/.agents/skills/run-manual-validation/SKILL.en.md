@@ -48,7 +48,7 @@ Branch-only has no `{task-id}`: skip this step and record `not-applicable (branc
 5. Read `reference/report-template.md`, create `validation-run.md|validation-run-r{N}.md`, and record the input mode, discovered list, per-item results, CLI JSON allowlist, and sanitized summaries.
 6. Run `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {artifact}`. When an Issue exists, run only `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`; do not publish the validation artifact as an Issue comment.
 7. Run `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`; fix failures and rerun it, then present the summary per `.agents/rules/validation-output.md` with necessary diagnostics.
-8. Report the evidence path, coverage gaps, and verification result; explicitly leave the decision to run `complete-manual-validation` to the maintainer. Read `.agents/rules/next-step-output.md` and end with `Completed at`.
+8. Report the evidence path, coverage gaps, and verification result; explicitly leave the decision to run `complete-manual-validation` to the maintainer.
 
 ## Scenario B: Branch-Only Fallback
 

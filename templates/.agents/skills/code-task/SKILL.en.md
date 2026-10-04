@@ -187,4 +187,4 @@ Present the verification summary per `.agents/rules/validation-output.md`, retai
 
 Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper. The local checkpoint is required for this skill; do not invoke the standalone `commit` skill, push, or create a PR here.
 
-> Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the current task's short id `NN` (see that file for lookup and fallback), while other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form; (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering the final output, read `.agents/rules/next-step-output.md`; render `{task-ref}` in the "Next steps" commands as the current task's short id `NN` (see that file for lookup and fallback), while other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
