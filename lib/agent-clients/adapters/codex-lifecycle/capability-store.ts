@@ -9,7 +9,7 @@ import {
   verifyLifecycleBuildIdentity
 } from './build-identity.ts';
 import type { LifecycleBuildIdentity } from './build-identity.ts';
-import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
+import { resolveAgentCapabilityStoreRoot } from '../../../runtime/agent-runtime.ts';
 
 type CapabilityStatus = 'armed' | 'attested' | 'consumed' | 'expired';
 type RecoveryState = 'unreserved' | 'reserved' | 'consumed';
@@ -328,7 +328,7 @@ function sameController(
 
 function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   const root = options.root
-    ?? resolveAgentRuntimeStoreRoot({ store: 'capabilities' });
+    ?? resolveAgentCapabilityStoreRoot();
   const now = options.now ?? Date.now;
   const createReference = options.reference ?? (() => crypto.randomBytes(32).toString('base64url'));
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;

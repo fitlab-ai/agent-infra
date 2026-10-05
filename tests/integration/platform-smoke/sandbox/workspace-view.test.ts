@@ -141,7 +141,7 @@ test('control materialization rotates token and generation and creates isolated 
   assert.equal(manifest.publicStatusDir, path.join(controlRoot, 'public'));
   assert.equal(manifest.processingDir, path.join(controlRoot, 'processing'));
   assert.equal(manifest.runtimeDir, path.join(controlRoot, 'runtime'));
-  assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'runtime', 'clients', 'codex')).sort(), ['capabilities', 'lifecycle']);
+  assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'runtime', 'clients', 'codex')), ['capabilities']);
   assert.equal(second.statusDir, path.join(controlRoot, 'public'));
   assert.equal(manifest.worktreeRoot, fs.realpathSync.native(repoRoot));
 });

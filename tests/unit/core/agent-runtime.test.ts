@@ -3,19 +3,18 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  resolveAgentCapabilityStoreRoot,
   resolveAgentRuntimeRoot,
-  resolveAgentRuntimeStoreRoot
 } from '../../../lib/runtime/agent-runtime.ts';
 
-test('task-bound runtime resolves client namespaces from the generic runtime directory', () => {
+test('task-bound capability store resolves from the configured runtime directory', () => {
   const env = {
     AGENT_INFRA_RUNTIME_DIR: '/run/agent-infra/runtime',
     AGENT_INFRA_CONTROL_TOKEN: 'token'
   };
   const runtimeRoot = path.resolve('/run/agent-infra/runtime');
   assert.equal(resolveAgentRuntimeRoot({ env }), runtimeRoot);
-  assert.equal(resolveAgentRuntimeStoreRoot({ env, client: 'codex', store: 'capabilities' }), path.join(runtimeRoot, 'clients', 'codex', 'capabilities'));
-  assert.equal(resolveAgentRuntimeStoreRoot({ env, client: 'claude', store: 'lifecycle' }), path.join(runtimeRoot, 'clients', 'claude', 'lifecycle'));
+  assert.equal(resolveAgentCapabilityStoreRoot({ env }), path.join(runtimeRoot, 'clients', 'codex', 'capabilities'));
 });
 
 test('bound control context cannot fall back to workspace runtime without an explicit runtime directory', () => {
@@ -25,20 +24,15 @@ test('bound control context cannot fall back to workspace runtime without an exp
   );
 });
 
-test('direct-host Codex keeps the legacy store layout', () => {
+test('direct-host capability store resolves from the workspace runtime directory', () => {
   const env = {};
   const runtimeRoot = path.join(path.resolve('/repo'), '.agents', 'workspace', '.runtime');
-  assert.equal(resolveAgentRuntimeStoreRoot({ repoRoot: '/repo', env, client: 'codex', store: 'capabilities' }), path.join(runtimeRoot, 'codex-capabilities'));
-  assert.equal(resolveAgentRuntimeStoreRoot({ repoRoot: '/repo', env, client: 'codex', store: 'lifecycle' }), path.join(runtimeRoot, 'codex-lifecycle'));
+  assert.equal(resolveAgentCapabilityStoreRoot({ repoRoot: '/repo', env }), path.join(runtimeRoot, 'codex-capabilities'));
 });
 
-test('runtime directory and client namespace validation fail closed', () => {
+test('runtime directory validation fails closed', () => {
   assert.throws(
     () => resolveAgentRuntimeRoot({ env: { AGENT_INFRA_RUNTIME_DIR: 'relative/runtime' } }),
     /AGENT_INFRA_RUNTIME_DIR_INVALID/
-  );
-  assert.throws(
-    () => resolveAgentRuntimeStoreRoot({ env: { AGENT_INFRA_RUNTIME_DIR: '/run/runtime' }, client: '../other', store: 'lifecycle' }),
-    /AGENT_INFRA_RUNTIME_CLIENT_INVALID/
   );
 });

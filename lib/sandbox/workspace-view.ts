@@ -239,8 +239,7 @@ export function materializeSandboxControl(params: Readonly<{
   }
   for (const directory of [
     path.join(runtimeDir, 'clients'),
-    path.join(runtimeDir, 'clients', 'codex', 'capabilities'),
-    path.join(runtimeDir, 'clients', 'codex', 'lifecycle')
+    path.join(runtimeDir, 'clients', 'codex', 'capabilities')
   ]) {
     assertSafeDirectory(directory, runtimeDir);
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
