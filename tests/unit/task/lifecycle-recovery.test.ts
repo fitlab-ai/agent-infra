@@ -166,6 +166,56 @@ test('automatic recovery rejects stop evidence consumed by another receipt', () 
   } finally { cleanup(f); }
 });
 
+test('automatic recovery rejects a replaced task receipt without changing evidence, run, or activity bytes', () => {
+  const f = fixture();
+  try {
+    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const replaced = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+    replaced.pendingDelegation.id = 'receipt-replaced';
+    fs.writeFileSync(runPath, `${JSON.stringify(replaced, null, 2)}\n`);
+    const runBefore = fs.readFileSync(runPath);
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const taskBefore = fs.readFileSync(taskPath);
+    const evidenceFiles = fs.readdirSync(f.store.root).sort();
+    const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(f.store.root, name))]));
+
+    const recovered = recover(f);
+
+    assert.equal(recovered.status, 'owner-unknown');
+    assert.equal(recovered.error?.code, 'RECOVERY_TASK_BINDING_MISMATCH');
+    assert.deepEqual(fs.readFileSync(runPath), runBefore);
+    assert.deepEqual(fs.readFileSync(taskPath), taskBefore);
+    assert.deepEqual(fs.readdirSync(f.store.root).sort(), evidenceFiles);
+    for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(f.store.root, name)), evidenceBefore.get(name));
+    assert.equal(f.store.read('child').consumer, null);
+  } finally { cleanup(f); }
+});
+
+test('automatic recovery rejects mismatched native associations without consuming or changing any bytes', () => {
+  const f = fixture();
+  try {
+    const evidenceName = fs.readdirSync(f.store.root).find((name) => name.endsWith('.json'))!;
+    const evidencePath = path.join(f.store.root, evidenceName);
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+    evidence.state.spawn.nativeAgent = 'agent-infra-lifecycle-reviewer';
+    fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+    const evidenceBefore = fs.readFileSync(evidencePath);
+    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const runBefore = fs.readFileSync(runPath);
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const taskBefore = fs.readFileSync(taskPath);
+
+    const recovered = recover(f);
+
+    assert.equal(recovered.status, 'owner-unknown');
+    assert.equal(recovered.error?.code, 'RECOVERY_STOP_EVIDENCE_INVALID');
+    assert.deepEqual(fs.readFileSync(evidencePath), evidenceBefore);
+    assert.deepEqual(fs.readFileSync(runPath), runBefore);
+    assert.deepEqual(fs.readFileSync(taskPath), taskBefore);
+    assert.equal(f.store.read('child').consumer, null);
+  } finally { cleanup(f); }
+});
+
 test('automatic recovery preserves an unrelated orchestration pause', () => {
   const f = fixture();
   try {

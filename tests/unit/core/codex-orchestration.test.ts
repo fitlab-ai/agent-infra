@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -269,6 +270,119 @@ test('Codex parent reconciliation ignores unrelated completed waits', async () =
   const result = await sealCodexParentDelegation('unrelated-parent', { repoRoot: f.root, store });
   assert.equal(result.error?.code, 'ORCHESTRATION_DELEGATION_MISSING');
   assert.equal(readRun(f.taskDir)?.status, 'running');
+});
+
+test('Codex parent seal rejects multiple current receipt children without pausing or changing bytes', async () => {
+  const f = fixture();
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, buildIdentity, preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  assert.equal(prepared.status, 'running');
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId, cliVersion: '0.147.0'
+  });
+  for (const [index, childThreadId] of [[1, 'child-1'], [2, 'child-2']] as const) {
+    const turnId = `parent-turn-${index}`;
+    store.apply({
+      type: 'hook-spawn', sessionId: 'parent', turnId, toolUseId: `spawn-${index}`,
+      nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+      requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+      taskBinding: { taskId, runId: 'run-1', receiptId: 'receipt-1' }
+    });
+    store.apply({
+      type: 'hook-child', sessionId: 'parent', turnId: `child-turn-${index}`, childThreadId,
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    });
+    store.apply({
+      type: 'app-thread', childThreadId, parentThreadId: 'parent', forkedFromId: null,
+      sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    });
+    store.apply({ type: 'app-settings', childThreadId, model: 'executor-model', reasoningEffort: 'xhigh' });
+  }
+  const evidenceFiles = fs.readdirSync(store.root).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(store.root, name))]));
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = await sealCodexParentDelegation('parent', {
+    repoRoot: f.root, store,
+    resolveTerminal: async () => ({ type: 'app-terminal', childThreadId: 'child-1', turnId: 'child-turn-1', status: 'completed' })
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.changed, false);
+  assert.equal(result.error?.code, 'CODEX_LIFECYCLE_TASK_BINDING_MISMATCH');
+  assert.equal(readRun(f.taskDir)?.status, 'running');
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  assert.deepEqual(fs.readdirSync(store.root).sort(), evidenceFiles);
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(store.root, name)), evidenceBefore.get(name));
+});
+
+test('Codex seal consume callback rejects a replaced receipt without consuming evidence or pausing', async () => {
+  const f = fixture();
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, buildIdentity, preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId, cliVersion: '0.147.0'
+  });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+    taskBinding: { taskId, runId: prepared.run!.runId, receiptId: prepared.run!.pendingDelegation!.id }
+  });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+  const resolved = {
+    resolution: {
+      thread: { type: 'app-thread' as const, childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
+      settings: { type: 'app-settings' as const, childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
+    },
+    reroutes: [], diagnostics: []
+  };
+  const activated = await activateCodexOrchestrationDelegation('child', {
+    repoRoot: f.root, store, buildIdentity, preflight, resolveThread: async () => resolved
+  });
+  assert.equal(activated.run?.pendingDelegation?.status, 'activated');
+  completeOrchestrationStage(taskId, { stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex' }, { repoRoot: f.root });
+  store.apply({ type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child', nativeAgent: 'agent-infra-lifecycle-executor' });
+  store.apply({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });
+
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  let runAfterReplacement: Buffer | undefined;
+  let evidenceAfterTerminal: Buffer | undefined;
+  const evidencePath = path.join(store.root, `${crypto.createHash('sha256').update('parent\0parent-turn\0spawn-tool').digest('hex')}.json`);
+  const sealed = await sealCodexOrchestrationDelegation('child', {
+    repoRoot: f.root, store,
+    resolveTerminal: async () => ({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' }),
+    orchestrationOptions: {
+      captureWorkspace: () => {
+        const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+        run.pendingDelegation.id = 'receipt-replaced';
+        fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+        runAfterReplacement = fs.readFileSync(runPath);
+        evidenceAfterTerminal = fs.readFileSync(evidencePath);
+        return 'after';
+      },
+      diffWorkspace: () => []
+    }
+  });
+
+  assert.equal(sealed.status, 'failed');
+  assert.equal(sealed.changed, false);
+  assert.equal(sealed.error?.code, 'ORCHESTRATION_CODEX_EVIDENCE_IDENTITY_MISMATCH');
+  assert.deepEqual(fs.readFileSync(runPath), runAfterReplacement);
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
+  assert.deepEqual(fs.readFileSync(evidencePath), evidenceAfterTerminal);
+  assert.equal(store.read('child').consumer, null);
 });
 
 test('Codex bridge completes sealing after evidence consumption survives a crash window', async () => {

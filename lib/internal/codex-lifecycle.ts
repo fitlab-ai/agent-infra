@@ -429,20 +429,6 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           // The normal apply path below owns missing or invalid evidence errors.
         }
       }
-      if (parsed.values['--bridge'] === 'true' && event.type === 'hook-child') {
-        const resolved = await resolveCodexThread(event.childThreadId);
-        store.apply({
-          ...event,
-          parentThreadId: resolved.resolution.thread.parentThreadId
-        });
-        const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, {
-          store,
-          orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId },
-          resolveThread: async () => resolved
-        });
-        outputBridgeResult(bridged);
-        return;
-      }
       if (event.type === 'hook-child') {
         const candidates = currentBinding
           ? store.findByTaskBinding(currentBinding).filter((record) =>
@@ -467,10 +453,20 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           || resolved.resolution.thread.nativeAgent !== event.nativeAgent) {
           throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: resolved child does not match the current spawn');
         }
+        verifyStoredBinding(taskContext.taskId, currentBinding!, nativeAgent);
         const result = store.apply({
           ...event,
           parentThreadId: resolved.resolution.thread.parentThreadId
         });
+        if (parsed.values['--bridge'] === 'true') {
+          const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, {
+            store,
+            orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId },
+            resolveThread: async () => resolved
+          });
+          outputBridgeResult(bridged);
+          return;
+        }
         output({ status: result.state.status, changed: true, evidence: result.state, diagnostics: resolved.diagnostics, error: result.state.error });
         if (result.state.status === 'invalid') process.exitCode = 1;
         return;

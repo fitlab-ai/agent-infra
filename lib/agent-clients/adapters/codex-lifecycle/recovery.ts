@@ -125,6 +125,9 @@ function validateStopRecord(
   const stop = record.state.stopEvidence;
   const provenance = receipt.lifecycleProvenance;
   const host = receipt.hostEvidence;
+  const spawn = record.state.spawn;
+  const child = record.state.child;
+  const stopState = record.state.stop;
   if (record.taskBinding?.taskId !== receipt.taskId
     || record.taskBinding.runId !== receipt.runId
     || record.taskBinding.receiptId !== receipt.id) {
@@ -139,6 +142,26 @@ function validateStopRecord(
     || record.state.status !== 'stop-ready'
     || stop.terminalStatus !== 'completed'
     || stop.hookStopObserved !== true
+    || !spawn
+    || spawn.sessionId !== start.parentThreadId
+    || spawn.turnId !== provenance.capabilityTurnId
+    || spawn.toolUseId !== host.spawnToolUseId
+    || spawn.nativeAgent !== start.nativeAgent
+    || spawn.hookDefinitionHash !== provenance.hookDefinitionHash
+    || spawn.requestedModel !== receipt.requestedModel
+    || spawn.requestedReasoningEffort !== receipt.requestedReasoningEffort
+    || spawn.taskBinding?.taskId !== receipt.taskId
+    || spawn.taskBinding.runId !== receipt.runId
+    || spawn.taskBinding.receiptId !== receipt.id
+    || !child
+    || child.sessionId !== start.parentThreadId
+    || child.turnId !== stop.turnId
+    || child.childThreadId !== receipt.childId
+    || child.nativeAgent !== start.nativeAgent
+    || !stopState
+    || stopState.childThreadId !== receipt.childId
+    || stopState.turnId !== stop.turnId
+    || stopState.nativeAgent !== start.nativeAgent
     || start.childThreadId !== receipt.childId
     || start.parentThreadId !== receipt.parentId
     || managedDelegationRole(start.nativeAgent) !== receipt.role
