@@ -116,6 +116,7 @@ function fixture(step = 'requirement-analysis-review') {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\ndelivery_remote: origin\ndelivery_base_ref: main\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), FULL_ANALYSIS);
   if (['technical-design-review', 'code', 'code-review', 'commit'].includes(step)) {
@@ -1008,11 +1009,11 @@ test('standalone completion ignores a current orchestration run without a pendin
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  fs.writeFileSync(path.join(f.dir, 'orchestration.json'), `${JSON.stringify(currentRun(f.id, {
+  fs.writeFileSync(path.join(f.dir, '.runtime', 'orchestration.json'), `${JSON.stringify(currentRun(f.id, {
     status: 'paused', nextStage: null,
     pause: { code: 'ORCHESTRATION_RETRYABLE', message: 'retry later', recoverable: true }
   }), null, 2)}\n`);
-  const runBefore = fs.readFileSync(path.join(f.dir, 'orchestration.json'));
+  const runBefore = fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json'));
 
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
@@ -1020,14 +1021,14 @@ test('standalone completion ignores a current orchestration run without a pendin
 
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
   assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.deepEqual(fs.readFileSync(path.join(f.dir, 'orchestration.json')), runBefore);
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json')), runBefore);
 });
 
 test('standalone completion ignores a legacy delegation receipt without a current child attempt', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id, {
       status: 'prepared', parentId: null, childId: null, spawnMode: null,
@@ -1051,7 +1052,7 @@ test('orchestrated completion advances one matching activated delegation', () =>
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id)
   }), null, 2)}\n`);
@@ -1072,7 +1073,7 @@ test('orchestrated completion reports a distinct partial-write error when the ru
     '--request-id', `test:${f.id}:plan`, '--reason-code', 'user-request'
   ]).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id)
   }), null, 2)}\n`);
@@ -1151,7 +1152,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id, {
       status: 'prepared', parentId: null, childId: null, spawnMode: null,

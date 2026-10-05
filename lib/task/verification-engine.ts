@@ -147,7 +147,7 @@ async function runCheck(type: any, context: any, shared: any): Promise<any> {
 }
 
 function checkOrchestrationState({ taskDir }: any): any {
-  const file = path.join(taskDir, 'orchestration.json');
+  const file = path.join(taskDir, '.runtime', 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-state', 'orchestration.json is missing');
   let run: OrchestrationRun | null;
@@ -216,7 +216,7 @@ function validateCleanCompletionEvidence(run: OrchestrationRun): string | null {
 }
 
 function checkOrchestrationEvidence({ taskDir }: any): any {
-  const file = path.join(taskDir, 'orchestration.json');
+  const file = path.join(taskDir, '.runtime', 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-evidence', 'orchestration.json is missing');
   let run: OrchestrationRun | null;

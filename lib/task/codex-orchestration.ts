@@ -164,7 +164,7 @@ async function prepareCodexOrchestrationDelegation(
     if (prepared.status !== 'running' || !receipt) return prepared;
     return Object.freeze({
       ...prepared,
-      lifecycleBindingMarker: encodeCodexLifecycleBinding({
+      adapterContext: encodeCodexLifecycleBinding({
         taskId: receipt.taskId,
         runId: receipt.runId,
         receiptId: receipt.id

@@ -7,11 +7,11 @@ import {
 } from '../agent-clients/config.ts';
 import { normalizeCustomToolInvocations } from '../agent-clients/custom-tool-invocations.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
-import { getAgentClientModelSelection } from '../agent-clients/registry.ts';
+import { getAgentClientAdapter, getAgentClientModelSelection } from '../agent-clients/registry.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection> [options]\n';
+const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection|launch-carrier> [options]\n';
 
 type ParsedArgs = Readonly<{
   skillName: string;
@@ -86,6 +86,54 @@ function parseArgs(args: string[]): ParsedArgs | null {
 
 function agentClient(args: string[] = []): void {
   if (!ensureInternalHandlerRoute('agent-client', args)) return;
+  if (internalHandlerRoute('agent-client', 'launch-carrier', args[0] ?? '')) {
+    const values: Record<string, string> = {};
+    const seen = new Set<string>();
+    for (let index = 1; index < args.length; index += 1) {
+      const flag = args[index]!;
+      if (!['--client', '--adapter-context', '--stage', '--round', '--role', '--format'].includes(flag) || seen.has(flag)) {
+        failure('AGENT_CLIENT_PAYLOAD_INVALID', `invalid or duplicate option '${flag}'`);
+        return;
+      }
+      const value = args[++index];
+      if (!value || value.startsWith('--')) {
+        failure('AGENT_CLIENT_PAYLOAD_INVALID', `option '${flag}' requires a value`);
+        return;
+      }
+      seen.add(flag);
+      values[flag] = value;
+    }
+    const client = values['--client'];
+    const round = Number(values['--round']);
+    const format = values['--format'] ?? 'json';
+    if (!isAgentClientId(client) || !values['--adapter-context'] || !values['--stage'] || !values['--role']
+      || !Number.isSafeInteger(round) || round < 1 || format !== 'json') {
+      failure('AGENT_CLIENT_PAYLOAD_INVALID', 'launch-carrier requires client, adapter context, stage, positive round, role, and json format');
+      return;
+    }
+    const createCarrier = getAgentClientAdapter(client).orchestrationAdapter?.createLaunchCarrier;
+    if (!createCarrier) {
+      process.stdout.write(`${JSON.stringify({
+        status: 'failed', changed: false, client, carrier: null,
+        error: { code: 'AGENT_CLIENT_LAUNCH_CARRIER_UNSUPPORTED', message: `Agent Client '${client}' does not support lifecycle launch carriers` }
+      })}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const carrier = createCarrier(values['--adapter-context']!, {
+        stage: values['--stage']!, round, role: values['--role']!
+      });
+      process.stdout.write(`${JSON.stringify({ status: 'ready', changed: false, client, carrier, error: null })}\n`);
+    } catch (error) {
+      process.stdout.write(`${JSON.stringify({
+        status: 'failed', changed: false, client, carrier: null,
+        error: { code: error instanceof Error && error.name ? error.name : 'AGENT_CLIENT_LAUNCH_CARRIER_INVALID', message: error instanceof Error ? error.message : String(error) }
+      })}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (internalHandlerRoute('agent-client', 'model-selection', args[0] ?? '')) {
     const values: Record<string, string> = {};
     const seen = new Set<string>();

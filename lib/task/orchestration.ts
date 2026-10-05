@@ -128,7 +128,7 @@ type OrchestrationResult = Readonly<{
   taskId: string | null;
   run: OrchestrationRun | null;
   next: OrchestrationNext | null;
-  lifecycleBindingMarker?: string;
+  adapterContext?: string;
   warnings?: readonly Readonly<{ code: string; message: string; action: string }>[];
   error: Readonly<{
     code: string;
@@ -193,7 +193,7 @@ function supportsLifecycleDelegation(client: AgentClientId): boolean {
 }
 
 function orchestrationPath(taskDir: string): string {
-  return path.join(taskDir, 'orchestration.json');
+  return path.join(taskDir, '.runtime', 'orchestration.json');
 }
 
 const ORCHESTRATION_STATE_INVALID_MESSAGE = 'orchestration.json does not match the current runtime structure; the file was left unchanged; rebuild the sandbox or manually repair the state before retrying';
@@ -423,6 +423,7 @@ function readRun(taskDir: string, options: Pick<OrchestrationOptions, 'diagnosti
 }
 
 function atomicWrite(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   fs.renameSync(temp, file);

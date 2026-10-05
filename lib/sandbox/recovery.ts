@@ -25,6 +25,7 @@ import { sandboxCoreBindMounts } from './mounts.ts';
 import { resolveSandboxGitMetadata } from './git-metadata.ts';
 import {
   assertSandboxTaskSource,
+  prepareTaskRuntimeMask,
   sandboxControlPaths,
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
@@ -341,6 +342,7 @@ async function ensureSandboxControlBroker(params: {
 }): Promise<void> {
   const control = sandboxControlPaths({
     base: params.config.controlBase ?? path.join(params.config.home, '.agent-infra', 'sandbox-control'),
+    repoRoot: params.config.repoRoot,
     project: params.config.project,
     container: params.container,
     identity: params.workspace
@@ -737,8 +739,10 @@ function expectedMounts(params: {
     container: params.container,
     identity: params.workspace
   });
+  if (params.workspace.mode === 'task-bound') prepareTaskRuntimeMask(view.root);
   const control = sandboxControlPaths({
     base: config.controlBase ?? path.join(config.home, '.agent-infra', 'sandbox-control'),
+    repoRoot: config.repoRoot,
     project: config.project,
     container: params.container,
     identity: params.workspace
@@ -1275,7 +1279,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       let completedReentry: { manifest: SandboxControlManifest; evidence: Awaited<ReturnType<typeof prepareCompletedReentry>> } | null = null;
       if (params.reentry === 'completed' && params.workspace?.mode === 'task-bound') {
         const control = sandboxControlPaths({
-          base: params.config.controlBase, project: params.config.project,
+          base: params.config.controlBase, repoRoot: params.config.repoRoot, project: params.config.project,
           container: params.row.name, identity: params.workspace
         });
         const manifest = readSandboxControlManifest(control.manifestPath);

@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { resolveTaskRef } from '../../../task/resolve-ref.ts';
+import { resolveTaskRuntimeRoot } from '../../../task/runtime-paths.ts';
 import { managedDelegationRole } from '../../../task/delegation-receipts.ts';
 
 const MARKER_PREFIX = '__agent_infra_binding_';
@@ -102,9 +102,7 @@ function parseCodexLifecycleBinding(taskName: string): Readonly<{
 }
 
 function resolveCodexLifecycleStoreRoot(taskRef: string, options: Readonly<{ repoRoot?: string }> = {}): string {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
-  return path.join(resolved.taskDir, '.runtime', 'codex-lifecycle');
+  return path.join(resolveTaskRuntimeRoot(taskRef, options), 'codex-lifecycle');
 }
 
 function verifyCodexLifecycleTaskBinding(

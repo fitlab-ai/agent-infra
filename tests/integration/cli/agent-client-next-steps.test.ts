@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { encodeCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
 
 function canonical(enabled: readonly string[]) {
   return ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
@@ -32,6 +33,50 @@ function run(root: string, args: string[]) {
     { cwd: root, encoding: 'utf8' }
   );
 }
+
+function runLaunchCarrier(root: string, args: string[]) {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'agent-client', 'launch-carrier', ...args], {
+    cwd: root, encoding: 'utf8'
+  });
+}
+
+test('agent-client launch-carrier invokes the selected adapter and fails without workspace mutation when unsupported', () => {
+  const root = fixture({ project: 'demo', agentClients: canonical(['codex']) });
+  const taskId = 'TASK-20261006-000008';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const runPath = path.join(taskDir, '.runtime', 'orchestration.json');
+  fs.mkdirSync(path.dirname(runPath), { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
+  fs.writeFileSync(runPath, 'sentinel orchestration bytes\n');
+  const taskBefore = fs.readFileSync(path.join(taskDir, 'task.md'));
+  const runBefore = fs.readFileSync(runPath);
+  const adapterContext = encodeCodexLifecycleBinding({ taskId, runId: 'run-1', receiptId: 'receipt-1' });
+
+  const supported = runLaunchCarrier(root, [
+    '--client', 'codex', '--adapter-context', adapterContext,
+    '--stage', 'code', '--round', '10', '--role', 'executor', '--format', 'json'
+  ]);
+  assert.equal(supported.status, 0, supported.stderr);
+  const payload = JSON.parse(supported.stdout);
+  assert.equal(payload.status, 'ready');
+  assert.deepEqual(payload.carrier, { task_name: `code_executor_r10${adapterContext}` });
+
+  const unsupported = runLaunchCarrier(root, [
+    '--client', 'claude-code', '--adapter-context', adapterContext,
+    '--stage', 'code', '--round', '10', '--role', 'executor', '--format', 'json'
+  ]);
+  assert.equal(unsupported.status, 1);
+  assert.equal(JSON.parse(unsupported.stdout).error.code, 'AGENT_CLIENT_LAUNCH_CARRIER_UNSUPPORTED');
+  const invalid = runLaunchCarrier(root, [
+    '--client', 'codex', '--adapter-context', 'invalid',
+    '--stage', 'code', '--round', '10', '--role', 'executor', '--format', 'json'
+  ]);
+  assert.equal(invalid.status, 1);
+  assert.equal(JSON.parse(invalid.stdout).error.code, 'CODEX_LIFECYCLE_LAUNCH_CONTEXT_INVALID');
+  assert.equal(JSON.parse(invalid.stdout).changed, false);
+  assert.deepEqual(fs.readFileSync(path.join(taskDir, 'task.md')), taskBefore);
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
 
 test('agent-client next-steps renders enabled built-ins and selected custom tools in text and JSON', () => {
   const root = fixture({

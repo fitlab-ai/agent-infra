@@ -198,7 +198,6 @@ test('test runner strips inherited sandbox control authority before loading test
         Agent_Infra_Control_Dir: path.join(root, 'live-channel'),
         aGeNt_InFrA_cOnTrOl_FuTuRe: 'future-authority',
         AGENT_INFRA_TASK_ID: 'TASK-20260904-002344',
-        AGENT_INFRA_SANDBOX: '1',
         AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),
         AGENT_INFRA_SANDBOX: '1',
         Node_Test_Context: 'inherited-context',

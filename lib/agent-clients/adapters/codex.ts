@@ -4,6 +4,28 @@ import {
   codexBeforeContainerCreateHook,
   codexRecoveryChecks
 } from './codex-sandbox.ts';
+import { parseCodexLifecycleBinding } from './codex-lifecycle/binding.ts';
+
+function codexCarrierError(code: string): Error {
+  const error = new Error(code);
+  error.name = code;
+  return error;
+}
+
+function codexLaunchCarrier(
+  adapterContext: string,
+  identity: Readonly<{ stage: string; round: number; role: string }>
+): Readonly<Record<string, string>> {
+  if (!Number.isSafeInteger(identity.round) || identity.round < 1
+    || !/^[a-z-]+$/u.test(identity.stage) || !/^[a-z-]+$/u.test(identity.role)) {
+    throw codexCarrierError('CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID');
+  }
+  const label = `${identity.stage.replaceAll('-', '_')}_${identity.role.replaceAll('-', '_')}_r${identity.round}`;
+  const taskName = `${label}${adapterContext}`;
+  const parsed = parseCodexLifecycleBinding(taskName);
+  if (!parsed) throw codexCarrierError('CODEX_LIFECYCLE_LAUNCH_CONTEXT_INVALID');
+  return Object.freeze({ task_name: parsed.taskName });
+}
 
 const codexAdapter = defineAgentClientAdapter({
   id: 'codex',
@@ -29,6 +51,7 @@ const codexAdapter = defineAgentClientAdapter({
     actualReasoningEffort: 'app-server'
   },
   orchestrationAdapter: {
+    createLaunchCarrier: codexLaunchCarrier,
     prepareDelegation: async (...args) => {
       const { prepareCodexOrchestrationDelegation } = await import('../../task/codex-orchestration.ts');
       return prepareCodexOrchestrationDelegation(...args);

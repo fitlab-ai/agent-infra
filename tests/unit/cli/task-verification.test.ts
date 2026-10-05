@@ -76,6 +76,7 @@ function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
   const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
+  fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   return { root, taskId, taskDir };
 }
 
@@ -524,7 +525,7 @@ test('run-task verification accepts complete current evidence and rejects invali
   fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
     skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
   }));
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const head = 'a'.repeat(40);
   const tree = 'b'.repeat(40);
   const run = currentRun(f.taskId, {
@@ -611,7 +612,7 @@ test('run-task verification accepts only internally consistent clean completion 
     completionEvidence: evidence,
     updatedAt: '2026-01-01T00:00:05.000Z'
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
   assert.equal(
     (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
@@ -648,7 +649,7 @@ test('run-task verification applies current receipt and pause invariants', async
     pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false },
     commitAuthorization: { issuedAt: null, consumedAt: null }
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
   assert.equal(
     (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
@@ -709,7 +710,7 @@ test('run-task verification accepts only current recovery provenance and rejects
       prNumber: 42, prHead: head
     }
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
   assert.equal(
     (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,

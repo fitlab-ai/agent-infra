@@ -6,10 +6,12 @@ import test, { after } from 'node:test';
 
 import {
   appendCodexLifecycleBinding,
+  encodeCodexLifecycleBinding,
   parseCodexLifecycleBinding,
   resolveCodexLifecycleStoreRoot,
   verifyCodexLifecycleTaskBinding
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
+import { codexAdapter } from '../../../lib/agent-clients/adapters/codex.ts';
 
 const roots = new Set<string>();
 after(() => {
@@ -29,6 +31,22 @@ test('Codex lifecycle binding survives the native task_name carrier round trip',
   assert.ok(Buffer.byteLength(taskName, 'utf8') <= 255);
   assert.deepEqual(parseCodexLifecycleBinding(taskName), { taskName, label, binding });
   assert.throws(() => appendCodexLifecycleBinding('a'.repeat(80), binding), /task_name/u);
+});
+
+test('Codex adapter materializes its native spawn carrier from opaque adapter context', () => {
+  const adapterContext = encodeCodexLifecycleBinding({
+    taskId: 'TASK-20261005-122106', runId: 'run-1', receiptId: 'receipt-1'
+  });
+  const createCarrier = codexAdapter.orchestrationAdapter?.createLaunchCarrier;
+  assert.ok(createCarrier);
+  const carrier = createCarrier(adapterContext, { stage: 'review-analysis', round: 2, role: 'reviewer' });
+  assert.deepEqual(carrier, { task_name: `review_analysis_reviewer_r2${adapterContext}` });
+  assert.deepEqual(parseCodexLifecycleBinding(carrier.task_name), {
+    taskName: carrier.task_name,
+    label: 'review_analysis_reviewer_r2',
+    binding: { taskId: 'TASK-20261005-122106', runId: 'run-1', receiptId: 'receipt-1' }
+  });
+  assert.throws(() => createCarrier('not-a-binding', { stage: 'code', round: 0, role: 'executor' }), /CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID/u);
 });
 
 test('Codex lifecycle binding rejects task names outside the native lowercase carrier contract', () => {

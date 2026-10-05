@@ -169,7 +169,7 @@ test('automatic recovery rejects stop evidence consumed by another receipt', () 
 test('automatic recovery rejects a replaced task receipt without changing evidence, run, or activity bytes', () => {
   const f = fixture();
   try {
-    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
     const replaced = JSON.parse(fs.readFileSync(runPath, 'utf8'));
     replaced.pendingDelegation.id = 'receipt-replaced';
     fs.writeFileSync(runPath, `${JSON.stringify(replaced, null, 2)}\n`);
@@ -200,7 +200,7 @@ test('automatic recovery rejects mismatched native associations without consumin
     evidence.state.spawn.nativeAgent = 'agent-infra-lifecycle-reviewer';
     fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
     const evidenceBefore = fs.readFileSync(evidencePath);
-    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
     const runBefore = fs.readFileSync(runPath);
     const taskPath = path.join(f.taskDir, 'task.md');
     const taskBefore = fs.readFileSync(taskPath);
@@ -230,7 +230,7 @@ test('automatic recovery preserves an unrelated orchestration pause', () => {
 test('automatic recovery is a no-op when no orchestration run exists', () => {
   const f = fixture();
   try {
-    fs.unlinkSync(path.join(f.taskDir, 'orchestration.json'));
+    fs.unlinkSync(path.join(f.taskDir, '.runtime', 'orchestration.json'));
     assert.deepEqual(recover(f), {
       status: 'no-op', changed: false, targetState: 'active', requestRef: TASK_ID,
       intent: 'recover-started', taskId: TASK_ID, receiptId: null, childId: null, error: null

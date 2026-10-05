@@ -71,10 +71,15 @@ export function sandboxCoreBindMounts(
     ...workspaceMounts,
   ];
   if (taskBound) {
+    const taskMountPath = path.posix.join('/workspace/.agents/workspace/active', overrides.taskId!);
     mounts.push({
       hostPaths: taskSources,
-      containerPath: path.posix.join('/workspace/.agents/workspace/active', overrides.taskId!),
+      containerPath: taskMountPath,
       readOnly: false
+    }, {
+      hostPaths: [path.join(overrides.workspaceViewRoot, 'task-runtime-mask')],
+      containerPath: path.posix.join(taskMountPath, '.runtime'),
+      readOnly: true
     });
   }
   mounts.push(

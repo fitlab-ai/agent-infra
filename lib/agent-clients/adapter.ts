@@ -68,6 +68,10 @@ type AgentClientLifecycleRecoveryResult = Readonly<{
 }>;
 
 type AgentClientOrchestrationAdapter = Readonly<{
+  createLaunchCarrier?: (
+    adapterContext: string,
+    identity: Readonly<{ stage: string; round: number; role: string }>
+  ) => Readonly<Record<string, string>>;
   prepareDelegation?: (
     taskRef: string,
     input: Readonly<{

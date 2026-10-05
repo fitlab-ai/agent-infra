@@ -21,7 +21,7 @@ import {
   type TaskFinalizationRequest,
   type TaskFinalizationReceipt
 } from '../../../lib/task/finalization.ts';
-import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
+import { applyTaskLifecycle, applyTaskLifecycleWithinTaskLock } from '../../../lib/task/lifecycle.ts';
 import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/verification.ts';
 
@@ -1000,9 +1000,9 @@ test('host finalization re-runs the terminal gate after interruption at the life
   const receiptAtLifecycle: { value: TaskFinalizationReceipt | null } = { value: null };
   const lifecycle: NonNullable<TaskFinalizationOptions['lifecycle']> = (received, lifecycleOptions) => {
     const lifecycleInput = { ...lifecycleOptions, repoRoot: f.repoRoot };
-    if (lifecycleInput.prepareOnly) return applyTaskLifecycle(received, lifecycleInput);
+    if (lifecycleInput.prepareOnly) return applyTaskLifecycleWithinTaskLock(received, lifecycleInput, TASK_ID);
     receiptAtLifecycle.value = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
-    const applied = applyTaskLifecycle(received, lifecycleInput);
+    const applied = applyTaskLifecycleWithinTaskLock(received, lifecycleInput, TASK_ID);
     throw new Error(`simulated interruption after lifecycle ${applied.status}`);
   };
   try {

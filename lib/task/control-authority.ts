@@ -29,6 +29,7 @@ import {
 } from './finalization.ts';
 import {
   applyTaskLifecycle,
+  applyTaskLifecycleWithinTaskLock,
   taskLifecycleFailure,
   type TaskLifecycleRequest,
   type TaskLifecycleResult
@@ -563,7 +564,7 @@ async function applyLifecycleWithAuthority(
   context: TaskControlExecutionContext,
   request: TaskLifecycleControlRequest
 ): Promise<TaskLifecycleResult | LifecycleRecoveryResult> {
-  const execute = async (): Promise<TaskLifecycleResult | LifecycleRecoveryResult> => {
+  const execute = async (underTaskLock = false): Promise<TaskLifecycleResult | LifecycleRecoveryResult> => {
     if (request.intent === 'recover-started') {
       const adapter = isAgentClientId(request.agent)
         ? getAgentClientAdapter(request.agent).orchestrationAdapter
@@ -577,7 +578,9 @@ async function applyLifecycleWithAuthority(
       }
       return adapter.recoverStarted(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
     }
-    return applyTaskLifecycle(request, { repoRoot: context.repoRoot });
+    return underTaskLock
+      ? applyTaskLifecycleWithinTaskLock(request, { repoRoot: context.repoRoot }, taskId!)
+      : applyTaskLifecycle(request, { repoRoot: context.repoRoot });
   };
   const taskId = lifecycleTaskId(request, context.repoRoot);
   if (!taskId) return await execute();
@@ -586,7 +589,7 @@ async function applyLifecycleWithAuthority(
       context.repoRoot,
       taskId,
       `task-lifecycle.${request.intent}`,
-      execute
+      () => execute(true)
     );
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;

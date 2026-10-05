@@ -67,7 +67,7 @@ function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFil
       return;
     }
     if (!stat.isFile() && !stat.isSymbolicLink()) return;
-    if (relative.startsWith('.agents/workspace/active/') && path.posix.basename(relative) === 'orchestration.json') return;
+    if (/^\.agents\/workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/orchestration\.json$/u.test(relative)) return;
     if (/^\.agents\/workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/codex-lifecycle\//u.test(relative)) return;
     const content = stat.isSymbolicLink()
       ? Buffer.from(fs.readlinkSync(absolute))

@@ -161,8 +161,8 @@ async function prepareLifecycleTask(root: string, hookDefinitionHash: string) {
     orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
   });
   assert.equal(prepared.status, 'running', JSON.stringify(prepared));
-  assert.ok(prepared.lifecycleBindingMarker);
-  const taskName = `analysis_executor_r1${prepared.lifecycleBindingMarker}`;
+  assert.ok(prepared.adapterContext);
+  const taskName = `analysis_executor_r1${prepared.adapterContext}`;
   assert.match(taskName, /^[a-z0-9_]+$/u);
   return {
     taskId,
@@ -297,7 +297,7 @@ test('codex-lifecycle bridge rejects an unbound managed spawn before creating li
 test('codex-lifecycle rejects receipt, branch, and multiple-task mismatches without lifecycle writes', async () => {
   const { root, env, hookDefinitionHash } = fixture();
   const task = await prepareLifecycleTask(root, hookDefinitionHash);
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const originalRun = fs.readFileSync(runPath);
   const event = (taskName: string) => run(root, env, ['hook-event', '--event', 'pre-tool'], JSON.stringify({
     sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
@@ -351,7 +351,7 @@ test('codex-lifecycle rejects a stop from an old receipt without changing eviden
   });
 
   const evidencePath = path.join(task.storeRoot, `${crypto.createHash('sha256').update('parent\0old-parent-turn\0old-spawn-tool').digest('hex')}.json`);
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const evidenceBefore = fs.readFileSync(evidencePath);
   const runBefore = fs.readFileSync(runPath);
   const result = run(root, env, ['hook-event', '--event', 'subagent-stop'], JSON.stringify({
@@ -383,7 +383,7 @@ test('codex-lifecycle rejects an ambiguous child event without writing evidence 
 
   const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
   const result = run(root, env, ['hook-event', '--event', 'subagent-start'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -407,7 +407,7 @@ test('codex-lifecycle bridge rejects an old receipt child before changing eviden
   });
   const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
   const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -431,7 +431,7 @@ test('codex-lifecycle bridge rejects a mismatched resolved parent without changi
   });
   const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
   const result = run(root, { ...env, CHILD_PARENT: 'other-parent' }, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -455,7 +455,7 @@ test('codex-lifecycle bridge rechecks the current receipt after async resolution
   });
   const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const result = run(root, { ...env, REPLACE_PENDING_RECEIPT: runPath }, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
@@ -484,7 +484,7 @@ test('codex-lifecycle bridge rejects multiple matching spawn records before writ
   }
   const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
   const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -515,7 +515,7 @@ test('codex-lifecycle bridge rejects a same-source child replay with a conflicti
     });
     const namesBefore = fs.readdirSync(task.storeRoot).sort();
     const evidenceBefore = new Map(namesBefore.map((name) => [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(task.storeRoot, name))).digest('hex')]));
-    const runPath = path.join(task.taskDir, 'orchestration.json');
+    const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
     const runBefore = fs.readFileSync(runPath);
 
     const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
@@ -575,7 +575,7 @@ test('codex-lifecycle bridge parent seal rejects multiple current children witho
   }
   const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
-  const runPath = path.join(task.taskDir, 'orchestration.json');
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
   const result = run(root, env, ['hook-event', '--event', 'post-tool', '--bridge', 'true'], JSON.stringify({
     toolName: 'collaborationwait_agent', sessionId: 'parent'
@@ -662,7 +662,7 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
   assert.equal(stopped.status, 0, `${stopped.stderr}\n${stopped.stdout}`);
   const payload = JSON.parse(stopped.stdout);
   assert.equal(payload.status, 'start-ready');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(taskDir, 'orchestration.json'), 'utf8')).pendingDelegation.status, 'stage-completed');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), 'utf8')).pendingDelegation.status, 'stage-completed');
   assert.equal(store.read('child').state.terminal, null);
   assert.equal(store.read('child').state.stop?.turnId, 'child-turn');
 });

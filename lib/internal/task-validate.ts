@@ -155,7 +155,7 @@ function inplaceValidation(config: ReturnType<typeof loadConfig>, target: Return
   const row = selectSandboxContainer([...running, ...nonRunning], containerNameCandidates(config, target.branch));
   if (!row) throw new Error('SANDBOX_VALIDATION_CONTAINER_NOT_FOUND');
   const control = sandboxControlPaths({
-    base: config.controlBase, project: config.project,
+    base: config.controlBase, repoRoot: config.repoRoot, project: config.project,
     container: row.name, identity: target.workspace
   });
   const manifest = readSandboxControlManifest(control.manifestPath);

@@ -829,7 +829,7 @@ function resolveRmTarget(
     ? matchedContainers
     : [...new Set([...containerNameCandidates(config, effectiveBranch), ...matchedContainers])];
   const controlRoots = containers.flatMap((container) => identities.map((identity) => sandboxControlPaths({
-    base: config.controlBase, project: config.project, container, identity
+    base: config.controlBase, repoRoot: config.repoRoot, project: config.project, container, identity
   }).root));
   const workspaceViewRoots = containers.flatMap((container) => identities.map((identity) => sandboxWorkspaceViewPaths({
     base: config.workspaceViewBase, project: config.project, container, identity
@@ -1007,7 +1007,9 @@ async function removeUncheckedSandbox(
   }
   for (const root of controlRoots) {
     fs.rmSync(root, { recursive: true, force: true });
-    removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
+    if (target.workspace.mode !== 'task-bound') {
+      removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
+    }
   }
   for (const root of workspaceViewRoots) {
     fs.rmSync(root, { recursive: true, force: true });

@@ -139,7 +139,16 @@ function approvedRouteFixture(
 }
 
 function persistedArtifactState(dir: string) {
-  const inventory = fs.readdirSync(dir).filter((name) => fs.lstatSync(path.join(dir, name)).isFile()).sort();
+  const inventory: string[] = [];
+  const visit = (current: string, prefix = '') => {
+    for (const name of fs.readdirSync(current).sort()) {
+      const relative = prefix ? path.join(prefix, name) : name;
+      const candidate = path.join(current, name);
+      if (fs.lstatSync(candidate).isDirectory()) visit(candidate, relative);
+      else if (fs.lstatSync(candidate).isFile()) inventory.push(relative);
+    }
+  };
+  visit(dir);
   return {
     inventory,
     hashes: Object.fromEntries(inventory.map((name) => [name, sha256File(path.join(dir, name))]))
@@ -200,7 +209,7 @@ test('task-orchestration begins idempotently and exposes a structured route', ()
     executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
     reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
   });
-  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), true);
+  assert.equal(fs.existsSync(path.join(f.dir, '.runtime', 'orchestration.json')), true);
 
   const second = run(f.root, [f.id, 'begin-or-resume', '--client', 'claude-code']);
   assert.equal(second.status, 0, second.stderr);
@@ -218,7 +227,7 @@ test('task-orchestration reports current-structure state errors without rewritin
   const f = fixture();
   const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]);
   assert.equal(begun.status, 0, begun.stderr);
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   const invalid = { ...JSON.parse(fs.readFileSync(runPath, 'utf8')), schemaVersion: 3 };
   const serialized = `${JSON.stringify(invalid, null, 2)}\n`;
   fs.writeFileSync(runPath, serialized);
@@ -244,7 +253,7 @@ test('task-orchestration rejects duplicate and unknown options without writing s
   const result = run(f.root, [f.id, 'begin-or-resume', '--max-steps', '8', '--max-steps', '9']);
   assert.equal(result.status, 2);
   assert.equal(JSON.parse(result.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
-  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
+  assert.equal(fs.existsSync(path.join(f.dir, '.runtime', 'orchestration.json')), false);
 });
 
 test('task-orchestration rejects partial model policy options before core state changes', () => {
@@ -253,10 +262,10 @@ test('task-orchestration rejects partial model policy options before core state 
     '--executor-model', 'executor-model']);
   assert.equal(first.status, 2);
   assert.equal(JSON.parse(first.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
-  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
+  assert.equal(fs.existsSync(path.join(f.dir, '.runtime', 'orchestration.json')), false);
 
   assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   const before = fs.readFileSync(runPath);
   const reentry = run(f.root, [f.id, 'begin-or-resume', '--client', 'claude-code',
     '--reviewer-model', 'reviewer-model']);
@@ -287,7 +296,7 @@ test('task-orchestration prepare fails closed before delegation for clients with
     '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
   ];
   assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitAntigravityPolicyArgs]).status, 0);
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   const before = fs.readFileSync(runPath);
 
   const prepared = run(f.root, [f.id, 'prepare', '--client', 'antigravity-cli',
@@ -313,7 +322,7 @@ test('task-orchestration prepares a real Claude Code delegation now that lifecyc
 test('task-orchestration hook-stop explicit taskRef branch forwards model/effort evidence like the auto branch (PL-3)', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   const before = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   const stageCompleted = {
     ...before,
@@ -356,7 +365,7 @@ test('task-orchestration begin fails closed when model policy is omitted', () =>
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.error.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
   assert.equal(payload.error.modelSelectionContext.kind, 'interactive-only');
-  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
+  assert.equal(fs.existsSync(path.join(f.dir, '.runtime', 'orchestration.json')), false);
 });
 
 test('task-orchestration falls back to the selected client project policy only', () => {
@@ -378,7 +387,7 @@ test('task-orchestration falls back to the selected client project policy only',
   const partial = run(f.root, [f.id, 'begin-or-resume', '--client', 'claude-code',
     '--executor-model', 'override-only']);
   assert.equal(partial.status, 2);
-  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
+  assert.equal(fs.existsSync(path.join(f.dir, '.runtime', 'orchestration.json')), false);
 
   const result = run(f.root, [f.id, 'begin-or-resume', '--client', 'claude-code']);
   assert.equal(result.status, 0, result.stderr);
@@ -421,7 +430,7 @@ test('task-orchestration CLI preserves open lifecycle execution across process b
       assert.equal(begun.status, 0, begun.stderr);
     }
     const taskBefore = fs.readFileSync(taskPath);
-    const runPath = path.join(f.dir, 'orchestration.json');
+    const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
     const runBefore = runState === 'idle' ? fs.readFileSync(runPath) : null;
 
     const routed = run(f.root, [f.id, 'route'], f.env);
@@ -505,7 +514,7 @@ test('task-orchestration returns to plan then code after upstream reports change
 test('task-orchestration CLI keeps completed code chains read-only without or after a run', () => {
   const missingRun = approvedRouteFixture('disabled');
   const missingBefore = persistedArtifactState(missingRun.dir);
-  assert.equal(missingBefore.inventory.includes('orchestration.json'), false);
+  assert.equal(missingBefore.inventory.includes('.runtime/orchestration.json'), false);
   for (const result of [
     run(missingRun.root, [missingRun.id, 'route'], missingRun.env),
     run(missingRun.root, [missingRun.id, 'route'], missingRun.env)
@@ -524,9 +533,9 @@ test('task-orchestration CLI keeps completed code chains read-only without or af
   assert.equal(completed.status, 0, completed.stderr);
   assert.equal(JSON.parse(completed.stdout).status, 'completed');
   const completedBefore = persistedArtifactState(completedRun.dir);
-  const completedRunPath = path.join(completedRun.dir, 'orchestration.json');
+  const completedRunPath = path.join(completedRun.dir, '.runtime', 'orchestration.json');
   const completedRunBefore = fs.readFileSync(completedRunPath);
-  assert.equal(completedBefore.inventory.includes('orchestration.json'), true);
+  assert.equal(completedBefore.inventory.includes('.runtime/orchestration.json'), true);
   const resumed = run(completedRun.root, [completedRun.id, 'route'], completedRun.env);
   assert.equal(resumed.status, 0, resumed.stderr);
   const resumedPayload = JSON.parse(resumed.stdout);
@@ -589,8 +598,9 @@ test('task-orchestration CLI ignores qualification diagnostics, preserves fixed 
   const preparedDelegation = run(prepared.root, [prepared.id, 'prepare', '--client', 'claude-code',
     '--requested-model', 'reviewer-model', '--requested-reasoning-effort', 'high'], prepared.env);
   assert.equal(preparedDelegation.status, 0, preparedDelegation.stderr || preparedDelegation.stdout);
-  const pendingRun = path.join(pending.dir, 'orchestration.json');
-  fs.copyFileSync(path.join(prepared.dir, 'orchestration.json'), pendingRun);
+  const pendingRun = path.join(pending.dir, '.runtime', 'orchestration.json');
+  fs.mkdirSync(path.dirname(pendingRun), { recursive: true });
+  fs.copyFileSync(path.join(prepared.dir, '.runtime', 'orchestration.json'), pendingRun);
   const pendingBefore = fs.readFileSync(pendingRun);
   const pendingRoute = run(pending.root, [pending.id, 'route'], pending.env);
   assert.equal(pendingRoute.status, 1, pendingRoute.stderr);

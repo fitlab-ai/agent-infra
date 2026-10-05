@@ -29,6 +29,7 @@ function mkFixture(): { repoRoot: string } {
 function writeTask(repoRoot: string, state: string, taskId: string): string {
   const dir = path.join(repoRoot, '.agents', 'workspace', state, taskId);
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'task.md'),
     `---\nid: ${taskId}\nbranch: feat-${state}\nstatus: ${state}\n---\n# 任务：${taskId}\n`
@@ -93,7 +94,7 @@ test('ai task status uses persisted paused orchestration state and does not requ
   const { repoRoot } = mkFixture();
   const taskId = 'TASK-20260101-000043';
   const taskDir = writeTask(repoRoot, 'active', taskId);
-  fs.writeFileSync(path.join(taskDir, 'orchestration.json'), `${JSON.stringify({
+  fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), `${JSON.stringify({
     taskId,
     runId: 'run-paused',
     status: 'paused',

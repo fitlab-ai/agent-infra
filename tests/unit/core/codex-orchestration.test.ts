@@ -79,7 +79,7 @@ test('Codex activation rejects an old lifecycle receipt without pausing or chang
     parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
   });
   const evidenceBefore = JSON.stringify(store.read('old-child'));
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
 
   const result = await activateCodexOrchestrationDelegation('old-child', {
@@ -118,7 +118,7 @@ test('Codex activation rechecks the pending receipt after asynchronous host reso
     parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
   });
   const evidenceBefore = JSON.stringify(store.read('child'));
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   let runAfterReceiptChange: Buffer | undefined;
 
   const result = await activateCodexOrchestrationDelegation('child', {
@@ -237,7 +237,7 @@ test('Codex prepare preflight fails before workspace capture or receipt creation
 
 test('Codex prepare preserves the typed orchestration state error', async () => {
   const f = fixture();
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const invalidRun = { ...JSON.parse(fs.readFileSync(runPath, 'utf8')), schemaVersion: 3 };
   fs.writeFileSync(runPath, `${JSON.stringify(invalidRun, null, 2)}\n`);
   let captures = 0;
@@ -304,7 +304,7 @@ test('Codex parent seal rejects multiple current receipt children without pausin
   }
   const evidenceFiles = fs.readdirSync(store.root).sort();
   const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(store.root, name))]));
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const runBefore = fs.readFileSync(runPath);
   const result = await sealCodexParentDelegation('parent', {
     repoRoot: f.root, store,
@@ -356,7 +356,7 @@ test('Codex seal consume callback rejects a replaced receipt without consuming e
   store.apply({ type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child', nativeAgent: 'agent-infra-lifecycle-executor' });
   store.apply({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });
 
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   let runAfterReplacement: Buffer | undefined;
   let evidenceAfterTerminal: Buffer | undefined;
   const evidencePath = path.join(store.root, `${crypto.createHash('sha256').update('parent\0parent-turn\0spawn-tool').digest('hex')}.json`);
@@ -508,19 +508,19 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'response_item', payload: {
       type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'spawn-tool',
-      arguments: JSON.stringify({ agent_type: 'agent-infra-lifecycle-executor', task_name: `analysis_executor_r1${prepared.lifecycleBindingMarker}`, model: 'executor-model', reasoning_effort: 'xhigh' })
+      arguments: JSON.stringify({ agent_type: 'agent-infra-lifecycle-executor', task_name: `analysis_executor_r1${prepared.adapterContext}`, model: 'executor-model', reasoning_effort: 'xhigh' })
     } }),
     JSON.stringify({ type: 'event_msg', payload: {
       type: 'item_completed', thread_id: 'parent', turn_id: 'parent-turn',
       item: {
         type: 'SubAgentActivity', id: 'spawn-tool', kind: 'started',
-        agent_thread_id: 'child', agent_path: `/root/analysis_executor_r1${prepared.lifecycleBindingMarker}`
+        agent_thread_id: 'child', agent_path: `/root/analysis_executor_r1${prepared.adapterContext}`
       }
     } })
   ].join('\n'));
   const started = await activateCodexSpawnDelegation({
     sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool', transcriptPath: rollout,
-    nativeAgent: 'agent-infra-lifecycle-executor', taskName: `analysis_executor_r1${prepared.lifecycleBindingMarker}`,
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: `analysis_executor_r1${prepared.adapterContext}`,
     requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root,
@@ -547,7 +547,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   completeOrchestrationStage(taskId, {
     stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
   }, { repoRoot: f.root });
-  const stageCompleted = fs.readFileSync(path.join(f.taskDir, 'orchestration.json'), 'utf8');
+  const stageCompleted = fs.readFileSync(path.join(f.taskDir, '.runtime', 'orchestration.json'), 'utf8');
   const sealed = await sealCodexParentDelegation('parent', {
     repoRoot: f.root,
     store,
@@ -560,7 +560,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   assert.equal(sealed.run?.pendingDelegation?.status, 'sealed');
   assert.equal(store.read('child').state.stopEvidence?.hookStopObserved, false);
 
-  fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), stageCompleted);
+  fs.writeFileSync(path.join(f.taskDir, '.runtime', 'orchestration.json'), stageCompleted);
   const replayed = await sealCodexParentDelegation('parent', {
     repoRoot: f.root,
     store,

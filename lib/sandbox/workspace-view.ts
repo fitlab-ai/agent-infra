@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import { resolveTaskWorkspace } from './task-resolver.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
+import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 import {
   createSandboxControlIdentitySentinel,
   writeSandboxControlIdentitySentinel
@@ -63,15 +64,17 @@ export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 
 
 export function sandboxControlPaths(params: Readonly<{
   base: string;
+  repoRoot?: string;
   project: string;
   container: string;
   identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
 }>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; runtimeDir: string; manifestPath: string }> {
-  const identityKey = params.identity.mode === 'task-bound'
-    ? `task-bound:${params.identity.taskId}`
-    : 'branch-only';
-  const digest = createHash('sha256').update(identityKey).digest('hex').slice(0, 16);
-  const root = path.resolve(params.base, params.project, params.container, digest);
+  const root = params.identity.mode === 'task-bound'
+    ? path.join(resolveTaskRuntimeRoot(params.identity.taskId, { repoRoot: params.repoRoot }), 'sandbox-control')
+    : (() => {
+      const digest = createHash('sha256').update('branch-only').digest('hex').slice(0, 16);
+      return path.resolve(params.base, params.project, params.container, digest);
+    })();
   return {
     root,
     channelDir: path.join(root, 'channel'),
@@ -188,6 +191,7 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
     fs.rmSync(hostPath, { recursive: true, force: true });
     fs.mkdirSync(hostPath, { recursive: true, mode: 0o700 });
   }
+  prepareTaskRuntimeMask(root);
 
   const active = path.join(root, 'active');
   const shortId = params.identity.mode === 'task-bound' && 'shortId' in params.identity
@@ -206,6 +210,21 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
   return { root };
 }
 
+export function prepareTaskRuntimeMask(workspaceViewRoot: string): string {
+  const root = path.resolve(workspaceViewRoot);
+  assertSafeDirectory(root, path.dirname(root));
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  fs.chmodSync(root, 0o700);
+  const taskRuntimeMask = path.join(root, 'task-runtime-mask');
+  assertSafeDirectory(taskRuntimeMask, root);
+  fs.mkdirSync(taskRuntimeMask, { recursive: true, mode: 0o555 });
+  if (fs.readdirSync(taskRuntimeMask).length > 0) {
+    throw new Error('SANDBOX_TASK_RUNTIME_MASK_NOT_EMPTY');
+  }
+  fs.chmodSync(taskRuntimeMask, 0o555);
+  return taskRuntimeMask;
+}
+
 export function materializeSandboxControl(params: Readonly<{
   base: string;
   repoRoot: string;
@@ -221,7 +240,7 @@ export function materializeSandboxControl(params: Readonly<{
   }>;
 }>): SandboxControlSetup {
   const { root, channelDir, statusDir, processingDir, runtimeDir, manifestPath } = sandboxControlPaths(params);
-  assertSafeDirectory(root, path.resolve(params.base));
+  assertSafeDirectory(root, params.identity.mode === 'task-bound' ? path.dirname(root) : path.resolve(params.base));
   if (fs.existsSync(root)) {
     if (!params.replacementLease || path.resolve(params.replacementLease.root) !== root) {
       throw new Error('SANDBOX_CONTROL_REPLACEMENT_REQUIRED');
@@ -234,7 +253,6 @@ export function materializeSandboxControl(params: Readonly<{
   fs.mkdirSync(consumedDir, { recursive: true, mode: 0o700 });
   for (const directory of [statusDir, processingDir, runtimeDir]) {
     assertSafeDirectory(directory, root);
-    if (directory === runtimeDir) fs.rmSync(directory, { recursive: true, force: true });
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
   for (const directory of [

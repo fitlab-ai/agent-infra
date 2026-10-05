@@ -626,7 +626,7 @@ function sealDelegation(
     const allowed = new Set([
       `${taskRoot}${receipt.artifact}`,
       `${taskRoot}task.md`,
-      `${taskRoot}orchestration.json`
+      `${taskRoot}.runtime/orchestration.json`
     ]);
     const disallowed = event.changedPaths.find((entry) => !allowed.has(entry));
     if (disallowed) return fail('DELEGATION_REVIEWER_WRITE_FORBIDDEN', `reviewer changed forbidden path '${disallowed}'`);

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -28,6 +30,22 @@ test('direct-host capability store resolves from the workspace runtime directory
   const env = {};
   const runtimeRoot = path.join(path.resolve('/repo'), '.agents', 'workspace', '.runtime');
   assert.equal(resolveAgentCapabilityStoreRoot({ repoRoot: '/repo', env }), path.join(runtimeRoot, 'codex-capabilities'));
+});
+
+test('task-bound capability store resolves beneath the unique task runtime root', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runtime-task-'));
+  const taskId = 'TASK-20261006-000007';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
+  try {
+    const env = { AGENT_INFRA_TASK_ID: taskId };
+    const runtimeRoot = path.join(taskDir, '.runtime');
+    assert.equal(resolveAgentRuntimeRoot({ repoRoot, env }), runtimeRoot);
+    assert.equal(resolveAgentCapabilityStoreRoot({ repoRoot, env }), path.join(runtimeRoot, 'capabilities'));
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test('runtime directory validation fails closed', () => {

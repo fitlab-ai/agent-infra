@@ -1107,6 +1107,7 @@ export async function create(
   const container = containerName(effectiveConfig, branch);
   const controlPaths = sandboxControlPaths({
     base: effectiveConfig.controlBase,
+    repoRoot: effectiveConfig.repoRoot,
     project: effectiveConfig.project,
     container,
     identity: target.workspace

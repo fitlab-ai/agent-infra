@@ -21,6 +21,7 @@ function fixture(scenario: (typeof scenarios)[number], line: string) {
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(dir, scenario.input), '# Input\n');
   fs.writeFileSync(path.join(dir, 'task.md'), `---
 id: ${TASK_ID}
@@ -172,7 +173,7 @@ test('orchestrated finalization dry-run reports a mismatch without pausing the r
     scenario,
     '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
   );
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     pendingDelegation: reviewReceipt(f.artifact, {
       status: 'prepared', parentId: null, childId: null, spawnMode: null,
@@ -202,7 +203,7 @@ test('standalone finalization ignores a current run without a pending delegation
     scenario,
     '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
   );
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     status: 'completed', nextStage: null,
     commitAuthorization: { issuedAt: null, consumedAt: '2026-01-01T00:00:01.000Z' }
@@ -224,7 +225,7 @@ test('orchestrated finalization accepts one matching activated delegation withou
     scenario,
     '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
   );
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     pendingDelegation: reviewReceipt(f.artifact)
   }), null, 2)}\n`);

@@ -36,7 +36,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-create': ['input'],
   'task-qualification': ['proposal', 'confirm', 'supersede', 'revoke'],
   'sandbox-control': ['serve', 'execute', 'recover', 'client'],
-  'agent-client': ['next-steps', 'model-selection'],
+  'agent-client': ['next-steps', 'model-selection', 'launch-carrier'],
   'codex-lifecycle': ['preflight', 'capability-arm', 'hook-event', 'resolve-start', 'resolve-stop', 'consume'],
   'codex-sandbox-controller': ['verify-context', 'run'],
   'git-workflow': ['inspect', 'preview-tree', 'snapshot', 'compare-trees', 'commit', 'push-rebased'],

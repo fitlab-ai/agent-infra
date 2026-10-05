@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 
 type RuntimeResolutionOptions = Readonly<{
   repoRoot?: string;
@@ -32,6 +33,10 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
     }
     return path.resolve(configured);
   }
+  const taskId = env.AGENT_INFRA_TASK_ID;
+  if (taskId) {
+    return resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot });
+  }
   if (boundControlContext(env)) {
     throw runtimeError(
       'AGENT_INFRA_RUNTIME_DIR_REQUIRED',
@@ -43,6 +48,10 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
 
 export function resolveAgentCapabilityStoreRoot(options: RuntimeResolutionOptions = {}): string {
   const env = options.env ?? process.env;
+  const taskId = env.AGENT_INFRA_TASK_ID;
+  if (taskId) {
+    return path.join(resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot }), 'capabilities');
+  }
   const runtimeRoot = resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env });
   if (env.AGENT_INFRA_RUNTIME_DIR) {
     return path.join(runtimeRoot, 'clients', 'codex', 'capabilities');
