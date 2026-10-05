@@ -929,6 +929,8 @@ async function prepareUnderLock(
         ['requirements', 'issue-type', 'fields'].includes(operation.name)
         && operation.status !== 'applied' && operation.status !== 'no-op'
         && !(operation.name === 'requirements' && operation.status === 'skipped' && operation.reasonCode === 'NO_REQUIREMENTS_ANCHOR')
+        && !(!synced.capabilities.push && ['issue-type', 'fields'].includes(operation.name)
+          && operation.status === 'skipped' && operation.reasonCode === 'PUSH_REQUIRED')
       );
       if ((synced.status !== 'applied' && synced.status !== 'no-op') || synced.error || badOperation) {
         const error = synced.error ?? {
@@ -937,6 +939,16 @@ async function prepareUnderLock(
           retryable: true
         };
         return failed(taskId, errorOf(error, 'FINALIZATION_ISSUE_METADATA_FAILED', true));
+      }
+      if (!synced.capabilities.push) {
+        const missingCapabilitySkip = ['issue-type', 'fields'].find((name) => !issueOperations?.some((operation) =>
+          operation.name === name && operation.status === 'skipped' && operation.reasonCode === 'PUSH_REQUIRED'
+        ));
+        if (missingCapabilitySkip) return failed(taskId, {
+          code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
+          message: `Issue metadata operation '${missingCapabilitySkip}' did not report the required PUSH_REQUIRED capability skip`,
+          retryable: true
+        });
       }
       let inspected: IssueResult;
       try { inspected = await issueInspect(taskId, { cwd: repoRoot }); }
@@ -949,7 +961,8 @@ async function prepareUnderLock(
           retryable: true
         });
       }
-      for (const name of ['requirements', 'issue-type', 'fields']) {
+      const rereadNames = synced.capabilities.push ? ['requirements', 'issue-type', 'fields'] : ['requirements'];
+      for (const name of rereadNames) {
         const operation = issueOperations?.find((candidate) => candidate.name === name);
         if (!operation) return failed(taskId, {
           code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',

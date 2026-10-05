@@ -88,6 +88,7 @@ function options(
     commentSync,
     verify,
     issueSync: async () => platformResult('no-op', ({
+      capabilities: { authenticated: true, comment: true, triage: true, push: true, admin: false },
       issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
       operations: ['requirements', 'issue-type', 'fields'].map((name) => ({ name, status: 'no-op', reasonCode: null }))
     }) as any) as any,
@@ -335,6 +336,7 @@ test('finalization verifies required Issue metadata independently of in-label st
           agent: 'codex', cwd: f.repoRoot, requirements: true, issueType: true, fields: true, dependency: 'required'
         });
         return platformResult('no-op', {
+          capabilities: { authenticated: true, comment: true, triage: true, push: true, admin: false },
           issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {}, labels: ['in: core'] },
           operations: [
             ...['requirements', 'issue-type', 'fields'].map((name) => ({ name, status: 'no-op', reasonCode: null })),
@@ -700,6 +702,7 @@ test('completion finalization tolerates a missing Issue requirements anchor', as
     const configured: TaskFinalizationOptions = {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
       issueSync: async () => platformResult('no-op', ({
+        capabilities: { authenticated: true, comment: true, triage: true, push: true, admin: false },
         issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
         operations: [
           { name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR' },
@@ -711,6 +714,54 @@ test('completion finalization tolerates a missing Issue requirements anchor', as
     const result = await applyTaskFinalization(request, configured);
     assert.equal(result.status, 'completed');
 
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completion finalization accepts push-required Issue metadata skips and still confirms identity', async () => {
+  const f = fixture();
+  try {
+    const configured: TaskFinalizationOptions = {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async () => platformResult('no-op', ({
+        capabilities: { authenticated: true, comment: true, triage: true, push: false, admin: false },
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements' },
+        operations: [
+          { name: 'requirements', status: 'no-op', reasonCode: null },
+          { name: 'issue-type', status: 'skipped', reasonCode: 'PUSH_REQUIRED' },
+          { name: 'fields', status: 'skipped', reasonCode: 'PUSH_REQUIRED' }
+        ]
+      }) as any) as any,
+      issueInspect: async () => platformResult('no-op', ({
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements' }
+      }) as any) as any
+    };
+    const result = await prepareTaskFinalization(request, configured);
+    assert.equal(result.status, 'prepared');
+    assert.equal(result.error, null);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completion finalization does not accept unsupported metadata skips without push', async () => {
+  const f = fixture();
+  try {
+    const result = await prepareTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async () => platformResult('no-op', ({
+        capabilities: { authenticated: true, comment: true, triage: false, push: false, admin: false },
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements' },
+        operations: [
+          { name: 'requirements', status: 'no-op', reasonCode: null },
+          { name: 'issue-type', status: 'skipped', reasonCode: 'ISSUE_TYPES_UNSUPPORTED' },
+          { name: 'fields', status: 'skipped', reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }
+        ]
+      }) as any) as any
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'ISSUE_TYPES_UNSUPPORTED');
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -792,6 +843,7 @@ test('completion finalization keeps Issue identity confirmation fail-closed afte
     const result = await prepareTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
       issueSync: async () => platformResult('no-op', ({
+        capabilities: { authenticated: true, comment: true, triage: true, push: true, admin: false },
         issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
         operations: [
           { name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR' },
