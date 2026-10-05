@@ -282,6 +282,19 @@ function parseCodexThreadResolution(readValue: unknown, rolloutRecords: readonly
   });
 }
 
+function resolvePreflightLifecycleStoreRoot(
+  repoRoot: string,
+  lifecycleStoreRoot?: string
+): string | undefined {
+  if (lifecycleStoreRoot) return lifecycleStoreRoot;
+  try {
+    const context = resolveTaskContext(undefined, { repoRoot });
+    return context.ok ? resolveCodexLifecycleStoreRoot(context.taskId, { repoRoot }) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readCodexRolloutRecords(readValue: unknown, childThreadId: string): readonly unknown[] {
   const thread = object(object(readValue)?.thread);
   const rolloutPath = nonEmpty(thread?.path);
@@ -606,18 +619,10 @@ async function preflightCodexLifecycleEvidence(
   }
 
   const hookDefinitionHash = crypto.createHash('sha256').update(hooksRaw).digest('hex');
-  let runtimeRoot = lifecycleStoreRoot;
-  if (!runtimeRoot) {
-    try {
-      const context = resolveTaskContext(undefined, { repoRoot });
-      runtimeRoot = context.ok
-        ? resolveCodexLifecycleStoreRoot(context.taskId, { repoRoot })
-        : path.join(repoRoot, '.agents', 'workspace', 'active', '.unbound', '.runtime', 'codex-lifecycle');
-    } catch {
-      runtimeRoot = path.join(repoRoot, '.agents', 'workspace', 'active', '.unbound', '.runtime', 'codex-lifecycle');
-    }
-  }
-  const runtimeLiveness = hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity);
+  const runtimeRoot = resolvePreflightLifecycleStoreRoot(repoRoot, lifecycleStoreRoot);
+  const runtimeLiveness = runtimeRoot
+    ? hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity)
+    : false;
 
   const transport = new CodexAppServerTransport();
   transport.start();
@@ -671,6 +676,7 @@ async function preflightCodexLifecycleEvidence(
 export {
   CodexAppServerTransport,
   hasCodexRuntimeLiveness,
+  resolvePreflightLifecycleStoreRoot,
   parseCodexModelReroute,
   parseCodexHooksList,
   parseCodexThreadResolution,

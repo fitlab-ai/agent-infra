@@ -9,6 +9,7 @@ import {
   parseCodexHooksList,
   parseCodexThreadResolution,
   parseCodexTurnCompleted,
+  resolvePreflightLifecycleStoreRoot,
   resolveCodexSpawnedChild,
   resolveCodexTerminal,
   resolveCodexThread,
@@ -446,4 +447,9 @@ test('Codex preflight validates exact lifecycle hooks and current spawn identity
     sessionId: 'old-session', turnId: 'turn', toolUseId: 'tool'
   }), false);
   assert.equal(hasCodexRuntimeLiveness(root, 'hash'), false);
+});
+
+test('Codex preflight has no lifecycle root when task context is unresolved', () => {
+  const root = temporaryRoot('codex-preflight-unbound-');
+  assert.equal(resolvePreflightLifecycleStoreRoot(root), undefined);
 });
