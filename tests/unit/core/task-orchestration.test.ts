@@ -115,7 +115,7 @@ function seedCompletionEvidence(taskDir: string) {
   recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
 }
 
-test('dispatch respects the repository execution lock', () => {
+test('dispatch uses the task lock without depending on a repository-wide lock', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -129,8 +129,8 @@ test('dispatch respects the repository execution lock', () => {
     () => dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root })
   );
 
-  assert.equal(result.error?.code, 'ORCHESTRATION_LOCK_BUSY');
-  assert.equal(readRun(f.taskDir)?.pendingDelegation?.spawnDispatchedAt, null);
+  assert.equal(result.status, 'running');
+  assert.notEqual(readRun(f.taskDir)?.pendingDelegation?.spawnDispatchedAt, null);
 });
 
 function approvedCodeFixture(manualValidation = 0) {
@@ -257,7 +257,7 @@ test('orchestration diagnostics protect malformed content and tolerate logger fa
   assert.throws(() => readRun(f.taskDir, { diagnosticLog: brokenLogger }), OrchestrationStateError);
 });
 
-test('orchestration diagnostics identify an invalid unrelated active candidate', () => {
+test('task-scoped prepare does not inspect an unrelated active task', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const otherTaskId = 'TASK-20260101-000002';
@@ -266,22 +266,18 @@ test('orchestration diagnostics identify an invalid unrelated active candidate',
   fs.writeFileSync(path.join(otherTaskDir, 'orchestration.json'), '{"schemaVersion":3}\n');
   const events: Array<{ event: string; fields: Readonly<Record<string, unknown>> }> = [];
 
-  assert.throws(
-    () => prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
+  const prepared = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
       client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
     }, {
       repoRoot: f.root,
       supportsLifecycleDelegation: () => true,
+      captureWorkspace: snapshot,
       diagnosticLog: (event, fields) => events.push({ event, fields })
-    }),
-    (error: unknown) => error instanceof OrchestrationStateError && error.reasonCodes.includes('top-level-keys')
-  );
-  const failed = events.find(({ event, fields }) => event === 'orchestration-active-scan-candidate-failed'
-    && fields.candidateTaskId === otherTaskId);
-  assert.ok(failed);
-  assert.equal(failed.fields.reasonCodes, 'top-level-keys');
-  assert.equal(failed.fields.candidateTaskDir, otherTaskDir);
-  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+    });
+  assert.equal(prepared.status, 'running', JSON.stringify(prepared));
+  assert.equal(prepared.run?.pendingDelegation?.taskId, 'TASK-20260101-000001');
+  assert.equal(events.some(({ fields }) => fields.candidateTaskId === otherTaskId), false);
+  assert.equal(fs.readFileSync(path.join(otherTaskDir, 'orchestration.json'), 'utf8'), '{"schemaVersion":3}\n');
 });
 
 test('persisted run identity is bound to its task directory', () => {
@@ -917,7 +913,7 @@ test('repository pending guard ignores paused runs that retain audit evidence', 
   assert.equal(readRun(f.taskDir)?.pendingDelegation?.status, 'prepared');
 });
 
-test('repository pending guard still blocks a second running delegation', () => {
+test('different tasks can hold independent pending delegations while one task still rejects duplicates', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -934,14 +930,18 @@ test('repository pending guard still blocks a second running delegation', () => 
   );
   beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
 
-  const prepared = prepareOrchestrationDelegation('TASK-20260101-000002', {
-    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
-  }, {
-    repoRoot: f.root, captureWorkspace: snapshot
-  });
+  const second = prepareOrchestrationDelegation('TASK-20260101-000002', {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { repoRoot: f.root, captureWorkspace: snapshot, id: () => 'receipt-second' });
+  const duplicate = prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'opencode', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
 
-  assert.equal(prepared.error?.code, 'ORCHESTRATION_DELEGATION_BUSY');
-  assert.equal(prepared.changed, false);
+  assert.equal(second.status, 'running');
+  assert.equal(second.run?.pendingDelegation?.taskId, 'TASK-20260101-000002');
+  assert.equal(readRun(f.taskDir)?.pendingDelegation?.taskId, 'TASK-20260101-000001');
+  assert.equal(duplicate.error?.code, 'ORCHESTRATION_DELEGATION_BUSY');
+  assert.equal(duplicate.changed, false);
 });
 
 test('native stop derives the workspace delta before sealing the unique delegation', () => {

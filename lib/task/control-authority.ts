@@ -37,7 +37,7 @@ import type {
   AgentClientLifecycleRecoveryRequest as LifecycleRecoveryRequest,
   AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult
 } from '../agent-clients/adapter.ts';
-import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
+import { resolveTaskContext, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
@@ -524,9 +524,19 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
 }
 
 function operationTaskId(context: TaskControlExecutionContext, taskRef: string): void {
-  if (context.source === 'sandbox-executor' && taskRef !== context.taskId) {
+  if (context.source === 'sandbox-executor' && taskRef !== 'auto' && taskRef !== context.taskId) {
     throw new Error('TASK_CONTROL_CONTEXT_TASK_MISMATCH: operation task does not match the sandbox manifest');
   }
+}
+
+function autoTaskOptions(
+  context: TaskControlExecutionContext,
+  options: OrchestrationOptions
+): OrchestrationOptions {
+  if (context.source === 'sandbox-executor') return { ...options, taskId: context.taskId };
+  const resolved = resolveTaskContext(undefined, { repoRoot: context.repoRoot });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  return { ...options, taskId: resolved.taskId };
 }
 
 function domainOptions(
@@ -631,11 +641,15 @@ function orchestration(
     case 'recover-prepared': return recoverPreparedOrchestrationDelegation(operation.taskRef, options);
     case 'hook-start':
       return input.auto === true
-        ? activateMatchingOrchestrationDelegation(input.client as AgentClientId, input.event as never, options)
+        ? activateMatchingOrchestrationDelegation(
+            input.client as AgentClientId, input.event as never, autoTaskOptions(context, options)
+          )
         : activateOrchestrationDelegation(operation.taskRef, input.event as never, options);
     case 'hook-stop':
       return input.auto === true
-        ? sealMatchingOrchestrationDelegation(input.client as AgentClientId, input.event as never, options)
+        ? sealMatchingOrchestrationDelegation(
+            input.client as AgentClientId, input.event as never, autoTaskOptions(context, options)
+          )
         : sealOrchestrationDelegation(operation.taskRef, input.event as never, options);
     case 'advance': return advanceOrchestration(operation.taskRef, options);
     case 'pause':

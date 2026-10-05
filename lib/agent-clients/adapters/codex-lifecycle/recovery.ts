@@ -10,7 +10,7 @@ import type { ActivityLogSection, StepRow } from '../../../task/activity-log.ts'
 import { captureTaskWriteMetadata, writeTask } from '../../../task/write.ts';
 import { parseTypedTaskFrontmatter } from '../../../task/frontmatter.ts';
 import { resolveTaskRef } from '../../../task/resolve-ref.ts';
-import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
+import { resolveCodexLifecycleStoreRoot } from './binding.ts';
 import {
   recoverActivatedOrchestrationDelegationUnderLock,
   readRun
@@ -93,10 +93,12 @@ function rowForReceipt(rows: readonly StepRow[], receipt: DelegationReceipt): St
 
 function readLifecycleStore(
   options: LifecycleRecoveryOptions,
-  repoRoot: string
+  repoRoot: string,
+  taskId: string
 ): ReturnType<typeof createCodexLifecycleStore> {
   return options.lifecycleStore ?? createCodexLifecycleStore({
-    root: resolveAgentRuntimeStoreRoot({ repoRoot, store: 'lifecycle' }),
+    root: resolveCodexLifecycleStoreRoot(taskId, { repoRoot }),
+    taskId,
     cliVersion: 'recovery',
     now: options.now
   });
@@ -123,6 +125,11 @@ function validateStopRecord(
   const stop = record.state.stopEvidence;
   const provenance = receipt.lifecycleProvenance;
   const host = receipt.hostEvidence;
+  if (record.taskBinding?.taskId !== receipt.taskId
+    || record.taskBinding.runId !== receipt.runId
+    || record.taskBinding.receiptId !== receipt.id) {
+    return { ok: false, code: 'RECOVERY_TASK_BINDING_MISMATCH', message: 'lifecycle evidence belongs to a different task receipt' };
+  }
   if (
     receipt.client !== 'codex'
     || !provenance
@@ -251,7 +258,7 @@ function recoverStartedLifecycleUnderLock(
   if (!pending.childId) {
     return failure(request, 'conflict', 'RECOVERY_DELEGATION_INVALID', 'activated delegation has no child identity', { taskId, receiptId: pending.id });
   }
-  const store = readLifecycleStore(options, resolved.repoRoot);
+  const store = readLifecycleStore(options, resolved.repoRoot, taskId);
   const stored = readStoredEvidence(store, pending.childId);
   if ('error' in stored) return failure(request, 'owner-unknown', 'RECOVERY_STORE_UNKNOWN', stored.error.message, { taskId, receiptId: pending.id, childId: pending.childId });
   if ('missing' in stored) return failure(request, 'owner-unknown', 'RECOVERY_STOP_EVIDENCE_MISSING', 'matching Codex lifecycle stop evidence is missing', { taskId, receiptId: pending.id, childId: pending.childId });
@@ -261,7 +268,9 @@ function recoverStartedLifecycleUnderLock(
   let consumed = stored;
   if (stored.consumer === null) {
     try {
-      consumed = store.consume(pending.childId, pending.id, pending.hostEvidence?.hookDefinitionHash);
+      consumed = store.consume(pending.childId, pending.id, pending.hostEvidence?.hookDefinitionHash, {
+        taskId: pending.taskId, runId: pending.runId, receiptId: pending.id
+      });
     } catch (error) {
       return failure(request, 'owner-unknown', 'RECOVERY_EVIDENCE_CONSUME_FAILED', error instanceof Error ? error.message : String(error), { taskId, receiptId: pending.id, childId: pending.childId });
     }

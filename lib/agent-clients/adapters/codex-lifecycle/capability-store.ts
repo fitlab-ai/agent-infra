@@ -516,6 +516,7 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
 
   function attestByReference(input: Readonly<{
     capabilityRef: string;
+    expectedTaskId?: string;
     sessionId: string;
     turnId: string;
     toolUseId: string;
@@ -523,7 +524,13 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
   }>): CodexCapabilityRecord {
-    const { file, record } = loadActive(input.capabilityRef);
+    const file = fileFor(input.capabilityRef);
+    if (!fs.existsSync(file)) throw capabilityError('CODEX_CAPABILITY_MISSING', 'capability token was not found');
+    const record = read(file);
+    if (input.expectedTaskId !== undefined && record.taskId !== input.expectedTaskId) {
+      throw capabilityError('CODEX_CAPABILITY_PROVENANCE_MISMATCH', 'capability task identity does not match');
+    }
+    if (now() >= record.expiresAt) throw capabilityError('CODEX_CAPABILITY_EXPIRED', 'capability token expired');
     if (record.status !== 'armed') {
       throw capabilityError(
         record.status === 'consumed' ? 'CODEX_CAPABILITY_REPLAY' : 'CODEX_CAPABILITY_STATE_INVALID',
@@ -743,7 +750,9 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   }
 
   function inspectReference(capabilityRef: string): CodexCapabilityRecord {
-    return loadActive(capabilityRef).record;
+    const file = fileFor(capabilityRef);
+    if (!fs.existsSync(file)) throw capabilityError('CODEX_CAPABILITY_MISSING', 'capability token was not found');
+    return read(file);
   }
 
   function findByRecoveryOperation(operationId: string): readonly CodexCapabilityRecord[] {

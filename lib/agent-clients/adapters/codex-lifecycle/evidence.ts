@@ -1,3 +1,5 @@
+import type { CodexLifecycleTaskBinding } from './binding.ts';
+
 type CodexEvidenceSource =
   | 'codex-hook'
   | 'codex-app-server-thread'
@@ -15,6 +17,7 @@ type CodexLifecycleEvent =
       requestedModel?: string;
       requestedReasoningEffort?: string;
       hookDefinitionHash: string;
+      taskBinding?: CodexLifecycleTaskBinding;
     }>
   | Readonly<{
       type: 'hook-child';

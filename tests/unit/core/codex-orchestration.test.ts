@@ -180,7 +180,7 @@ test('Codex prepare preserves the typed orchestration state error', async () => 
 test('Codex parent reconciliation ignores unrelated completed waits', async () => {
   const f = fixture();
   const store = createCodexLifecycleStore({
-    root: path.join(f.root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId,
     cliVersion: '0.147.0'
   });
   const result = await sealCodexParentDelegation('unrelated-parent', { repoRoot: f.root, store });
@@ -204,14 +204,15 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   }).run?.pendingDelegation?.spawnDispatchedAt !== null, true);
 
   const store = createCodexLifecycleStore({
-    root: path.join(f.root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId,
     cliVersion: '0.147.0',
     now: () => '2026-08-14T00:00:02.000Z'
   });
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
-    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64)
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+    taskBinding: { taskId, runId: 'run-1', receiptId: 'receipt-1' }
   });
   store.apply({
     type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -258,7 +259,9 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   store.apply({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });
   const pending = readRun(f.taskDir)?.pendingDelegation;
   assert.equal(pending?.status, 'stage-completed');
-  store.consume('child', pending!.id, pending!.hostEvidence?.hookDefinitionHash);
+  store.consume('child', pending!.id, pending!.hostEvidence?.hookDefinitionHash, {
+    taskId, runId: pending!.runId, receiptId: pending!.id
+  });
   assert.equal(store.read('child').consumer, 'receipt-1');
   const sealed = await sealCodexOrchestrationDelegation('child', {
     repoRoot: f.root,
@@ -281,7 +284,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
 
 test('Codex bridge activates and seals from trusted parent spawn and wait evidence', async () => {
   const f = fixture();
-  await prepareCodexOrchestrationDelegation(taskId, {
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
   }, {
     repoRoot: f.root,
@@ -291,13 +294,14 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   });
   dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
   const store = createCodexLifecycleStore({
-    root: path.join(f.root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId,
     cliVersion: '0.147.0'
   });
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
-    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64)
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+    taskBinding: { taskId, runId: 'run-1', receiptId: 'receipt-1' }
   });
   store.apply({
     type: 'hook-child', sessionId: 'parent', turnId: 'parent-turn', childThreadId: 'child',
@@ -307,19 +311,19 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'response_item', payload: {
       type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'spawn-tool',
-      arguments: JSON.stringify({ agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1', model: 'executor-model', reasoning_effort: 'xhigh' })
+      arguments: JSON.stringify({ agent_type: 'agent-infra-lifecycle-executor', task_name: `analysis_executor_r1${prepared.lifecycleBindingMarker}`, model: 'executor-model', reasoning_effort: 'xhigh' })
     } }),
     JSON.stringify({ type: 'event_msg', payload: {
       type: 'item_completed', thread_id: 'parent', turn_id: 'parent-turn',
       item: {
         type: 'SubAgentActivity', id: 'spawn-tool', kind: 'started',
-        agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+        agent_thread_id: 'child', agent_path: `/root/analysis_executor_r1${prepared.lifecycleBindingMarker}`
       }
     } })
   ].join('\n'));
   const started = await activateCodexSpawnDelegation({
     sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool', transcriptPath: rollout,
-    nativeAgent: 'agent-infra-lifecycle-executor', taskName: 'analysis_executor_r1',
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: `analysis_executor_r1${prepared.lifecycleBindingMarker}`,
     requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root,

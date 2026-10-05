@@ -76,6 +76,34 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.throws(() => store.consume('child', 'receipt-2'), /already consumed/);
 });
 
+test('task-scoped Codex lifecycle store validates first spawn binding before creating its directory', () => {
+  const parent = temporaryRoot();
+  const root = path.join(parent, 'task', '.runtime', 'codex-lifecycle');
+  const taskId = 'TASK-20260101-000001';
+  const store = createCodexLifecycleStore({ root, taskId, cliVersion: '0.147.0' });
+  assert.equal(fs.existsSync(root), false);
+  assert.throws(() => store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash',
+    taskBinding: { taskId: 'TASK-20260101-000002', runId: 'run-1', receiptId: 'receipt-1' }
+  }), /does not match its task store/);
+  assert.equal(fs.existsSync(root), false);
+  assert.throws(() => store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+  }), /was not found/);
+  assert.equal(fs.existsSync(root), false);
+
+  const result = store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash',
+    taskBinding: { taskId, runId: 'run-1', receiptId: 'receipt-1' }
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(result.path, 'utf8')).taskBinding, {
+    taskId, runId: 'run-1', receiptId: 'receipt-1'
+  });
+});
+
 test('Codex lifecycle store rejects ambiguous parent session and agent correlation', () => {
   const root = temporaryRoot();
   const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0' });

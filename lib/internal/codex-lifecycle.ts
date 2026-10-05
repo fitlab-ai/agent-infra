@@ -14,7 +14,14 @@ import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-l
 import { verifyCodexSandboxControllerContextWithWarnings } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { hasSealableOrchestrationDelegation } from '../task/orchestration.ts';
+import { resolveTaskContext } from '../task/resolve-ref.ts';
+import { hasSealableOrchestrationDelegation, readRun } from '../task/orchestration.ts';
+import {
+  parseCodexLifecycleBinding,
+  resolveCodexLifecycleStoreRoot,
+  verifyCodexLifecycleTaskBinding
+} from '../agent-clients/adapters/codex-lifecycle/binding.ts';
+import type { CodexLifecycleTaskBinding } from '../agent-clients/adapters/codex-lifecycle/binding.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -100,13 +107,77 @@ function hookDefinitionHash(): string {
 }
 
 function controllerBinding(taskId: string) {
+  if (process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== taskId) {
+    throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: sandbox task view does not match lifecycle binding');
+  }
   const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
   if (!contextPath) return undefined;
   const context = verifyCodexSandboxControllerContextWithWarnings(contextPath, { repoRoot: process.cwd() }).context;
+  if (context.taskId !== taskId) throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: controller task does not match lifecycle binding');
   return {
     instanceDigest: context.controllerInstanceDigest,
     controlGeneration: context.controlGeneration
   };
+}
+
+function resolveLifecycleTaskContext(expectedTaskId?: string) {
+  const controllerPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  const taskId = controllerPath
+    ? verifyCodexSandboxControllerContextWithWarnings(controllerPath, { repoRoot: process.cwd() }).context.taskId
+    : process.env.AGENT_INFRA_TASK_ID;
+  const context = taskId
+    ? resolveTaskRef(taskId, { repoRoot: process.cwd() })
+    : resolveTaskContext(undefined, { repoRoot: process.cwd() });
+  if (!context.ok) throw new Error(`${context.code}: ${context.message}`);
+  if (expectedTaskId && context.taskId !== expectedTaskId) {
+    throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: task context does not match lifecycle binding');
+  }
+  return context;
+}
+
+function verifyPendingBinding(
+  binding: CodexLifecycleTaskBinding,
+  nativeAgent: string,
+  expected: Readonly<{ requestedModel?: string; requestedReasoningEffort?: string }> = {}
+) {
+  const resolved = resolveLifecycleTaskContext(binding.taskId);
+  const run = readRun(resolved.taskDir);
+  if (!run) throw new Error('Codex lifecycle task binding has no current orchestration run');
+  verifyCodexLifecycleTaskBinding(binding, run, nativeAgent, expected);
+  return { resolved, run };
+}
+
+function verifyStoredBinding(
+  taskId: string,
+  binding: CodexLifecycleTaskBinding,
+  nativeAgent: string
+): void {
+  const resolved = resolveTaskRef(taskId, { repoRoot: process.cwd() });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  const run = readRun(resolved.taskDir);
+  const matches = run
+    ? [run.pendingDelegation, ...run.receipts].filter((receipt) => receipt
+      && receipt.id === binding.receiptId
+      && receipt.taskId === binding.taskId
+      && receipt.runId === binding.runId)
+    : [];
+  if (matches.length !== 1 || matches[0]!.client !== 'codex'
+    || matches[0]!.role !== nativeRole(nativeAgent)) {
+    throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: stored task receipt does not match lifecycle event');
+  }
+}
+
+function nativeRole(nativeAgent: string): string | null {
+  const match = /^agent-infra-lifecycle-(executor|reviewer)$/u.exec(nativeAgent);
+  return match?.[1] ?? null;
+}
+
+function taskScopedStore(taskId: string) {
+  return createCodexLifecycleStore({
+    root: resolveCodexLifecycleStoreRoot(taskId, { repoRoot: process.cwd() }),
+    taskId,
+    cliVersion: cliVersion()
+  });
 }
 
 async function readStdin(): Promise<unknown> {
@@ -119,7 +190,7 @@ async function readStdin(): Promise<unknown> {
   return JSON.parse(input || '{}') as unknown;
 }
 
-function recordFromPayload(phase: string, payload: unknown): CodexLifecycleEvent | UnresolvedHookChild | null {
+function recordFromPayload(phase: string, payload: unknown, taskBinding?: CodexLifecycleTaskBinding): CodexLifecycleEvent | UnresolvedHookChild | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Codex lifecycle hook payload must be an object');
   }
@@ -134,7 +205,8 @@ function recordFromPayload(phase: string, payload: unknown): CodexLifecycleEvent
     nativeAgent: text('nativeAgent'),
     ...(text('requestedModel') ? { requestedModel: text('requestedModel') } : {}),
     ...(text('requestedReasoningEffort') ? { requestedReasoningEffort: text('requestedReasoningEffort') } : {}),
-    hookDefinitionHash: text('hookDefinitionHash')
+    hookDefinitionHash: text('hookDefinitionHash'),
+    ...(taskBinding ? { taskBinding } : {})
   };
   if (phase === 'subagent-start') return {
     type: 'hook-child',
@@ -212,7 +284,6 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       return;
     }
 
-    const store = createCodexLifecycleStore({ cliVersion: cliVersion() });
     if (internalHandlerRoute('codex-lifecycle', 'hook-event', parsed.operation)) {
       const phase = parsed.values['--event'];
       if (!phase || !['pre-tool', 'subagent-start', 'post-tool', 'subagent-stop'].includes(phase)) {
@@ -227,14 +298,16 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         if (capabilityRef) {
           const capabilityStore = createCodexCapabilityStore();
           const armed = capabilityStore.inspectReference(capabilityRef);
+          const controller = controllerBinding(armed.taskId);
           const capability = capabilityStore.attestByReference({
             capabilityRef,
+            expectedTaskId: armed.taskId,
             sessionId: payloadText(payload, 'sessionId'),
             turnId: payloadText(payload, 'turnId'),
             toolUseId: payloadText(payload, 'toolUseId'),
             hookDefinitionHash: payloadText(payload, 'hookDefinitionHash'),
             buildIdentity: computeLifecycleBuildIdentity(process.cwd()),
-            controller: controllerBinding(armed.taskId)
+            controller
           });
           output({
             status: capability.status,
@@ -252,10 +325,25 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           return;
         }
       }
+      const toolName = payloadText(payload, 'toolName');
+      const spawnName = payloadText(payload, 'taskName');
+      const spawnBinding = (phase === 'pre-tool' || (phase === 'post-tool' && toolName === 'collaborationspawn_agent'))
+        ? parseCodexLifecycleBinding(spawnName)
+        : null;
+      if ((phase === 'pre-tool' || (phase === 'post-tool' && toolName === 'collaborationspawn_agent')) && !spawnBinding) {
+        throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISSING: task_name must carry the prepared task binding');
+      }
+      const nativeAgent = payloadText(payload, 'nativeAgent');
+      const taskContext = spawnBinding
+        ? verifyPendingBinding(spawnBinding.binding, nativeAgent, {
+            requestedModel: payloadText(payload, 'requestedModel') || undefined,
+            requestedReasoningEffort: payloadText(payload, 'requestedReasoningEffort') || undefined
+          }).resolved
+        : resolveLifecycleTaskContext();
+      const store = taskScopedStore(taskContext.taskId);
+      if (spawnBinding) verifyStoredBinding(taskContext.taskId, spawnBinding.binding, nativeAgent);
       if (phase === 'post-tool' && parsed.values['--bridge'] === 'true') {
-        const toolName = payloadText(payload, 'toolName');
         if (toolName === 'collaborationspawn_agent') {
-          const nativeAgent = payloadText(payload, 'nativeAgent');
           if (!MANAGED_AGENT.test(nativeAgent)) {
             output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
             return;
@@ -271,33 +359,49 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
             taskName: payloadText(payload, 'taskName'),
             ...(requestedModel ? { requestedModel } : {}),
             ...(requestedReasoningEffort ? { requestedReasoningEffort } : {})
-          }, { store });
+          }, { store, orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId } });
           outputBridgeResult(bridged);
           return;
         }
         if (toolName === 'collaborationwait_agent') {
-          outputBridgeResult(await sealCodexParentDelegation(payloadText(payload, 'sessionId'), { store }));
+          outputBridgeResult(await sealCodexParentDelegation(payloadText(payload, 'sessionId'), {
+            store, orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId }
+          }));
           return;
         }
         output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
         return;
       }
-      const event = recordFromPayload(phase, payload);
+      const event = recordFromPayload(phase, payload, spawnBinding?.binding);
       if (!event) {
         if (phase === 'post-tool' && parsed.values['--bridge'] === 'true') {
           const value = payload as Record<string, unknown>;
           const childThreadId = String(value.childThreadId ?? '');
-          const reconciled = reconcileCodexOrchestrationDelegation(childThreadId);
+          const reconciled = reconcileCodexOrchestrationDelegation(childThreadId, {
+            orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId }
+          });
           outputBridgeResult(reconciled);
           return;
         }
         output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
         return;
       }
+      if (!spawnBinding) {
+        const run = readRun(taskContext.taskDir);
+        const receipt = run?.pendingDelegation;
+        if (!receipt || receipt.client !== 'codex' || receipt.role !== nativeRole(nativeAgent)) {
+          throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: no matching pending task receipt');
+        }
+        verifyStoredBinding(taskContext.taskId, {
+          taskId: receipt.taskId, runId: receipt.runId, receiptId: receipt.id
+        }, nativeAgent);
+      }
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
         try {
           if (store.read(event.childThreadId).consumer) {
-            const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
+            const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, {
+              store, orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId }
+            });
             outputBridgeResult(bridged);
             return;
           }
@@ -313,6 +417,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         });
         const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, {
           store,
+          orchestrationOptions: { repoRoot: process.cwd(), taskId: taskContext.taskId },
           resolveThread: async () => resolved
         });
         outputBridgeResult(bridged);
@@ -330,7 +435,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       }
       const result = store.apply(event);
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
-        if (!hasSealableOrchestrationDelegation('codex', event.childThreadId, { repoRoot: process.cwd() })) {
+        if (!hasSealableOrchestrationDelegation('codex', event.childThreadId, { repoRoot: process.cwd(), taskId: taskContext.taskId })) {
           output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
           return;
         }
@@ -350,6 +455,15 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
 
     const childThreadId = parsed.values['--child-id'];
     if (!childThreadId) throw new Error(`operation '${parsed.operation}' requires --child-id`);
+    const taskContext = resolveLifecycleTaskContext();
+    const store = taskScopedStore(taskContext.taskId);
+    const existing = store.read(childThreadId);
+    if (!existing.taskBinding) throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISSING: stored lifecycle identity has no task binding');
+    verifyStoredBinding(
+      taskContext.taskId,
+      existing.taskBinding,
+      existing.state.startEvidence?.nativeAgent ?? existing.state.spawn?.nativeAgent ?? ''
+    );
     if (internalHandlerRoute('codex-lifecycle', 'resolve-start', parsed.operation)) {
       if (store.read(childThreadId).state.spawn?.hookDefinitionHash !== hookDefinitionHash()) {
         throw new Error('Codex lifecycle hook definition hash is stale');

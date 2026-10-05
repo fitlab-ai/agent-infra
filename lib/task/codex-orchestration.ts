@@ -19,9 +19,17 @@ import {
   pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation,
   reconcileMatchingOrchestrationDelegation,
+  readRun,
   sealMatchingOrchestrationDelegationWithHostEvidence
 } from './orchestration.ts';
 import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
+import {
+  encodeCodexLifecycleBinding,
+  resolveCodexLifecycleStoreRoot,
+  parseCodexLifecycleBinding,
+  verifyCodexLifecycleTaskBinding
+} from '../agent-clients/adapters/codex-lifecycle/binding.ts';
+import { reduceCodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
 
 type LifecycleStore = ReturnType<typeof createCodexLifecycleStore>;
 type CodexBridgeOptions = Readonly<{
@@ -46,7 +54,36 @@ type CodexSpawnIdentity = Readonly<{
 }>;
 
 function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
-  return { ...options.orchestrationOptions, repoRoot: options.repoRoot ?? options.orchestrationOptions?.repoRoot };
+  return {
+    ...options.orchestrationOptions,
+    repoRoot: options.repoRoot ?? options.orchestrationOptions?.repoRoot,
+    taskId: options.orchestrationOptions?.taskId ?? options.store?.taskId ?? undefined
+  };
+}
+
+function recordMatchesTaskReceipt(childThreadId: string, options: CodexBridgeOptions) {
+  const store = requiredStore(options);
+  const record = store.read(childThreadId);
+  const binding = record.taskBinding;
+  if (!binding || (store.taskId && binding.taskId !== store.taskId)) {
+    throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: lifecycle record task does not match its store');
+  }
+  const repoRoot = options.repoRoot ?? options.orchestrationOptions?.repoRoot ?? process.cwd();
+  const resolved = resolveTaskRef(binding.taskId, { repoRoot });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  const run = readRun(resolved.taskDir);
+  const receipts = run
+    ? [run.pendingDelegation, ...run.receipts].filter((receipt) => receipt
+      && receipt.taskId === binding.taskId
+      && receipt.runId === binding.runId
+      && receipt.id === binding.receiptId)
+    : [];
+  const nativeAgent = record.state.startEvidence?.nativeAgent ?? record.state.spawn?.nativeAgent ?? '';
+  const role = nativeAgent.endsWith('reviewer') ? 'reviewer' : 'executor';
+  if (receipts.length !== 1 || receipts[0]!.client !== 'codex' || receipts[0]!.role !== role) {
+    throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: lifecycle record has no matching task receipt');
+  }
+  return { store, record, binding, resolved, run, receipt: receipts[0]! };
 }
 
 function bridgeFailure(code: string, message: string): OrchestrationResult {
@@ -82,8 +119,22 @@ async function prepareCodexOrchestrationDelegation(
     const repoRoot = options.repoRoot ?? process.cwd();
     const resolved = resolveTaskRef(taskRef, { repoRoot });
     if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
-    await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot);
-    return prepareOrchestrationDelegation(taskRef, input, coreOptions(options));
+    await (options.preflight ?? preflightCodexLifecycleEvidence)(
+      repoRoot,
+      undefined,
+      resolveCodexLifecycleStoreRoot(resolved.taskId, { repoRoot })
+    );
+    const prepared = prepareOrchestrationDelegation(taskRef, input, coreOptions(options));
+    const receipt = prepared.run?.pendingDelegation;
+    if (prepared.status !== 'running' || !receipt) return prepared;
+    return Object.freeze({
+      ...prepared,
+      lifecycleBindingMarker: encodeCodexLifecycleBinding({
+        taskId: receipt.taskId,
+        runId: receipt.runId,
+        receiptId: receipt.id
+      })
+    });
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     return bridgeFailure('ORCHESTRATION_CLIENT_PREFLIGHT_FAILED', error instanceof Error ? error.message : String(error));
@@ -95,11 +146,21 @@ async function activateCodexOrchestrationDelegation(
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
   try {
+    const store = requiredStore(options);
+    const bound = recordMatchesTaskReceipt(childThreadId, options);
+    if (!['prepared', 'activated', 'stage-completed'].includes(bound.receipt.status)) {
+      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'lifecycle task receipt is not in an activatable state');
+    }
     if (!hasActivatableOrchestrationDelegation('codex', childThreadId, coreOptions(options))) {
       return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
     }
-    const store = requiredStore(options);
     const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
+    const candidateEvents = [resolved.resolution.thread, ...resolved.reroutes, resolved.resolution.settings];
+    let candidateState = bound.record.state;
+    for (const event of candidateEvents) candidateState = reduceCodexLifecycleEvent(candidateState, event);
+    if (candidateState.status === 'invalid') {
+      return bridgeFailure(candidateState.error?.code ?? 'CODEX_EVIDENCE_IDENTITY_MISMATCH', candidateState.error?.message ?? 'Codex lifecycle identity does not match');
+    }
     store.apply(resolved.resolution.thread);
     for (const reroute of resolved.reroutes) store.apply(reroute);
     store.apply(resolved.resolution.settings);
@@ -153,9 +214,22 @@ async function activateCodexSpawnDelegation(
 ): Promise<OrchestrationResult> {
   try {
     const store = requiredStore(options);
+    const parsed = parseCodexLifecycleBinding(spawn.taskName);
+    if (!parsed) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISSING', 'Codex spawn task_name has no valid task binding');
+    const resolvedTask = resolveTaskRef(parsed.binding.taskId, { repoRoot: options.repoRoot ?? process.cwd() });
+    if (!resolvedTask.ok) return bridgeFailure(resolvedTask.code, resolvedTask.message);
+    const pendingRun = readRun(resolvedTask.taskDir);
+    if (!pendingRun) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex task has no current orchestration run');
+    verifyCodexLifecycleTaskBinding(parsed.binding, pendingRun, spawn.nativeAgent, {
+      requestedModel: spawn.requestedModel,
+      requestedReasoningEffort: spawn.requestedReasoningEffort
+    });
+    if (store.taskId && store.taskId !== parsed.binding.taskId) {
+      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex lifecycle store task does not match spawn binding');
+    }
     const childThreadId = resolveCodexSpawnedChild(spawn.transcriptPath, spawn);
     const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
-    store.applyToSpawn(spawn, {
+    store.applyToSpawn({ ...spawn, taskBinding: parsed.binding }, {
       type: 'hook-child',
       sessionId: spawn.sessionId,
       turnId: spawn.turnId,
@@ -171,7 +245,11 @@ async function activateCodexSpawnDelegation(
     });
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
-    return pauseBridge('ORCHESTRATION_CODEX_START_FAILED', error instanceof Error ? error.message : String(error), options);
+    const message = error instanceof Error ? error.message : String(error);
+    if (/task binding|task_name|identity does not match|does not match the current pending receipt/iu.test(message)) {
+      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', message);
+    }
+    return pauseBridge('ORCHESTRATION_CODEX_START_FAILED', message, options);
   }
 }
 
@@ -180,6 +258,7 @@ async function sealCodexOrchestrationDelegation(
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
   try {
+    const bound = recordMatchesTaskReceipt(childThreadId, options);
     if (!hasSealableOrchestrationDelegation('codex', childThreadId, coreOptions(options))) {
       return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
     }
@@ -201,7 +280,12 @@ async function sealCodexOrchestrationDelegation(
       'codex',
       { nativeAgent: record.state.startEvidence.nativeAgent, childId: childThreadId },
       (receipt) => {
-        const consumed = store.consume(childThreadId, receipt.id, receipt.hostEvidence?.hookDefinitionHash);
+        const consumed = store.consume(
+          childThreadId,
+          receipt.id,
+          receipt.hostEvidence?.hookDefinitionHash,
+          existing.taskBinding ?? undefined
+        );
         return {
           stopRevision: consumed.revision,
           consumer: consumed.consumer!,
@@ -212,7 +296,9 @@ async function sealCodexOrchestrationDelegation(
     );
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
-    return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', error instanceof Error ? error.message : String(error), options);
+    const message = error instanceof Error ? error.message : String(error);
+    if (/task binding|identity mismatch/iu.test(message)) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', message);
+    return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', message, options);
   }
 }
 
@@ -223,12 +309,23 @@ async function sealCodexParentDelegation(
   try {
     const store = requiredStore(options);
     const candidates = store.findByParent(parentThreadId);
-    if (!candidates.length) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
-    for (const consumed of candidates.filter((record) => record.consumer)) {
+    if (!store.taskId) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISSING', 'parent seal requires a task-scoped lifecycle store');
+    const repoRoot = options.repoRoot ?? options.orchestrationOptions?.repoRoot ?? process.cwd();
+    const resolved = resolveTaskRef(store.taskId, { repoRoot });
+    if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
+    const pending = readRun(resolved.taskDir)?.pendingDelegation;
+    if (!pending || pending.taskId !== store.taskId || pending.client !== 'codex') {
+      return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+    }
+    const scopedCandidates = candidates.filter((record) => record.taskBinding?.taskId === pending.taskId
+      && record.taskBinding.runId === pending.runId
+      && record.taskBinding.receiptId === pending.id);
+    if (!scopedCandidates.length) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+    for (const consumed of scopedCandidates.filter((record) => record.consumer)) {
       const replayed = await sealCodexOrchestrationDelegation(consumed.state.startEvidence!.childThreadId, options);
       if (replayed.error?.code !== 'ORCHESTRATION_DELEGATION_MISSING') return replayed;
     }
-    const active = candidates.find((record) => !record.consumer);
+    const active = scopedCandidates.find((record) => !record.consumer);
     if (!active) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
     const start = active.state.startEvidence!;
     const child = active.state.child!;

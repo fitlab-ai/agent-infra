@@ -29,7 +29,7 @@ import type {
   DelegationStage
 } from './delegation-receipts.ts';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
-import { resolveAgentRuntimeStoreRoot } from '../runtime/agent-runtime.ts';
+import { resolveCodexLifecycleStoreRoot } from '../agent-clients/adapters/codex-lifecycle/binding.ts';
 import {
   getAgentClientCapability,
   getAgentClientDelegationEvidence,
@@ -128,6 +128,7 @@ type OrchestrationResult = Readonly<{
   taskId: string | null;
   run: OrchestrationRun | null;
   next: OrchestrationNext | null;
+  lifecycleBindingMarker?: string;
   warnings?: readonly Readonly<{ code: string; message: string; action: string }>[];
   error: Readonly<{
     code: string;
@@ -155,6 +156,7 @@ type OrchestrationCompletionPlanResult = Readonly<{
 }>;
 type OrchestrationOptions = {
   repoRoot?: string;
+  taskId?: string;
   gitWorktreeRoot?: string;
   diagnosticLog?: OrchestrationDiagnosticLogger;
   id?: () => string;
@@ -854,10 +856,6 @@ function prepareOrchestrationDelegationUnlocked(
   const run = readRun(resolved.taskDir, options);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
-  const repositoryPending = matchingDelegations(() => true, options);
-  if (repositoryPending.length > 0) {
-    return failed('ORCHESTRATION_DELEGATION_BUSY', 'the repository already has a pending lifecycle delegation', resolved.taskId);
-  }
   if (run.stepCount >= run.maxSteps) return pauseOrchestration(taskRef, 'ORCHESTRATION_MAX_STEPS', 'maximum orchestration steps reached', true, options);
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
@@ -922,14 +920,9 @@ function prepareOrchestrationDelegation(
   try {
     return withTaskExecutionLock(
       resolved.repoRoot,
-      '__repository__',
-      'task-orchestration.prepare.repository',
-      () => withTaskExecutionLock(
-        resolved.repoRoot,
-        resolved.taskId,
-        'task-orchestration.prepare.task',
-        () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
-      )
+      resolved.taskId,
+      'task-orchestration.prepare.task',
+      () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
     );
   } catch (error) {
     if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
@@ -967,14 +960,9 @@ function dispatchOrchestrationDelegation(
   try {
     return withTaskExecutionLock(
       resolved.repoRoot,
-      '__repository__',
-      'task-orchestration.dispatch.repository',
-      () => withTaskExecutionLock(
-        resolved.repoRoot,
-        resolved.taskId,
-        'task-orchestration.dispatch.task',
-        () => dispatchOrchestrationDelegationUnlocked(taskRef, options)
-      )
+      resolved.taskId,
+      'task-orchestration.dispatch.task',
+      () => dispatchOrchestrationDelegationUnlocked(taskRef, options)
     );
   } catch (error) {
     if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
@@ -987,6 +975,13 @@ function matchingDelegations(
   options: OrchestrationOptions
 ): Array<{ taskId: string; run: OrchestrationRun }> {
   const repoRoot = options.repoRoot ?? process.cwd();
+  if (options.taskId) {
+    const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', options.taskId);
+    const run = readRun(taskDir, options);
+    return run && run.status === 'running' && run.pendingDelegation && predicate(run.pendingDelegation)
+      ? [{ taskId: options.taskId, run }]
+      : [];
+  }
   const activeRoot = path.join(repoRoot, '.agents', 'workspace', 'active');
   if (!fs.existsSync(activeRoot)) return [];
   emitDiagnostic(options, 'orchestration-active-scan-start', {
@@ -1385,7 +1380,7 @@ function recoverPreparedOrchestrationDelegation(
           receipt.client === 'codex'
           && receipt.lifecycleProvenance
           && hasActiveCodexLifecycleEvidence(
-          resolveAgentRuntimeStoreRoot({ repoRoot: resolved.repoRoot, store: 'lifecycle' }),
+          resolveCodexLifecycleStoreRoot(resolved.taskId, { repoRoot: resolved.repoRoot }),
             {
               nativeAgent: `agent-infra-lifecycle-${receipt.role}`,
               hookDefinitionHash: receipt.lifecycleProvenance.hookDefinitionHash

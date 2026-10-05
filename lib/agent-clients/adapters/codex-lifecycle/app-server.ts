@@ -7,7 +7,8 @@ import semver from 'semver';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { CodexLifecycleEvent } from './evidence.ts';
-import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
+import { parseCodexLifecycleBinding, resolveCodexLifecycleStoreRoot } from './binding.ts';
+import { resolveTaskContext } from '../../../task/resolve-ref.ts';
 
 type JsonObject = Record<string, unknown>;
 type ThreadResolution = Readonly<{
@@ -83,6 +84,9 @@ function resolveCodexSpawnedChild(
     requestedReasoningEffort?: string;
   }>
 ): string {
+  if (!parseCodexLifecycleBinding(expected.taskName)) {
+    throw new Error('Codex spawn task_name does not carry a valid lifecycle binding');
+  }
   const name = path.basename(transcriptPath);
   if (!transcriptPath || (!name.endsWith(`-${expected.sessionId}.jsonl`) && name !== `${expected.sessionId}.jsonl`)) {
     throw new Error('Codex parent rollout path is invalid');
@@ -570,7 +574,8 @@ async function resolveCodexTerminal(
 
 async function preflightCodexLifecycleEvidence(
   repoRoot: string = process.cwd(),
-  runtimeIdentity?: CodexRuntimeIdentity
+  runtimeIdentity?: CodexRuntimeIdentity,
+  lifecycleStoreRoot?: string
 ) {
   const versionRun = spawnSync('codex', ['--version'], { encoding: 'utf8' });
   const match = /codex-cli\s+(\d+\.\d+\.\d+)/.exec(versionRun.stdout ?? '');
@@ -601,7 +606,17 @@ async function preflightCodexLifecycleEvidence(
   }
 
   const hookDefinitionHash = crypto.createHash('sha256').update(hooksRaw).digest('hex');
-  const runtimeRoot = resolveAgentRuntimeStoreRoot({ repoRoot, store: 'lifecycle' });
+  let runtimeRoot = lifecycleStoreRoot;
+  if (!runtimeRoot) {
+    try {
+      const context = resolveTaskContext(undefined, { repoRoot });
+      runtimeRoot = context.ok
+        ? resolveCodexLifecycleStoreRoot(context.taskId, { repoRoot })
+        : path.join(repoRoot, '.agents', 'workspace', 'active', '.unbound', '.runtime', 'codex-lifecycle');
+    } catch {
+      runtimeRoot = path.join(repoRoot, '.agents', 'workspace', 'active', '.unbound', '.runtime', 'codex-lifecycle');
+    }
+  }
   const runtimeLiveness = hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity);
 
   const transport = new CodexAppServerTransport();

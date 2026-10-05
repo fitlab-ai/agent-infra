@@ -13,6 +13,7 @@
     "lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts",
     "lib/agent-clients/adapters/codex-lifecycle/controller-context.ts",
     "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/binding.ts",
     "lib/agent-clients/adapters/codex-lifecycle/evidence.ts",
     "lib/agent-clients/adapters/codex-lifecycle/store.ts",
     "lib/agent-clients/adapters/codex-lifecycle/manifest-files.json",

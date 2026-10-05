@@ -14,6 +14,7 @@ import {
   resolveCodexThread,
   validateCodexLifecycleHookConfig
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/app-server.ts';
+import { appendCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
@@ -102,11 +103,14 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
 test('parent rollout resolves exactly one trusted lifecycle child for a spawn tool call', () => {
   const root = temporaryRoot('codex-parent-rollout-');
   const rollout = path.join(root, 'rollout-parent.jsonl');
+  const taskName = appendCodexLifecycleBinding('analysis_executor_r1', {
+    taskId: 'TASK-20260101-000001', runId: 'run-1', receiptId: 'receipt-1'
+  });
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'response_item', payload: {
       type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'tool',
       arguments: JSON.stringify({
-        agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1',
+        agent_type: 'agent-infra-lifecycle-executor', task_name: taskName,
         model: 'executor-model', reasoning_effort: 'xhigh'
       })
     } }),
@@ -114,39 +118,42 @@ test('parent rollout resolves exactly one trusted lifecycle child for a spawn to
       type: 'item_completed', thread_id: 'parent', turn_id: 'turn',
       item: {
         type: 'SubAgentActivity', id: 'tool', kind: 'started',
-        agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+        agent_thread_id: 'child', agent_path: `/root/${taskName}`
       }
     } })
   ].join('\n'));
   assert.equal(resolveCodexSpawnedChild(rollout, {
     sessionId: 'parent', turnId: 'turn', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-executor',
-    taskName: 'analysis_executor_r1', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    taskName, requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }), 'child');
   assert.throws(() => resolveCodexSpawnedChild(rollout, {
     sessionId: 'parent', turnId: 'turn', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-reviewer',
-    taskName: 'analysis_executor_r1'
+    taskName
   }), /does not match/);
 });
 
 test('parent rollout child correlation fails closed for missing, duplicate, or mismatched activities', () => {
   const root = temporaryRoot('codex-parent-rollout-');
   const rollout = path.join(root, 'rollout-parent.jsonl');
+  const taskName = appendCodexLifecycleBinding('analysis_executor_r1', {
+    taskId: 'TASK-20260101-000001', runId: 'run-1', receiptId: 'receipt-1'
+  });
   const call = { type: 'response_item', payload: {
     type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'tool',
     arguments: JSON.stringify({
-      agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1'
+      agent_type: 'agent-infra-lifecycle-executor', task_name: taskName
     })
   } };
   const activity = { type: 'event_msg', payload: {
     type: 'item_completed', thread_id: 'parent', turn_id: 'turn',
     item: {
       type: 'SubAgentActivity', id: 'tool', kind: 'started',
-      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      agent_thread_id: 'child', agent_path: `/root/${taskName}`
     }
   } };
   const expected = {
     sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
-    nativeAgent: 'agent-infra-lifecycle-executor', taskName: 'analysis_executor_r1'
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName
   };
   const invalidActivities = [
     [],
