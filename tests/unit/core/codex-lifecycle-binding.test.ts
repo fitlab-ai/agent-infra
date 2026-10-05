@@ -19,11 +19,27 @@ after(() => {
 test('Codex lifecycle binding survives the native task_name carrier round trip', () => {
   const binding = {
     taskId: 'TASK-20261005-122106',
+    runId: '550e8400-e29b-41d4-a716-446655440000',
+    receiptId: '123e4567-e89b-12d3-a456-426614174000'
+  };
+  const label = 'analysis_executor_r1';
+  const taskName = appendCodexLifecycleBinding(label, binding);
+
+  assert.match(taskName, /^[a-z0-9_]+$/u);
+  assert.ok(Buffer.byteLength(taskName, 'utf8') <= 255);
+  assert.deepEqual(parseCodexLifecycleBinding(taskName), { taskName, label, binding });
+  assert.throws(() => appendCodexLifecycleBinding('a'.repeat(80), binding), /task_name/u);
+});
+
+test('Codex lifecycle binding rejects task names outside the native lowercase carrier contract', () => {
+  const binding = {
+    taskId: 'TASK-20261005-122106',
     runId: 'run-1',
     receiptId: 'receipt-1'
   };
   const taskName = appendCodexLifecycleBinding('analysis_executor_r1', binding);
-  assert.match(taskName, /^analysis_executor_r1--agent-infra-binding-[A-Za-z0-9_-]+$/u);
+  assert.match(taskName, /^analysis_executor_r1__agent_infra_binding_[a-z2-7]+$/u);
+  assert.match(taskName, /^[a-z0-9_]+$/u);
   assert.deepEqual(parseCodexLifecycleBinding(taskName), {
     taskName,
     label: 'analysis_executor_r1',

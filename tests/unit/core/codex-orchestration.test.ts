@@ -61,6 +61,89 @@ test('Codex prepares the requested stage from current task and model policy', as
   assert.equal(readRun(f.taskDir)?.pendingDelegation?.stage, 'analysis');
 });
 
+test('Codex activation rejects an old lifecycle receipt without pausing or changing either store', async () => {
+  const f = fixture();
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId,
+    cliVersion: '0.147.0'
+  });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'old-turn', toolUseId: 'old-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+    taskBinding: { taskId, runId: 'old-run', receiptId: 'old-receipt' }
+  });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'old-child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+  });
+  const evidenceBefore = JSON.stringify(store.read('old-child'));
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+
+  const result = await activateCodexOrchestrationDelegation('old-child', {
+    repoRoot: f.root, store,
+    resolveThread: async () => { throw new Error('must not resolve a stale child'); }
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.changed, false);
+  assert.notEqual(result.error?.code, 'ORCHESTRATION_CODEX_START_FAILED');
+  assert.equal(readRun(f.taskDir)?.status, 'running');
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  assert.equal(JSON.stringify(store.read('old-child')), evidenceBefore);
+});
+
+test('Codex activation rechecks the pending receipt after asynchronous host resolution and before evidence writes', async () => {
+  const f = fixture();
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId,
+    cliVersion: '0.147.0'
+  });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+    taskBinding: { taskId, runId: prepared.run!.runId, receiptId: prepared.run!.pendingDelegation!.id }
+  });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+  });
+  const evidenceBefore = JSON.stringify(store.read('child'));
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  let runAfterReceiptChange: Buffer | undefined;
+
+  const result = await activateCodexOrchestrationDelegation('child', {
+    repoRoot: f.root, store,
+    resolveThread: async () => {
+      const changedRun = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+      changedRun.pendingDelegation.id = 'receipt-replaced';
+      fs.writeFileSync(runPath, `${JSON.stringify(changedRun, null, 2)}\n`);
+      runAfterReceiptChange = fs.readFileSync(runPath);
+      return {
+        resolution: {
+          thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
+          settings: { type: 'app-settings', childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
+        },
+        reroutes: [], diagnostics: []
+      };
+    }
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.changed, false);
+  assert.equal(result.error?.code, 'CODEX_LIFECYCLE_TASK_BINDING_MISMATCH');
+  assert.equal(JSON.stringify(store.read('child')), evidenceBefore);
+  assert.deepEqual(fs.readFileSync(runPath), runAfterReceiptChange);
+});
+
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-orchestration-'));
   fixtureRoots.add(root);

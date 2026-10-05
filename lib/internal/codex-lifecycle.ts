@@ -155,16 +155,19 @@ function verifyStoredBinding(
   const resolved = resolveTaskRef(taskId, { repoRoot: process.cwd() });
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
   const run = readRun(resolved.taskDir);
-  const matches = run
-    ? [run.pendingDelegation, ...run.receipts].filter((receipt) => receipt
-      && receipt.id === binding.receiptId
-      && receipt.taskId === binding.taskId
-      && receipt.runId === binding.runId)
-    : [];
-  if (matches.length !== 1 || matches[0]!.client !== 'codex'
-    || matches[0]!.role !== nativeRole(nativeAgent)) {
-    throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: stored task receipt does not match lifecycle event');
+  const receipt = run?.pendingDelegation;
+  if (!receipt || run?.status !== 'running'
+    || receipt.id !== binding.receiptId
+    || receipt.taskId !== binding.taskId
+    || receipt.runId !== binding.runId
+    || receipt.client !== 'codex'
+    || receipt.role !== nativeRole(nativeAgent)) {
+    throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: stored task receipt is not the current pending lifecycle event');
   }
+}
+
+function sameTaskBinding(left: CodexLifecycleTaskBinding | null | undefined, right: CodexLifecycleTaskBinding): boolean {
+  return left?.taskId === right.taskId && left.runId === right.runId && left.receiptId === right.receiptId;
 }
 
 function nativeRole(nativeAgent: string): string | null {
@@ -396,6 +399,23 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           taskId: receipt.taskId, runId: receipt.runId, receiptId: receipt.id
         }, nativeAgent);
       }
+      const currentRun = readRun(taskContext.taskDir);
+      const currentReceipt = currentRun?.pendingDelegation;
+      const currentBinding = currentReceipt && {
+        taskId: currentReceipt.taskId, runId: currentReceipt.runId, receiptId: currentReceipt.id
+      };
+      if (event.type === 'hook-stop') {
+        const record = store.read(event.childThreadId);
+        const child = record.state.child;
+        if (!currentBinding || !sameTaskBinding(record.taskBinding, currentBinding)
+          || !child
+          || child.sessionId !== event.sessionId
+          || child.turnId !== event.turnId
+          || child.childThreadId !== event.childThreadId
+          || child.nativeAgent !== event.nativeAgent) {
+          throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: stop event does not match the current task receipt and child');
+        }
+      }
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
         try {
           if (store.read(event.childThreadId).consumer) {
@@ -424,7 +444,29 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         return;
       }
       if (event.type === 'hook-child') {
+        const candidates = currentBinding
+          ? store.findByTaskBinding(currentBinding).filter((record) =>
+            record.state.spawn?.sessionId === event.sessionId
+          && record.state.spawn?.nativeAgent === event.nativeAgent
+          )
+          : [];
+        if (candidates.length !== 1) {
+          throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: child event has no unique spawn for the current task receipt');
+        }
         const resolved = await resolveCodexThread(event.childThreadId);
+        verifyStoredBinding(taskContext.taskId, currentBinding!, nativeAgent);
+        const latestCandidates = store.findByTaskBinding(currentBinding!).filter((record) =>
+          record.state.spawn?.sessionId === event.sessionId
+          && record.state.spawn?.nativeAgent === event.nativeAgent
+        );
+        if (latestCandidates.length !== 1 || latestCandidates[0]!.revision !== candidates[0]!.revision) {
+          throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: task receipt spawn became ambiguous during child resolution');
+        }
+        if (resolved.resolution.thread.childThreadId !== event.childThreadId
+          || resolved.resolution.thread.parentThreadId !== event.sessionId
+          || resolved.resolution.thread.nativeAgent !== event.nativeAgent) {
+          throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: resolved child does not match the current spawn');
+        }
         const result = store.apply({
           ...event,
           parentThreadId: resolved.resolution.thread.parentThreadId
@@ -433,6 +475,8 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         if (result.state.status === 'invalid') process.exitCode = 1;
         return;
       }
+      if (!currentBinding) throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: current task receipt is missing');
+      verifyStoredBinding(taskContext.taskId, currentBinding, nativeAgent);
       const result = store.apply(event);
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
         if (!hasSealableOrchestrationDelegation('codex', event.childThreadId, { repoRoot: process.cwd(), taskId: taskContext.taskId })) {
@@ -469,6 +513,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         throw new Error('Codex lifecycle hook definition hash is stale');
       }
       const resolved = await resolveCodexThread(childThreadId);
+      verifyStoredBinding(taskContext.taskId, existing.taskBinding, existing.state.startEvidence?.nativeAgent ?? existing.state.spawn?.nativeAgent ?? '');
       let latest = store.apply(resolved.resolution.thread);
       for (const reroute of resolved.reroutes) latest = store.apply(reroute);
       latest = store.apply(resolved.resolution.settings);
@@ -480,6 +525,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       const stopTurnId = store.read(childThreadId).state.stop?.turnId;
       if (!stopTurnId) throw new Error('Codex lifecycle stop hook is not available');
       const terminal = await resolveCodexTerminal(childThreadId, stopTurnId);
+      verifyStoredBinding(taskContext.taskId, existing.taskBinding, existing.state.startEvidence?.nativeAgent ?? existing.state.spawn?.nativeAgent ?? '');
       const latest = store.apply(terminal);
       if (latest.state.status !== 'stop-ready') {
         throw new Error(`Codex lifecycle stop evidence is not ready (status=${latest.state.status})`);
@@ -490,6 +536,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
     if (internalHandlerRoute('codex-lifecycle', 'consume', parsed.operation)) {
       const consumer = parsed.values['--consumer'];
       if (!consumer) throw new Error('consume requires --consumer');
+      verifyStoredBinding(taskContext.taskId, existing.taskBinding, existing.state.startEvidence?.nativeAgent ?? existing.state.spawn?.nativeAgent ?? '');
       const consumed = store.consume(childThreadId, consumer, hookDefinitionHash());
       output({ status: 'consumed', changed: true, evidence: {
         start: consumed.state.startEvidence,

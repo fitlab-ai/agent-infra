@@ -291,6 +291,14 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
   }
 
+  function findByTaskBinding(binding: CodexLifecycleTaskBinding): readonly StoredCodexLifecycle[] {
+    return Object.freeze(recordFiles(root)
+      .map((file) => readRecord(file, options.taskId))
+      .filter((record) => record.taskBinding?.taskId === binding.taskId
+        && record.taskBinding.runId === binding.runId
+        && record.taskBinding.receiptId === binding.receiptId));
+  }
+
   function read(childThreadId: string): StoredCodexLifecycle {
     const matches = findByChild(childThreadId);
     if (matches.length === 0) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
@@ -381,7 +389,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     });
   }
 
-  return Object.freeze({ taskId: options.taskId ?? null, root, apply, applyToSpawn, consume, expireBefore, findByParent, read });
+  return Object.freeze({ taskId: options.taskId ?? null, root, apply, applyToSpawn, consume, expireBefore, findByParent, findByTaskBinding, read });
 }
 
 export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence };

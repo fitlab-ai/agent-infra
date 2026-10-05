@@ -3,9 +3,10 @@ import path from 'node:path';
 import { resolveTaskRef } from '../../../task/resolve-ref.ts';
 import { managedDelegationRole } from '../../../task/delegation-receipts.ts';
 
-const MARKER_PREFIX = '--agent-infra-binding-';
+const MARKER_PREFIX = '__agent_infra_binding_';
+const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
 const TASK_ID_PATTERN = /^TASK-[0-9]{8}-[0-9]{6}$/u;
-const SAFE_LABEL_PATTERN = /^[A-Za-z0-9_-]{1,80}$/u;
+const SAFE_LABEL_PATTERN = /^[a-z0-9_]{1,80}$/u;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
 
 type CodexLifecycleTaskBinding = Readonly<{
@@ -15,13 +16,44 @@ type CodexLifecycleTaskBinding = Readonly<{
 }>;
 
 function assertSafeTaskName(taskName: string): void {
-  if (
-    Buffer.byteLength(taskName, 'utf8') > 255
-    || taskName.includes('/')
-    || taskName.includes('\\')
-    || taskName === '.'
-    || taskName === '..'
-  ) throw new Error('Codex task_name must be one path-safe component of at most 255 bytes');
+  if (Buffer.byteLength(taskName, 'utf8') > 255 || !/^[a-z0-9_]+$/u.test(taskName)) {
+    throw new Error('Codex task_name must use lowercase letters, digits, and underscores within 255 bytes');
+  }
+}
+
+function encodeTaskNamePayload(value: string): string {
+  let buffer = 0;
+  let bits = 0;
+  let encoded = '';
+  for (const byte of Buffer.from(value, 'utf8')) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      encoded += BASE32_ALPHABET[(buffer >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits) encoded += BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
+  return encoded;
+}
+
+function decodeTaskNamePayload(encoded: string): string | null {
+  let buffer = 0;
+  let bits = 0;
+  const bytes: number[] = [];
+  for (const character of encoded) {
+    const value = BASE32_ALPHABET.indexOf(character);
+    if (value < 0) return null;
+    buffer = (buffer << 5) | value;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((buffer >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  if (bits && (buffer & ((1 << bits) - 1)) !== 0) return null;
+  const decoded = Buffer.from(bytes).toString('utf8');
+  return encodeTaskNamePayload(decoded) === encoded ? decoded : null;
 }
 
 function encodeCodexLifecycleBinding(binding: CodexLifecycleTaskBinding): string {
@@ -30,7 +62,7 @@ function encodeCodexLifecycleBinding(binding: CodexLifecycleTaskBinding): string
     || !SAFE_ID_PATTERN.test(binding.receiptId)) {
     throw new Error('Codex lifecycle task binding is invalid');
   }
-  return `${MARKER_PREFIX}${Buffer.from(JSON.stringify(binding)).toString('base64url')}`;
+  return `${MARKER_PREFIX}${encodeTaskNamePayload(JSON.stringify(binding))}`;
 }
 
 function appendCodexLifecycleBinding(label: string, binding: CodexLifecycleTaskBinding): string {
@@ -50,9 +82,11 @@ function parseCodexLifecycleBinding(taskName: string): Readonly<{
   if (markerIndex < 1) return null;
   const label = taskName.slice(0, markerIndex);
   const encoded = taskName.slice(markerIndex + MARKER_PREFIX.length);
-  if (!SAFE_LABEL_PATTERN.test(label) || !/^[A-Za-z0-9_-]+$/u.test(encoded)) return null;
+  if (!SAFE_LABEL_PATTERN.test(label) || !/^[a-z2-7]+$/u.test(encoded)) return null;
   try {
-    const value = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const decoded = decodeTaskNamePayload(encoded);
+    if (!decoded) return null;
+    const value = JSON.parse(decoded) as Record<string, unknown>;
     if (Object.keys(value).sort().join(',') !== 'receiptId,runId,taskId'
       || typeof value.taskId !== 'string' || !TASK_ID_PATTERN.test(value.taskId)
       || typeof value.runId !== 'string' || !SAFE_ID_PATTERN.test(value.runId)
