@@ -182,6 +182,7 @@ test('test runner strips inherited sandbox control authority before loading test
     "  assert.equal(process.env.AGENT_INFRA_TEST_SENTINEL, 'preserved');",
     "  assert.equal(process.env.AGENT_INFRA_TASK_ID, undefined);",
     "  assert.equal(process.env.AGENT_INFRA_RUNTIME_DIR, undefined);",
+    "  assert.equal(process.env.AGENT_INFRA_SANDBOX, undefined);",
     "  assert.notEqual(process.env.NODE_TEST_CONTEXT, 'inherited-context');",
     '});',
     ''
@@ -197,6 +198,7 @@ test('test runner strips inherited sandbox control authority before loading test
         aGeNt_InFrA_cOnTrOl_FuTuRe: 'future-authority',
         AGENT_INFRA_TASK_ID: 'TASK-20260904-002344',
         AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),
+        AGENT_INFRA_SANDBOX: '1',
         Node_Test_Context: 'inherited-context',
         AGENT_INFRA_TEST_SENTINEL: 'preserved'
       }

@@ -11,6 +11,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint-complexity:
+    name: lint complexity / Node 22.13.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup supported lint runtime
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: tools/eslint/package-lock.json
+
+      - name: Install isolated lint dependencies
+        run: npm ci --prefix tools/eslint
+
+      - name: Check lint baseline
+        run: npm run lint --prefix tools/eslint
+
+      - name: Test lint baseline comparator
+        run: npm test --prefix tools/eslint
+
   unit-tests:
     name: ${{ matrix.os }} / Node ${{ matrix.node }}
     runs-on: ${{ matrix.os }}
