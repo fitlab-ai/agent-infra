@@ -454,10 +454,17 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: resolved child does not match the current spawn');
         }
         verifyStoredBinding(taskContext.taskId, currentBinding!, nativeAgent);
-        const result = store.apply({
+        const spawn = latestCandidates[0]!.state.spawn;
+        if (!spawn) throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: current spawn record is missing');
+        const result = store.applyToSpawn({
+          sessionId: spawn.sessionId,
+          turnId: spawn.turnId,
+          toolUseId: spawn.toolUseId,
+          taskBinding: currentBinding!
+        }, {
           ...event,
           parentThreadId: resolved.resolution.thread.parentThreadId
-        });
+        }, latestCandidates[0]!.revision);
         if (parsed.values['--bridge'] === 'true') {
           const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, {
             store,

@@ -1221,7 +1221,7 @@ function sealMatchingOrchestrationDelegationWithHostEvidence(
     return { status: 'running', changed: true, taskId: matched.taskId, run: updated, next: null, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/TASK_BINDING_MISMATCH|identity mismatch|receipt changed|ambiguous|already consumed|revision changed|does not match the stored spawn/iu.test(message)) {
+    if (/TASK_BINDING_MISMATCH|CODEX_EVIDENCE_(?:IDENTITY_MISMATCH|PARENT_MISMATCH|REPLAY_CONFLICT)|identity mismatch|receipt changed|ambiguous|already consumed|revision changed|does not match the stored spawn/iu.test(message)) {
       return failed('ORCHESTRATION_CODEX_EVIDENCE_IDENTITY_MISMATCH', message, matched.taskId);
     }
     return pauseOrchestration(

@@ -118,7 +118,7 @@ function sameTaskBinding(
 }
 
 function isBindingFailure(message: string): boolean {
-  return /CODEX_LIFECYCLE_TASK_BINDING_MISMATCH|task binding|identity mismatch|ambiguous active children/iu.test(message);
+  return /CODEX_LIFECYCLE_TASK_BINDING_MISMATCH|CODEX_EVIDENCE_(?:IDENTITY_MISMATCH|PARENT_MISMATCH|REPLAY_CONFLICT)|task binding|identity mismatch|ambiguous active children/iu.test(message);
 }
 
 function bridgeFailure(code: string, message: string): OrchestrationResult {
@@ -322,7 +322,7 @@ async function activateCodexSpawnDelegation(
       parentThreadId: resolved.resolution.thread.parentThreadId,
       nativeAgent: spawn.nativeAgent,
       source: 'parent-rollout'
-    });
+    }, latestCandidates[0]!.revision);
     return activateCodexOrchestrationDelegation(childThreadId, {
       ...options,
       store,

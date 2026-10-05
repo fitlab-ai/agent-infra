@@ -45,6 +45,12 @@ type ActiveCodexLifecycleEvidenceQuery = Readonly<{
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 1_000;
 const LOCK_STALE_MS = 30_000;
+const NON_PERSISTENT_FAILURES = new Set([
+  'CODEX_EVIDENCE_IDENTITY_MISMATCH',
+  'CODEX_EVIDENCE_PARENT_MISMATCH',
+  'CODEX_EVIDENCE_REPLAY_CONFLICT'
+]);
+
 function digest(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -227,6 +233,9 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       }
       if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
       const nextState = reduceCodexLifecycleEvent(current.state, event);
+      if (nextState.status === 'invalid' && nextState.error && NON_PERSISTENT_FAILURES.has(nextState.error.code)) {
+        throw new Error(`${nextState.error.code}: ${nextState.error.message}`);
+      }
       const next = Object.freeze({
         schemaVersion: 2 as const,
         revision: current.revision + 1,
@@ -246,7 +255,8 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
 
   function applyToSpawn(
     identity: Readonly<{ sessionId: string; turnId: string; toolUseId: string; taskBinding: CodexLifecycleTaskBinding }>,
-    event: Extract<CodexLifecycleEvent, { type: 'hook-child' }>
+    event: Extract<CodexLifecycleEvent, { type: 'hook-child' }>,
+    expectedRevision: number
   ): CodexLifecycleStoreResult {
     const file = path.join(root, `${digest(`${identity.sessionId}\0${identity.turnId}\0${identity.toolUseId}`)}.json`);
     if (!fs.existsSync(file)) throw new Error('Codex lifecycle spawn identity was not found');
@@ -260,13 +270,23 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       if (JSON.stringify(current.taskBinding) !== JSON.stringify(identity.taskBinding)) {
         throw new Error('Codex lifecycle task binding does not match the stored spawn');
       }
+      if (current.revision !== expectedRevision) {
+        throw new Error(`Codex lifecycle revision changed from ${expectedRevision} to ${current.revision}`);
+      }
       if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
       if (
         current.state.spawn?.sessionId !== identity.sessionId
         || current.state.spawn.turnId !== identity.turnId
         || current.state.spawn.toolUseId !== identity.toolUseId
+        || current.state.spawn.nativeAgent !== event.nativeAgent
+        || event.sessionId !== identity.sessionId
+        || event.parentThreadId !== identity.sessionId
       ) throw new Error('Codex lifecycle spawn identity does not match the stored event');
       const nextState = reduceCodexLifecycleEvent(current.state, event);
+      if (nextState.status === 'invalid' && nextState.error && NON_PERSISTENT_FAILURES.has(nextState.error.code)) {
+        throw new Error(`${nextState.error.code}: ${nextState.error.message}`);
+      }
+      if (nextState === current.state) return Object.freeze({ path: file, revision: current.revision, state: current.state });
       const next = Object.freeze({
         ...current,
         revision: current.revision + 1,

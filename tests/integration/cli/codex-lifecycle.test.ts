@@ -497,6 +497,62 @@ test('codex-lifecycle bridge rejects multiple matching spawn records before writ
   assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
 });
 
+test('codex-lifecycle bridge rejects a same-source child replay with a conflicting turn without changing state in source and compiled CLIs', async () => {
+  const invocations: Array<Readonly<Record<string, unknown>>> = [];
+  const compiledCli = path.resolve('dist/bin/internal-cli.js');
+  for (const [label, cliPath] of [['compiled', compiledCli], ['source', INTERNAL_CLI_PATH]] as const) {
+    const { root, env, hookDefinitionHash } = fixture();
+    const task = await prepareLifecycleTask(root, hookDefinitionHash);
+    const store = createCodexLifecycleStore({ root: task.storeRoot, taskId: task.taskId, cliVersion: '0.147.0' });
+    store.apply({
+      type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+      nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
+      taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
+    });
+    store.apply({
+      type: 'hook-child', sessionId: 'parent', turnId: 'original-child-turn', childThreadId: 'child',
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+    });
+    const namesBefore = fs.readdirSync(task.storeRoot).sort();
+    const evidenceBefore = new Map(namesBefore.map((name) => [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(task.storeRoot, name))).digest('hex')]));
+    const runPath = path.join(task.taskDir, 'orchestration.json');
+    const runBefore = fs.readFileSync(runPath);
+
+    const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
+      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+      nativeAgent: 'agent-infra-lifecycle-executor'
+    }), cliPath);
+
+    const record = store.read('child');
+    const changedNames = fs.readdirSync(task.storeRoot).sort().filter((name) =>
+      crypto.createHash('sha256').update(fs.readFileSync(path.join(task.storeRoot, name))).digest('hex') !== evidenceBefore.get(name)
+    );
+    const runAfter = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+    invocations.push({
+      cli: label,
+      exitCode: result.status,
+      result: result.stdout.trim(),
+      evidenceNamesBefore: namesBefore,
+      evidenceNamesAfter: fs.readdirSync(task.storeRoot).sort(),
+      changedEvidenceFiles: changedNames,
+      recordBefore: { revision: 2, status: 'observed-child', turnId: 'original-child-turn' },
+      recordAfter: { revision: record.revision, status: record.state.status, turnId: record.state.child?.turnId },
+      consumer: record.consumer,
+      runBytesUnchanged: fs.readFileSync(runPath).equals(runBefore),
+      runStatus: runAfter.status,
+      pause: runAfter.pause
+    });
+  }
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations.map((item) => item.exitCode), [1, 1], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.evidenceNamesAfter), invocations.map((item) => item.evidenceNamesBefore), JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.changedEvidenceFiles), [[], []], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.recordAfter), invocations.map((item) => item.recordBefore), JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.consumer), [null, null], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.runBytesUnchanged), [true, true], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => [item.runStatus, item.pause]), [['running', null], ['running', null]], JSON.stringify(invocations));
+});
+
 test('codex-lifecycle bridge parent seal rejects multiple current children without pausing or writing', async () => {
   const { root, env, hookDefinitionHash } = fixture();
   const task = await prepareLifecycleTask(root, hookDefinitionHash);

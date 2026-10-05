@@ -161,6 +161,70 @@ test('Codex lifecycle store correlates a real child session through its host-res
   assert.equal(result.state.child?.sessionId, 'parent');
 });
 
+test('Codex lifecycle store refuses identity and replay conflicts before persisting child or resolve evidence', () => {
+  const root = temporaryRoot();
+  const taskId = 'TASK-20260101-000001';
+  const binding = { taskId, runId: 'run-1', receiptId: 'receipt-1' };
+  const store = createCodexLifecycleStore({ root, taskId, cliVersion: '0.147.0' });
+  const spawn = store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash', taskBinding: binding
+  });
+  const identity = { sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool', taskBinding: binding };
+  const original = {
+    type: 'hook-child' as const, sessionId: 'parent', turnId: 'original-child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook' as const
+  };
+  const accepted = store.applyToSpawn(identity, original, spawn.revision);
+  const bytesBeforeReplay = fs.readFileSync(accepted.path);
+  assert.throws(() => store.applyToSpawn(identity, { ...original, turnId: 'wrong-child-turn' }, accepted.revision), /CODEX_EVIDENCE_REPLAY_CONFLICT/u);
+  assert.deepEqual(fs.readFileSync(accepted.path), bytesBeforeReplay);
+  assert.throws(() => store.applyToSpawn(identity, { ...original, nativeAgent: 'agent-infra-lifecycle-reviewer' }, accepted.revision), /spawn identity does not match/u);
+  assert.deepEqual(fs.readFileSync(accepted.path), bytesBeforeReplay);
+  assert.equal(store.read('child').state.status, 'observed-child');
+  assert.equal(store.read('child').revision, accepted.revision);
+
+  assert.throws(() => store.applyToSpawn(identity, { ...original, turnId: 'stale-writer-turn' }, spawn.revision), /revision changed/u);
+  assert.deepEqual(fs.readFileSync(accepted.path), bytesBeforeReplay);
+
+  assert.throws(() => store.apply({
+    type: 'app-thread', childThreadId: 'child', parentThreadId: 'wrong-parent', forkedFromId: null,
+    sourceParentThreadId: 'wrong-parent', nativeAgent: 'agent-infra-lifecycle-executor'
+  }), /CODEX_EVIDENCE_PARENT_MISMATCH/u);
+  assert.deepEqual(fs.readFileSync(accepted.path), bytesBeforeReplay);
+});
+
+test('Codex lifecycle store keeps legal parent-rollout to hook conversion and exact child replay valid', () => {
+  const root = temporaryRoot();
+  const taskId = 'TASK-20260101-000001';
+  const binding = { taskId, runId: 'run-1', receiptId: 'receipt-1' };
+  const store = createCodexLifecycleStore({ root, taskId, cliVersion: '0.147.0' });
+  const spawn = store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash', taskBinding: binding
+  });
+  const identity = { sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool', taskBinding: binding };
+  const rollout = store.applyToSpawn(identity, {
+    type: 'hook-child', sessionId: 'parent', turnId: 'rollout-child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'parent-rollout'
+  }, spawn.revision);
+  const hook = store.applyToSpawn(identity, {
+    type: 'hook-child', sessionId: 'parent', turnId: 'hook-child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+  }, rollout.revision);
+  assert.equal(hook.state.status, 'observed-child');
+  assert.equal(hook.state.child?.turnId, 'hook-child-turn');
+  assert.equal(hook.state.child?.source, 'hook');
+
+  const hookBytes = fs.readFileSync(hook.path);
+  const replay = store.applyToSpawn(identity, hook.state.child!, hook.revision);
+  assert.equal(replay.state.status, 'observed-child');
+  assert.equal(replay.state.child?.turnId, 'hook-child-turn');
+  assert.equal(replay.state.child?.source, 'hook');
+  assert.equal(replay.revision, hook.revision);
+  assert.deepEqual(fs.readFileSync(replay.path), hookBytes);
+});
+
 test('Codex lifecycle store recovers a stale writer lock', () => {
   const root = temporaryRoot();
   const lock = path.join(root, '.write.lock');
