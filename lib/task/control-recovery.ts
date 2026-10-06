@@ -56,7 +56,7 @@ export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperat
   ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation' })),
   { family: 'task-finalization', intent: 'complete', class: 'finalization' },
   { family: 'task-create', intent: 'create', class: 'task-create' },
-  ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller' }))
+  ...(['open', 'close', 'verify', 'attest-capability'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller' }))
 ]);
 
 export function digestControlRecoveryIntent(family: string, intent: string): string {

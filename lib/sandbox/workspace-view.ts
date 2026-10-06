@@ -255,14 +255,6 @@ export function materializeSandboxControl(params: Readonly<{
     assertSafeDirectory(directory, root);
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
-  for (const directory of [
-    path.join(runtimeDir, 'clients'),
-    path.join(runtimeDir, 'clients', 'codex', 'capabilities')
-  ]) {
-    assertSafeDirectory(directory, runtimeDir);
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    fs.chmodSync(directory, 0o700);
-  }
   for (const queue of ['requests', 'responses']) {
     const directory = path.join(channelDir, queue);
     assertSafeDirectory(directory, root);

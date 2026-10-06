@@ -49,15 +49,15 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
 
 export function resolveAgentCapabilityStoreRoot(options: RuntimeResolutionOptions = {}): string {
   const env = options.env ?? process.env;
-  if (env.AGENT_INFRA_RUNTIME_DIR) {
-    return path.join(resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env }), 'clients', 'codex', 'capabilities');
-  }
   const taskId = options.taskId ?? env.AGENT_INFRA_TASK_ID;
   if (taskId) {
     return path.join(
       resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot }),
-      'sandbox-control', 'runtime', 'clients', 'codex', 'capabilities'
+      'sandbox-control', 'private-capabilities', 'clients', 'codex', 'capabilities'
     );
+  }
+  if (env.AGENT_INFRA_RUNTIME_DIR) {
+    return path.join(resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env }), 'clients', 'codex', 'capabilities');
   }
   const runtimeRoot = resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env });
   return path.join(runtimeRoot, 'codex-capabilities');

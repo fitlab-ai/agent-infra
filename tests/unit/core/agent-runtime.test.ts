@@ -9,7 +9,7 @@ import {
   resolveAgentRuntimeRoot,
 } from '../../../lib/runtime/agent-runtime.ts';
 
-test('task-bound capability store resolves from the configured runtime directory', () => {
+test('non-task capability store resolves from the configured runtime directory', () => {
   const env = {
     AGENT_INFRA_RUNTIME_DIR: '/run/agent-infra/runtime',
     AGENT_INFRA_CONTROL_TOKEN: 'token'
@@ -41,7 +41,7 @@ test('task-bound capability store resolves beneath the unique task runtime root'
   try {
     const env = { AGENT_INFRA_TASK_ID: taskId };
     const runtimeRoot = path.join(taskDir, '.runtime');
-    const controlRuntimeRoot = path.join(runtimeRoot, 'sandbox-control', 'runtime');
+    const controlRuntimeRoot = path.join(runtimeRoot, 'sandbox-control', 'private-capabilities');
     assert.equal(resolveAgentRuntimeRoot({ repoRoot, env }), runtimeRoot);
     assert.equal(
       resolveAgentCapabilityStoreRoot({ repoRoot, env }),
@@ -56,7 +56,7 @@ test('task-bound capability store resolves beneath the unique task runtime root'
         repoRoot,
         env: {
           AGENT_INFRA_TASK_ID: taskId,
-          AGENT_INFRA_RUNTIME_DIR: controlRuntimeRoot
+          AGENT_INFRA_RUNTIME_DIR: path.join(runtimeRoot, 'sandbox-control', 'runtime')
         }
       }),
       path.join(controlRuntimeRoot, 'clients', 'codex', 'capabilities')

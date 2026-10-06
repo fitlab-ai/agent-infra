@@ -19,6 +19,7 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     workspaceViewRoot: '/views/current',
     controlDir: '/control/current',
     controlStatusDir: '/control/status',
+    runtimeDir: '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime',
     taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
     taskId: 'TASK-20260809-010203'
   });
@@ -61,12 +62,18 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     }
   ]);
   assert.equal(mounts.some((mount) => mount.hostPaths.includes('/repo/.agents/workspace')), false);
-  assert.deepEqual(mounts.at(-2), {
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/runtime'), {
+    hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'],
+    containerPath: '/run/agent-infra/runtime',
+    readOnly: false
+  });
+  assert.equal(mounts.some((mount) => mount.hostPaths.some((hostPath) => hostPath.includes('private-capabilities'))), false);
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control-status'), {
     hostPaths: ['/control/status'],
     containerPath: '/run/agent-infra/control-status',
     readOnly: true
   });
-  assert.deepEqual(mounts.at(-1), {
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control'), {
     hostPaths: ['/control/current'],
     containerPath: '/run/agent-infra/control',
     readOnly: false

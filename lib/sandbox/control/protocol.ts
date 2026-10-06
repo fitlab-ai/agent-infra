@@ -72,8 +72,8 @@ export type SandboxTaskCreateRequest = RequestBase & Readonly<{
 }>;
 export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   family: 'codex-controller';
-  command: 'open' | 'close' | 'verify';
-  args: [];
+  command: 'open' | 'close' | 'verify' | 'attest-capability';
+  args: string[];
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
@@ -223,6 +223,30 @@ export function isSandboxControlFamily(value: string): value is SandboxControlFa
   return SANDBOX_CONTROL_FAMILIES.includes(value as SandboxControlFamily);
 }
 
+function validControllerArgs(command: unknown, args: unknown): args is string[] {
+  if (!Array.isArray(args)) return false;
+  if (command !== 'attest-capability') return args.length === 0;
+  return args.length === 5 && args.every((arg) => typeof arg === 'string' && arg.length > 0 && arg.length <= 4096);
+}
+
+function validateCodexControllerRequest(request: Record<string, unknown>, manifest: SandboxControlManifest): SandboxCodexControllerRequest {
+  const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+  if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
+    || !validControllerArgs(request.command, request.args)
+    || !['open', 'close', 'verify', 'attest-capability'].includes(request.command as string)
+    || !validControllerProcess(request.controllerProcess)
+    || (request.command === 'open' && request.controllerProof !== null)
+    || (request.command !== 'open' && !validControllerProof(request.controllerProof))
+    || (request.command === 'verify'
+      && JSON.stringify(request.controllerProcess) !== JSON.stringify((request.controllerProof as CodexControllerLeaseProofV1).controllerProcess))) {
+    fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller request schema is invalid');
+  }
+  if (manifest.mode !== 'task-bound' || !manifest.taskId) {
+    fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot register a Codex controller');
+  }
+  return request as SandboxCodexControllerRequest;
+}
+
 export function validateSandboxControlRequest(
   value: unknown,
   manifest: SandboxControlManifest,
@@ -262,21 +286,7 @@ export function validateSandboxControlRequest(
     return { ...request, candidate: validateTaskCreateCandidate(request.candidate) } as SandboxTaskCreateRequest;
   }
   if (request.family === 'codex-controller') {
-    const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
-    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
-      || !Array.isArray(request.args) || request.args.length !== 0
-      || !['open', 'close', 'verify'].includes(request.command as string)
-      || !validControllerProcess(request.controllerProcess)
-      || (request.command === 'open' && request.controllerProof !== null)
-      || (request.command !== 'open' && !validControllerProof(request.controllerProof))
-      || (request.command === 'verify'
-        && JSON.stringify(request.controllerProcess) !== JSON.stringify((request.controllerProof as CodexControllerLeaseProofV1).controllerProcess))) {
-      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller request schema is invalid');
-    }
-    if (manifest.mode !== 'task-bound' || !manifest.taskId) {
-      fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot register a Codex controller');
-    }
-    return request as SandboxCodexControllerRequest;
+    return validateCodexControllerRequest(request, manifest);
   }
   if (request.family === 'task-finalization') {
     const expected = ['agent', 'args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'operation', 'token', 'version'];

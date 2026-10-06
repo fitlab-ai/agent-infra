@@ -10,6 +10,8 @@ import {
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { requestCodexCapabilityAttestation } from '../sandbox/control/client.ts';
+import { controllerProofFromContext } from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
 import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { verifyCodexSandboxControllerContextWithWarnings } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
@@ -345,11 +347,35 @@ async function applyHookChildEvent(
 async function attestCapabilityReference(payload: unknown): Promise<boolean> {
   const capabilityRef = payloadText(payload, 'capabilityRef');
   if (!capabilityRef) return false;
+  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  if (contextPath) {
+    const { context } = verifyCodexSandboxControllerContextWithWarnings(contextPath, { repoRoot: process.cwd() });
+    if (context.taskId !== process.env.AGENT_INFRA_TASK_ID) {
+      throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: controller task does not match sandbox task');
+    }
+    const sessionId = payloadText(payload, 'sessionId');
+    const turnId = payloadText(payload, 'turnId');
+    const toolUseId = payloadText(payload, 'toolUseId');
+    const hookHash = payloadText(payload, 'hookDefinitionHash');
+    if (!sessionId || !turnId || !toolUseId || !hookHash) {
+      throw new Error('CODEX_CAPABILITY_IDENTITY_INVALID: hook identity is incomplete');
+    }
+    const result = requestCodexCapabilityAttestation({
+      controllerProof: controllerProofFromContext(context),
+      attestation: [capabilityRef, sessionId, turnId, toolUseId, hookHash]
+    });
+    output({ status: result.status, changed: result.changed, evidence: result.evidence, diagnostics: [], error: null });
+    return true;
+  }
+  if (process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_CONTROL_TOKEN) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_REQUIRED: capability attestation requires a verified controller');
+  }
   const capabilityStore = createCodexCapabilityStore({ taskId: process.env.AGENT_INFRA_TASK_ID });
   const armed = capabilityStore.inspectReference(capabilityRef);
+  const expectedTaskId = process.env.AGENT_INFRA_TASK_ID ?? resolveLifecycleTaskContext(armed.taskId).taskId;
   const capability = capabilityStore.attestByReference({
     capabilityRef,
-    expectedTaskId: armed.taskId,
+    expectedTaskId,
     sessionId: payloadText(payload, 'sessionId'),
     turnId: payloadText(payload, 'turnId'),
     toolUseId: payloadText(payload, 'toolUseId'),

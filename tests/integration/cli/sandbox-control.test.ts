@@ -7,6 +7,7 @@ import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import {
   requestCodexControllerClose,
+  requestCodexCapabilityAttestation,
   requestCodexControllerOpen,
   requestCodexControllerVerify,
   recoverSandboxControl,
@@ -30,6 +31,8 @@ import {
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
+import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
   atomicWriteJson,
   createSandboxControlTerminalResult,
@@ -2804,6 +2807,10 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   const branch = initializeRepository(root);
   const packageVersion = (JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as { version: string }).version;
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: packageVersion }));
+  const taskId = 'TASK-20260809-010203';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n# Fixture\n`);
   for (const relative of [
     '.codex/hooks.json',
     '.codex/agents/agent-infra-lifecycle-executor.toml',
@@ -2844,7 +2851,7 @@ exit 1
     authorityEvidence,
     branch,
     mode: 'task-bound',
-    taskId: 'TASK-20260809-010203',
+    taskId,
     token: 'controller-secret',
     generation: 'controller-generation',
     controlRootId: 'a'.repeat(96),
@@ -2899,10 +2906,44 @@ exit 1
       timeoutMs: 5_000
     }));
     assert.deepEqual(verified.binding, {
-      taskId: 'TASK-20260809-010203',
+      taskId,
       controlGeneration: 'controller-generation',
       controllerInstanceDigest: opened.lease.controllerInstanceDigest
     });
+    const privateRoot = path.join(taskDir, '.runtime', 'sandbox-control', 'private-capabilities', 'clients', 'codex', 'capabilities');
+    const buildIdentity = computeLifecycleBuildIdentity(root);
+    const capabilityStore = createCodexCapabilityStore({ root: privateRoot, reference: (() => {
+      let index = 0;
+      return () => `capability-ref-${++index}`;
+    })() });
+    const controller = { instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: opened.lease.controlGeneration };
+    const armed = capabilityStore.arm({ taskId, buildIdentity, controller });
+    const wrongIdentity = capabilityStore.arm({ taskId: 'TASK-20260809-999999', buildIdentity, controller });
+    const proof = {
+      version: 1 as const, leaseId: opened.lease.leaseId, leaseSecret: opened.lease.leaseSecret,
+      controllerProcess: opened.lease.controllerProcess
+    };
+    const requestAttestation = (capabilityRef: string) => withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: taskId,
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestCodexCapabilityAttestation({
+      controllerProof: proof,
+      attestation: [capabilityRef, 'session-1', 'turn-1', 'tool-1', 'hook-hash-1'],
+      channelDir, statusDir, token: 'controller-secret', generation: 'controller-generation', timeoutMs: 5_000
+    }));
+    const wrongPath = wrongIdentity.path;
+    const wrongBytes = fs.readFileSync(wrongPath);
+    assert.throws(() => requestAttestation(wrongIdentity.capabilityRef), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
+    assert.deepEqual(fs.readFileSync(wrongPath), wrongBytes);
+    const attested = requestAttestation(armed.capabilityRef);
+    assert.equal(attested.status, 'attested');
+    assert.equal(attested.binding.taskId, taskId);
+    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, attested.evidence.revision);
+    const expected = { taskId, hookDefinitionHash: 'hook-hash-1', buildIdentity, controller };
+    capabilityStore.reserveReference(armed.capabilityRef, 'host-consume', expected);
+    assert.equal(capabilityStore.consumeReference(armed.capabilityRef, 'host-consume', expected).status, 'consumed');
+    assert.equal(fs.existsSync(path.join(root, 'runtime', 'clients', 'codex', 'capabilities')), false);
     const closed = withSandboxControlEnvironment({
       AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
