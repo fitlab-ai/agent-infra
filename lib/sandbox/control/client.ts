@@ -27,6 +27,7 @@ import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/shor
 import { hasTaskBoundMarker, isSandbox } from '../environment.ts';
 import { loadConfig } from '../config.ts';
 import { recoverSandboxControlFromHost } from './host-recovery.ts';
+import { signCodexHookAttestation } from './codex-hook-attestation.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 const SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS = 5 * 60_000;
@@ -715,6 +716,8 @@ function requestCodexController(params: Readonly<{
 
 export function requestCodexCapabilityAttestation(params: Readonly<{
   attestation: readonly [string, string, string, string, string];
+  taskId: string;
+  attestationPrivateKey: string;
   controllerProof: CodexControllerLeaseProofV1;
   channelDir?: string; statusDir?: string; token?: string; generation?: string; timeoutMs?: number;
 }>): CodexCapabilityAttested {
@@ -726,6 +729,16 @@ export function requestCodexCapabilityAttestation(params: Readonly<{
     family: 'codex-controller', command: 'attest-capability', args: [...params.attestation],
     controllerProcess: params.controllerProof.controllerProcess, controllerProof: params.controllerProof
   };
+  request.args.push(signCodexHookAttestation({
+    requestId: request.id,
+    token: request.token,
+    generation: request.generation,
+    issuedAt: request.issuedAt,
+    expiresAt: request.expiresAt,
+    taskId: params.taskId,
+    controllerProof: params.controllerProof,
+    attestation: params.attestation
+  }, params.attestationPrivateKey));
   return parseCodexCapabilityAttestationResponse(exchangeSandboxControl(request, params));
 }
 

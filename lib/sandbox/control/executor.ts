@@ -38,6 +38,7 @@ import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type Broke
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { resolveAgentCapabilityStoreRoot } from '../../runtime/agent-runtime.ts';
+import { verifyCodexHookAttestation } from './codex-hook-attestation.ts';
 import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
@@ -315,7 +316,20 @@ function executeCapabilityAttestation(
   });
   const taskId = manifest.taskId;
   if (!taskId) throw new Error('CODEX_CAPABILITY_PROVENANCE_MISMATCH: broker task identity is missing');
-  const [capabilityRef, sessionId, turnId, toolUseId, hookDefinitionHash] = request.args;
+  const attestation = request.args.slice(0, 5) as [string, string, string, string, string];
+  if (!binding.attestationPublicKey || !verifyCodexHookAttestation({
+    requestId: request.id,
+    token: request.token,
+    generation: request.generation,
+    issuedAt: request.issuedAt,
+    expiresAt: request.expiresAt,
+    taskId,
+    controllerProof: request.controllerProof!,
+    attestation
+  }, request.args[5]!, binding.attestationPublicKey)) {
+    throw new Error('CODEX_CAPABILITY_ATTESTATION_INVALID: hook authorization signature is invalid');
+  }
+  const [capabilityRef, sessionId, turnId, toolUseId, hookDefinitionHash] = attestation;
   const capability = createCodexCapabilityStore({
     root: resolveAgentCapabilityStoreRoot({ repoRoot: manifest.repoRoot, taskId })
   }).attestByReference({

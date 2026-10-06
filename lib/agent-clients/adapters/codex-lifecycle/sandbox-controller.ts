@@ -11,6 +11,7 @@ import {
   requestCodexControllerOpen,
   requestCodexControllerVerify
 } from '../../../sandbox/control/client.ts';
+import { bindCodexControllerAttestationKey } from '../../../sandbox/control/controller-registration.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
@@ -18,7 +19,7 @@ import {
   controllerProofFromContext,
   verifyCodexSandboxControllerContextWithWarnings as verifyContextFileWithWarnings,
   writeCodexSandboxControllerContext,
-  type CodexSandboxControllerContextV2
+  type CodexSandboxControllerContextV3
 } from './controller-context.ts';
 
 type ControllerControl = Readonly<{
@@ -45,6 +46,7 @@ type ControllerOptions = Readonly<{
   now?: () => number;
   codexVersion?: () => string;
   verifyController?: typeof requestCodexControllerVerify;
+  bindControllerAttestationKey?: typeof bindCodexControllerAttestationKey;
   openController?: typeof requestCodexControllerOpen;
   closeController?: typeof requestCodexControllerClose;
   environment?: NodeJS.ProcessEnv;
@@ -56,7 +58,7 @@ type PreparedCodexSandboxController = Readonly<{
   env: NodeJS.ProcessEnv;
   home: string;
   contextPath: string;
-  context: CodexSandboxControllerContextV2;
+  context: CodexSandboxControllerContextV3;
   cleanup: () => void;
 }>;
 
@@ -68,6 +70,18 @@ type VerifyContextOptions = Readonly<{
   control?: ControllerControl;
   requestControllerVerify?: typeof requestCodexControllerVerify;
 }>;
+
+function bindControllerAttestationKey(
+  options: ControllerOptions,
+  params: Parameters<typeof bindCodexControllerAttestationKey>[0]
+): void {
+  const bind = options.bindControllerAttestationKey;
+  if (bind) {
+    bind(params);
+    return;
+  }
+  bindCodexControllerAttestationKey(params);
+}
 
 function copyRegular(source: string, destination: string, mode: number): void {
   const stat = fs.lstatSync(source);
@@ -116,7 +130,7 @@ function verifyRuntime(runtimeDir: string): void {
 }
 
 function verifyControllerBinding(
-  context: CodexSandboxControllerContextV2,
+  context: CodexSandboxControllerContextV3,
   control: ControllerControl,
   requestControllerVerify: typeof requestCodexControllerVerify
 ): void {
@@ -136,7 +150,7 @@ function verifyControllerBinding(
 function verifyCodexSandboxControllerContextWithWarnings(
   contextPath: string,
   options: VerifyContextOptions = {}
-): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
+): Readonly<{ context: CodexSandboxControllerContextV3; warnings: readonly LifecycleIdentityWarning[] }> {
   const control = options.control ?? controlFromEnvironment();
   const fileVerification = verifyContextFileWithWarnings(contextPath, {
     repoRoot: options.repoRoot,
@@ -273,7 +287,7 @@ function prepareCodexSandboxController(
   const home = fs.mkdtempSync(path.join(runtimeRoot, `${key}-`));
   fs.chmodSync(home, 0o700);
   let cleaned = false;
-  let context: CodexSandboxControllerContextV2 | null = null;
+  let context: CodexSandboxControllerContextV3 | null = null;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
@@ -312,6 +326,9 @@ function prepareCodexSandboxController(
     copyRegular(executor, path.join(home, 'agents', path.basename(executor)), 0o600);
     copyRegular(reviewer, path.join(home, 'agents', path.basename(reviewer)), 0o600);
 
+    const attestationKeys = crypto.generateKeyPairSync('ed25519');
+    const attestationPrivateKey = attestationKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const attestationPublicKey = attestationKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const opened = (options.openController ?? requestCodexControllerOpen)({
       controllerProcess: { pid: process.pid, startTime: parentStartTime },
       ...control,
@@ -321,14 +338,22 @@ function prepareCodexSandboxController(
     if (opened.lease.buildIdentity.protocolVersion !== LIFECYCLE_PROTOCOL_VERSION) {
       throw new Error('CODEX_LIFECYCLE_PROTOCOL_MISMATCH: Codex lifecycle protocol version does not match');
     }
-    context = contextFromControllerLease(opened.lease, {
-      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
-    });
     if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid
       || opened.lease.controllerProcess.startTime !== parentStartTime) {
       throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
     }
+    context = contextFromControllerLease(opened.lease, {
+      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
+      attestationPrivateKey
+    });
+    bindControllerAttestationKey(options, {
+      manifestPath: path.join(path.dirname(control.statusDir), 'manifest.json'),
+      taskId,
+      controlGeneration: opened.lease.controlGeneration,
+      proof: controllerProofFromContext(context),
+      publicKey: attestationPublicKey
+    });
     verifyControllerBinding(context, control, options.verifyController ?? requestCodexControllerVerify);
     const contextPath = path.join(home, 'controller-context.json');
     writeCodexSandboxControllerContext(contextPath, context);
@@ -431,7 +456,7 @@ export {
   controllerProofFromContext
 };
 export type {
-  CodexSandboxControllerContextV2 as CodexSandboxControllerContext,
+  CodexSandboxControllerContextV3 as CodexSandboxControllerContext,
   ControllerControl,
   ControllerInput,
   ControllerOptions,

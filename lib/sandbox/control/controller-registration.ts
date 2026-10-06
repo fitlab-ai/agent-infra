@@ -10,7 +10,7 @@ import type { SandboxControlManifest } from './protocol.ts';
 const CONTROLLER_TTL_MS = 4 * 60 * 60 * 1_000;
 const HEX_256 = /^[a-f0-9]{64}$/u;
 const REGISTRATION_KEYS = [
-  'buildIdentity', 'containerId', 'controlGeneration', 'controllerInstanceDigest',
+  'attestationPublicKey', 'buildIdentity', 'containerId', 'controlGeneration', 'controllerInstanceDigest',
   'controllerProcess', 'expiresAt', 'issuedAt', 'leaseId', 'leaseSecretHash',
   'taskId', 'version'
 ].sort().join(',');
@@ -29,6 +29,7 @@ export type CodexControllerRegistrationV1 = Readonly<{
   containerId: string;
   leaseId: string;
   leaseSecretHash: string;
+  attestationPublicKey: string | null;
   controllerInstanceDigest: string;
   controllerProcess: ProcessIdentity;
   buildIdentity: LifecycleBuildIdentity;
@@ -101,6 +102,41 @@ function validBuild(value: unknown): value is LifecycleBuildIdentity {
     && typeof build.lifecycleContractHash === 'string' && HEX_256.test(build.lifecycleContractHash);
 }
 
+function validAttestationPublicKey(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) return false;
+  try {
+    return crypto.createPublicKey(value).asymmetricKeyType === 'ed25519';
+  } catch {
+    return false;
+  }
+}
+
+function validRegistrationIdentity(registration: Record<string, unknown>): boolean {
+  return Object.keys(registration).sort().join(',') === REGISTRATION_KEYS
+    && registration.version === 1
+    && typeof registration.taskId === 'string'
+    && typeof registration.controlGeneration === 'string'
+    && typeof registration.containerId === 'string'
+    && typeof registration.controllerInstanceDigest === 'string'
+    && HEX_256.test(registration.controllerInstanceDigest)
+    && validProcess(registration.controllerProcess)
+    && validBuild(registration.buildIdentity);
+}
+
+function validRegistrationLease(registration: Record<string, unknown>): boolean {
+  return typeof registration.leaseId === 'string'
+    && HEX_256.test(registration.leaseId)
+    && typeof registration.leaseSecretHash === 'string'
+    && HEX_256.test(registration.leaseSecretHash)
+    && (registration.attestationPublicKey === null || validAttestationPublicKey(registration.attestationPublicKey));
+}
+
+function validRegistrationTimes(registration: Record<string, unknown>): boolean {
+  return Number.isSafeInteger(registration.issuedAt)
+    && Number.isSafeInteger(registration.expiresAt)
+    && (registration.expiresAt as number) > (registration.issuedAt as number);
+}
+
 function parseRegistration(raw: string): CodexControllerRegistrationV1 {
   let value: unknown;
   try {
@@ -112,22 +148,24 @@ function parseRegistration(raw: string): CodexControllerRegistrationV1 {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration is invalid');
   }
   const registration = value as Record<string, unknown>;
-  if (Object.keys(registration).sort().join(',') !== REGISTRATION_KEYS
-    || registration.version !== 1
-    || typeof registration.taskId !== 'string'
-    || typeof registration.controlGeneration !== 'string'
-    || typeof registration.containerId !== 'string'
-    || typeof registration.leaseId !== 'string' || !HEX_256.test(registration.leaseId)
-    || typeof registration.leaseSecretHash !== 'string' || !HEX_256.test(registration.leaseSecretHash)
-    || typeof registration.controllerInstanceDigest !== 'string' || !HEX_256.test(registration.controllerInstanceDigest)
-    || !validProcess(registration.controllerProcess)
-    || !validBuild(registration.buildIdentity)
-    || !Number.isSafeInteger(registration.issuedAt)
-    || !Number.isSafeInteger(registration.expiresAt)
-    || (registration.expiresAt as number) <= (registration.issuedAt as number)) {
+  if (!validRegistrationIdentity(registration)
+    || !validRegistrationLease(registration)
+    || !validRegistrationTimes(registration)) {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration schema is invalid');
   }
   return registration as CodexControllerRegistrationV1;
+}
+
+function matchesAttestationLease(
+  registration: CodexControllerRegistrationV1,
+  params: Readonly<{ taskId: string; controlGeneration: string; proof: CodexControllerLeaseProofV1 }>
+): boolean {
+  return registration.taskId === params.taskId
+    && registration.controlGeneration === params.controlGeneration
+    && params.proof.version === 1
+    && registration.leaseId === params.proof.leaseId
+    && safeEqual(registration.leaseSecretHash, secretHash(params.proof.leaseSecret))
+    && JSON.stringify(registration.controllerProcess) === JSON.stringify(params.proof.controllerProcess);
 }
 
 function registrationPath(manifestPath: string): string {
@@ -255,6 +293,7 @@ export function openCodexControllerRegistration(params: Readonly<{
     containerId: params.manifest.containerIdentity.id,
     leaseId,
     leaseSecretHash: secretHash(leaseSecret),
+    attestationPublicKey: null,
     controllerInstanceDigest,
     controllerProcess: params.controllerProcess,
     buildIdentity: params.buildIdentity,
@@ -317,6 +356,34 @@ export function closeCodexControllerRegistration(params: Readonly<{
   return Object.freeze({ version: 1, status: 'closed', changed: true, lease: null, error: null });
 }
 
+export function bindCodexControllerAttestationKey(params: Readonly<{
+  manifestPath: string;
+  taskId: string;
+  controlGeneration: string;
+  proof: CodexControllerLeaseProofV1;
+  publicKey: string;
+}>): void {
+  if (!validAttestationPublicKey(params.publicKey)) {
+    fail('CODEX_SANDBOX_CONTROLLER_ATTESTATION_KEY_INVALID', 'hook attestation public key is invalid');
+  }
+  const file = registrationPath(params.manifestPath);
+  const initial = readRaw(file);
+  if (!initial) fail('SANDBOX_CONTROL_CONTROLLER_REGISTRATION_MISSING', 'controller registration is missing');
+  const registration = parseRegistration(initial.raw);
+  if (!matchesAttestationLease(registration, params)) {
+    fail('CODEX_SANDBOX_CONTROLLER_PROOF_INVALID', 'controller attestation binding proof is invalid');
+  }
+  if (registration.attestationPublicKey !== null) {
+    if (registration.attestationPublicKey === params.publicKey) return;
+    fail('CODEX_SANDBOX_CONTROLLER_ATTESTATION_KEY_CONFLICT', 'controller hook attestation key is already bound');
+  }
+  const current = readRaw(file);
+  if (!current || current.raw !== initial.raw || !sameFile(current.stat, initial.stat)) {
+    fail('CODEX_SANDBOX_CONTROLLER_OWNERSHIP_LOST', 'controller registration changed before attestation key binding');
+  }
+  atomicWrite(file, Object.freeze({ ...registration, attestationPublicKey: params.publicKey }));
+}
+
 export function resolveCodexControllerBinding(params: Readonly<{
   manifest: SandboxControlManifest;
   manifestPath: string;
@@ -327,6 +394,7 @@ export function resolveCodexControllerBinding(params: Readonly<{
 }>): Readonly<{
   instanceDigest: string;
   controlGeneration: string;
+  attestationPublicKey: string | null;
 }> {
   if (params.manifest.mode !== 'task-bound' || !params.manifest.taskId) {
     fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot resolve a Codex controller registration');
@@ -347,6 +415,7 @@ export function resolveCodexControllerBinding(params: Readonly<{
   if (state === 'unknown') fail('CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN', 'controller process state is unknown');
   return Object.freeze({
     instanceDigest: registration.controllerInstanceDigest,
-    controlGeneration: registration.controlGeneration
+    controlGeneration: registration.controlGeneration,
+    attestationPublicKey: registration.attestationPublicKey
   });
 }

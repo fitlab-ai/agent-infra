@@ -121,6 +121,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
       runtimeDir: f.runtimeDir
     },
     ...broker,
+    bindControllerAttestationKey: () => undefined,
     codexVersion: () => '0.147.0',
     environment: { ...process.env, UNRELATED_CONTROLLER_SECRET: 'must-not-leak' }
   });
@@ -187,12 +188,13 @@ test('sandbox controller enforces a task lease and controller context binding', 
     temporaryRoot,
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
+    bindControllerAttestationKey: () => undefined,
     codexVersion: () => '0.147.0'
   } as const;
   const prepared = prepareCodexSandboxController({}, options);
   const contextRaw = fs.readFileSync(prepared.contextPath, 'utf8');
   const contextValue = JSON.parse(contextRaw) as Record<string, unknown>;
-  assert.equal(contextValue.version, 2);
+  assert.equal(contextValue.version, 3);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, extra: true })}\n`, { mode: 0o600 });
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
@@ -226,6 +228,7 @@ test('sandbox controller closes a broker lease when the opened binding is invali
     temporaryRoot: trackedTemporaryRoot('codex-controller-invalid-binding-'),
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
+    bindControllerAttestationKey: () => undefined,
     verifyController: (() => ({
       version: 1 as const,
       status: 'verified' as const,

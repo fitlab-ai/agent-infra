@@ -13,13 +13,14 @@ import {
 
 const HEX_256 = /^[a-f0-9]{64}$/u;
 
-export type CodexSandboxControllerContextV2 = Readonly<{
-  version: 2;
+export type CodexSandboxControllerContextV3 = Readonly<{
+  version: 3;
   taskId: string;
   controlGeneration: string;
   controllerInstanceDigest: string;
   controllerProcess: ProcessIdentity;
   controllerLease: Readonly<{ version: 1; leaseId: string; leaseSecret: string }>;
+  attestationPrivateKey: string;
   issuedAt: number;
   expiresAt: number;
   buildIdentity: LifecycleBuildIdentity;
@@ -50,47 +51,68 @@ function validBuildIdentity(value: unknown): value is LifecycleBuildIdentity {
     && typeof identity.lifecycleContractHash === 'string' && HEX_256.test(identity.lifecycleContractHash);
 }
 
-function validateContext(value: unknown): CodexSandboxControllerContextV2 {
+function validContextHeader(context: Record<string, unknown>): boolean {
+  return exactKeys(context, [
+    'attestationPrivateKey', 'buildIdentity', 'controlGeneration', 'controllerInstanceDigest', 'controllerLease',
+    'controllerProcess', 'expiresAt', 'hookDefinitionHash', 'issuedAt', 'taskId', 'version'
+  ])
+    && context.version === 3
+    && typeof context.taskId === 'string' && context.taskId.length > 0
+    && typeof context.controlGeneration === 'string' && context.controlGeneration.length > 0
+    && typeof context.controllerInstanceDigest === 'string' && HEX_256.test(context.controllerInstanceDigest)
+    && validProcess(context.controllerProcess);
+}
+
+function validContextLease(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const lease = value as Record<string, unknown>;
+  return exactKeys(lease, ['leaseId', 'leaseSecret', 'version'])
+    && lease.version === 1
+    && typeof lease.leaseId === 'string' && HEX_256.test(lease.leaseId)
+    && typeof lease.leaseSecret === 'string' && HEX_256.test(lease.leaseSecret);
+}
+
+function validContextEvidence(context: Record<string, unknown>): boolean {
+  const issuedAt = context.issuedAt;
+  const expiresAt = context.expiresAt;
+  return Number.isSafeInteger(issuedAt)
+    && Number.isSafeInteger(expiresAt)
+    && (expiresAt as number) > (issuedAt as number)
+    && validBuildIdentity(context.buildIdentity)
+    && typeof context.hookDefinitionHash === 'string'
+    && HEX_256.test(context.hookDefinitionHash);
+}
+
+function validateContext(value: unknown): CodexSandboxControllerContextV3 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
   const context = value as Record<string, unknown>;
-  const lease = context.controllerLease as Record<string, unknown> | null;
-  if (!exactKeys(context, [
-    'buildIdentity', 'controlGeneration', 'controllerInstanceDigest', 'controllerLease',
-    'controllerProcess', 'expiresAt', 'hookDefinitionHash', 'issuedAt',
-    'taskId', 'version'
-  ])
-    || context.version !== 2
-    || typeof context.taskId !== 'string' || context.taskId.length === 0
-    || typeof context.controlGeneration !== 'string' || context.controlGeneration.length === 0
-    || typeof context.controllerInstanceDigest !== 'string' || !HEX_256.test(context.controllerInstanceDigest)
-    || !validProcess(context.controllerProcess)
-    || !lease || !exactKeys(lease, ['leaseId', 'leaseSecret', 'version'])
-    || lease.version !== 1
-    || typeof lease.leaseId !== 'string' || !HEX_256.test(lease.leaseId)
-    || typeof lease.leaseSecret !== 'string' || !HEX_256.test(lease.leaseSecret)
-    || !Number.isSafeInteger(context.issuedAt)
-    || !Number.isSafeInteger(context.expiresAt)
-    || (context.expiresAt as number) <= (context.issuedAt as number)
-    || !validBuildIdentity(context.buildIdentity)
-    || typeof context.hookDefinitionHash !== 'string' || !HEX_256.test(context.hookDefinitionHash)) {
+  if (!validContextHeader(context) || !validContextLease(context.controllerLease) || !validContextEvidence(context)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  return context as unknown as CodexSandboxControllerContextV2;
+  try {
+    if (crypto.createPrivateKey(context.attestationPrivateKey as string).asymmetricKeyType !== 'ed25519') {
+      throw new Error('invalid key type');
+    }
+  } catch {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
+  }
+  return context as unknown as CodexSandboxControllerContextV3;
 }
 
 export function contextFromControllerLease(
   lease: CodexControllerLeaseV1,
-  input: Readonly<{ hookDefinitionHash: string }>
-): CodexSandboxControllerContextV2 {
+  input: Readonly<{ hookDefinitionHash: string; attestationPrivateKey: string }>
+): CodexSandboxControllerContextV3 {
   return Object.freeze({
-    version: 2,
+    version: 3,
     taskId: lease.taskId,
     controlGeneration: lease.controlGeneration,
     controllerInstanceDigest: lease.controllerInstanceDigest,
     controllerProcess: lease.controllerProcess,
     controllerLease: Object.freeze({ version: 1, leaseId: lease.leaseId, leaseSecret: lease.leaseSecret }),
+    attestationPrivateKey: input.attestationPrivateKey,
     issuedAt: lease.issuedAt,
     expiresAt: lease.expiresAt,
     buildIdentity: lease.buildIdentity,
@@ -100,7 +122,7 @@ export function contextFromControllerLease(
 
 export function writeCodexSandboxControllerContext(
   contextPath: string,
-  context: CodexSandboxControllerContextV2
+  context: CodexSandboxControllerContextV3
 ): void {
   validateContext(context);
   fs.mkdirSync(path.dirname(contextPath), { recursive: true, mode: 0o700 });
@@ -122,7 +144,7 @@ export function verifyCodexSandboxControllerContextWithWarnings(
     generation?: string;
     probeProcess?: (identity: ProcessIdentity) => 'alive' | 'dead' | 'unknown';
   }> = {}
-): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
+): Readonly<{ context: CodexSandboxControllerContextV3; warnings: readonly LifecycleIdentityWarning[] }> {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(contextPath);
@@ -133,7 +155,7 @@ export function verifyCodexSandboxControllerContextWithWarnings(
     || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  let context: CodexSandboxControllerContextV2;
+  let context: CodexSandboxControllerContextV3;
   try {
     context = validateContext(JSON.parse(fs.readFileSync(contextPath, 'utf8')));
   } catch {
@@ -153,7 +175,7 @@ export function verifyCodexSandboxControllerContextWithWarnings(
   return Object.freeze({ context: Object.freeze(context), warnings: identity.warnings });
 }
 
-export function controllerProofFromContext(context: CodexSandboxControllerContextV2): CodexControllerLeaseProofV1 {
+export function controllerProofFromContext(context: CodexSandboxControllerContextV3): CodexControllerLeaseProofV1 {
   return Object.freeze({
     version: 1,
     leaseId: context.controllerLease.leaseId,

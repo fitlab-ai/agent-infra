@@ -226,7 +226,11 @@ export function isSandboxControlFamily(value: string): value is SandboxControlFa
 function validControllerArgs(command: unknown, args: unknown): args is string[] {
   if (!Array.isArray(args)) return false;
   if (command !== 'attest-capability') return args.length === 0;
-  return args.length === 5 && args.every((arg) => typeof arg === 'string' && arg.length > 0 && arg.length <= 4096);
+  const fields = args.slice(0, 5);
+  const signature = args[5];
+  return args.length === 6
+    && fields.every((arg) => typeof arg === 'string' && arg.length > 0 && arg.length <= 4096)
+    && typeof signature === 'string' && /^[A-Za-z0-9_-]{86}$/u.test(signature);
 }
 
 function validateCodexControllerRequest(request: Record<string, unknown>, manifest: SandboxControlManifest): SandboxCodexControllerRequest {

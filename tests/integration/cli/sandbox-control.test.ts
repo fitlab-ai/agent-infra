@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import crypto from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,10 +33,12 @@ import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/pro
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { bindCodexControllerAttestationKey } from '../../../lib/sandbox/control/controller-registration.ts';
 import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
   atomicWriteJson,
   createSandboxControlTerminalResult,
+  readSandboxControlStatus,
   writeSandboxControlPayload,
   writeSandboxControlReservation,
   writeSandboxControlResultEvidence,
@@ -81,6 +84,31 @@ function readJsonFileAfterPublication(filePath: string, timeoutMs: number): Reco
     }
   }
   throw new Error(`Timed out waiting for JSON in ${filePath}`);
+}
+
+function snapshotFiles(root: string): Readonly<Record<string, string>> {
+  const entries: Record<string, string> = {};
+  const visit = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      const relative = path.relative(root, file);
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile()) entries[relative] = fs.readFileSync(file).toString('base64');
+    }
+  };
+  visit(root);
+  return Object.freeze(entries);
+}
+
+function submitRawControlRequest(channelDir: string, request: Record<string, unknown>): Record<string, unknown> {
+  const requests = path.join(channelDir, 'requests');
+  const responses = path.join(channelDir, 'responses');
+  const id = request.id as string;
+  const requestPath = path.join(requests, `${id}.json`);
+  const temporaryPath = path.join(requests, `.${id}.tmp`);
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(request)}\n`, { mode: 0o600, flag: 'wx' });
+  fs.renameSync(temporaryPath, requestPath);
+  return readJsonFileAfterPublication(path.join(responses, `${id}.json`), 5_000);
 }
 
 function waitForAbsent(filePath: string, timeoutMs: number): void {
@@ -2923,12 +2951,68 @@ exit 1
       version: 1 as const, leaseId: opened.lease.leaseId, leaseSecret: opened.lease.leaseSecret,
       controllerProcess: opened.lease.controllerProcess
     };
-    const requestAttestation = (capabilityRef: string) => withSandboxControlEnvironment({
+    const attackerKeys = crypto.generateKeyPairSync('ed25519');
+    const attackerPrivateKey = attackerKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const attackerPublicKey = attackerKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const armedBytesBeforeForgery = fs.readFileSync(armed.path);
+    const armedStateBeforeForgery = capabilityStore.inspectReference(armed.capabilityRef);
+    const registrationPath = path.join(root, 'codex-controller.json');
+    const registrationBeforeForgery = fs.readFileSync(registrationPath);
+    const taskFilesBeforeForgery = snapshotFiles(taskDir);
+    const taskViewBeforeForgery = readSandboxControlStatus(statusDir).taskView;
+    const attemptChannelKeyBinding = () => {
+      const bindAttemptNow = Date.now();
+      const response = submitRawControlRequest(channelDir, {
+      version: 4,
+      id: crypto.randomUUID(),
+      token: 'controller-secret',
+      generation: 'controller-generation',
+      issuedAt: bindAttemptNow,
+      expiresAt: bindAttemptNow + 2_000,
+      family: 'codex-controller',
+      command: 'bind-attestation-key',
+      args: [attackerPublicKey],
+      controllerProcess: proof.controllerProcess,
+      controllerProof: proof
+      });
+      assert.equal(response.phase, 'rejected');
+      assert.equal((response.error as { code?: string } | null)?.code, 'SANDBOX_CONTROL_REQUEST_INVALID');
+    };
+    attemptChannelKeyBinding();
+    assert.deepEqual(fs.readFileSync(registrationPath), registrationBeforeForgery);
+    assert.deepEqual(fs.readFileSync(armed.path), armedBytesBeforeForgery);
+    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, armedStateBeforeForgery.revision);
+    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).status, 'armed');
+    assert.deepEqual(snapshotFiles(taskDir), taskFilesBeforeForgery);
+    assert.deepEqual(readSandboxControlStatus(statusDir).taskView, taskViewBeforeForgery);
+    const legitimateKeys = crypto.generateKeyPairSync('ed25519');
+    const legitimatePrivateKey = legitimateKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const legitimatePublicKey = legitimateKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    bindCodexControllerAttestationKey({
+      manifestPath,
+      taskId,
+      controlGeneration: opened.lease.controlGeneration,
+      proof,
+      publicKey: legitimatePublicKey
+    });
+    const registrationAfterLegitimateBinding = fs.readFileSync(registrationPath);
+    attemptChannelKeyBinding();
+    assert.deepEqual(fs.readFileSync(registrationPath), registrationAfterLegitimateBinding);
+    assert.throws(() => bindCodexControllerAttestationKey({
+      manifestPath,
+      taskId,
+      controlGeneration: opened.lease.controlGeneration,
+      proof,
+      publicKey: attackerPublicKey
+    }), /CODEX_SANDBOX_CONTROLLER_ATTESTATION_KEY_CONFLICT/);
+    const requestAttestation = (capabilityRef: string, privateKey = legitimatePrivateKey) => withSandboxControlEnvironment({
       AGENT_INFRA_TASK_ID: taskId,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
     }, () => requestCodexCapabilityAttestation({
       controllerProof: proof,
+      taskId,
+      attestationPrivateKey: privateKey,
       attestation: [capabilityRef, 'session-1', 'turn-1', 'tool-1', 'hook-hash-1'],
       channelDir, statusDir, token: 'controller-secret', generation: 'controller-generation', timeoutMs: 5_000
     }));
@@ -2936,6 +3020,18 @@ exit 1
     const wrongBytes = fs.readFileSync(wrongPath);
     assert.throws(() => requestAttestation(wrongIdentity.capabilityRef), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
     assert.deepEqual(fs.readFileSync(wrongPath), wrongBytes);
+    const taskFilesBeforeSignatureForgery = snapshotFiles(taskDir);
+    const taskViewBeforeSignatureForgery = readSandboxControlStatus(statusDir).taskView;
+    assert.throws(
+      () => requestAttestation(armed.capabilityRef, attackerPrivateKey),
+      /CODEX_CAPABILITY_ATTESTATION_INVALID/
+    );
+    assert.deepEqual(fs.readFileSync(armed.path), armedBytesBeforeForgery);
+    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, armedStateBeforeForgery.revision);
+    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).status, 'armed');
+    assert.deepEqual(snapshotFiles(taskDir), taskFilesBeforeSignatureForgery);
+    const taskViewAfterForgery = readSandboxControlStatus(statusDir).taskView;
+    assert.deepEqual(taskViewAfterForgery, taskViewBeforeSignatureForgery);
     const attested = requestAttestation(armed.capabilityRef);
     assert.equal(attested.status, 'attested');
     assert.equal(attested.binding.taskId, taskId);

@@ -23,6 +23,27 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
     taskId: 'TASK-20260809-010203'
   });
+  const controllerHome = '/tmp/agent-infra-codex-controllers/controller-home';
+  const controllerContext = path.join(controllerHome, 'controller-context.json');
+  assert.deepEqual(mounts.flatMap((mount) => mount.hostPaths), [
+    '/repo/.git',
+    '/worktree',
+    '/control/current/workspace.git',
+    '/views/current/active/.short-ids.json',
+    '/views/current/completed',
+    '/views/current/blocked',
+    '/views/current/archive',
+    '/repo/.agents/workspace/active/TASK-20260809-010203',
+    '/views/current/task-runtime-mask',
+    '/share/common',
+    '/share/branches/feature',
+    '/shell/feature',
+    '/control/status',
+    '/control/current',
+    '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'
+  ]);
+  assert.equal(mounts.some((mount) => mount.hostPaths.some((hostPath) =>
+    controllerContext === hostPath || controllerContext.startsWith(`${hostPath}/`))), false);
   assert.deepEqual(mounts.slice(0, 3), [
     { hostPaths: ['/repo/.git'], containerPath: '/run/agent-infra/git', readOnly: false },
     { hostPaths: ['/worktree'], containerPath: '/workspace', readOnly: false },

@@ -568,7 +568,11 @@ test('typed controller verify returns only the live task binding without spawnin
   const before = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
   const result = await executeRequest(manifest, manifestPath, validated, {
     buildIdentity: () => controllerBuild,
-    resolveControllerBinding: () => ({ instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: manifest.generation })
+    resolveControllerBinding: () => ({
+      instanceDigest: opened.lease.controllerInstanceDigest,
+      controlGeneration: manifest.generation,
+      attestationPublicKey: null
+    })
   });
   assert.equal(result.exitCode, 0);
   assert.deepEqual(JSON.parse(result.stdout), {
