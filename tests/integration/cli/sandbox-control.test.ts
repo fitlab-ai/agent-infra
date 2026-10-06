@@ -35,6 +35,7 @@ import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/exe
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { bindCodexControllerAttestationKey } from '../../../lib/sandbox/control/controller-registration.ts';
 import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { prepareCodexSandboxController, resolveCodexSandboxControllerHostBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import {
   atomicWriteJson,
   createSandboxControlTerminalResult,
@@ -54,8 +55,19 @@ import { recoverSandboxControlFromHost } from '../../../lib/sandbox/control/host
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
-import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
+import { getProcessIdentityState, getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { createLocalTask } from '../../../lib/task/create.ts';
+import {
+  activateOrchestrationDelegation,
+  advanceOrchestration,
+  beginOrResumeOrchestration,
+  completeOrchestrationStage,
+  dispatchOrchestrationDelegation,
+  pauseOrchestration,
+  prepareOrchestrationDelegation,
+  readRun,
+  sealOrchestrationDelegation
+} from '../../../lib/task/orchestration.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
 import { serializeTaskFinalizationEnvelope } from '../../../lib/task/finalization-envelope.ts';
 import { prepareTaskFinalization } from '../../../lib/task/finalization.ts';
@@ -98,6 +110,113 @@ function snapshotFiles(root: string): Readonly<Record<string, string>> {
   };
   visit(root);
   return Object.freeze(entries);
+}
+
+function snapshotTaskBusinessFiles(root: string): Readonly<Record<string, string>> {
+  const entries: Record<string, string> = {};
+  const visit = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      const relative = path.relative(root, file);
+      const controlRoot = path.join('.runtime', 'sandbox-control');
+      if (relative === controlRoot || relative.startsWith(`${controlRoot}${path.sep}`)) continue;
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile()) {
+        entries[relative] = fs.readFileSync(file).toString('base64');
+      }
+    }
+  };
+  visit(root);
+  return Object.freeze(entries);
+}
+
+function seedTaskBusinessState(taskId: string, root: string, taskDir: string): void {
+  const modelPolicy = {
+    executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
+    reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+  } as const;
+  const options = {
+    repoRoot: root,
+    now: () => '2026-01-01T00:00:00.000Z',
+    captureWorkspace: () => 'business-state-before'
+  };
+  assert.equal(beginOrResumeOrchestration(taskId, {
+    ...options, client: 'claude-code', modelPolicy, id: () => 'fixture-run'
+  }).status, 'running');
+  const prepared = prepareOrchestrationDelegation(taskId, {
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { ...options, supportsLifecycleDelegation: () => true, id: () => 'fixture-receipt' });
+  assert.equal(prepared.status, 'running', JSON.stringify(prepared.error));
+  assert.ok(prepared.next);
+  assert.equal(dispatchOrchestrationDelegation(taskId, options).status, 'running');
+  assert.equal(activateOrchestrationDelegation(taskId, {
+    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'fixture-child', parentId: 'fixture-parent',
+    spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
+  }, options).status, 'running');
+  assert.equal(completeOrchestrationStage(taskId, {
+    stage: prepared.next.stage, round: prepared.next.round, artifact: prepared.next.artifact, agent: 'claude-code'
+  }, options).status, 'running');
+  assert.equal(sealOrchestrationDelegation(taskId, {
+    childId: 'fixture-child', exitCode: 0, afterFingerprint: 'business-state-after', changedPaths: []
+  }, options).status, 'running');
+  const consumed = advanceOrchestration(taskId, options);
+  assert.equal(consumed.status, 'running');
+  assert.equal(consumed.run?.receipts.length, 1);
+  assert.equal(consumed.run?.receipts[0]?.status, 'consumed');
+  assert.equal(pauseOrchestration(taskId, 'FIXTURE_PAUSED', 'seeded business state', true, options).status, 'paused');
+  const run = readRun(taskDir);
+  assert.equal(run?.status, 'paused');
+  assert.ok(run?.pause);
+  assert.equal(run?.receipts.length, 1);
+  assert.equal(run?.receipts[0]?.status, 'consumed');
+}
+
+function assertTaskBusinessStateSnapshot(
+  taskDir: string,
+  snapshot: Readonly<Record<string, string>>
+): void {
+  assert.ok(Object.keys(snapshot).length > 0);
+  assert.ok(Object.hasOwn(snapshot, 'task.md'));
+  assert.ok(Object.hasOwn(snapshot, path.join('.runtime', 'orchestration.json')));
+  const run = JSON.parse(Buffer.from(snapshot[path.join('.runtime', 'orchestration.json')]!, 'base64').toString('utf8')) as {
+    status?: string;
+    receipts?: Array<{ status?: string; consumedAt?: string | null }>;
+    pause?: { code?: string } | null;
+  };
+  assert.equal(run.status, 'paused');
+  assert.equal(run.receipts?.length, 1);
+  assert.equal(run.receipts?.[0]?.status, 'consumed');
+  assert.ok(run.receipts?.[0]?.consumedAt);
+  assert.equal(run.pause?.code, 'FIXTURE_PAUSED');
+  assert.equal(fs.existsSync(path.join(taskDir, '.runtime', 'orchestration.json')), true);
+}
+
+function brokerBusinessState(statusDir: string): Readonly<{ state: string; reasonCode: string | null; taskView: unknown }> {
+  const status = readSandboxControlStatus(statusDir);
+  return Object.freeze({ state: status.state, reasonCode: status.reasonCode, taskView: status.taskView });
+}
+
+function assertContainerViewCannotResolveControllerManifest(taskId: string, branch: string): void {
+  const containerView = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-container-view-'));
+  try {
+    fs.mkdirSync(path.join(containerView, '.agents', 'workspace', 'active', taskId), { recursive: true });
+    fs.writeFileSync(path.join(containerView, '.agents', 'workspace', 'active', taskId, 'task.md'),
+      `---\nid: ${taskId}\nbranch: ${branch}\n---\n# Fixture\n`);
+    execFileSync('git', ['init', '-q'], { cwd: containerView });
+    execFileSync('git', ['checkout', '-qb', branch], { cwd: containerView });
+    assert.throws(() => resolveCodexSandboxControllerHostBinding(containerView), /MANIFEST_INVALID/);
+  } finally {
+    fs.rmSync(containerView, { recursive: true, force: true });
+  }
+}
+
+function assertRejectedSandboxTaskReference(
+  ref: string,
+  result: Readonly<{ status: number | null; stdout: string; stderr: string }>
+): void {
+  assert.equal(result.status, ref === 'not-a-task' ? 2 : 1, `${ref}: ${result.stderr}${result.stdout}`);
+  if (ref === 'not-a-task') assert.equal(JSON.parse(result.stdout).error.code, 'INVALID_TASK_REF');
+  else assert.match(result.stderr, /SANDBOX_TASK_REF_MISMATCH/, ref);
 }
 
 function submitRawControlRequest(channelDir: string, request: Record<string, unknown>): Record<string, unknown> {
@@ -2787,12 +2906,7 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
           assert.equal(output.taskId, taskId, ref);
           assert.equal(output.next.name, 'analysis.md', ref);
         } else {
-          assert.equal(result.status, ref === 'not-a-task' ? 2 : 1, `${ref}: ${result.stderr}${result.stdout}`);
-          if (ref === 'not-a-task') {
-            assert.equal(JSON.parse(result.stdout).error.code, 'INVALID_TASK_REF');
-          } else {
-            assert.match(result.stderr, /SANDBOX_TASK_REF_MISMATCH/, ref);
-          }
+          assertRejectedSandboxTaskReference(ref, result);
         }
       }
     } finally { process.chdir(previousCwd); }
@@ -2826,19 +2940,23 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
 
 test('sandbox broker opens and closes a host-only Codex controller registration across processes', onPlatforms('linux'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-roundtrip-'));
-  const channelDir = path.join(root, 'channel');
-  const manifestPath = path.join(root, 'manifest.json');
-  const statusDir = path.join(root, 'public');
-  const processingDir = path.join(root, 'processing');
+  const taskId = 'TASK-20260809-010203';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const controlRoot = path.join(taskDir, '.runtime', 'sandbox-control');
+  const channelDir = path.join(controlRoot, 'channel');
+  const manifestPath = path.join(controlRoot, 'manifest.json');
+  const statusDir = path.join(controlRoot, 'public');
+  const processingDir = path.join(controlRoot, 'processing');
+  const runtimeDir = path.join(controlRoot, 'runtime');
   const fakeBin = path.join(root, 'bin-fixture');
-  for (const directory of [channelDir, statusDir, processingDir, fakeBin]) fs.mkdirSync(directory, { recursive: true });
+  const hostTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-host-private-'));
+  for (const directory of [channelDir, statusDir, processingDir, runtimeDir, fakeBin]) fs.mkdirSync(directory, { recursive: true });
   const branch = initializeRepository(root);
   const packageVersion = (JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as { version: string }).version;
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: packageVersion }));
-  const taskId = 'TASK-20260809-010203';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n# Fixture\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v${packageVersion}\nbranch: ${branch}\n---\n# Fixture\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  seedTaskBusinessState(taskId, root, taskDir);
   for (const relative of [
     '.codex/hooks.json',
     '.codex/agents/agent-infra-lifecycle-executor.toml',
@@ -2859,7 +2977,6 @@ if [ "$1" = version ]; then printf '%s\\n' '{"ApiVersion":"1.50"}'; exit 0; fi
 if [ "$1" = info ]; then printf '%s\\n' '"daemon-id"'; exit 0; fi
 if [ "$1" = container ] && [ "$2" = ls ]; then printf '%s\\n' '${containerId}'; exit 0; fi
 if [ "$1" = container ] && [ "$2" = inspect ]; then printf '%s\\n' '{"Id":"${containerId}","State":{"Running":true},"Config":{"Labels":{}}}'; exit 0; fi
-[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"
 exit 1
 `, { mode: 0o700 });
   const authorityEvidence = captureSandboxAuthority('native', {
@@ -2886,7 +3003,7 @@ exit 1
     channelDir,
     publicStatusDir: statusDir,
     processingDir,
-    runtimeDir: path.join(root, 'runtime')
+    runtimeDir
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'controller-generation', controlRootId: 'a'.repeat(96)
@@ -2897,69 +3014,60 @@ exit 1
     { cwd: path.resolve('.'), stdio: 'ignore', env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` } }
   );
   try {
-    waitForFile(path.join(root, 'broker.json'), 5_000);
+    waitForFile(path.join(controlRoot, 'broker.json'), 5_000);
     waitForHealthyStatus(statusDir, 5_000);
-    const startTime = getProcessStartTime(process.pid);
-    assert.ok(startTime);
-    const opened = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
+    const hostBinding = resolveCodexSandboxControllerHostBinding(root);
+    assert.equal(hostBinding.manifestPath, manifestPath);
+    assert.equal(hostBinding.control.channelDir, channelDir);
+    assertContainerViewCannotResolveControllerManifest(taskId, branch);
+    const controllerHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-home-'));
+    fs.writeFileSync(path.join(controllerHome, 'auth.json'), '{"token":"controller-test"}\n', { mode: 0o600 });
+    const prepared = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: taskId,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestCodexControllerOpen({
-      controllerProcess: { pid: process.pid, startTime },
-      channelDir,
-      statusDir,
-      token: 'controller-secret',
-      generation: 'controller-generation',
-      timeoutMs: 5_000
+    }, () => prepareCodexSandboxController({}, {
+      repoRoot: root,
+      codexHome: controllerHome,
+      temporaryRoot: hostTempRoot,
+      codexVersion: () => '0.147.0'
     }));
-    const registration = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
-    assert.equal(registration.includes(opened.lease.leaseSecret), false);
-    assert.equal(fs.lstatSync(path.join(root, 'codex-controller.json')).mode & 0o777, 0o600);
-    const verified = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
-      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestCodexControllerVerify({
-      controllerProof: {
-        version: 1,
-        leaseId: opened.lease.leaseId,
-        leaseSecret: opened.lease.leaseSecret,
-        controllerProcess: opened.lease.controllerProcess
-      },
-      channelDir,
-      statusDir,
-      token: 'controller-secret',
-      generation: 'controller-generation',
-      timeoutMs: 5_000
-    }));
-    assert.deepEqual(verified.binding, {
-      taskId,
-      controlGeneration: 'controller-generation',
-      controllerInstanceDigest: opened.lease.controllerInstanceDigest
-    });
+    const opened = {
+      leaseId: prepared.context.controllerLease.leaseId,
+      leaseSecret: prepared.context.controllerLease.leaseSecret,
+      controllerProcess: prepared.context.controllerProcess,
+      controllerInstanceDigest: prepared.context.controllerInstanceDigest,
+      controlGeneration: prepared.context.controlGeneration
+    };
+    assert.equal(opened.controllerProcess.pid, process.pid);
+    assert.equal(getProcessIdentityState(opened.controllerProcess), 'alive');
+    const registrationPath = path.join(controlRoot, 'codex-controller.json');
+    const registration = fs.readFileSync(registrationPath, 'utf8');
+    assert.equal(registration.includes(opened.leaseSecret), false);
+    assert.equal(fs.lstatSync(registrationPath).mode & 0o777, 0o600);
+    assert.ok(JSON.parse(registration).attestationPublicKey);
     const privateRoot = path.join(taskDir, '.runtime', 'sandbox-control', 'private-capabilities', 'clients', 'codex', 'capabilities');
     const buildIdentity = computeLifecycleBuildIdentity(root);
     const capabilityStore = createCodexCapabilityStore({ root: privateRoot, reference: (() => {
       let index = 0;
       return () => `capability-ref-${++index}`;
     })() });
-    const controller = { instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: opened.lease.controlGeneration };
+    const controller = { instanceDigest: opened.controllerInstanceDigest, controlGeneration: opened.controlGeneration };
     const armed = capabilityStore.arm({ taskId, buildIdentity, controller });
     const wrongIdentity = capabilityStore.arm({ taskId: 'TASK-20260809-999999', buildIdentity, controller });
     const proof = {
-      version: 1 as const, leaseId: opened.lease.leaseId, leaseSecret: opened.lease.leaseSecret,
-      controllerProcess: opened.lease.controllerProcess
+      version: 1 as const, leaseId: opened.leaseId, leaseSecret: opened.leaseSecret,
+      controllerProcess: opened.controllerProcess
     };
     const attackerKeys = crypto.generateKeyPairSync('ed25519');
     const attackerPrivateKey = attackerKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
     const attackerPublicKey = attackerKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const armedBytesBeforeForgery = fs.readFileSync(armed.path);
     const armedStateBeforeForgery = capabilityStore.inspectReference(armed.capabilityRef);
-    const registrationPath = path.join(root, 'codex-controller.json');
     const registrationBeforeForgery = fs.readFileSync(registrationPath);
-    const taskFilesBeforeForgery = snapshotFiles(taskDir);
-    const taskViewBeforeForgery = readSandboxControlStatus(statusDir).taskView;
+    const taskFilesBeforeForgery = snapshotTaskBusinessFiles(taskDir);
+    assertTaskBusinessStateSnapshot(taskDir, taskFilesBeforeForgery);
+    const taskViewBeforeForgery = brokerBusinessState(statusDir);
     const attemptChannelKeyBinding = () => {
       const bindAttemptNow = Date.now();
       const response = submitRawControlRequest(channelDir, {
@@ -2983,29 +3091,30 @@ exit 1
     assert.deepEqual(fs.readFileSync(armed.path), armedBytesBeforeForgery);
     assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, armedStateBeforeForgery.revision);
     assert.equal(capabilityStore.inspectReference(armed.capabilityRef).status, 'armed');
-    assert.deepEqual(snapshotFiles(taskDir), taskFilesBeforeForgery);
-    assert.deepEqual(readSandboxControlStatus(statusDir).taskView, taskViewBeforeForgery);
-    const legitimateKeys = crypto.generateKeyPairSync('ed25519');
-    const legitimatePrivateKey = legitimateKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-    const legitimatePublicKey = legitimateKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-    bindCodexControllerAttestationKey({
-      manifestPath,
-      taskId,
-      controlGeneration: opened.lease.controlGeneration,
-      proof,
-      publicKey: legitimatePublicKey
-    });
+    assert.deepEqual(snapshotTaskBusinessFiles(taskDir), taskFilesBeforeForgery);
+    assert.deepEqual(brokerBusinessState(statusDir), taskViewBeforeForgery);
     const registrationAfterLegitimateBinding = fs.readFileSync(registrationPath);
+    const taskFilesBeforeChannelRebinding = snapshotTaskBusinessFiles(taskDir);
+    const taskViewBeforeChannelRebinding = brokerBusinessState(statusDir);
     attemptChannelKeyBinding();
     assert.deepEqual(fs.readFileSync(registrationPath), registrationAfterLegitimateBinding);
+    assert.deepEqual(snapshotTaskBusinessFiles(taskDir), taskFilesBeforeChannelRebinding);
+    assert.deepEqual(brokerBusinessState(statusDir), taskViewBeforeChannelRebinding);
+    const taskFilesBeforeHostRebinding = snapshotTaskBusinessFiles(taskDir);
+    const taskViewBeforeHostRebinding = brokerBusinessState(statusDir);
     assert.throws(() => bindCodexControllerAttestationKey({
       manifestPath,
       taskId,
-      controlGeneration: opened.lease.controlGeneration,
+      controlGeneration: opened.controlGeneration,
       proof,
       publicKey: attackerPublicKey
     }), /CODEX_SANDBOX_CONTROLLER_ATTESTATION_KEY_CONFLICT/);
-    const requestAttestation = (capabilityRef: string, privateKey = legitimatePrivateKey) => withSandboxControlEnvironment({
+    assert.deepEqual(fs.readFileSync(registrationPath), registrationAfterLegitimateBinding);
+    assert.deepEqual(fs.readFileSync(armed.path), armedBytesBeforeForgery);
+    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, armedStateBeforeForgery.revision);
+    assert.deepEqual(snapshotTaskBusinessFiles(taskDir), taskFilesBeforeHostRebinding);
+    assert.deepEqual(brokerBusinessState(statusDir), taskViewBeforeHostRebinding);
+    const requestAttestation = (capabilityRef: string, privateKey: string) => withSandboxControlEnvironment({
       AGENT_INFRA_TASK_ID: taskId,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
@@ -3018,10 +3127,23 @@ exit 1
     }));
     const wrongPath = wrongIdentity.path;
     const wrongBytes = fs.readFileSync(wrongPath);
-    assert.throws(() => requestAttestation(wrongIdentity.capabilityRef), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
+    const wrongStateBefore = capabilityStore.inspectReference(wrongIdentity.capabilityRef);
+    const taskFilesBeforeWrongIdentity = snapshotTaskBusinessFiles(taskDir);
+    const taskViewBeforeWrongIdentity = brokerBusinessState(statusDir);
+    const registrationBeforeWrongIdentity = fs.readFileSync(registrationPath);
+    assert.throws(
+      () => requestAttestation(wrongIdentity.capabilityRef, prepared.context.attestationPrivateKey),
+      /CODEX_CAPABILITY_PROVENANCE_MISMATCH/
+    );
     assert.deepEqual(fs.readFileSync(wrongPath), wrongBytes);
-    const taskFilesBeforeSignatureForgery = snapshotFiles(taskDir);
-    const taskViewBeforeSignatureForgery = readSandboxControlStatus(statusDir).taskView;
+    assert.equal(capabilityStore.inspectReference(wrongIdentity.capabilityRef).revision, wrongStateBefore.revision);
+    assert.equal(capabilityStore.inspectReference(wrongIdentity.capabilityRef).status, wrongStateBefore.status);
+    assert.deepEqual(fs.readFileSync(registrationPath), registrationBeforeWrongIdentity);
+    assert.deepEqual(snapshotTaskBusinessFiles(taskDir), taskFilesBeforeWrongIdentity);
+    assert.deepEqual(brokerBusinessState(statusDir), taskViewBeforeWrongIdentity);
+    const taskFilesBeforeSignatureForgery = snapshotTaskBusinessFiles(taskDir);
+    const taskViewBeforeSignatureForgery = brokerBusinessState(statusDir);
+    const registrationBeforeSignatureForgery = fs.readFileSync(registrationPath);
     assert.throws(
       () => requestAttestation(armed.capabilityRef, attackerPrivateKey),
       /CODEX_CAPABILITY_ATTESTATION_INVALID/
@@ -3029,36 +3151,35 @@ exit 1
     assert.deepEqual(fs.readFileSync(armed.path), armedBytesBeforeForgery);
     assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, armedStateBeforeForgery.revision);
     assert.equal(capabilityStore.inspectReference(armed.capabilityRef).status, 'armed');
-    assert.deepEqual(snapshotFiles(taskDir), taskFilesBeforeSignatureForgery);
-    const taskViewAfterForgery = readSandboxControlStatus(statusDir).taskView;
-    assert.deepEqual(taskViewAfterForgery, taskViewBeforeSignatureForgery);
-    const attested = requestAttestation(armed.capabilityRef);
+    assert.deepEqual(fs.readFileSync(registrationPath), registrationAfterLegitimateBinding);
+    assert.deepEqual(fs.readFileSync(registrationPath), registrationBeforeSignatureForgery);
+    assert.deepEqual(snapshotTaskBusinessFiles(taskDir), taskFilesBeforeSignatureForgery);
+    assert.deepEqual(brokerBusinessState(statusDir), taskViewBeforeSignatureForgery);
+    const hookResult = spawnSync(process.execPath, [
+      '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
+      'codex-lifecycle', 'hook-event', '--event', 'post-tool', '--bridge', 'true'
+    ], {
+      cwd: root,
+      encoding: 'utf8',
+      env: prepared.env,
+      input: JSON.stringify({
+        capabilityRef: armed.capabilityRef,
+        sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
+        hookDefinitionHash: prepared.context.hookDefinitionHash
+      })
+    });
+    assert.equal(hookResult.status, 0, hookResult.stderr || hookResult.stdout);
+    const hookEvidence = JSON.parse(hookResult.stdout) as { status: string; evidence: { revision: number } };
+    assert.equal(hookEvidence.status, 'attested');
+    const attested = capabilityStore.inspectReference(armed.capabilityRef);
     assert.equal(attested.status, 'attested');
-    assert.equal(attested.binding.taskId, taskId);
-    assert.equal(capabilityStore.inspectReference(armed.capabilityRef).revision, attested.evidence.revision);
-    const expected = { taskId, hookDefinitionHash: 'hook-hash-1', buildIdentity, controller };
+    assert.equal(attested.taskId, taskId);
+    assert.equal(attested.revision, hookEvidence.evidence.revision);
+    const expected = { taskId, hookDefinitionHash: prepared.context.hookDefinitionHash, buildIdentity, controller };
     capabilityStore.reserveReference(armed.capabilityRef, 'host-consume', expected);
     assert.equal(capabilityStore.consumeReference(armed.capabilityRef, 'host-consume', expected).status, 'consumed');
-    assert.equal(fs.existsSync(path.join(root, 'runtime', 'clients', 'codex', 'capabilities')), false);
-    const closed = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
-      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestCodexControllerClose({
-      controllerProcess: opened.lease.controllerProcess,
-      controllerProof: {
-        version: 1,
-        leaseId: opened.lease.leaseId,
-        leaseSecret: opened.lease.leaseSecret,
-        controllerProcess: opened.lease.controllerProcess
-      },
-      channelDir,
-      statusDir,
-      token: 'controller-secret',
-      generation: 'controller-generation',
-      timeoutMs: 5_000
-    }));
-    assert.equal(closed.changed, true);
+    assert.equal(fs.existsSync(path.join(controlRoot, 'runtime', 'clients', 'codex', 'capabilities')), false);
+    prepared.cleanup();
     assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
   } finally {
     child.kill();
@@ -3067,6 +3188,7 @@ exit 1
       else child.once('exit', () => resolve());
     });
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(hostTempRoot, { recursive: true, force: true });
   }
 });
 
