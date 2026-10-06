@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { acquireSandboxResourceLock, type SandboxResourceLock } from './native-file-lock.ts';
 import { getProcessIdentityState, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
 import type { SandboxControlManifest } from './protocol.ts';
 
@@ -71,6 +72,15 @@ export class CodexControllerRegistrationError extends Error {
     this.name = code;
     this.code = code;
   }
+}
+
+export function acquireCodexControllerRegistrationLock(manifest: SandboxControlManifest): SandboxResourceLock {
+  if (manifest.mode !== 'task-bound' || !manifest.taskId) {
+    fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot lock a Codex controller registration');
+  }
+  return acquireSandboxResourceLock(`${manifest.engine}:${manifest.containerIdentity.id}`, {
+    lockDomain: manifest.authorityEvidence.lockDomain
+  });
 }
 
 function fail(code: string, message: string): never {

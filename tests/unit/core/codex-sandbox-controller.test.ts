@@ -79,7 +79,7 @@ function controllerBroker(root: string, manifestPath: string, taskId = 'TASK-202
   const leaseId = 'c'.repeat(64);
   const leaseSecret = 'd'.repeat(64);
   return {
-    openController: ((params: { controllerProcess: { pid: number; startTime: number } }) => {
+    initializeControllerRegistration: ((params: { controllerProcess: { pid: number; startTime: number } }) => {
       if (active) throw new Error('CODEX_SANDBOX_CONTROLLER_BUSY');
       active = true;
       const issuedAt = Date.now();

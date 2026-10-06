@@ -8,15 +8,20 @@ import * as toml from 'smol-toml';
 
 import {
   requestCodexControllerClose,
-  requestCodexControllerOpen,
   requestCodexControllerVerify
 } from '../../../sandbox/control/client.ts';
-import { bindCodexControllerAttestationKey } from '../../../sandbox/control/controller-registration.ts';
+import {
+  bindCodexControllerAttestationKey,
+  acquireCodexControllerRegistrationLock,
+  openCodexControllerRegistration,
+  type CodexControllerOpened
+} from '../../../sandbox/control/controller-registration.ts';
 import { readSandboxControlManifest } from '../../../sandbox/control/lifecycle.ts';
+import type { SandboxControlManifest } from '../../../sandbox/control/protocol.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { resolveTaskContext } from '../../../task/resolve-ref.ts';
 import { resolveTaskRuntimeRoot } from '../../../task/runtime-paths.ts';
-import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
+import { computeLifecycleBuildIdentity, LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
   contextFromControllerLease,
   controllerProofFromContext,
@@ -50,7 +55,7 @@ type ControllerOptions = Readonly<{
   codexVersion?: () => string;
   verifyController?: typeof requestCodexControllerVerify;
   bindControllerAttestationKey?: typeof bindCodexControllerAttestationKey;
-  openController?: typeof requestCodexControllerOpen;
+  initializeControllerRegistration?: (params: Readonly<{ controllerProcess: ProcessIdentity }>) => CodexControllerOpened;
   closeController?: typeof requestCodexControllerClose;
   environment?: NodeJS.ProcessEnv;
 }>;
@@ -100,6 +105,7 @@ function resolveCodexSandboxControllerHostBinding(repoRoot: string): Readonly<{
   control: ControllerControl;
   manifestPath: string;
   taskId: string;
+  manifest: SandboxControlManifest;
 }> {
   const task = resolveTaskContext(undefined, { repoRoot });
   if (!task.ok || task.state !== 'active') {
@@ -122,7 +128,8 @@ function resolveCodexSandboxControllerHostBinding(repoRoot: string): Readonly<{
       runtimeDir: manifest.runtimeDir
     },
     manifestPath,
-    taskId: task.taskId
+    taskId: task.taskId,
+    manifest
   };
 }
 
@@ -143,12 +150,14 @@ function controllerStartup(repoRoot: string, controlOverride?: ControllerControl
   control: ControllerControl;
   manifestPath: string;
   taskId: string | null;
+  manifest: SandboxControlManifest | null;
 }> {
   if (controlOverride) {
     return {
       control: controlOverride,
       manifestPath: path.join(path.dirname(controlOverride.statusDir), 'manifest.json'),
-      taskId: null
+      taskId: null,
+      manifest: null
     };
   }
   return resolveCodexSandboxControllerHostBinding(repoRoot);
@@ -389,31 +398,49 @@ function registerControllerContext(
   setContext: (context: CodexSandboxControllerContextV3) => void
 ): CodexSandboxControllerContextV3 {
   const control = startup.control;
-  const keys = crypto.generateKeyPairSync('ed25519');
-  const attestationPrivateKey = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-  const attestationPublicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  const opened = (options.openController ?? requestCodexControllerOpen)({
-    controllerProcess: { pid: process.pid, startTime: parentStartTime }, ...control, timeoutMs: 30_000
-  });
-  const taskId = opened.lease.taskId;
-  assertControllerTaskBinding(startup.taskId, taskId);
-  if (opened.lease.buildIdentity.protocolVersion !== LIFECYCLE_PROTOCOL_VERSION) {
-    throw new Error('CODEX_LIFECYCLE_PROTOCOL_MISMATCH: Codex lifecycle protocol version does not match');
-  }
-  if (opened.lease.controlGeneration !== control.generation
-    || opened.lease.controllerProcess.pid !== process.pid
-    || opened.lease.controllerProcess.startTime !== parentStartTime) {
-    throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
-  }
-  const context = contextFromControllerLease(opened.lease, {
-    hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
-    attestationPrivateKey
-  });
-  setContext(context);
-  bindControllerAttestationKey(options, {
-    manifestPath: startup.manifestPath, taskId, controlGeneration: opened.lease.controlGeneration,
-    proof: controllerProofFromContext(context), publicKey: attestationPublicKey
-  });
+  const initialize = (): CodexSandboxControllerContextV3 => {
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const attestationPrivateKey = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const attestationPublicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const controllerProcess = { pid: process.pid, startTime: parentStartTime };
+    const opened = options.initializeControllerRegistration
+      ? options.initializeControllerRegistration({ controllerProcess })
+      : openCodexControllerRegistration({
+          manifest: startup.manifest ?? readSandboxControlManifest(startup.manifestPath),
+          manifestPath: startup.manifestPath,
+          controllerProcess,
+          buildIdentity: computeLifecycleBuildIdentity(startup.manifest?.repoRoot ?? options.repoRoot ?? process.cwd())
+        });
+    const taskId = opened.lease.taskId;
+    assertControllerTaskBinding(startup.taskId, taskId);
+    if (opened.lease.buildIdentity.protocolVersion !== LIFECYCLE_PROTOCOL_VERSION) {
+      throw new Error('CODEX_LIFECYCLE_PROTOCOL_MISMATCH: Codex lifecycle protocol version does not match');
+    }
+    if (opened.lease.controlGeneration !== control.generation
+      || opened.lease.controllerProcess.pid !== process.pid
+      || opened.lease.controllerProcess.startTime !== parentStartTime) {
+      throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
+    }
+    const context = contextFromControllerLease(opened.lease, {
+      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
+      attestationPrivateKey
+    });
+    setContext(context);
+    bindControllerAttestationKey(options, {
+      manifestPath: startup.manifestPath, taskId, controlGeneration: opened.lease.controlGeneration,
+      proof: controllerProofFromContext(context), publicKey: attestationPublicKey
+    });
+    return context;
+  };
+  let context: CodexSandboxControllerContextV3;
+  if (startup.manifest) {
+    const lock = acquireCodexControllerRegistrationLock(startup.manifest);
+    try {
+      context = initialize();
+    } finally {
+      lock.release();
+    }
+  } else context = initialize();
   verifyControllerBinding(context, control, options.verifyController ?? requestCodexControllerVerify);
   return context;
 }

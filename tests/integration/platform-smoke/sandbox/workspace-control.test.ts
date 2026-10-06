@@ -787,7 +787,10 @@ test('control protocol rejects request v2 and controller result parser enforces 
     stderr: '',
     error: null
   };
-  assert.equal(parseCodexControllerResult(response).status, 'opened');
+  assert.throws(
+    () => parseCodexControllerResult(response),
+    (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
+  );
   const verified = {
     version: 1,
     status: 'verified',
@@ -813,7 +816,7 @@ test('control protocol rejects request v2 and controller result parser enforces 
     () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...opened, extra: true })}\n` }),
     (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
   );
-  assert.throws(() => parseCodexControllerResult({ ...response, exitCode: 1 }), /controller success result is invalid/);
+  assert.throws(() => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify(verified)}\n`, exitCode: 1 }), /controller success result is invalid/);
 });
 
 test('branch-only sandboxes and incorrect tokens fail closed', () => {
@@ -845,7 +848,7 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     args: [],
     controllerProcess: { pid: 100, startTime: 10 },
     controllerProof: null
-  }, branchManifest, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
+  }, branchManifest, { now: 2_000 }), /SANDBOX_CONTROL_REQUEST_INVALID/);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-controller-denied-'));
   const manifestPath = path.join(root, 'manifest.json');
   fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });

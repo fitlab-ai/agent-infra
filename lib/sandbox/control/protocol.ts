@@ -72,7 +72,7 @@ export type SandboxTaskCreateRequest = RequestBase & Readonly<{
 }>;
 export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   family: 'codex-controller';
-  command: 'open' | 'close' | 'verify' | 'attest-capability';
+  command: 'close' | 'verify' | 'attest-capability';
   args: string[];
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
@@ -237,10 +237,9 @@ function validateCodexControllerRequest(request: Record<string, unknown>, manife
   const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !validControllerArgs(request.command, request.args)
-    || !['open', 'close', 'verify', 'attest-capability'].includes(request.command as string)
+    || !['close', 'verify', 'attest-capability'].includes(request.command as string)
     || !validControllerProcess(request.controllerProcess)
-    || (request.command === 'open' && request.controllerProof !== null)
-    || (request.command !== 'open' && !validControllerProof(request.controllerProof))
+    || !validControllerProof(request.controllerProof)
     || (request.command === 'verify'
       && JSON.stringify(request.controllerProcess) !== JSON.stringify((request.controllerProof as CodexControllerLeaseProofV1).controllerProcess))) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller request schema is invalid');

@@ -9,7 +9,6 @@ import test, { type TestContext } from 'node:test';
 import {
   requestCodexControllerClose,
   requestCodexCapabilityAttestation,
-  requestCodexControllerOpen,
   requestCodexControllerVerify,
   recoverSandboxControl,
   recoverSandboxControlFromChannel,
@@ -2938,7 +2937,7 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
 
 }
 
-test('sandbox broker opens and closes a host-only Codex controller registration across processes', onPlatforms('linux'), async () => {
+test('host controller prepares a private registration and uses the broker for authenticated lifecycle operations', onPlatforms('linux'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-roundtrip-'));
   const taskId = 'TASK-20260809-010203';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -3032,6 +3031,12 @@ exit 1
       temporaryRoot: hostTempRoot,
       codexVersion: () => '0.147.0'
     }));
+    const controllerRequests = fs.readdirSync(processingDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(processingDir, entry.name, 'request.json'))
+      .filter((requestPath) => fs.existsSync(requestPath))
+      .map((requestPath) => JSON.parse(fs.readFileSync(requestPath, 'utf8')) as { family?: string; command?: string });
+    assert.equal(controllerRequests.some((request) => request.family === 'codex-controller' && request.command === 'open'), false);
     const opened = {
       leaseId: prepared.context.controllerLease.leaseId,
       leaseSecret: prepared.context.controllerLease.leaseSecret,

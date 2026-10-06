@@ -40,9 +40,9 @@ import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-l
 import { resolveAgentCapabilityStoreRoot } from '../../runtime/agent-runtime.ts';
 import { verifyCodexHookAttestation } from './codex-hook-attestation.ts';
 import {
+  acquireCodexControllerRegistrationLock,
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
-  openCodexControllerRegistration,
   resolveCodexControllerBinding
 } from './controller-registration.ts';
 
@@ -393,18 +393,12 @@ async function executeRequestInner(
           stderr: ''
         };
       }
-      const result = request.command === 'open'
-        ? openCodexControllerRegistration({
-            manifest,
-            manifestPath,
-            controllerProcess: request.controllerProcess!,
-            buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
-          })
-        : closeCodexControllerRegistration({
-            manifest,
-            manifestPath,
-            proof: request.controllerProof!
-          });
+      if (request.command !== 'close') throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: unsupported controller command');
+      const result = closeCodexControllerRegistration({
+        manifest,
+        manifestPath,
+        proof: request.controllerProof!
+      });
       return { exitCode: 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
     } catch (error) {
       const errorCode = error instanceof CodexControllerRegistrationError
@@ -477,8 +471,12 @@ export async function executeRequest(
   options: ExecuteRequestOptions = {}
 ): Promise<SandboxControlExecutionResult> {
   const fields = requestAuditFields(manifest, request);
-  appendExecutorAudit(manifest, 'executor-request-start', fields);
+  let controllerLock: ReturnType<typeof acquireCodexControllerRegistrationLock> | null = null;
   try {
+    if (request.family === 'codex-controller') {
+      controllerLock = acquireCodexControllerRegistrationLock(manifest);
+    }
+    appendExecutorAudit(manifest, 'executor-request-start', fields);
     let result: SandboxControlExecutionResult;
     if (request.family === 'codex-controller' && request.command === 'attest-capability') {
       try {
@@ -510,6 +508,8 @@ export async function executeRequest(
       errorType: error instanceof Error ? error.name : typeof error,
     });
     throw error;
+  } finally {
+    controllerLock?.release();
   }
 }
 
