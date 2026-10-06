@@ -15,7 +15,6 @@ const env = Object.fromEntries(
       && normalized !== 'AGENT_INFRA_SANDBOX'
       && !normalized.startsWith('AGENT_INFRA_CONTROL_')
       && normalized !== 'AGENT_INFRA_TASK_ID'
-      && normalized !== 'AGENT_INFRA_SANDBOX'
       && normalized !== 'AGENT_INFRA_RUNTIME_DIR';
   })
 );

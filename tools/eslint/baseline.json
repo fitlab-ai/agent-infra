@@ -169,6 +169,14 @@
       "count": 1
     },
     {
+      "file": "lib/sandbox/removal.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=34",
+      "anchorSha256": "0c43a36c747c7de365268d7b63f53d87f6518f18e9505d77e39634244860d02d",
+      "count": 1
+    },
+    {
       "file": "lib/sandbox/commands/rm.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -182,14 +190,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=16",
       "anchorSha256": "0cd41ae2bda5500d9273a3b1180437c4adb59e8f8814d5d3917161f49a8625ef",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/removal.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=34",
-      "anchorSha256": "0ce684cbcc330f74deb329a1f5a444b016206200ce6791efeea9370add242677",
       "count": 1
     },
     {
@@ -337,27 +337,11 @@
       "count": 1
     },
     {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=18",
-      "anchorSha256": "18a95695a2171045fe2358febf878ffb40db21e1d290871176239cf81a2491d2",
-      "count": 1
-    },
-    {
       "file": "lib/server/process-state.ts",
       "ruleId": "complexity",
       "messageId": "complex",
       "normalizedMessage": "complexity=21",
       "anchorSha256": "18beba9b58950bce296d694f4d8f6982dcc55bdb2b8184aacbf4bd57a8b5d1f3",
-      "count": 1
-    },
-    {
-      "file": "lib/task/codex-orchestration.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=16",
-      "anchorSha256": "19b2d9d151828ac13cc54bc7fa53f2fe0ab576b7764d4706825cae5adbee5558",
       "count": 1
     },
     {
@@ -398,14 +382,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=41",
       "anchorSha256": "1db2875d112cf16981ddc064781b69f9be36e305d22601ca229be0b33f777ffe",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=21",
-      "anchorSha256": "1db53059774af4efdf4b2e1e92f61f9b954b5e2596bba820b53425583d7e1d9a",
       "count": 1
     },
     {
@@ -495,6 +471,22 @@
       "normalizedMessage": "complexity=45",
       "anchorSha256": "2867b4480c4e17ee51bde50e8143e79d8e3f3d68f5281a49d2347a3bd5303f4a",
       "count": 1
+    },
+    {
+      "file": "lib/task/finalization.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=98",
+      "anchorSha256": "290bd6336ba769a519ec7747d528e681b1d88c0bd45a68a78d9028b7a15fedae",
+      "count": 1
+    },
+    {
+      "file": "lib/task/finalization.ts",
+      "ruleId": "max-depth",
+      "messageId": "tooDeeply",
+      "normalizedMessage": "depth=5",
+      "anchorSha256": "290bd6336ba769a519ec7747d528e681b1d88c0bd45a68a78d9028b7a15fedae",
+      "count": 3
     },
     {
       "file": "lib/task/commands/decisions.ts",
@@ -673,14 +665,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/agent-client.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=34",
-      "anchorSha256": "36ff298c09bf3d89738959be36145d5cd1c141e3586b816407baa040360e7384",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/executor.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -817,11 +801,11 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
+      "file": "lib/sandbox/recovery.ts",
       "ruleId": "complexity",
       "messageId": "complex",
-      "normalizedMessage": "complexity=19",
-      "anchorSha256": "3f6e5bc7b4d77ea5095fe6ac9217f2f46e38be66063cee1e43d7289db0e07bac",
+      "normalizedMessage": "complexity=30",
+      "anchorSha256": "41015753686cf2ab93f72c6c52e83f5139eac44a8960792448afa5bb4e419001",
       "count": 1
     },
     {
@@ -862,6 +846,14 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=20",
       "anchorSha256": "48033cdb506d9e157a01185287eeabd4eeb28a6eba49d4979c7356347cae5a23",
+      "count": 1
+    },
+    {
+      "file": "tests/unit/core/codex-orchestration.test.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=25",
+      "anchorSha256": "4825d14332bc1e0749cf489013d8dc7e8666024926c4f0e909611992f50cf8e2",
       "count": 1
     },
     {
@@ -1001,6 +993,14 @@
       "count": 1
     },
     {
+      "file": "lib/task/finalization.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=35",
+      "anchorSha256": "51e38c1ac2eb69714d4437ccd54d22e69788fcbb0998556fe36f479074f18b06",
+      "count": 1
+    },
+    {
       "file": "lib/task/commands/status.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -1046,14 +1046,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=18",
       "anchorSha256": "54ccd6b7201cfb3a0939575c4055882fd5870d28f5eaa2def577f09370b05ada",
-      "count": 1
-    },
-    {
-      "file": "lib/task/control-authority.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=16",
-      "anchorSha256": "555b62e71080a0a61558d991223b65bc3d37741c8d3060871a64a59742a17365",
       "count": 1
     },
     {
@@ -1118,6 +1110,22 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=20",
       "anchorSha256": "587d1391d4120932dd5bf198d236aad51932df13036ff20f3cfadd853d2249da",
+      "count": 1
+    },
+    {
+      "file": "lib/internal/task-validate.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=31",
+      "anchorSha256": "5895a346cb0b556fbd5e28c75b16c219df907bce96e0e44fa86e85b3f0d7725c",
+      "count": 1
+    },
+    {
+      "file": "lib/internal/task-validate.ts",
+      "ruleId": "max-depth",
+      "messageId": "tooDeeply",
+      "normalizedMessage": "depth=5",
+      "anchorSha256": "5895a346cb0b556fbd5e28c75b16c219df907bce96e0e44fa86e85b3f0d7725c",
       "count": 1
     },
     {
@@ -1190,22 +1198,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=16",
       "anchorSha256": "5d766cfe30c33d5cf87c7575af53e5b0f9912eefb254015dd3341c2795e5d538",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-validate.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=31",
-      "anchorSha256": "5e85a9888eb36ea7a038d06773e04f13b099ff1bbcd43c0e57d5d3042e51dddd",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-validate.ts",
-      "ruleId": "max-depth",
-      "messageId": "tooDeeply",
-      "normalizedMessage": "depth=5",
-      "anchorSha256": "5e85a9888eb36ea7a038d06773e04f13b099ff1bbcd43c0e57d5d3042e51dddd",
       "count": 1
     },
     {
@@ -1313,6 +1305,14 @@
       "count": 1
     },
     {
+      "file": "lib/task/verification-engine.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=23",
+      "anchorSha256": "62e480ef0b92d7ed2fb52f1861d6d25c46e4ced1ae697bc231f471a8cbbfe701",
+      "count": 1
+    },
+    {
       "file": "lib/sandbox/control/state.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -1373,7 +1373,7 @@
       "ruleId": "complexity",
       "messageId": "complex",
       "normalizedMessage": "complexity=18",
-      "anchorSha256": "6a71b65924ce58714a8a28874dded767245419a8dd21cfd5437a1b47bc338eac",
+      "anchorSha256": "6a594859fd5b2f308df2812bff06637dc096986d4e4c3d4b26d45c9aaad7afc9",
       "count": 1
     },
     {
@@ -1381,7 +1381,7 @@
       "ruleId": "complexity",
       "messageId": "complex",
       "normalizedMessage": "complexity=55",
-      "anchorSha256": "6a71b65924ce58714a8a28874dded767245419a8dd21cfd5437a1b47bc338eac",
+      "anchorSha256": "6a594859fd5b2f308df2812bff06637dc096986d4e4c3d4b26d45c9aaad7afc9",
       "count": 1
     },
     {
@@ -1389,7 +1389,7 @@
       "ruleId": "complexity",
       "messageId": "complex",
       "normalizedMessage": "complexity=81",
-      "anchorSha256": "6a71b65924ce58714a8a28874dded767245419a8dd21cfd5437a1b47bc338eac",
+      "anchorSha256": "6a594859fd5b2f308df2812bff06637dc096986d4e4c3d4b26d45c9aaad7afc9",
       "count": 1
     },
     {
@@ -1401,19 +1401,19 @@
       "count": 1
     },
     {
+      "file": "lib/task/lifecycle.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=103",
+      "anchorSha256": "6c4ae01ebb2a7dc407a4e179f5c8526d07bacf77a0c55e8f2b132c3905059e7e",
+      "count": 1
+    },
+    {
       "file": "lib/platform/merged-pr-equivalence.ts",
       "ruleId": "complexity",
       "messageId": "complex",
       "normalizedMessage": "complexity=18",
       "anchorSha256": "6d69c4ae24e8790073d7a7fd4c5feef47f3a52c400bc60cc3d9b7ee4add73a89",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/recovery.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=30",
-      "anchorSha256": "6da7890e5030a9eb8c154fc8d16c963a338b13afaf072369e7a3a065dbcac10b",
       "count": 1
     },
     {
@@ -1569,22 +1569,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/recovery.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=55",
-      "anchorSha256": "74988403506acb5e66fd9433e94ccc93537a2dc8a54b7004725b96a23dc37db6",
-      "count": 1
-    },
-    {
-      "file": "tests/helpers/sandbox.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=21",
-      "anchorSha256": "74fa532a220b87d0e38aa036f2244c9ff2700bf510b6c3ed7db9074f6ac01440",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pr-summary.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -1606,22 +1590,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=23",
       "anchorSha256": "75ee7eb47bc3e5cced1d5ee387b427db4177026d97f7361582016c18a19f4de5",
-      "count": 1
-    },
-    {
-      "file": "lib/task/codex-orchestration.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=16",
-      "anchorSha256": "77e0b116eabcb7bf01ab35a0f4babfcc7c9d401c13b1b45bf50f4d07acbb0e40",
-      "count": 1
-    },
-    {
-      "file": "lib/task/delegation-receipts.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=26",
-      "anchorSha256": "782745569a8b69e273c5361b6202b9fd435cac0e0ec9f31d7e3bfda2ec7d48f5",
       "count": 1
     },
     {
@@ -1881,27 +1849,11 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/recovery.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=33",
-      "anchorSha256": "91313d2d951641fc204b77de2474e71fdaafa2d38d508f819815d90c5baaa402",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/codex-sandbox.ts",
       "ruleId": "complexity",
       "messageId": "complex",
       "normalizedMessage": "complexity=19",
       "anchorSha256": "91d0660f3ae2ac4ca224125846b03edbf386d5429b40013d4abe7fabec04535d",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=22",
-      "anchorSha256": "928fa996214d6b25479cb3b87f8dcc3e3d1117f059ebf76136140c51b0b6f015",
       "count": 1
     },
     {
@@ -2041,6 +1993,14 @@
       "count": 1
     },
     {
+      "file": "lib/sandbox/recovery.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=55",
+      "anchorSha256": "a171e8c3ba8d1db25491d036c1a599065810c5d2d53aa444d5b4431116714831",
+      "count": 1
+    },
+    {
       "file": "tests/integration/platform-smoke/platform/pr-review.test.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2094,14 +2054,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=60",
       "anchorSha256": "a2b452b476112c031966cb09f16823fe7fa147c431841f77cec419c524d17708",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=46",
-      "anchorSha256": "a32a57fdc3d77fcbe722df377bd956cdcca8bdc0f12e8dbed46a638f6f452032",
       "count": 1
     },
     {
@@ -2169,14 +2121,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/recovery.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=41",
-      "anchorSha256": "adbf5e8d1b3ed994ea7cef0f6f4c2c6c075ca17d6192c200fa50742926ef68ce",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2222,6 +2166,14 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=33",
       "anchorSha256": "af8e309bb4d1d88f9105ef818bdf92c9643276ea9b098f225508c2af348678f9",
+      "count": 1
+    },
+    {
+      "file": "tests/helpers/sandbox.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=21",
+      "anchorSha256": "b0e8431657988ae1c0754a539e9c9752d2e26d86c05cadb781da0ba4b5c1ac7a",
       "count": 1
     },
     {
@@ -2305,14 +2257,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/finalization.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=35",
-      "anchorSha256": "b55ddd672996023ce296b54af5f3c10a4befd6e9569a0ecf01f8ead09a8a3686",
-      "count": 1
-    },
-    {
       "file": "lib/internal/release-workflow.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2337,6 +2281,14 @@
       "count": 1
     },
     {
+      "file": "lib/task/orchestration.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=18",
+      "anchorSha256": "b6f6b6815617dc7bc79487e88ec3a84e293d630890c27f81a09f449b333bb72f",
+      "count": 1
+    },
+    {
       "file": "lib/sandbox/control/executor.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2350,6 +2302,14 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=20",
       "anchorSha256": "b8a3d0f30b86f508119690f9333c2a7fa896cd4cb873f2476e161a8504af1b48",
+      "count": 1
+    },
+    {
+      "file": "lib/internal/codex-lifecycle.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=59",
+      "anchorSha256": "bb39cd3492960d89a3d2720a476b8a055b99240febde3826624de2fbb4b967ad",
       "count": 1
     },
     {
@@ -2462,6 +2422,14 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=23",
       "anchorSha256": "c8ab219b6bb492e7c70dd77767d18b24338f4027195471e9072a470003f03723",
+      "count": 1
+    },
+    {
+      "file": "lib/task/verification-engine.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=46",
+      "anchorSha256": "c8d5608ceb03b6a1cfe91b6a549993b670728dbb0cd85fb34369487d471826ee",
       "count": 1
     },
     {
@@ -2681,22 +2649,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/codex-lifecycle.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=60",
-      "anchorSha256": "d8ea57b94437e2892341cf81020d7e4bf967e4e65fa308e38b86964adde36aea",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/codex-lifecycle.ts",
-      "ruleId": "max-depth",
-      "messageId": "tooDeeply",
-      "normalizedMessage": "depth=5",
-      "anchorSha256": "d8ea57b94437e2892341cf81020d7e4bf967e4e65fa308e38b86964adde36aea",
-      "count": 2
-    },
-    {
       "file": "lib/task/orchestration.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2777,14 +2729,6 @@
       "count": 1
     },
     {
-      "file": "tests/unit/core/codex-orchestration.test.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=25",
-      "anchorSha256": "dea2fa13e21aa21d36787055d99fc14293d118a7872ad299eebca84c4c817e01",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2839,22 +2783,6 @@
       "normalizedMessage": "complexity=29",
       "anchorSha256": "e390fabbbcc069fe441bc7c116ea6cf8da9de98fe5df4bf000763a9ded4c0feb",
       "count": 1
-    },
-    {
-      "file": "lib/task/finalization.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=98",
-      "anchorSha256": "e3b7df13eed2bde8f3c631fef653c1d444926bf6e5623d42e8cbe9b3adbf9ec3",
-      "count": 1
-    },
-    {
-      "file": "lib/task/finalization.ts",
-      "ruleId": "max-depth",
-      "messageId": "tooDeeply",
-      "normalizedMessage": "depth=5",
-      "anchorSha256": "e3b7df13eed2bde8f3c631fef653c1d444926bf6e5623d42e8cbe9b3adbf9ec3",
-      "count": 3
     },
     {
       "file": "lib/platform/github-release-notes.ts",
@@ -3017,14 +2945,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=23",
-      "anchorSha256": "ec5a4e6b743d030c7fe1620442c236722965e21556f9191805e249b56c09db12",
-      "count": 1
-    },
-    {
       "file": "tests/integration/cli/sandbox-control.test.ts",
       "ruleId": "max-depth",
       "messageId": "tooDeeply",
@@ -3038,22 +2958,6 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=31",
       "anchorSha256": "ecb6be54a7ee3c5d7b44aa4a36e40b60060cbc5f82b36ab05d9f69cb2e6a6afa",
-      "count": 1
-    },
-    {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=109",
-      "anchorSha256": "ed91321b7349adf84fe1bf511d44bee94a4718aadf5d84764fef740b13375495",
-      "count": 1
-    },
-    {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "max-depth",
-      "messageId": "tooDeeply",
-      "normalizedMessage": "depth=5",
-      "anchorSha256": "ed91321b7349adf84fe1bf511d44bee94a4718aadf5d84764fef740b13375495",
       "count": 1
     },
     {

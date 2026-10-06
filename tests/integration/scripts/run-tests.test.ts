@@ -183,7 +183,6 @@ test('test runner strips inherited sandbox control authority before loading test
     "  assert.equal(process.env.AGENT_INFRA_TASK_ID, undefined);",
     "  assert.equal(process.env.AGENT_INFRA_SANDBOX, undefined);",
     "  assert.equal(process.env.AGENT_INFRA_RUNTIME_DIR, undefined);",
-    "  assert.equal(process.env.AGENT_INFRA_SANDBOX, undefined);",
     "  assert.notEqual(process.env.NODE_TEST_CONTEXT, 'inherited-context');",
     '});',
     ''

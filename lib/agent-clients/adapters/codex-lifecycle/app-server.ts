@@ -72,6 +72,56 @@ function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function readRolloutRecords(transcriptPath: string, sessionId: string): JsonObject[] {
+  const name = path.basename(transcriptPath);
+  if (!transcriptPath || (!name.endsWith(`-${sessionId}.jsonl`) && name !== `${sessionId}.jsonl`)) {
+    throw new Error('Codex parent rollout path is invalid');
+  }
+  const stat = fs.lstatSync(transcriptPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Codex parent rollout is not a regular file');
+  const offset = Math.max(0, stat.size - 8 * 1024 * 1024);
+  const buffer = Buffer.alloc(stat.size - offset);
+  const descriptor = fs.openSync(transcriptPath, 'r');
+  try {
+    fs.readSync(descriptor, buffer, 0, buffer.length, offset);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  let text = buffer.toString('utf8');
+  if (offset) text = text.slice(text.indexOf('\n') + 1);
+  return text.split(/\r?\n/u).filter(Boolean).map((line) => object(JSON.parse(line))).filter((record): record is JsonObject => Boolean(record));
+}
+
+function isExpectedSpawnCall(record: JsonObject, expected: Parameters<typeof resolveCodexSpawnedChild>[1]): boolean {
+  const payload = object(record.payload);
+  return record.type === 'response_item'
+    && payload?.type === 'function_call'
+    && payload.call_id === expected.toolUseId
+    && payload.namespace === 'collaboration'
+    && payload.name === 'spawn_agent';
+}
+
+function spawnArgsMatch(args: JsonObject | null, expected: Parameters<typeof resolveCodexSpawnedChild>[1]): boolean {
+  return args?.agent_type === expected.nativeAgent
+    && args.task_name === expected.taskName
+    && (!expected.requestedModel || args.model === expected.requestedModel)
+    && (!expected.requestedReasoningEffort || args.reasoning_effort === expected.requestedReasoningEffort);
+}
+
+function isExpectedChildActivity(record: JsonObject, expected: Parameters<typeof resolveCodexSpawnedChild>[1]): boolean {
+  const payload = object(record.payload);
+  const item = object(payload?.item);
+  return record.type === 'event_msg'
+    && payload?.type === 'item_completed'
+    && payload.thread_id === expected.sessionId
+    && payload.turn_id === expected.turnId
+    && item?.type === 'SubAgentActivity'
+    && item.id === expected.toolUseId
+    && item.kind === 'started'
+    && item.agent_path === `/root/${expected.taskName}`
+    && Boolean(nonEmpty(item.agent_thread_id));
+}
+
 function resolveCodexSpawnedChild(
   transcriptPath: string,
   expected: Readonly<{
@@ -87,54 +137,13 @@ function resolveCodexSpawnedChild(
   if (!parseCodexLifecycleBinding(expected.taskName)) {
     throw new Error('Codex spawn task_name does not carry a valid lifecycle binding');
   }
-  const name = path.basename(transcriptPath);
-  if (!transcriptPath || (!name.endsWith(`-${expected.sessionId}.jsonl`) && name !== `${expected.sessionId}.jsonl`)) {
-    throw new Error('Codex parent rollout path is invalid');
-  }
-  const stat = fs.lstatSync(transcriptPath);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Codex parent rollout is not a regular file');
-  const maxBytes = 8 * 1024 * 1024;
-  const offset = Math.max(0, stat.size - maxBytes);
-  const buffer = Buffer.alloc(stat.size - offset);
-  const descriptor = fs.openSync(transcriptPath, 'r');
-  try {
-    fs.readSync(descriptor, buffer, 0, buffer.length, offset);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  let text = buffer.toString('utf8');
-  if (offset) text = text.slice(text.indexOf('\n') + 1);
-  const records = text.split(/\r?\n/).filter(Boolean).map((line) => object(JSON.parse(line))).filter(Boolean);
-  const calls = records.filter((record) => {
-    const payload = object(record?.payload);
-    return record?.type === 'response_item'
-      && payload?.type === 'function_call'
-      && payload.call_id === expected.toolUseId
-      && payload.namespace === 'collaboration'
-      && payload.name === 'spawn_agent';
-  });
+  const records = readRolloutRecords(transcriptPath, expected.sessionId);
+  const calls = records.filter((record) => isExpectedSpawnCall(record, expected));
   if (calls.length !== 1) throw new Error('Codex parent rollout spawn call was not found uniquely');
   const call = object(calls[0]?.payload);
   const args = object(JSON.parse(nonEmpty(call?.arguments) ?? '{}'));
-  if (
-    args?.agent_type !== expected.nativeAgent
-    || args.task_name !== expected.taskName
-    || (expected.requestedModel && args.model !== expected.requestedModel)
-    || (expected.requestedReasoningEffort && args.reasoning_effort !== expected.requestedReasoningEffort)
-  ) throw new Error('Codex parent rollout spawn identity does not match the hook event');
-  const activities = records.filter((record) => {
-    const payload = object(record?.payload);
-    const item = object(payload?.item);
-    return record?.type === 'event_msg'
-      && payload?.type === 'item_completed'
-      && payload.thread_id === expected.sessionId
-      && payload.turn_id === expected.turnId
-      && item?.type === 'SubAgentActivity'
-      && item.id === expected.toolUseId
-      && item.kind === 'started'
-      && item.agent_path === `/root/${expected.taskName}`
-      && nonEmpty(item.agent_thread_id);
-  });
+  if (!spawnArgsMatch(args, expected)) throw new Error('Codex parent rollout spawn identity does not match the hook event');
+  const activities = records.filter((record) => isExpectedChildActivity(record, expected));
   if (activities.length !== 1) throw new Error('Codex parent rollout child activity was not found uniquely');
   return nonEmpty(object(object(activities[0]?.payload)?.item)?.agent_thread_id)!;
 }
@@ -590,6 +599,25 @@ async function preflightCodexLifecycleEvidence(
   runtimeIdentity?: CodexRuntimeIdentity,
   lifecycleStoreRoot?: string
 ) {
+  const { cliVersion, hooksRaw } = validateStaticCodexPreflight(repoRoot);
+  const hookDefinitionHash = crypto.createHash('sha256').update(hooksRaw).digest('hex');
+  const runtimeRoot = resolvePreflightLifecycleStoreRoot(repoRoot, lifecycleStoreRoot);
+  const runtimeLiveness = runtimeRoot
+    ? hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity)
+    : false;
+  const host = await discoverLifecycleHooks(repoRoot);
+  return Object.freeze({
+    cliVersion,
+    hookDefinitionHash,
+    staticReady: true,
+    discoveredHooks: host.discoveredHooks,
+    hookProvenance: host.hookProvenance,
+    runtimeLiveness,
+    diagnostics: host.diagnostics
+  });
+}
+
+function validateStaticCodexPreflight(repoRoot: string): Readonly<{ cliVersion: string; hooksRaw: string }> {
   const versionRun = spawnSync('codex', ['--version'], { encoding: 'utf8' });
   const match = /codex-cli\s+(\d+\.\d+\.\d+)/.exec(versionRun.stdout ?? '');
   if (versionRun.status !== 0 || !match?.[1] || !semver.gte(match[1], '0.147.0')) {
@@ -617,13 +645,18 @@ async function preflightCodexLifecycleEvidence(
   } finally {
     fs.rmSync(schemaDir, { recursive: true, force: true });
   }
+  return { cliVersion: match[1]!, hooksRaw };
+}
 
-  const hookDefinitionHash = crypto.createHash('sha256').update(hooksRaw).digest('hex');
-  const runtimeRoot = resolvePreflightLifecycleStoreRoot(repoRoot, lifecycleStoreRoot);
-  const runtimeLiveness = runtimeRoot
-    ? hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity)
-    : false;
-
+async function discoverLifecycleHooks(repoRoot: string): Promise<Readonly<{
+  discoveredHooks: readonly DiscoveredHook[];
+  hookProvenance: Readonly<{
+    hookSource: 'isolated-user' | 'managed' | 'project';
+    hookSourcePathDigest: string;
+    hookSourceHash: string;
+  }>;
+  diagnostics: readonly unknown[];
+}>> {
   const transport = new CodexAppServerTransport();
   transport.start();
   let discoveredHooks: readonly DiscoveredHook[];
@@ -653,10 +686,7 @@ async function preflightCodexLifecycleEvidence(
   const hookSource = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT
     ? 'isolated-user'
     : source === 'managed' ? 'managed' : 'project';
-  return Object.freeze({
-    cliVersion: match[1],
-    hookDefinitionHash,
-    staticReady: true,
+  return {
     discoveredHooks,
     hookProvenance: Object.freeze({
       hookSource,
@@ -668,9 +698,8 @@ async function preflightCodexLifecycleEvidence(
         currentHash: hook.currentHash
       })))).digest('hex')
     }),
-    runtimeLiveness,
     diagnostics: transport.diagnostics
-  });
+  };
 }
 
 export {

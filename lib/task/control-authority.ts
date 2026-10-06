@@ -622,22 +622,7 @@ function orchestration(
       });
     case 'route': return routeOrchestration(operation.taskRef, options);
     case 'status': return statusOrchestration(operation.taskRef, options);
-    case 'prepare': {
-      const prepareInput = {
-        client: input.client as AgentClientId,
-        requestedModel: input.requestedModel as string | undefined,
-        requestedReasoningEffort: input.requestedReasoningEffort as string | undefined,
-      };
-      const prepareDelegation = getAgentClientAdapter(prepareInput.client)
-        .orchestrationAdapter?.prepareDelegation;
-      if (prepareDelegation) {
-        return prepareDelegation(operation.taskRef, prepareInput, {
-          repoRoot: context.repoRoot,
-          orchestrationOptions: options,
-        });
-      }
-      return prepareOrchestrationDelegation(operation.taskRef, prepareInput, options);
-    }
+    case 'prepare': return prepareTaskOrchestration(context, operation, options);
     case 'dispatch': return dispatchOrchestrationDelegation(operation.taskRef, options);
     case 'await-activation':
       return awaitOrchestrationDelegationActivation(operation.taskRef, input.event as never, options);
@@ -664,6 +649,26 @@ function orchestration(
         options
       );
   }
+}
+
+function prepareTaskOrchestration(
+  context: TaskControlExecutionContext,
+  operation: Extract<TaskControlOperation, { family: 'task-orchestration' }>,
+  options: OrchestrationOptions
+): OrchestrationResult | Promise<OrchestrationResult> {
+  const input = operation.input;
+  const prepareInput = {
+    client: input.client as AgentClientId,
+    requestedModel: input.requestedModel as string | undefined,
+    requestedReasoningEffort: input.requestedReasoningEffort as string | undefined,
+  };
+  const prepareDelegation = getAgentClientAdapter(prepareInput.client).orchestrationAdapter?.prepareDelegation;
+  return prepareDelegation
+    ? prepareDelegation(operation.taskRef, prepareInput, {
+      repoRoot: context.repoRoot,
+      orchestrationOptions: options,
+    })
+    : prepareOrchestrationDelegation(operation.taskRef, prepareInput, options);
 }
 
 function orchestrationFailure(error: unknown): OrchestrationResult {

@@ -57,34 +57,57 @@ function digest(value: string): string {
 
 function readRecord(file: string, expectedTaskId?: string): StoredCodexLifecycle {
   const value = JSON.parse(fs.readFileSync(file, 'utf8')) as StoredCodexLifecycle;
-  if (
-    value.schemaVersion !== 2
-    || !Number.isSafeInteger(value.revision)
-    || value.revision < 1
-    || !value.state
-    || value.state.schemaVersion !== 1
-    || !(value.taskBinding === null || (
-      typeof value.taskBinding === 'object'
-      && value.taskBinding !== null
-      && /^TASK-[0-9]{8}-[0-9]{6}$/u.test(value.taskBinding.taskId)
-      && typeof value.taskBinding.runId === 'string'
-      && value.taskBinding.runId.trim() === value.taskBinding.runId
-      && value.taskBinding.runId.length > 0
-      && typeof value.taskBinding.receiptId === 'string'
-      && value.taskBinding.receiptId.trim() === value.taskBinding.receiptId
-      && value.taskBinding.receiptId.length > 0
-    ))
-    || (value.spawnObservedAt != null && (
-      typeof value.spawnObservedAt !== 'string'
-      || !Number.isFinite(Date.parse(value.spawnObservedAt))
-    ))
-  ) {
+  if (!validStoredTaskBinding(value.taskBinding)
+    || !validStoredLifecycleMetadata(value)
+    || !validSpawnObservedAt(value.spawnObservedAt)) {
     throw new Error(`Codex lifecycle record '${path.basename(file)}' is invalid`);
   }
   if (expectedTaskId && value.taskBinding?.taskId !== expectedTaskId) {
     throw new Error('Codex lifecycle record belongs to a different task');
   }
   return Object.freeze({ ...value, spawnObservedAt: value.spawnObservedAt ?? null });
+}
+
+function validStoredTaskBinding(value: StoredCodexLifecycle['taskBinding']): boolean {
+  return value === null || (
+    typeof value === 'object'
+    && /^TASK-[0-9]{8}-[0-9]{6}$/u.test(value.taskId)
+    && typeof value.runId === 'string'
+    && value.runId.trim() === value.runId
+    && value.runId.length > 0
+    && typeof value.receiptId === 'string'
+    && value.receiptId.trim() === value.receiptId
+    && value.receiptId.length > 0
+  );
+}
+
+function validStoredLifecycleMetadata(value: StoredCodexLifecycle): boolean {
+  return value.schemaVersion === 2
+    && Number.isSafeInteger(value.revision)
+    && value.revision >= 1
+    && Boolean(value.state)
+    && value.state.schemaVersion === 1;
+}
+
+function validSpawnObservedAt(value: string | null | undefined): boolean {
+  return value == null || (typeof value === 'string' && Number.isFinite(Date.parse(value)));
+}
+
+function assertCurrentCanApply(
+  current: StoredCodexLifecycle,
+  expectedTaskId: string | undefined,
+  binding: CodexLifecycleTaskBinding | null
+): void {
+  if (expectedTaskId && current.taskBinding?.taskId !== expectedTaskId) {
+    throw new Error('Codex lifecycle record belongs to a different task');
+  }
+  if (current.revision === 0 && !current.taskBinding && expectedTaskId) {
+    throw new Error('Codex lifecycle record has no task binding');
+  }
+  if (current.revision > 0 && binding && JSON.stringify(current.taskBinding) !== JSON.stringify(binding)) {
+    throw new Error('Codex lifecycle task binding does not match the stored spawn');
+  }
+  if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
 }
 
 function recordFiles(root: string): string[] {
@@ -222,16 +245,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
             spawnObservedAt: null,
             updatedAt: observedAt
           });
-      if (options.taskId && current.taskBinding?.taskId !== options.taskId) {
-        throw new Error('Codex lifecycle record belongs to a different task');
-      }
-      if (current.revision === 0 && !current.taskBinding && options.taskId) {
-        throw new Error('Codex lifecycle record has no task binding');
-      }
-      if (current.revision > 0 && binding && JSON.stringify(current.taskBinding) !== JSON.stringify(binding)) {
-        throw new Error('Codex lifecycle task binding does not match the stored spawn');
-      }
-      if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
+      assertCurrentCanApply(current, options.taskId, binding);
       const nextState = reduceCodexLifecycleEvent(current.state, event);
       if (nextState.status === 'invalid' && nextState.error && NON_PERSISTENT_FAILURES.has(nextState.error.code)) {
         throw new Error(`${nextState.error.code}: ${nextState.error.message}`);

@@ -831,6 +831,52 @@ function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}
   return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
 }
 
+function validatePreparedModelPolicy(
+  taskId: string,
+  run: OrchestrationRun,
+  next: NonNullable<OrchestrationResult['next']>,
+  input: Readonly<{ requestedModel?: string; requestedReasoningEffort?: string }>
+): OrchestrationResult | null {
+  if (!validModel(input.requestedModel)) {
+    return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', taskId);
+  }
+  if (!validModel(input.requestedReasoningEffort)) {
+    return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_REQUIRED', 'prepare requires the exact requested reasoning effort', taskId);
+  }
+  const expectedPolicy = run.modelPolicy[next.role];
+  if (input.requestedModel !== expectedPolicy.model) {
+    return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, taskId);
+  }
+  if (input.requestedReasoningEffort !== expectedPolicy.reasoningEffort) {
+    return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_MISMATCH', `requested reasoning effort does not match the persisted ${next.role} policy`, taskId);
+  }
+  return null;
+}
+
+function captureTaskSnapshot(taskId: string, repoRoot: string, options: OrchestrationOptions): string {
+  return (options.captureWorkspace ?? captureWorkspaceSnapshot)({
+    gitRoot: gitRootFor(repoRoot, options),
+    stateRoot: repoRoot,
+    taskId
+  });
+}
+
+function validateDelegationRun(
+  taskRef: string,
+  taskId: string,
+  run: OrchestrationRun | null,
+  options: OrchestrationOptions
+): OrchestrationResult | null {
+  if (!run || run.status !== 'running') {
+    return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', taskId);
+  }
+  if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', taskId);
+  if (run.stepCount >= run.maxSteps) {
+    return pauseOrchestration(taskRef, 'ORCHESTRATION_MAX_STEPS', 'maximum orchestration steps reached', true, options);
+  }
+  return null;
+}
+
 function prepareOrchestrationDelegationUnlocked(
   taskRef: string,
   input: Readonly<{
@@ -855,50 +901,35 @@ function prepareOrchestrationDelegationUnlocked(
     requestedReasoningEffort: input.requestedReasoningEffort ?? null
   });
   const run = readRun(resolved.taskDir, options);
-  if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
-  if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
-  if (run.stepCount >= run.maxSteps) return pauseOrchestration(taskRef, 'ORCHESTRATION_MAX_STEPS', 'maximum orchestration steps reached', true, options);
+  const runFailure = validateDelegationRun(taskRef, resolved.taskId, run, options);
+  if (runFailure) return runFailure;
+  const activeRun = run!;
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;
-  if (!validModel(input.requestedModel)) {
-    return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', resolved.taskId);
-  }
-  if (!validModel(input.requestedReasoningEffort)) {
-    return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_REQUIRED', 'prepare requires the exact requested reasoning effort', resolved.taskId);
-  }
-  const expectedPolicy = run.modelPolicy[next.role];
-  if (input.requestedModel !== expectedPolicy.model) {
-    return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
-  }
-  if (input.requestedReasoningEffort !== expectedPolicy.reasoningEffort) {
-    return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_MISMATCH', `requested reasoning effort does not match the persisted ${next.role} policy`, resolved.taskId);
-  }
+  const policyFailure = validatePreparedModelPolicy(resolved.taskId, activeRun, next, input);
+  if (policyFailure) return policyFailure;
   let beforeFingerprint: string;
   try {
-    beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
-      gitRoot: gitRootFor(resolved.repoRoot, options),
-      stateRoot: resolved.repoRoot,
-      taskId: resolved.taskId
-    });
+    beforeFingerprint = captureTaskSnapshot(resolved.taskId, resolved.repoRoot, options);
   } catch (error) {
     return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
   const receipt = prepareDelegation({
     taskId: resolved.taskId,
-    runId: run.runId,
+    runId: activeRun.runId,
     role: next.role,
     stage: next.stage,
     round: next.round,
     artifact: next.artifact,
     client: input.client,
-    requestedModel: input.requestedModel,
-    requestedReasoningEffort: input.requestedReasoningEffort,
+    requestedModel: input.requestedModel!,
+    requestedReasoningEffort: input.requestedReasoningEffort!,
     workspaceSnapshotScope: 'task',
     lifecycleProvenance: input.lifecycleProvenance ?? null,
     beforeFingerprint
   }, { id: options.id, now: options.now, monotonicNow: options.monotonicNow });
-  const updated = withUpdatedRun(run, {
+  const updated = withUpdatedRun(activeRun, {
     nextStage: next.stage,
     pendingDelegation: receipt
   });
@@ -1222,17 +1253,19 @@ function sealMatchingOrchestrationDelegationWithHostEvidence(
     return { status: 'running', changed: true, taskId: matched.taskId, run: updated, next: null, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/TASK_BINDING_MISMATCH|CODEX_EVIDENCE_(?:IDENTITY_MISMATCH|PARENT_MISMATCH|REPLAY_CONFLICT)|identity mismatch|receipt changed|ambiguous|already consumed|revision changed|does not match the stored spawn/iu.test(message)) {
-      return failed('ORCHESTRATION_CODEX_EVIDENCE_IDENTITY_MISMATCH', message, matched.taskId);
-    }
-    return pauseOrchestration(
-      matched.taskId,
-      'ORCHESTRATION_CODEX_EVIDENCE_FAILED',
-      message,
-      true,
-      options
-    );
+    return codexHostEvidenceSealError(message, matched.taskId, options);
   }
+}
+
+function codexHostEvidenceSealError(
+  message: string,
+  taskId: string,
+  options: OrchestrationOptions
+): OrchestrationResult {
+  if (/TASK_BINDING_MISMATCH|CODEX_EVIDENCE_(?:IDENTITY_MISMATCH|PARENT_MISMATCH|REPLAY_CONFLICT)|identity mismatch|receipt changed|ambiguous|already consumed|revision changed|does not match the stored spawn/iu.test(message)) {
+    return failed('ORCHESTRATION_CODEX_EVIDENCE_IDENTITY_MISMATCH', message, taskId);
+  }
+  return pauseOrchestration(taskId, 'ORCHESTRATION_CODEX_EVIDENCE_FAILED', message, true, options);
 }
 
 function reconcileMatchingOrchestrationDelegation(

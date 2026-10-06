@@ -342,6 +342,51 @@ function foldBlankToNull(value: string | undefined): string | null {
   return value?.trim() ? value : null;
 }
 
+function validateSealHostEvidence(receipt: DelegationReceipt, evidence: NonNullable<Parameters<typeof sealDelegation>[1]['hostEvidence']>): ReceiptFailure | null {
+  if (!receipt.hostEvidence
+    || !Number.isSafeInteger(evidence.stopRevision)
+    || evidence.stopRevision <= receipt.hostEvidence.startRevision
+    || evidence.consumer !== receipt.id
+    || !evidence.consumedAt.trim()) {
+    return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex stop evidence reference is invalid');
+  }
+  return null;
+}
+
+function validateSealRequest(
+  receipt: DelegationReceipt,
+  event: Parameters<typeof sealDelegation>[1],
+  options: NonNullable<Parameters<typeof sealDelegation>[2]>
+): ReceiptFailure | null {
+  if (receipt.status !== 'stage-completed') {
+    return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected stage-completed`);
+  }
+  if (receipt.client === 'codex' && options.requireHostEvidence !== false && !event.hostEvidence) {
+    return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex sealing requires consumed lifecycle-v2 host evidence');
+  }
+  if (event.childId !== receipt.childId || event.exitCode !== 0) {
+    return fail('DELEGATION_STOP_INVALID', 'native stop identity or exit status is invalid');
+  }
+  const reviewerPathFailure = validateReviewerSealPaths(receipt, event.changedPaths);
+  if (reviewerPathFailure) return reviewerPathFailure;
+  if (event.hostEvidence) return validateSealHostEvidence(receipt, event.hostEvidence);
+  return null;
+}
+
+function validateReviewerSealPaths(receipt: DelegationReceipt, changedPaths: readonly string[]): ReceiptFailure | null {
+  if (receipt.role !== 'reviewer') return null;
+  const taskRoot = `.agents/workspace/active/${receipt.taskId}/`;
+  const allowed = new Set([
+    `${taskRoot}${receipt.artifact}`,
+    `${taskRoot}task.md`,
+    `${taskRoot}.runtime/orchestration.json`
+  ]);
+  const disallowed = changedPaths.find((entry) => !allowed.has(entry));
+  return disallowed
+    ? fail('DELEGATION_REVIEWER_WRITE_FORBIDDEN', `reviewer changed forbidden path '${disallowed}'`)
+    : null;
+}
+
 function prepareDelegation(
   input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'spawnDispatchedAt' | 'activationDeadlineAt' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
   options: { id?: () => string; now?: () => string; monotonicNow?: () => number } = {}
@@ -616,30 +661,8 @@ function sealDelegation(
   }>,
   options: { now?: () => string; requireHostEvidence?: boolean } = {}
 ): ReceiptResult {
-  if (receipt.status !== 'stage-completed') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected stage-completed`);
-  if (receipt.client === 'codex' && options.requireHostEvidence !== false && !event.hostEvidence) {
-    return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex sealing requires consumed lifecycle-v2 host evidence');
-  }
-  if (event.childId !== receipt.childId || event.exitCode !== 0) return fail('DELEGATION_STOP_INVALID', 'native stop identity or exit status is invalid');
-  if (receipt.role === 'reviewer') {
-    const taskRoot = `.agents/workspace/active/${receipt.taskId}/`;
-    const allowed = new Set([
-      `${taskRoot}${receipt.artifact}`,
-      `${taskRoot}task.md`,
-      `${taskRoot}.runtime/orchestration.json`
-    ]);
-    const disallowed = event.changedPaths.find((entry) => !allowed.has(entry));
-    if (disallowed) return fail('DELEGATION_REVIEWER_WRITE_FORBIDDEN', `reviewer changed forbidden path '${disallowed}'`);
-  }
-  if (event.hostEvidence) {
-    if (
-      !receipt.hostEvidence
-      || !Number.isSafeInteger(event.hostEvidence.stopRevision)
-      || event.hostEvidence.stopRevision <= receipt.hostEvidence.startRevision
-      || event.hostEvidence.consumer !== receipt.id
-      || !event.hostEvidence.consumedAt.trim()
-    ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex stop evidence reference is invalid');
-  }
+  const validationFailure = validateSealRequest(receipt, event, options);
+  if (validationFailure) return validationFailure;
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'sealed',

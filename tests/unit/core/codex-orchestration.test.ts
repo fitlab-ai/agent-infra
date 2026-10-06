@@ -6,6 +6,7 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
+import { appendCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -145,6 +146,133 @@ test('Codex activation rechecks the pending receipt after asynchronous host reso
   assert.deepEqual(fs.readFileSync(runPath), runAfterReceiptChange);
 });
 
+test('Codex activation rechecks receipt and revision after its evidence collector returns', async () => {
+  const f = fixture();
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId, cliVersion: '0.147.0'
+  });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+    taskBinding: { taskId, runId: prepared.run!.runId, receiptId: prepared.run!.pendingDelegation!.id }
+  });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
+  let afterMutation: string | undefined;
+  const result = await activateCodexOrchestrationDelegation('child', {
+    repoRoot: f.root, store,
+    resolveThread: async () => ({
+      resolution: {
+        thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
+        settings: { type: 'app-settings', childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
+      },
+      reroutes: [], diagnostics: []
+    }),
+    preflight: () => new Promise((resolve) => {
+      resolve({
+        cliVersion: '0.147.0', hookDefinitionHash: 'c'.repeat(64), staticReady: true,
+        discoveredHooks: [], hookProvenance, runtimeLiveness: false, diagnostics: []
+      });
+      queueMicrotask(() => {
+        const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+        run.pendingDelegation.id = 'receipt-replaced-after-collector';
+        fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+        afterMutation = snapshotDirectory(f.taskDir);
+      });
+    })
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.changed, false);
+  assert.equal(result.error?.code, 'CODEX_LIFECYCLE_TASK_BINDING_MISMATCH');
+  assert.equal(snapshotDirectory(f.taskDir), afterMutation);
+  assert.equal(store.read('child').revision, 2);
+});
+
+test('Codex spawn resolution rechecks the current task tree before applying the child event', async () => {
+  for (const mutation of ['replace-receipt', 'remove-task-file'] as const) {
+    const f = fixture();
+    const { store, spawn } = await prepareSpawnActivation(f);
+    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
+    let afterMutation: string | undefined;
+    const result = await activateCodexSpawnDelegation(spawn, {
+      repoRoot: f.root, buildIdentity, preflight, store,
+      resolveThread: () => new Promise((resolve) => {
+        resolve({
+          resolution: {
+            thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
+            settings: { type: 'app-settings', childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
+          },
+          reroutes: [], diagnostics: []
+        });
+        queueMicrotask(() => {
+          if (mutation === 'replace-receipt') {
+            const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+            run.pendingDelegation.id = 'receipt-replaced-after-child-resolution';
+            fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+          } else {
+            fs.unlinkSync(path.join(f.taskDir, 'task.md'));
+          }
+          afterMutation = snapshotDirectory(f.taskDir);
+        });
+      })
+    });
+    assert.equal(result.status, 'failed', mutation);
+    assert.equal(result.changed, false, mutation);
+    assert.deepEqual(changedSnapshotPaths(afterMutation!, snapshotDirectory(f.taskDir)), [], mutation);
+  }
+});
+
+test('Codex parent seal rechecks receipt after terminal collection before writing terminal and stop evidence', async () => {
+  const f = fixture();
+  const store = await prepareActivatedChild(f);
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
+  let afterMutation: string | undefined;
+  const result = await sealCodexParentDelegation('parent', {
+    repoRoot: f.root, store,
+    resolveTerminal: () => new Promise((resolve) => {
+      resolve({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });
+      queueMicrotask(() => {
+        const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+        run.pendingDelegation.id = 'receipt-replaced-after-terminal-collection';
+        fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+        afterMutation = snapshotDirectory(f.taskDir);
+      });
+    })
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.changed, false);
+  assert.equal(result.error?.code, 'CODEX_LIFECYCLE_TASK_BINDING_MISMATCH');
+  assert.equal(snapshotDirectory(f.taskDir), afterMutation);
+  assert.equal(store.read('child').state.terminal, null);
+  assert.equal(store.read('child').state.stop, null);
+});
+
+test('Codex child seal pauses when terminal evidence is not terminal', async () => {
+  const f = fixture();
+  const store = await prepareActivatedChild(f);
+  store.apply({
+    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+  const result = await sealCodexOrchestrationDelegation('child', {
+    repoRoot: f.root, store,
+    resolveTerminal: async () => { throw new Error('CODEX_TURN_NOT_TERMINAL'); }
+  });
+  assert.equal(result.status, 'paused');
+  assert.equal(result.run?.pause?.code, 'ORCHESTRATION_CODEX_STOP_FAILED');
+  assert.equal(readRun(f.taskDir)?.pause?.code, 'ORCHESTRATION_CODEX_STOP_FAILED');
+});
+
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-orchestration-'));
   fixtureRoots.add(root);
@@ -153,6 +281,123 @@ function fixture() {
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   beginOrResumeOrchestration(taskId, { repoRoot: root, client: 'codex', modelPolicy: policy, id: () => 'run-1' });
   return { root, taskDir };
+}
+
+function snapshotDirectory(root: string): string {
+  const entries: Array<readonly [string, string]> = [];
+  const visit = (dir: string, relative: string): void => {
+    for (const name of fs.readdirSync(dir).sort()) {
+      const absolute = path.join(dir, name);
+      const child = path.posix.join(relative, name);
+      const stat = fs.lstatSync(absolute);
+      if (stat.isDirectory()) {
+        entries.push([child, 'directory']);
+        visit(absolute, child);
+      } else if (stat.isSymbolicLink()) {
+        entries.push([child, `symlink:${fs.readlinkSync(absolute)}`]);
+      } else {
+        entries.push([child, `file:${fs.readFileSync(absolute).toString('base64')}`]);
+      }
+    }
+  };
+  visit(root, '');
+  return JSON.stringify(entries);
+}
+
+function changedSnapshotPaths(before: string, after: string): string[] {
+  const oldEntries = new Map(JSON.parse(before) as Array<readonly [string, string]>);
+  const newEntries = new Map(JSON.parse(after) as Array<readonly [string, string]>);
+  return [...new Set([...oldEntries.keys(), ...newEntries.keys()])]
+    .filter((name) => oldEntries.get(name) !== newEntries.get(name)).sort();
+}
+
+async function prepareSpawnActivation(f: ReturnType<typeof fixture>) {
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, buildIdentity, preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
+  const binding = { taskId, runId: 'run-1', receiptId: 'receipt-1' };
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId, cliVersion: '0.147.0'
+  });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64), taskBinding: binding
+  });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'parent-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+  });
+  const taskName = appendCodexLifecycleBinding('analysis_executor_r1', binding);
+  const transcriptPath = path.join(f.root, 'rollout-parent.jsonl');
+  fs.writeFileSync(transcriptPath, [
+    JSON.stringify({ type: 'response_item', payload: {
+      type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'spawn-tool',
+      arguments: JSON.stringify({
+        agent_type: 'agent-infra-lifecycle-executor', task_name: taskName,
+        model: 'executor-model', reasoning_effort: 'xhigh'
+      })
+    } }),
+    JSON.stringify({ type: 'event_msg', payload: {
+      type: 'item_completed', thread_id: 'parent', turn_id: 'parent-turn',
+      item: { type: 'SubAgentActivity', id: 'spawn-tool', kind: 'started', agent_thread_id: 'child', agent_path: `/root/${taskName}` }
+    } })
+  ].join('\n'));
+  return {
+    store,
+    spawn: {
+      sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool', transcriptPath,
+      nativeAgent: 'agent-infra-lifecycle-executor', taskName,
+      requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    }
+  };
+}
+
+async function prepareActivatedChild(f: ReturnType<typeof fixture>) {
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, buildIdentity, preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
+  const store = createCodexLifecycleStore({
+    root: path.join(f.taskDir, '.runtime', 'codex-lifecycle'), taskId, cliVersion: '0.147.0'
+  });
+  for (const event of [
+    {
+      type: 'hook-spawn' as const, sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+      nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
+      requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64),
+      taskBinding: { taskId, runId: prepared.run!.runId, receiptId: prepared.run!.pendingDelegation!.id }
+    },
+    {
+      type: 'hook-child' as const, sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    },
+    {
+      type: 'app-thread' as const, childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null,
+      sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    },
+    { type: 'app-settings' as const, childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
+  ]) store.apply(event);
+  const activated = await activateCodexOrchestrationDelegation('child', {
+    repoRoot: f.root, store, buildIdentity, preflight,
+    resolveThread: async () => ({
+      resolution: {
+        thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
+        settings: { type: 'app-settings', childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
+      },
+      reroutes: [], diagnostics: []
+    })
+  });
+  assert.equal(activated.run?.pendingDelegation?.status, 'activated');
+  completeOrchestrationStage(taskId, { stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex' }, { repoRoot: f.root });
+  return store;
 }
 
 test('Codex prepare rejects missing model or effort before preparing a stage', async () => {

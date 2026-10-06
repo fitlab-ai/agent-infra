@@ -114,21 +114,37 @@ function verifyCodexLifecycleTaskBinding(
   nativeAgent: string,
   expected: Readonly<{ requestedModel?: string; requestedReasoningEffort?: string }> = {}
 ): void {
-  const receipt = run.pendingDelegation;
-  if (!receipt
-    || run.status !== 'running'
-    || run.taskId !== binding.taskId
-    || run.runId !== binding.runId
-    || receipt.taskId !== binding.taskId
-    || receipt.runId !== binding.runId
-    || receipt.id !== binding.receiptId
-    || receipt.client !== 'codex'
-    || receipt.status !== 'prepared'
-    || managedDelegationRole(nativeAgent) !== receipt.role
-    || (expected.requestedModel && receipt.requestedModel !== expected.requestedModel)
-    || (expected.requestedReasoningEffort && receipt.requestedReasoningEffort !== expected.requestedReasoningEffort)) {
+  if (!codexReceiptMatchesBinding(binding, run, nativeAgent, expected)) {
     throw new Error('Codex lifecycle task binding does not match the current pending receipt');
   }
+}
+
+function codexReceiptMatchesBinding(
+  binding: CodexLifecycleTaskBinding,
+  run: Parameters<typeof verifyCodexLifecycleTaskBinding>[1],
+  nativeAgent: string,
+  expected: Readonly<{ requestedModel?: string; requestedReasoningEffort?: string }>
+): boolean {
+  const receipt = run.pendingDelegation;
+  return Boolean(receipt)
+    && run.status === 'running'
+    && run.taskId === binding.taskId
+    && run.runId === binding.runId
+    && receipt!.taskId === binding.taskId
+    && receipt!.runId === binding.runId
+    && receipt!.id === binding.receiptId
+    && receipt!.client === 'codex'
+    && receipt!.status === 'prepared'
+    && managedDelegationRole(nativeAgent) === receipt!.role
+    && requestedBindingMatches(receipt!, expected);
+}
+
+function requestedBindingMatches(
+  receipt: NonNullable<Parameters<typeof verifyCodexLifecycleTaskBinding>[1]['pendingDelegation']>,
+  expected: Readonly<{ requestedModel?: string; requestedReasoningEffort?: string }>
+): boolean {
+  return (!expected.requestedModel || receipt.requestedModel === expected.requestedModel)
+    && (!expected.requestedReasoningEffort || receipt.requestedReasoningEffort === expected.requestedReasoningEffort);
 }
 
 export {

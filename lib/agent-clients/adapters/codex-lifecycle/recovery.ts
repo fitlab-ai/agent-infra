@@ -121,73 +121,130 @@ function validateStopRecord(
   record: StoredCodexLifecycle,
   receipt: DelegationReceipt
 ): { ok: true } | { ok: false; code: string; message: string } {
-  const start = record.state.startEvidence;
-  const stop = record.state.stopEvidence;
-  const provenance = receipt.lifecycleProvenance;
-  const host = receipt.hostEvidence;
-  const spawn = record.state.spawn;
-  const child = record.state.child;
-  const stopState = record.state.stop;
-  if (record.taskBinding?.taskId !== receipt.taskId
-    || record.taskBinding.runId !== receipt.runId
-    || record.taskBinding.receiptId !== receipt.id) {
+  if (!stopRecordMatchesReceipt(record, receipt)) {
     return { ok: false, code: 'RECOVERY_TASK_BINDING_MISMATCH', message: 'lifecycle evidence belongs to a different task receipt' };
   }
-  if (
-    receipt.client !== 'codex'
-    || !provenance
-    || host?.kind !== 'codex-lifecycle-v2'
-    || !start
-    || !stop
-    || record.state.status !== 'stop-ready'
-    || stop.terminalStatus !== 'completed'
-    || stop.hookStopObserved !== true
-    || !spawn
-    || spawn.sessionId !== start.parentThreadId
-    || spawn.turnId !== provenance.capabilityTurnId
-    || spawn.toolUseId !== host.spawnToolUseId
-    || spawn.nativeAgent !== start.nativeAgent
-    || spawn.hookDefinitionHash !== provenance.hookDefinitionHash
-    || spawn.requestedModel !== receipt.requestedModel
-    || spawn.requestedReasoningEffort !== receipt.requestedReasoningEffort
-    || spawn.taskBinding?.taskId !== receipt.taskId
-    || spawn.taskBinding.runId !== receipt.runId
-    || spawn.taskBinding.receiptId !== receipt.id
-    || !child
-    || child.sessionId !== start.parentThreadId
-    || child.turnId !== stop.turnId
-    || child.childThreadId !== receipt.childId
-    || child.nativeAgent !== start.nativeAgent
-    || !stopState
-    || stopState.childThreadId !== receipt.childId
-    || stopState.turnId !== stop.turnId
-    || stopState.nativeAgent !== start.nativeAgent
-    || start.childThreadId !== receipt.childId
-    || start.parentThreadId !== receipt.parentId
-    || managedDelegationRole(start.nativeAgent) !== receipt.role
-    || start.hookDefinitionHash !== provenance.hookDefinitionHash
-    || host.hookDefinitionHash !== provenance.hookDefinitionHash
-    || host.capabilitySessionId !== provenance.capabilitySessionId
-    || host.capabilityTurnId !== provenance.capabilityTurnId
-    || host.capabilityToolUseId !== provenance.capabilityToolUseId
-    || host.spawnToolUseId !== start.spawnToolUseId
-    || !host.spawnObservedAt
-    || host.spawnObservedAt !== record.spawnObservedAt
-    || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
-    || host.controlGeneration !== provenance.controlGeneration
-    || typeof host.controllerInstanceDigest !== 'string'
-    || typeof host.controlGeneration !== 'string'
-    || host.startRevision < 1
-    || record.revision <= host.startRevision
-    || record.state.child?.childThreadId !== receipt.childId
-    || record.state.stop?.childThreadId !== receipt.childId
-  ) {
+  if (!stopEvidenceMatchesReceipt(record, receipt)) {
     return { ok: false, code: 'RECOVERY_STOP_EVIDENCE_INVALID', message: 'Codex stop evidence does not match the activated receipt' };
   }
   if (record.consumer !== null && record.consumer !== receipt.id) {
     return { ok: false, code: 'RECOVERY_CONSUMER_CONFLICT', message: `Codex lifecycle evidence was consumed by '${record.consumer}'` };
   }
   return { ok: true };
+}
+
+function stopRecordMatchesReceipt(record: StoredCodexLifecycle, receipt: DelegationReceipt): boolean {
+  return record.taskBinding?.taskId === receipt.taskId
+    && record.taskBinding.runId === receipt.runId
+    && record.taskBinding.receiptId === receipt.id;
+}
+
+function stopEvidenceMatchesReceipt(record: StoredCodexLifecycle, receipt: DelegationReceipt): boolean {
+  const start = record.state.startEvidence;
+  const stop = record.state.stopEvidence;
+  const provenance = receipt.lifecycleProvenance;
+  const host = receipt.hostEvidence;
+  if (!stopRecordHasRequiredEvidence(record, receipt, start, stop, host)) return false;
+  return spawnMatchesReceipt(record, receipt, provenance!, host!, start!)
+    && childMatchesReceipt(record, receipt, start!, stop!)
+    && hostEvidenceMatches(record, receipt, provenance!, host!, start!);
+}
+
+function stopRecordHasRequiredEvidence(
+  record: StoredCodexLifecycle,
+  receipt: DelegationReceipt,
+  start: StoredCodexLifecycle['state']['startEvidence'],
+  stop: StoredCodexLifecycle['state']['stopEvidence'],
+  host: DelegationReceipt['hostEvidence']
+): boolean {
+  return receipt.client === 'codex'
+    && Boolean(receipt.lifecycleProvenance)
+    && host?.kind === 'codex-lifecycle-v2'
+    && Boolean(start && stop && record.state.spawn && record.state.child && record.state.stop)
+    && record.state.status === 'stop-ready'
+    && stop?.terminalStatus === 'completed'
+    && stop.hookStopObserved === true;
+}
+
+function spawnMatchesReceipt(
+  record: StoredCodexLifecycle,
+  receipt: DelegationReceipt,
+  provenance: NonNullable<DelegationReceipt['lifecycleProvenance']>,
+  host: NonNullable<DelegationReceipt['hostEvidence']>,
+  start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>
+): boolean {
+  const spawn = record.state.spawn;
+  return Boolean(spawn)
+    && spawn!.sessionId === start.parentThreadId
+    && spawn!.turnId === provenance.capabilityTurnId
+    && spawn!.toolUseId === host.spawnToolUseId
+    && spawn!.nativeAgent === start.nativeAgent
+    && spawn!.hookDefinitionHash === provenance.hookDefinitionHash
+    && spawn!.requestedModel === receipt.requestedModel
+    && spawn!.requestedReasoningEffort === receipt.requestedReasoningEffort
+    && spawn!.taskBinding?.taskId === receipt.taskId
+    && spawn!.taskBinding.runId === receipt.runId
+    && spawn!.taskBinding.receiptId === receipt.id;
+}
+
+function childMatchesReceipt(
+  record: StoredCodexLifecycle,
+  receipt: DelegationReceipt,
+  start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>,
+  stop: NonNullable<StoredCodexLifecycle['state']['stopEvidence']>
+): boolean {
+  const child = record.state.child;
+  const stopState = record.state.stop;
+  return Boolean(child && stopState)
+    && child!.sessionId === start.parentThreadId
+    && child!.turnId === stop.turnId
+    && child!.childThreadId === receipt.childId
+    && child!.nativeAgent === start.nativeAgent
+    && stopState!.childThreadId === receipt.childId
+    && stopState!.turnId === stop.turnId
+    && stopState!.nativeAgent === start.nativeAgent
+    && start.childThreadId === receipt.childId
+    && start.parentThreadId === receipt.parentId
+    && managedDelegationRole(start.nativeAgent) === receipt.role;
+}
+
+function hostEvidenceMatches(
+  record: StoredCodexLifecycle,
+  receipt: DelegationReceipt,
+  provenance: NonNullable<DelegationReceipt['lifecycleProvenance']>,
+  host: NonNullable<DelegationReceipt['hostEvidence']>,
+  start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>
+): boolean {
+  return hostProvenanceMatches(record, receipt, provenance, host, start)
+    && hostRevisionMatches(record, receipt, host);
+}
+
+function hostProvenanceMatches(
+  record: StoredCodexLifecycle,
+  receipt: DelegationReceipt,
+  provenance: NonNullable<DelegationReceipt['lifecycleProvenance']>,
+  host: NonNullable<DelegationReceipt['hostEvidence']>,
+  start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>
+): boolean {
+  return start.hookDefinitionHash === provenance.hookDefinitionHash
+    && host.hookDefinitionHash === provenance.hookDefinitionHash
+    && host.capabilitySessionId === provenance.capabilitySessionId
+    && host.capabilityTurnId === provenance.capabilityTurnId
+    && host.capabilityToolUseId === provenance.capabilityToolUseId
+    && host.spawnToolUseId === start.spawnToolUseId
+    && Boolean(host.spawnObservedAt)
+    && host.spawnObservedAt === record.spawnObservedAt
+    && host.controllerInstanceDigest === provenance.controllerInstanceDigest
+    && host.controlGeneration === provenance.controlGeneration;
+}
+
+function hostRevisionMatches(record: StoredCodexLifecycle, receipt: DelegationReceipt, host: NonNullable<DelegationReceipt['hostEvidence']>): boolean {
+  return typeof host.controllerInstanceDigest === 'string'
+    && typeof host.controlGeneration === 'string'
+    && host.startRevision >= 1
+    && record.revision > host.startRevision
+    && record.state.child?.childThreadId === receipt.childId
+    && record.state.stop?.childThreadId === receipt.childId;
 }
 
 function abortedCandidates(run: OrchestrationRun, rows: readonly StepRow[]): RecoveryCandidate[] {
@@ -258,64 +315,121 @@ function recoverStartedLifecycleUnderLock(
 
   const rows = openRows(section);
   const pending = run.pendingDelegation;
-  if (!pending) {
-    const candidates = abortedCandidates(run, rows);
-    if (candidates.length === 0) return result(request, 'no-op', { taskId });
-    if (candidates.length > 1) {
-      return failure(request, 'conflict', 'RECOVERY_CANDIDATE_AMBIGUOUS', 'more than one aborted delegation has an open lifecycle row', { taskId });
-    }
-    return appendRecoveryLog(request, taskId, section, candidates[0]!, resolved.repoRoot, options.writeTask ?? writeTask);
+  if (!pending) return recoverAbortedLifecycle(request, taskId, section, resolved.repoRoot, run, rows, options);
+  return recoverActiveLifecycle(request, taskId, section, resolved.repoRoot, run, rows, pending, options);
+}
+
+function recoverAbortedLifecycle(
+  request: LifecycleRecoveryRequest,
+  taskId: string,
+  section: ActivityLogSection,
+  repoRoot: string,
+  run: OrchestrationRun,
+  rows: readonly StepRow[],
+  options: LifecycleRecoveryOptions
+): LifecycleRecoveryResult {
+  const candidates = abortedCandidates(run, rows);
+  if (candidates.length === 0) return result(request, 'no-op', { taskId });
+  if (candidates.length > 1) {
+    return failure(request, 'conflict', 'RECOVERY_CANDIDATE_AMBIGUOUS', 'more than one aborted delegation has an open lifecycle row', { taskId });
   }
+  return appendRecoveryLog(request, taskId, section, candidates[0]!, repoRoot, options.writeTask ?? writeTask);
+}
+
+function recoverActiveLifecycle(
+  request: LifecycleRecoveryRequest,
+  taskId: string,
+  section: ActivityLogSection,
+  repoRoot: string,
+  run: OrchestrationRun,
+  rows: readonly StepRow[],
+  pending: DelegationReceipt,
+  options: LifecycleRecoveryOptions
+): LifecycleRecoveryResult {
   if (pending.status !== 'activated') return result(request, 'no-op', { taskId });
   if (pending.client !== 'codex' || run.status !== 'running' || run.pause !== null) {
     return failure(request, 'conflict', 'RECOVERY_ORCHESTRATION_INVALID', 'activated recovery requires one running Codex delegation', {
       taskId, receiptId: pending.id, childId: pending.childId
     });
   }
+  const rowResult = matchingActiveRecoveryRow(request, taskId, rows, pending);
+  if ('result' in rowResult) return rowResult.result;
+  const evidenceResult = consumeRecoveryEvidence(request, taskId, repoRoot, pending, options);
+  if ('result' in evidenceResult) return evidenceResult.result;
+  return finishActiveRecovery(request, taskId, section, repoRoot, pending, rowResult.row, evidenceResult.consumed, options);
+}
+
+function matchingActiveRecoveryRow(
+  request: LifecycleRecoveryRequest,
+  taskId: string,
+  rows: readonly StepRow[],
+  pending: DelegationReceipt
+): { row: StepRow } | { result: LifecycleRecoveryResult } {
   const matchingRows = rowForReceipt(rows, pending);
   if (matchingRows.length !== 1 || normalizeAgentToken(matchingRows[0]!.agent) !== 'codex' || matchingRows[0]!.note !== 'started') {
-    return failure(request, 'conflict', 'RECOVERY_LOG_CONFLICT', 'activated delegation does not have one matching open lifecycle row', {
+    return { result: failure(request, 'conflict', 'RECOVERY_LOG_CONFLICT', 'activated delegation does not have one matching open lifecycle row', {
       taskId, receiptId: pending.id, childId: pending.childId
-    });
+    }) };
   }
   if (!pending.childId) {
-    return failure(request, 'conflict', 'RECOVERY_DELEGATION_INVALID', 'activated delegation has no child identity', { taskId, receiptId: pending.id });
+    return { result: failure(request, 'conflict', 'RECOVERY_DELEGATION_INVALID', 'activated delegation has no child identity', { taskId, receiptId: pending.id }) };
   }
-  const store = readLifecycleStore(options, resolved.repoRoot, taskId);
-  const stored = readStoredEvidence(store, pending.childId);
-  if ('error' in stored) return failure(request, 'owner-unknown', 'RECOVERY_STORE_UNKNOWN', stored.error.message, { taskId, receiptId: pending.id, childId: pending.childId });
-  if ('missing' in stored) return failure(request, 'owner-unknown', 'RECOVERY_STOP_EVIDENCE_MISSING', 'matching Codex lifecycle stop evidence is missing', { taskId, receiptId: pending.id, childId: pending.childId });
-  const evidence = validateStopRecord(stored, pending);
-  if (!evidence.ok) return failure(request, evidence.code === 'RECOVERY_CONSUMER_CONFLICT' ? 'conflict' : 'owner-unknown', evidence.code, evidence.message, { taskId, receiptId: pending.id, childId: pending.childId });
+  return { row: matchingRows[0]! };
+}
 
+function consumeRecoveryEvidence(
+  request: LifecycleRecoveryRequest,
+  taskId: string,
+  repoRoot: string,
+  pending: DelegationReceipt,
+  options: LifecycleRecoveryOptions
+): { consumed: StoredCodexLifecycle } | { result: LifecycleRecoveryResult } {
+  const store = readLifecycleStore(options, repoRoot, taskId);
+  const stored = readStoredEvidence(store, pending.childId!);
+  if ('error' in stored) return { result: failure(request, 'owner-unknown', 'RECOVERY_STORE_UNKNOWN', stored.error.message, { taskId, receiptId: pending.id, childId: pending.childId }) };
+  if ('missing' in stored) return { result: failure(request, 'owner-unknown', 'RECOVERY_STOP_EVIDENCE_MISSING', 'matching Codex lifecycle stop evidence is missing', { taskId, receiptId: pending.id, childId: pending.childId }) };
+  const evidence = validateStopRecord(stored, pending);
+  if (!evidence.ok) return { result: failure(request, evidence.code === 'RECOVERY_CONSUMER_CONFLICT' ? 'conflict' : 'owner-unknown', evidence.code, evidence.message, { taskId, receiptId: pending.id, childId: pending.childId }) };
   let consumed = stored;
   if (stored.consumer === null) {
     try {
-      consumed = store.consume(pending.childId, pending.id, pending.hostEvidence?.hookDefinitionHash, {
+      consumed = store.consume(pending.childId!, pending.id, pending.hostEvidence?.hookDefinitionHash, {
         taskId: pending.taskId, runId: pending.runId, receiptId: pending.id
       });
     } catch (error) {
-      return failure(request, 'owner-unknown', 'RECOVERY_EVIDENCE_CONSUME_FAILED', error instanceof Error ? error.message : String(error), { taskId, receiptId: pending.id, childId: pending.childId });
+      return { result: failure(request, 'owner-unknown', 'RECOVERY_EVIDENCE_CONSUME_FAILED', error instanceof Error ? error.message : String(error), { taskId, receiptId: pending.id, childId: pending.childId }) };
     }
   }
-  if (!consumed.consumedAt) {
-    return failure(request, 'owner-unknown', 'RECOVERY_EVIDENCE_INVALID', 'consumed stop evidence has no timestamp', { taskId, receiptId: pending.id, childId: pending.childId });
-  }
+  return consumed.consumedAt
+    ? { consumed }
+    : { result: failure(request, 'owner-unknown', 'RECOVERY_EVIDENCE_INVALID', 'consumed stop evidence has no timestamp', { taskId, receiptId: pending.id, childId: pending.childId }) };
+}
+
+function finishActiveRecovery(
+  request: LifecycleRecoveryRequest,
+  taskId: string,
+  section: ActivityLogSection,
+  repoRoot: string,
+  pending: DelegationReceipt,
+  row: StepRow,
+  consumed: StoredCodexLifecycle,
+  options: LifecycleRecoveryOptions
+): LifecycleRecoveryResult {
   const recovered = recoverActivatedOrchestrationDelegationUnderLock(taskId, {
     receiptId: pending.id,
     stage: pending.stage,
     round: pending.round,
     artifact: pending.artifact,
     startedAgent: request.agent,
-    childId: pending.childId,
+    childId: pending.childId!,
     stopRevision: consumed.revision,
     consumer: pending.id,
-    consumedAt: consumed.consumedAt
-  }, { ...options.orchestration, repoRoot: resolved.repoRoot, now: options.now });
+    consumedAt: consumed.consumedAt!
+  }, { ...options.orchestration, repoRoot, now: options.now });
   if (recovered.status === 'failed' || !recovered.run) {
     return failure(request, 'owner-unknown', recovered.error?.code ?? 'RECOVERY_ORCHESTRATION_FAILED', recovered.error?.message ?? 'orchestration recovery failed', { taskId, receiptId: pending.id, childId: pending.childId });
   }
-  return appendRecoveryLog(request, taskId, section, { receipt: recovered.run.receipts.at(-1)!, row: matchingRows[0]! }, resolved.repoRoot, options.writeTask ?? writeTask);
+  return appendRecoveryLog(request, taskId, section, { receipt: recovered.run.receipts.at(-1)!, row }, repoRoot, options.writeTask ?? writeTask);
 }
 
 function recoverStartedLifecycleFromAdapter(

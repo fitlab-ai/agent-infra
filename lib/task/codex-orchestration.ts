@@ -32,8 +32,12 @@ import {
   type CodexLifecycleTaskBinding
 } from '../agent-clients/adapters/codex-lifecycle/binding.ts';
 import { reduceCodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
+import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
 
 type LifecycleStore = ReturnType<typeof createCodexLifecycleStore>;
+type TaskRunWithPendingDelegation = NonNullable<ReturnType<typeof readRun>> & Readonly<{
+  pendingDelegation: NonNullable<NonNullable<ReturnType<typeof readRun>>['pendingDelegation']>;
+}>;
 type CodexBridgeOptions = Readonly<{
   repoRoot?: string;
   store?: LifecycleStore;
@@ -63,6 +67,21 @@ function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
   };
 }
 
+function taskRunMatchesReceipt(
+  run: ReturnType<typeof readRun>,
+  binding: CodexLifecycleTaskBinding,
+  nativeAgent: string
+): run is TaskRunWithPendingDelegation {
+  const receipt = run?.pendingDelegation;
+  const role = nativeAgent.endsWith('reviewer') ? 'reviewer' : 'executor';
+  return run?.status === 'running'
+    && receipt?.taskId === binding.taskId
+    && receipt.runId === binding.runId
+    && receipt.id === binding.receiptId
+    && receipt.client === 'codex'
+    && receipt.role === role;
+}
+
 function recordMatchesTaskReceipt(childThreadId: string, options: CodexBridgeOptions) {
   const store = requiredStore(options);
   let record: ReturnType<LifecycleStore['read']>;
@@ -79,17 +98,11 @@ function recordMatchesTaskReceipt(childThreadId: string, options: CodexBridgeOpt
   const resolved = resolveTaskRef(binding.taskId, { repoRoot });
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
   const run = readRun(resolved.taskDir);
-  const receipt = run?.pendingDelegation;
   const nativeAgent = record.state.startEvidence?.nativeAgent ?? record.state.spawn?.nativeAgent ?? '';
-  const role = nativeAgent.endsWith('reviewer') ? 'reviewer' : 'executor';
-  if (run?.status !== 'running' || !receipt
-    || receipt.taskId !== binding.taskId
-    || receipt.runId !== binding.runId
-    || receipt.id !== binding.receiptId
-    || receipt.client !== 'codex'
-    || receipt.role !== role) {
+  if (!taskRunMatchesReceipt(run, binding, nativeAgent)) {
     throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: lifecycle record does not match the current pending task receipt');
   }
+  const receipt = run.pendingDelegation;
   return { store, record, binding, resolved, run, receipt };
 }
 
@@ -119,6 +132,100 @@ function sameTaskBinding(
 
 function isBindingFailure(message: string): boolean {
   return /CODEX_LIFECYCLE_TASK_BINDING_MISMATCH|CODEX_EVIDENCE_(?:IDENTITY_MISMATCH|PARENT_MISMATCH|REPLAY_CONFLICT)|task binding|identity mismatch|ambiguous active children/iu.test(message);
+}
+
+function codexSealFailure(
+  error: unknown,
+  options: CodexBridgeOptions,
+  source: 'child' | 'parent'
+): OrchestrationResult {
+  if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === 'CODEX_TURN_NOT_TERMINAL') {
+    return source === 'parent'
+      ? bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'The matching Codex child has not completed')
+      : pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', message, options);
+  }
+  if (isBindingFailure(message)) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', message);
+  return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', message, options);
+}
+
+function sameBoundLifecycleRecord(
+  bound: ReturnType<typeof recordMatchesTaskReceipt>,
+  current: ReturnType<typeof recordMatchesTaskReceipt>
+): boolean {
+  return sameTaskReceipt(bound.receipt, current.receipt)
+    && sameLifecycleRevision(bound.record, current.record);
+}
+
+function candidateActivationState(
+  state: ReturnType<typeof reduceCodexLifecycleEvent>,
+  events: readonly CodexLifecycleEvent[]
+) {
+  return events.reduce((current, event) => reduceCodexLifecycleEvent(current, event), state);
+}
+
+function candidateActivationFailure(
+  state: ReturnType<typeof reduceCodexLifecycleEvent>,
+  options: CodexBridgeOptions
+): OrchestrationResult | null {
+  if (state.status === 'invalid') {
+    return bridgeFailure(state.error?.code ?? 'CODEX_EVIDENCE_IDENTITY_MISMATCH', state.error?.message ?? 'Codex lifecycle identity does not match');
+  }
+  if (state.status !== 'start-ready' || !state.startEvidence) {
+    return pauseBridge('ORCHESTRATION_CODEX_START_EVIDENCE_INVALID', 'Codex lifecycle start evidence is not ready', options);
+  }
+  return null;
+}
+
+async function collectActivationEvidence(
+  childThreadId: string,
+  options: CodexBridgeOptions,
+  bound: ReturnType<typeof recordMatchesTaskReceipt>
+): Promise<Readonly<{
+  preflight: Awaited<ReturnType<typeof preflightCodexLifecycleEvidence>>;
+  events: readonly CodexLifecycleEvent[];
+  evidence: NonNullable<ReturnType<typeof reduceCodexLifecycleEvent>['startEvidence']>;
+}> | OrchestrationResult> {
+  const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
+  const current = recordMatchesTaskReceipt(childThreadId, options);
+  if (!sameBoundLifecycleRecord(bound, current)) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed while resolving Codex child evidence');
+  }
+  const candidateEvents = [resolved.resolution.thread, ...resolved.reroutes, resolved.resolution.settings];
+  const candidateState = candidateActivationState(bound.record.state, candidateEvents);
+  const candidateFailure = candidateActivationFailure(candidateState, options);
+  if (candidateFailure) return candidateFailure;
+  const evidence = candidateState.startEvidence!;
+  const repoRoot = options.repoRoot ?? process.cwd();
+  const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot, {
+    sessionId: evidence.parentThreadId,
+    turnId: evidence.parentTurnId,
+    toolUseId: evidence.spawnToolUseId
+  });
+  const afterPreflight = recordMatchesTaskReceipt(childThreadId, options);
+  if (!sameBoundLifecycleRecord(bound, afterPreflight)) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed while validating Codex host evidence');
+  }
+  return { preflight, events: candidateEvents, evidence };
+}
+
+function applyCollectedActivationEvidence(
+  childThreadId: string,
+  options: CodexBridgeOptions,
+  store: LifecycleStore,
+  bound: ReturnType<typeof recordMatchesTaskReceipt>,
+  events: readonly CodexLifecycleEvent[]
+): ReturnType<LifecycleStore['read']> | OrchestrationResult {
+  const current = recordMatchesTaskReceipt(childThreadId, options);
+  if (!sameBoundLifecycleRecord(bound, current)) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed before Codex activation');
+  }
+  for (const event of events) store.apply(event);
+  const record = store.read(childThreadId);
+  return record.state.status === 'start-ready' && record.state.startEvidence
+    ? record
+    : bridgeFailure('CODEX_EVIDENCE_IDENTITY_MISMATCH', 'Codex lifecycle identity changed before activation');
 }
 
 function bridgeFailure(code: string, message: string): OrchestrationResult {
@@ -189,42 +296,12 @@ async function activateCodexOrchestrationDelegation(
     if (!hasActivatableOrchestrationDelegation('codex', childThreadId, coreOptions(options))) {
       return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
     }
-    const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
-    const current = recordMatchesTaskReceipt(childThreadId, options);
-    if (!sameTaskReceipt(bound.receipt, current.receipt) || !sameLifecycleRevision(bound.record, current.record)) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed while resolving Codex child evidence');
-    }
-    const candidateEvents = [resolved.resolution.thread, ...resolved.reroutes, resolved.resolution.settings];
-    let candidateState = bound.record.state;
-    for (const event of candidateEvents) candidateState = reduceCodexLifecycleEvent(candidateState, event);
-    if (candidateState.status === 'invalid') {
-      return bridgeFailure(candidateState.error?.code ?? 'CODEX_EVIDENCE_IDENTITY_MISMATCH', candidateState.error?.message ?? 'Codex lifecycle identity does not match');
-    }
-    const evidence = candidateState.status === 'start-ready' ? candidateState.startEvidence : null;
-    if (!evidence) {
-      return pauseBridge('ORCHESTRATION_CODEX_START_EVIDENCE_INVALID', 'Codex lifecycle start evidence is not ready', options);
-    }
+    const activationEvidence = await collectActivationEvidence(childThreadId, options, bound);
+    if ('status' in activationEvidence) return activationEvidence;
+    const { evidence, events, preflight } = activationEvidence;
     const repoRoot = options.repoRoot ?? process.cwd();
-    const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot, {
-      sessionId: evidence.parentThreadId,
-      turnId: evidence.parentTurnId,
-      toolUseId: evidence.spawnToolUseId
-    });
-    const afterPreflight = recordMatchesTaskReceipt(childThreadId, options);
-    if (!sameTaskReceipt(bound.receipt, afterPreflight.receipt) || !sameLifecycleRevision(bound.record, afterPreflight.record)) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed while validating Codex host evidence');
-    }
-    store.apply(resolved.resolution.thread);
-    for (const reroute of resolved.reroutes) store.apply(reroute);
-    store.apply(resolved.resolution.settings);
-    const record = store.read(childThreadId);
-    if (record.state.status !== 'start-ready' || !record.state.startEvidence) {
-      return bridgeFailure('CODEX_EVIDENCE_IDENTITY_MISMATCH', 'Codex lifecycle identity changed before activation');
-    }
-    const currentBeforeActivation = recordMatchesTaskReceipt(childThreadId, options);
-    if (!sameTaskReceipt(bound.receipt, currentBeforeActivation.receipt)) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt changed before Codex activation');
-    }
+    const record = applyCollectedActivationEvidence(childThreadId, options, store, bound, events);
+    if ('status' in record) return record;
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
     const activated = activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,
@@ -262,6 +339,53 @@ async function activateCodexOrchestrationDelegation(
   }
 }
 
+function matchingSpawnRecords(
+  store: LifecycleStore,
+  binding: CodexLifecycleTaskBinding,
+  spawn: CodexSpawnIdentity
+) {
+  return store.findByTaskBinding(binding).filter((record) =>
+    record.state.spawn?.sessionId === spawn.sessionId
+    && record.state.spawn?.turnId === spawn.turnId
+    && record.state.spawn?.toolUseId === spawn.toolUseId
+    && record.state.spawn?.nativeAgent === spawn.nativeAgent
+  );
+}
+
+function verifySpawnTask(
+  binding: CodexLifecycleTaskBinding,
+  spawn: CodexSpawnIdentity,
+  store: LifecycleStore,
+  options: CodexBridgeOptions
+) {
+  const resolved = resolveTaskRef(binding.taskId, { repoRoot: options.repoRoot ?? process.cwd() });
+  if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
+  const run = readRun(resolved.taskDir);
+  if (!run) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex task has no current orchestration run');
+  verifyCodexLifecycleTaskBinding(binding, run, spawn.nativeAgent, {
+    requestedModel: spawn.requestedModel,
+    requestedReasoningEffort: spawn.requestedReasoningEffort
+  });
+  if (store.taskId && store.taskId !== binding.taskId) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex lifecycle store task does not match spawn binding');
+  }
+  return { taskDir: resolved.taskDir };
+}
+
+async function resolveCurrentSpawnChild(
+  childThreadId: string,
+  spawn: CodexSpawnIdentity,
+  options: CodexBridgeOptions
+) {
+  const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
+  if (resolved.resolution.thread.childThreadId !== childThreadId
+    || resolved.resolution.thread.parentThreadId !== spawn.sessionId
+    || resolved.resolution.thread.nativeAgent !== spawn.nativeAgent) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'resolved Codex child does not match the native spawn identity');
+  }
+  return { resolved };
+}
+
 async function activateCodexSpawnDelegation(
   spawn: CodexSpawnIdentity,
   options: CodexBridgeOptions = {}
@@ -270,63 +394,36 @@ async function activateCodexSpawnDelegation(
     const store = requiredStore(options);
     const parsed = parseCodexLifecycleBinding(spawn.taskName);
     if (!parsed) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISSING', 'Codex spawn task_name has no valid task binding');
-    const resolvedTask = resolveTaskRef(parsed.binding.taskId, { repoRoot: options.repoRoot ?? process.cwd() });
-    if (!resolvedTask.ok) return bridgeFailure(resolvedTask.code, resolvedTask.message);
-    const pendingRun = readRun(resolvedTask.taskDir);
-    if (!pendingRun) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex task has no current orchestration run');
-    verifyCodexLifecycleTaskBinding(parsed.binding, pendingRun, spawn.nativeAgent, {
-      requestedModel: spawn.requestedModel,
-      requestedReasoningEffort: spawn.requestedReasoningEffort
-    });
-    if (store.taskId && store.taskId !== parsed.binding.taskId) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex lifecycle store task does not match spawn binding');
-    }
-    const candidates = store.findByTaskBinding(parsed.binding).filter((record) =>
-      record.state.spawn?.sessionId === spawn.sessionId
-      && record.state.spawn?.turnId === spawn.turnId
-      && record.state.spawn?.toolUseId === spawn.toolUseId
-      && record.state.spawn?.nativeAgent === spawn.nativeAgent
-    );
+    const task = verifySpawnTask(parsed.binding, spawn, store, options);
+    if ('status' in task) return task;
+    const candidates = matchingSpawnRecords(store, parsed.binding, spawn);
     if (candidates.length !== 1) {
       return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex spawn does not identify one current task lifecycle record');
     }
     const childThreadId = resolveCodexSpawnedChild(spawn.transcriptPath, spawn);
-    const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
-    const currentTask = resolveTaskRef(parsed.binding.taskId, { repoRoot: options.repoRoot ?? process.cwd() });
-    if (!currentTask.ok) return bridgeFailure(currentTask.code, currentTask.message);
-    const currentRun = readRun(currentTask.taskDir);
-    if (!currentRun) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex task run disappeared while resolving its child');
-    verifyCodexLifecycleTaskBinding(parsed.binding, currentRun, spawn.nativeAgent, {
-      requestedModel: spawn.requestedModel,
-      requestedReasoningEffort: spawn.requestedReasoningEffort
-    });
-    const latestCandidates = store.findByTaskBinding(parsed.binding).filter((record) =>
-      record.state.spawn?.sessionId === spawn.sessionId
-      && record.state.spawn?.turnId === spawn.turnId
-      && record.state.spawn?.toolUseId === spawn.toolUseId
-      && record.state.spawn?.nativeAgent === spawn.nativeAgent
+    const current = await resolveCurrentSpawnChild(
+      childThreadId, spawn, options
     );
+    if ('status' in current) return current;
+    const latestTask = verifySpawnTask(parsed.binding, spawn, store, options);
+    if ('status' in latestTask) return latestTask;
+    const latestCandidates = matchingSpawnRecords(store, parsed.binding, spawn);
     if (latestCandidates.length !== 1 || latestCandidates[0]!.revision !== candidates[0]!.revision) {
       return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex spawn record changed while resolving its child');
-    }
-    if (resolved.resolution.thread.childThreadId !== childThreadId
-      || resolved.resolution.thread.parentThreadId !== spawn.sessionId
-      || resolved.resolution.thread.nativeAgent !== spawn.nativeAgent) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'resolved Codex child does not match the native spawn identity');
     }
     store.applyToSpawn({ ...spawn, taskBinding: parsed.binding }, {
       type: 'hook-child',
       sessionId: spawn.sessionId,
       turnId: spawn.turnId,
       childThreadId,
-      parentThreadId: resolved.resolution.thread.parentThreadId,
+      parentThreadId: current.resolved.resolution.thread.parentThreadId,
       nativeAgent: spawn.nativeAgent,
       source: 'parent-rollout'
     }, latestCandidates[0]!.revision);
     return activateCodexOrchestrationDelegation(childThreadId, {
       ...options,
       store,
-      resolveThread: async () => resolved
+      resolveThread: async () => current.resolved
     });
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
@@ -391,11 +488,88 @@ async function sealCodexOrchestrationDelegation(
       coreOptions(options)
     );
   } catch (error) {
-    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
-    const message = error instanceof Error ? error.message : String(error);
-    if (isBindingFailure(message)) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', message);
-    return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', message, options);
+    return codexSealFailure(error, options, 'child');
   }
+}
+
+function findCurrentParentReceipt(store: LifecycleStore, repoRoot: string) {
+  if (!store.taskId) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISSING', 'parent seal requires a task-scoped lifecycle store');
+  const resolved = resolveTaskRef(store.taskId, { repoRoot });
+  if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
+  const pending = readRun(resolved.taskDir)?.pendingDelegation;
+  if (!pending || pending.taskId !== store.taskId || pending.client !== 'codex') {
+    return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+  }
+  return { pending };
+}
+
+function findParentLifecycleRecord(
+  parentThreadId: string,
+  store: LifecycleStore,
+  pending: NonNullable<NonNullable<ReturnType<typeof readRun>>['pendingDelegation']>
+) {
+  const binding = { taskId: pending.taskId, runId: pending.runId, receiptId: pending.id };
+  const candidates = store.findByTaskBinding(binding).filter((record) =>
+    record.state.startEvidence?.parentThreadId === parentThreadId
+  );
+  if (!candidates.length) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+  if (candidates.length !== 1) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'parent seal has multiple lifecycle records for the current task receipt');
+  }
+  const active = candidates[0]!;
+  const start = active.state.startEvidence;
+  const child = active.state.child;
+  if (!start || !child || start.childThreadId !== child.childThreadId
+    || start.parentThreadId !== parentThreadId
+    || active.state.spawn?.sessionId !== parentThreadId
+    || active.state.spawn.nativeAgent !== start.nativeAgent
+    || managedDelegationRole(start.nativeAgent) !== pending.role) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'parent lifecycle record does not match the current native delegation identity');
+  }
+  return { active, start, child };
+}
+
+async function collectParentTerminalIfNeeded(
+  active: ReturnType<LifecycleStore['read']>,
+  start: NonNullable<ReturnType<typeof reduceCodexLifecycleEvent>['startEvidence']>,
+  options: CodexBridgeOptions
+): Promise<Awaited<ReturnType<typeof resolveCodexTerminal>> | null> {
+  if (active.state.terminal) return null;
+  const resolveTerminal = options.resolveTerminal ?? resolveCodexTerminal;
+  return active.state.stop
+    ? resolveTerminal(start.childThreadId, active.state.stop.turnId)
+    : resolveTerminal(start.childThreadId);
+}
+
+function applyParentTerminalCandidate(
+  parentThreadId: string,
+  repoRoot: string,
+  store: LifecycleStore,
+  pending: NonNullable<NonNullable<ReturnType<typeof readRun>>['pendingDelegation']>,
+  active: ReturnType<LifecycleStore['read']>,
+  start: NonNullable<ReturnType<typeof reduceCodexLifecycleEvent>['startEvidence']>,
+  child: NonNullable<ReturnType<typeof reduceCodexLifecycleEvent>['child']>,
+  terminal: Awaited<ReturnType<typeof resolveCodexTerminal>> | null
+): OrchestrationResult | null {
+  const latestReceipt = findCurrentParentReceipt(store, repoRoot);
+  if ('status' in latestReceipt) return latestReceipt;
+  if (!sameTaskReceipt(pending, latestReceipt.pending)) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt changed while resolving parent terminal evidence');
+  }
+  const latestMatch = findParentLifecycleRecord(parentThreadId, store, latestReceipt.pending);
+  if ('status' in latestMatch) return latestMatch;
+  if (!sameLifecycleRevision(active, latestMatch.active)
+    || !sameTaskBinding(active.taskBinding, latestMatch.active.taskBinding)) {
+    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed while resolving parent terminal evidence');
+  }
+  if (terminal) store.apply(terminal);
+  if (!store.read(start.childThreadId).state.stop) {
+    store.apply({
+      type: 'hook-stop', sessionId: parentThreadId, turnId: child.turnId,
+      childThreadId: start.childThreadId, nativeAgent: start.nativeAgent, source: 'parent-rollout'
+    });
+  }
+  return null;
 }
 
 async function sealCodexParentDelegation(
@@ -404,64 +578,20 @@ async function sealCodexParentDelegation(
 ): Promise<OrchestrationResult> {
   try {
     const store = requiredStore(options);
-    if (!store.taskId) return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISSING', 'parent seal requires a task-scoped lifecycle store');
     const repoRoot = options.repoRoot ?? options.orchestrationOptions?.repoRoot ?? process.cwd();
-    const resolved = resolveTaskRef(store.taskId, { repoRoot });
-    if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
-    const pending = readRun(resolved.taskDir)?.pendingDelegation;
-    if (!pending || pending.taskId !== store.taskId || pending.client !== 'codex') {
-      return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
-    }
-    const binding = { taskId: pending.taskId, runId: pending.runId, receiptId: pending.id };
-    const scopedCandidates = store.findByTaskBinding(binding).filter((record) =>
-      record.state.startEvidence?.parentThreadId === parentThreadId
-    );
-    if (!scopedCandidates.length) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
-    if (scopedCandidates.length !== 1) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'parent seal has multiple lifecycle records for the current task receipt');
-    }
-    const active = scopedCandidates[0]!;
-    const start = active.state.startEvidence!;
-    const child = active.state.child!;
-    if (!start || !child || start.childThreadId !== child.childThreadId
-      || start.parentThreadId !== parentThreadId
-      || active.state.spawn?.sessionId !== parentThreadId
-      || active.state.spawn.nativeAgent !== start.nativeAgent
-      || managedDelegationRole(start.nativeAgent) !== pending.role) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'parent lifecycle record does not match the current native delegation identity');
-    }
+    const current = findCurrentParentReceipt(store, repoRoot);
+    if ('status' in current) return current;
+    const pending = current.pending;
+    const match = findParentLifecycleRecord(parentThreadId, store, pending);
+    if ('status' in match) return match;
+    const { active, start, child } = match;
     if (active.consumer) return sealCodexOrchestrationDelegation(start.childThreadId, options);
-    if (!active.state.terminal) {
-      const resolveTerminal = options.resolveTerminal ?? resolveCodexTerminal;
-      const terminal = active.state.stop
-        ? await resolveTerminal(start.childThreadId, active.state.stop.turnId)
-        : await resolveTerminal(start.childThreadId);
-      const current = recordMatchesTaskReceipt(start.childThreadId, options);
-      if (!sameTaskReceipt(pending, current.receipt) || !sameLifecycleRevision(active, current.record)) {
-        return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'task receipt or lifecycle revision changed while resolving parent terminal evidence');
-      }
-      store.apply(terminal);
-    }
-    if (!store.read(start.childThreadId).state.stop) {
-      store.apply({
-        type: 'hook-stop',
-        sessionId: parentThreadId,
-        turnId: child.turnId,
-        childThreadId: start.childThreadId,
-        nativeAgent: start.nativeAgent,
-        source: 'parent-rollout'
-      });
-    }
+    const terminal = await collectParentTerminalIfNeeded(active, start, options);
+    const failure = applyParentTerminalCandidate(parentThreadId, repoRoot, store, pending, active, start, child, terminal);
+    if (failure) return failure;
     return sealCodexOrchestrationDelegation(start.childThreadId, options);
   } catch (error) {
-    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
-    if (error instanceof Error && error.message === 'CODEX_TURN_NOT_TERMINAL') {
-      return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'The matching Codex child has not completed');
-    }
-    if (isBindingFailure(error instanceof Error ? error.message : String(error))) {
-      return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', error instanceof Error ? error.message : String(error));
-    }
-    return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', error instanceof Error ? error.message : String(error), options);
+    return codexSealFailure(error, options, 'parent');
   }
 }
 

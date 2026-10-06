@@ -1029,12 +1029,17 @@ async function removeUncheckedSandbox(
     assertBranchRemovalIdentity(config, effectiveBranch, worktreePermits);
     runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
   }
-  if (target.workspace.mode === 'task-bound') {
-    releaseStaleShortIdRegistry(config.repoRoot, target.workspace.taskId);
-  }
+  releaseTaskBoundSandboxIdentity(config.repoRoot, target.workspace);
 
   if (!options.quiet) p.outro('Sandbox removed');
   return null;
+}
+
+function releaseTaskBoundSandboxIdentity(
+  repoRoot: string,
+  workspace: SandboxWorkspaceKey
+): void {
+  if (workspace.mode === 'task-bound') releaseStaleShortIdRegistry(repoRoot, workspace.taskId);
 }
 
 async function rmOneCore(
