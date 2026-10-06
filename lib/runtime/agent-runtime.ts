@@ -4,6 +4,7 @@ import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 type RuntimeResolutionOptions = Readonly<{
   repoRoot?: string;
   env?: NodeJS.ProcessEnv;
+  taskId?: string;
 }>;
 
 function runtimeError(code: string, message: string): Error {
@@ -48,13 +49,16 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
 
 export function resolveAgentCapabilityStoreRoot(options: RuntimeResolutionOptions = {}): string {
   const env = options.env ?? process.env;
-  const taskId = env.AGENT_INFRA_TASK_ID;
+  if (env.AGENT_INFRA_RUNTIME_DIR) {
+    return path.join(resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env }), 'clients', 'codex', 'capabilities');
+  }
+  const taskId = options.taskId ?? env.AGENT_INFRA_TASK_ID;
   if (taskId) {
-    return path.join(resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot }), 'capabilities');
+    return path.join(
+      resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot }),
+      'sandbox-control', 'runtime', 'clients', 'codex', 'capabilities'
+    );
   }
   const runtimeRoot = resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env });
-  if (env.AGENT_INFRA_RUNTIME_DIR) {
-    return path.join(runtimeRoot, 'clients', 'codex', 'capabilities');
-  }
   return path.join(runtimeRoot, 'codex-capabilities');
 }

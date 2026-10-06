@@ -78,6 +78,7 @@ type CodexCapabilityRecord = Readonly<{
 
 type CodexCapabilityStoreOptions = Readonly<{
   root?: string;
+  taskId?: string;
   now?: () => number;
   reference?: () => string;
   ttlMs?: number;
@@ -328,7 +329,7 @@ function sameController(
 
 function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   const root = options.root
-    ?? resolveAgentCapabilityStoreRoot();
+    ?? resolveAgentCapabilityStoreRoot({ taskId: options.taskId });
   const now = options.now ?? Date.now;
   const createReference = options.reference ?? (() => crypto.randomBytes(32).toString('base64url'));
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;

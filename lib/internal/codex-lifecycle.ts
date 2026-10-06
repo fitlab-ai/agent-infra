@@ -345,7 +345,7 @@ async function applyHookChildEvent(
 async function attestCapabilityReference(payload: unknown): Promise<boolean> {
   const capabilityRef = payloadText(payload, 'capabilityRef');
   if (!capabilityRef) return false;
-  const capabilityStore = createCodexCapabilityStore();
+  const capabilityStore = createCodexCapabilityStore({ taskId: process.env.AGENT_INFRA_TASK_ID });
   const armed = capabilityStore.inspectReference(capabilityRef);
   const capability = capabilityStore.attestByReference({
     capabilityRef,
@@ -443,7 +443,7 @@ function armCapability(parsed: Parsed): void {
   if (!taskId) throw new Error('capability-arm requires --task-id');
   const resolved = resolveTaskRef(taskId, { repoRoot: process.cwd() });
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
-  const armed = createCodexCapabilityStore().arm({
+  const armed = createCodexCapabilityStore({ taskId: resolved.taskId }).arm({
     taskId: resolved.taskId, buildIdentity: computeLifecycleBuildIdentity(process.cwd()),
     controller: controllerBinding(resolved.taskId)
   });

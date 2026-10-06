@@ -59,7 +59,7 @@ test('agent-client launch-carrier invokes the selected adapter and fails without
   assert.equal(supported.status, 0, supported.stderr);
   const payload = JSON.parse(supported.stdout);
   assert.equal(payload.status, 'ready');
-  assert.deepEqual(payload.carrier, { task_name: `code_executor_r10${adapterContext}` });
+  assert.deepEqual(payload.carrier, { task_name: `c_e_r10${adapterContext}` });
 
   const unsupported = runLaunchCarrier(root, [
     '--client', 'claude-code', '--adapter-context', adapterContext,

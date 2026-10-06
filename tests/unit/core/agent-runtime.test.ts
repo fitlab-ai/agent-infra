@@ -41,8 +41,26 @@ test('task-bound capability store resolves beneath the unique task runtime root'
   try {
     const env = { AGENT_INFRA_TASK_ID: taskId };
     const runtimeRoot = path.join(taskDir, '.runtime');
+    const controlRuntimeRoot = path.join(runtimeRoot, 'sandbox-control', 'runtime');
     assert.equal(resolveAgentRuntimeRoot({ repoRoot, env }), runtimeRoot);
-    assert.equal(resolveAgentCapabilityStoreRoot({ repoRoot, env }), path.join(runtimeRoot, 'capabilities'));
+    assert.equal(
+      resolveAgentCapabilityStoreRoot({ repoRoot, env }),
+      path.join(controlRuntimeRoot, 'clients', 'codex', 'capabilities')
+    );
+    assert.equal(
+      resolveAgentCapabilityStoreRoot({ repoRoot, taskId }),
+      path.join(controlRuntimeRoot, 'clients', 'codex', 'capabilities')
+    );
+    assert.equal(
+      resolveAgentCapabilityStoreRoot({
+        repoRoot,
+        env: {
+          AGENT_INFRA_TASK_ID: taskId,
+          AGENT_INFRA_RUNTIME_DIR: controlRuntimeRoot
+        }
+      }),
+      path.join(controlRuntimeRoot, 'clients', 'codex', 'capabilities')
+    );
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }

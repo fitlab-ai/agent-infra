@@ -12,15 +12,30 @@ function codexCarrierError(code: string): Error {
   return error;
 }
 
+function codexStageToken(stage: string): string {
+  const tokens: Readonly<Record<string, string>> = {
+    analysis: 'a',
+    plan: 'p',
+    code: 'c',
+    'review-analysis': 'ra',
+    'review-plan': 'rp',
+    'review-code': 'rc',
+    commit: 'm'
+  };
+  const token = tokens[stage];
+  if (!token) throw codexCarrierError('CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID');
+  return token;
+}
+
 function codexLaunchCarrier(
   adapterContext: string,
   identity: Readonly<{ stage: string; round: number; role: string }>
 ): Readonly<Record<string, string>> {
   if (!Number.isSafeInteger(identity.round) || identity.round < 1
-    || !/^[a-z-]+$/u.test(identity.stage) || !/^[a-z-]+$/u.test(identity.role)) {
+    || !['executor', 'reviewer'].includes(identity.role)) {
     throw codexCarrierError('CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID');
   }
-  const label = `${identity.stage.replaceAll('-', '_')}_${identity.role.replaceAll('-', '_')}_r${identity.round}`;
+  const label = `${codexStageToken(identity.stage)}_${identity.role === 'reviewer' ? 'r' : 'e'}_r${identity.round}`;
   const taskName = `${label}${adapterContext}`;
   const parsed = parseCodexLifecycleBinding(taskName);
   if (!parsed) throw codexCarrierError('CODEX_LIFECYCLE_LAUNCH_CONTEXT_INVALID');

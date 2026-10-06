@@ -40,13 +40,45 @@ test('Codex adapter materializes its native spawn carrier from opaque adapter co
   const createCarrier = codexAdapter.orchestrationAdapter?.createLaunchCarrier;
   assert.ok(createCarrier);
   const carrier = createCarrier(adapterContext, { stage: 'review-analysis', round: 2, role: 'reviewer' });
-  assert.deepEqual(carrier, { task_name: `review_analysis_reviewer_r2${adapterContext}` });
+  assert.deepEqual(carrier, { task_name: `ra_r_r2${adapterContext}` });
   assert.deepEqual(parseCodexLifecycleBinding(carrier.task_name), {
     taskName: carrier.task_name,
-    label: 'review_analysis_reviewer_r2',
+    label: 'ra_r_r2',
     binding: { taskId: 'TASK-20261005-122106', runId: 'run-1', receiptId: 'receipt-1' }
   });
   assert.throws(() => createCarrier('not-a-binding', { stage: 'code', round: 0, role: 'executor' }), /CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID/u);
+});
+
+test('Codex adapter carrier fits native limits for default UUID bindings across reviewer stages', () => {
+  const adapterContext = encodeCodexLifecycleBinding({
+    taskId: 'TASK-20261005-122106',
+    runId: '550e8400-e29b-41d4-a716-446655440000',
+    receiptId: '123e4567-e89b-12d3-a456-426614174000'
+  });
+  const createCarrier = codexAdapter.orchestrationAdapter?.createLaunchCarrier;
+  assert.ok(createCarrier);
+  const identities: readonly (readonly [string, string])[] = [
+    ['analysis', 'executor'],
+    ['review-analysis', 'reviewer'],
+    ['plan', 'executor'],
+    ['review-plan', 'reviewer'],
+    ['code', 'executor'],
+    ['review-code', 'reviewer'],
+    ['commit', 'executor']
+  ];
+  for (const [stage, role] of identities) {
+    for (const round of [1, 10]) {
+      const carrier: Readonly<Record<string, string>> = createCarrier(adapterContext, { stage, round, role });
+      const taskName = carrier.task_name ?? '';
+      assert.ok(taskName);
+      assert.ok(Buffer.byteLength(taskName, 'utf8') <= 255);
+      assert.deepEqual(parseCodexLifecycleBinding(taskName)?.binding, {
+        taskId: 'TASK-20261005-122106',
+        runId: '550e8400-e29b-41d4-a716-446655440000',
+        receiptId: '123e4567-e89b-12d3-a456-426614174000'
+      });
+    }
+  }
 });
 
 test('Codex lifecycle binding rejects task names outside the native lowercase carrier contract', () => {

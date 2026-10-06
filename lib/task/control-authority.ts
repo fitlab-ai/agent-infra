@@ -238,7 +238,7 @@ export function issueLifecycleRecoveryAttestation(
   if (lifecycleAuthorityBuildDigest(buildIdentity) !== request.expectedBuildIdentityDigest) {
     return authorityRejected(request, 'LIFECYCLE_AUTHORITY_BUILD_MISMATCH', 'current lifecycle build does not match the request');
   }
-  const store = options.capabilityStore ?? createCodexCapabilityStore();
+  const store = options.capabilityStore ?? createCodexCapabilityStore({ taskId: request.taskId });
   const registry = options.operationAttestations ?? authorityOperationMap.get(store) ?? new Map<string, LifecycleRecoveryAttestationV1>();
   authorityOperationMap.set(store, registry);
   const key = `${request.requestId}\0${request.operationId}\0${request.phase}`;
@@ -316,12 +316,13 @@ export function queryLifecycleRecoveryOperation(
   operationId: string,
   options: Readonly<{
     capabilityStore?: ReturnType<typeof createCodexCapabilityStore>;
+    taskId?: string;
   }> = {}
 ): LifecycleRecoveryOperationQueryV1 {
   if (!/^[a-f0-9-]{16,64}$/u.test(operationId)) {
     throw new Error('LIFECYCLE_RECOVERY_OPERATION_INVALID');
   }
-  const store = options.capabilityStore ?? createCodexCapabilityStore();
+  const store = options.capabilityStore ?? createCodexCapabilityStore({ taskId: options.taskId });
   const registry = authorityOperationMap.get(store);
   const known = [...(registry?.values() ?? [])].filter((value) => value.operationId === operationId);
   const capabilities = store.findByRecoveryOperation(operationId);
