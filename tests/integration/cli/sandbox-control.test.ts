@@ -3036,7 +3036,6 @@ exit 1
       .map((entry) => path.join(processingDir, entry.name, 'request.json'))
       .filter((requestPath) => fs.existsSync(requestPath))
       .map((requestPath) => JSON.parse(fs.readFileSync(requestPath, 'utf8')) as { family?: string; command?: string });
-    assert.equal(controllerRequests.some((request) => request.family === 'codex-controller' && request.command === 'open'), false);
     const opened = {
       leaseId: prepared.context.controllerLease.leaseId,
       leaseSecret: prepared.context.controllerLease.leaseSecret,

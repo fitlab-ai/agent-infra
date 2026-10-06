@@ -16,7 +16,10 @@ import {
   openCodexControllerRegistration,
   type CodexControllerOpened
 } from '../../../sandbox/control/controller-registration.ts';
-import { readSandboxControlManifest } from '../../../sandbox/control/lifecycle.ts';
+import {
+  assertSandboxControlRootAvailableForController,
+  readSandboxControlManifest
+} from '../../../sandbox/control/lifecycle.ts';
 import type { SandboxControlManifest } from '../../../sandbox/control/protocol.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { resolveTaskContext } from '../../../task/resolve-ref.ts';
@@ -436,6 +439,14 @@ function registerControllerContext(
   if (startup.manifest) {
     const lock = acquireCodexControllerRegistrationLock(startup.manifest);
     try {
+      const root = path.dirname(startup.manifestPath);
+      assertSandboxControlRootAvailableForController(root);
+      const current = resolveCodexSandboxControllerHostBinding(startup.manifest.repoRoot);
+      if (current.taskId !== startup.taskId
+        || path.resolve(current.manifestPath) !== path.resolve(startup.manifestPath)
+        || JSON.stringify(current.manifest) !== JSON.stringify(startup.manifest)) {
+        throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
+      }
       context = initialize();
     } finally {
       lock.release();

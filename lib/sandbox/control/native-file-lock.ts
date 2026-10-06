@@ -106,3 +106,7 @@ export function acquireSandboxResourceLock(
     throw new Error(String(error instanceof Error ? error.message : error).replaceAll('FILE_LOCK_', 'SANDBOX_LOCK_'));
   }
 }
+
+export function acquireSandboxControlRootLock(root: string): SandboxResourceLock {
+  return acquireSandboxResourceLock(`sandbox-control-root:${path.resolve(root)}`);
+}

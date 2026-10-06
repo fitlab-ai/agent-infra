@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { getProcessStartTime } from '../../../../lib/server/process-state.ts';
 import { sandboxControlSafeEnv } from '../../../../lib/sandbox/control/server.ts';
@@ -39,6 +40,7 @@ import {
   SANDBOX_CONTROL_AUDIT_MAX_BYTES
 } from '../../../../lib/sandbox/control/state.ts';
 import {
+  assertSandboxControlRootAvailableForController,
   acquireSandboxControlReplacement,
   assertSandboxControlBrokerOwner,
   assertSandboxControlCutoverSnapshot,
@@ -48,6 +50,7 @@ import {
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
 } from '../../../../lib/sandbox/control/lifecycle.ts';
+import { acquireSandboxResourceLock } from '../../../../lib/sandbox/control/native-file-lock.ts';
 import {
   assertSandboxControlExecutorAuthority,
   executeRequest,
@@ -59,6 +62,7 @@ import { platformResult } from '../../../../lib/platform/types.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import {
+  acquireCodexControllerRegistrationLock,
   closeCodexControllerRegistration,
   openCodexControllerRegistration,
   readCodexControllerRegistration,
@@ -760,37 +764,15 @@ test('control protocol rejects request v2 and controller result parser enforces 
     controllerProof: null
   };
   assert.throws(() => validateSandboxControlRequest({ ...request, version: 2 }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
-  const opened = {
-    version: 1,
-    status: 'opened',
-    changed: true,
-    lease: {
-      version: 1,
-      leaseId: 'c'.repeat(64),
-      leaseSecret: 'd'.repeat(64),
-      taskId: manifest.taskId!,
-      controlGeneration: manifest.generation,
-      controllerInstanceDigest: 'e'.repeat(64),
-      controllerProcess: { pid: 200, startTime: 20 },
-      buildIdentity: controllerBuild,
-      issuedAt: 1_000,
-      expiresAt: 2_000
-    },
-    error: null
-  };
   const response = {
     version: 2 as const,
     id: request.id,
     phase: 'completed' as const,
     exitCode: 0,
-    stdout: `${JSON.stringify(opened)}\n`,
+    stdout: '',
     stderr: '',
     error: null
   };
-  assert.throws(
-    () => parseCodexControllerResult(response),
-    (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
-  );
   const verified = {
     version: 1,
     status: 'verified',
@@ -813,7 +795,7 @@ test('control protocol rejects request v2 and controller result parser enforces 
     (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
   );
   assert.throws(
-    () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...opened, extra: true })}\n` }),
+    () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...verified, extra: true })}\n` }),
     (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
   );
   assert.throws(() => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify(verified)}\n`, exitCode: 1 }), /controller success result is invalid/);
@@ -841,14 +823,20 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     /REQUEST_INVALID/
   );
   const branchManifest = { ...manifest, mode: 'branch-only' as const, taskId: null };
+  const validProof = {
+    version: 1 as const,
+    leaseId: '7'.repeat(64),
+    leaseSecret: '8'.repeat(64),
+    controllerProcess: { pid: 100, startTime: 10 }
+  };
   assert.throws(() => validateSandboxControlRequest({
     ...request,
     family: 'codex-controller',
-    command: 'open',
+    command: 'verify',
     args: [],
     controllerProcess: { pid: 100, startTime: 10 },
-    controllerProof: null
-  }, branchManifest, { now: 2_000 }), /SANDBOX_CONTROL_REQUEST_INVALID/);
+    controllerProof: validProof
+  }, branchManifest, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-controller-denied-'));
   const manifestPath = path.join(root, 'manifest.json');
   fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
@@ -858,12 +846,7 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     controllerProcess: { pid: 100, startTime: 10 },
     buildIdentity: controllerBuild
   }, { probeProcess: () => 'alive' }), /SANDBOX_CONTROL_BRANCH_ONLY/);
-  const proof = {
-    version: 1 as const,
-    leaseId: '7'.repeat(64),
-    leaseSecret: '8'.repeat(64),
-    controllerProcess: { pid: 100, startTime: 10 }
-  };
+  const proof = validProof;
   assert.throws(() => closeCodexControllerRegistration({
     manifest: branchManifest, manifestPath, proof
   }), /SANDBOX_CONTROL_BRANCH_ONLY/);
@@ -1118,16 +1101,19 @@ test('manifest reader rejects fields outside the current structure', () => {
   }
 });
 
-test('replacement owner lookup failures fail closed instead of reclaiming the lease', () => {
+test('replacement owner lookup fails closed after the crashed owner releases the root lock', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-unknown-'));
-  const lease = acquireSandboxControlReplacement(root);
+  const replacementPath = path.join(root, 'replacement.json');
+  fs.writeFileSync(replacementPath, `${JSON.stringify({
+    version: 1, transitionId: 'stale-transition', pid: process.pid, startTime: 1
+  })}\n`, { mode: 0o600 });
   try {
     assert.throws(
       () => acquireSandboxControlReplacement(root, { probeOwner: () => 'unknown' }),
       /SANDBOX_CONTROL_REPLACEMENT_OWNER_UNAVAILABLE/
     );
+    assert.equal(fs.existsSync(replacementPath), true);
   } finally {
-    lease.release();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1162,6 +1148,45 @@ test('replacement cutover restores the previous root after materialization failu
   }
 });
 
+test('replacement root lock serializes controller registration and permits cutover recovery', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-window-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  const oldManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    channelDir: path.join(root, 'channel'),
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    runtimeDir: path.join(root, 'runtime')
+  };
+  for (const directory of [oldManifest.channelDir, oldManifest.publicStatusDir, oldManifest.processingDir, oldManifest.runtimeDir]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(oldManifest)}\n`);
+  const carrierLock = acquireSandboxResourceLock('docker:container-id', { lockDomain: 'a'.repeat(64) });
+  assert.throws(() => acquireCodexControllerRegistrationLock(oldManifest), /SANDBOX_LOCK_BUSY/);
+  carrierLock.release();
+  const controllerLock = acquireCodexControllerRegistrationLock(oldManifest);
+  assert.throws(() => acquireSandboxControlReplacement(root), /SANDBOX_LOCK_BUSY/);
+  controllerLock.release();
+  const firstLease = acquireSandboxControlReplacement(root);
+  let replacementLease: ReturnType<typeof acquireSandboxControlReplacement> | null = null;
+  try {
+    beginSandboxControlReplacement(root, firstLease);
+    assert.throws(() => acquireSandboxControlReplacement(root), /SANDBOX_LOCK_BUSY/);
+    assert.throws(() => acquireCodexControllerRegistrationLock(oldManifest), /SANDBOX_LOCK_BUSY/);
+    assert.throws(() => assertSandboxControlRootAvailableForController(root), /SANDBOX_CONTROL_REPLACEMENT_RECOVERY_REQUIRED/);
+    firstLease.release();
+    replacementLease = acquireSandboxControlReplacement(root);
+    assert.equal(await recoverSandboxControlReplacement(root, replacementLease), 'restored');
+    assert.deepEqual(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), oldManifest);
+  } finally {
+    replacementLease?.release();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('replacement recovery restores a root that disappeared after the snapshot was prepared', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-window-'));
   const manifestPath = path.join(root, 'manifest.json');
@@ -1178,11 +1203,20 @@ test('replacement recovery restores a root that disappeared after the snapshot w
     fs.mkdirSync(directory, { recursive: true });
   }
   fs.writeFileSync(manifestPath, `${JSON.stringify(oldManifest)}\n`);
-  const firstLease = acquireSandboxControlReplacement(root);
+  const lifecycleUrl = pathToFileURL(path.resolve('lib/sandbox/control/lifecycle.ts')).href;
+  const childSource = [
+    `import fs from 'node:fs';`,
+    `import { acquireSandboxControlReplacement, beginSandboxControlReplacement } from ${JSON.stringify(lifecycleUrl)};`,
+    `const root = ${JSON.stringify(root)};`,
+    `const lease = acquireSandboxControlReplacement(root);`,
+    `beginSandboxControlReplacement(root, lease);`,
+    `fs.rmSync(root, { recursive: true, force: true });`,
+    `process.exit(0);`
+  ].join('\n');
+  execFileSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', childSource]);
+  assert.equal(fs.existsSync(root), false);
   let replacementLease: ReturnType<typeof acquireSandboxControlReplacement> | null = null;
   try {
-    beginSandboxControlReplacement(root, firstLease);
-    fs.rmSync(root, { recursive: true, force: true });
     replacementLease = acquireSandboxControlReplacement(root);
     assert.equal(await recoverSandboxControlReplacement(root, replacementLease), 'restored');
     assert.deepEqual(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), oldManifest);

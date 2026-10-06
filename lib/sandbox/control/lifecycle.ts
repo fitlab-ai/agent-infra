@@ -19,6 +19,7 @@ import { DEFAULT_SANDBOX_CONTROL_TIMING } from './protocol.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
 import {
   acquireSandboxResourceLock,
+  acquireSandboxControlRootLock,
   resolveSandboxLockNamespace,
   type SandboxResourceLock
 } from './native-file-lock.ts';
@@ -850,6 +851,25 @@ function readReplacementRecord(filePath: string): { raw: string; record: Replace
   }
 }
 
+export function assertSandboxControlRootAvailableForController(root: string): void {
+  const resolvedRoot = path.resolve(root);
+  if (readReplacementRecord(replacementPath(resolvedRoot)) || readReplacementState(resolvedRoot)) {
+    throw new Error('SANDBOX_CONTROL_REPLACEMENT_RECOVERY_REQUIRED');
+  }
+  if (fs.existsSync(path.join(resolvedRoot, QUIESCING_FILE))) {
+    throw new Error('SANDBOX_CONTROL_QUIESCING');
+  }
+}
+
+function ensureSandboxControlRootDirectory(root: string): void {
+  if (fs.existsSync(root)) {
+    const stat = fs.lstatSync(root);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
+  } else {
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  }
+}
+
 export function acquireSandboxControlReplacement(
   root: string,
   options: Readonly<{
@@ -858,68 +878,73 @@ export function acquireSandboxControlReplacement(
   }> = {}
 ): SandboxControlReplacementLease {
   const resolvedRoot = path.resolve(root);
-  if (fs.existsSync(resolvedRoot)) {
-    const stat = fs.lstatSync(resolvedRoot);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
-  } else {
-    fs.mkdirSync(resolvedRoot, { recursive: true, mode: 0o700 });
-  }
-  const startTime = options.owner?.startTime ?? getProcessStartTime(process.pid);
-  if (startTime === null || startTime === undefined) throw new Error('SANDBOX_CONTROL_REPLACEMENT_OWNER_UNAVAILABLE');
-  const owner = options.owner ?? { pid: process.pid, startTime };
-  const transitionId = randomUUID();
-  const record = `${JSON.stringify({ version: 1, transitionId, ...owner })}\n`;
-  const filePath = replacementPath(resolvedRoot);
-  const existing = readReplacementRecord(filePath);
-  if (existing) {
-    const ownerState = (options.probeOwner ?? getProcessIdentityState)(existing.record);
-    if (ownerState === 'alive') {
-      throw new Error('SANDBOX_CONTROL_REPLACEMENT_BUSY');
-    }
-    if (ownerState === 'unknown') {
-      throw new Error('SANDBOX_CONTROL_REPLACEMENT_OWNER_UNAVAILABLE');
-    }
-    if (fs.readFileSync(filePath, 'utf8') !== existing.raw) {
-      throw new Error('SANDBOX_CONTROL_OWNER_TRANSITION');
-    }
-    fs.unlinkSync(filePath);
-  }
+  const resourceLock = acquireSandboxControlRootLock(resolvedRoot);
   try {
-    fs.writeFileSync(filePath, record, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error('SANDBOX_CONTROL_REPLACEMENT_BUSY');
+    ensureSandboxControlRootDirectory(resolvedRoot);
+    const startTime = options.owner?.startTime ?? getProcessStartTime(process.pid);
+    if (startTime === null || startTime === undefined) throw new Error('SANDBOX_CONTROL_REPLACEMENT_OWNER_UNAVAILABLE');
+    const owner = options.owner ?? { pid: process.pid, startTime };
+    const transitionId = randomUUID();
+    const record = `${JSON.stringify({ version: 1, transitionId, ...owner })}\n`;
+    const filePath = replacementPath(resolvedRoot);
+    const existing = readReplacementRecord(filePath);
+    if (existing) {
+      const ownerState = (options.probeOwner ?? getProcessIdentityState)(existing.record);
+      if (ownerState === 'alive') {
+        throw new Error('SANDBOX_CONTROL_REPLACEMENT_BUSY');
+      }
+      if (ownerState === 'unknown') {
+        throw new Error('SANDBOX_CONTROL_REPLACEMENT_OWNER_UNAVAILABLE');
+      }
+      if (fs.readFileSync(filePath, 'utf8') !== existing.raw) {
+        throw new Error('SANDBOX_CONTROL_OWNER_TRANSITION');
+      }
+      fs.unlinkSync(filePath);
     }
+    try {
+      fs.writeFileSync(filePath, record, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error('SANDBOX_CONTROL_REPLACEMENT_BUSY');
+      }
+      throw error;
+    }
+    let released = false;
+    const verifyOwnership = (): void => {
+      if (released) throw new Error('SANDBOX_CONTROL_REPLACEMENT_RELEASED');
+      const current = readReplacementRecord(filePath);
+      if (!current || current.raw !== record || current.record.transitionId !== transitionId) {
+        throw new Error('SANDBOX_CONTROL_OWNER_TRANSITION');
+      }
+    };
+    return {
+      root: resolvedRoot,
+      transitionId,
+      owner,
+      assertOwned: verifyOwnership,
+      clearQuiescing(): void {
+        verifyOwnership();
+        const markerPath = path.join(resolvedRoot, QUIESCING_FILE);
+        if (fs.existsSync(markerPath)) {
+          if (!regularFile(markerPath)) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
+          fs.unlinkSync(markerPath);
+        }
+      },
+      release(): void {
+        if (released) return;
+        try {
+          verifyOwnership();
+          fs.unlinkSync(filePath);
+          released = true;
+        } finally {
+          resourceLock.release();
+        }
+      }
+    };
+  } catch (error) {
+    resourceLock.release();
     throw error;
   }
-  let released = false;
-  const verifyOwnership = (): void => {
-    if (released) throw new Error('SANDBOX_CONTROL_REPLACEMENT_RELEASED');
-    const current = readReplacementRecord(filePath);
-    if (!current || current.raw !== record || current.record.transitionId !== transitionId) {
-      throw new Error('SANDBOX_CONTROL_OWNER_TRANSITION');
-    }
-  };
-  return {
-    root: resolvedRoot,
-    transitionId,
-    owner,
-    assertOwned: verifyOwnership,
-    clearQuiescing(): void {
-      verifyOwnership();
-      const markerPath = path.join(resolvedRoot, QUIESCING_FILE);
-      if (fs.existsSync(markerPath)) {
-        if (!regularFile(markerPath)) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
-        fs.unlinkSync(markerPath);
-      }
-    },
-    release(): void {
-      if (released) return;
-      verifyOwnership();
-      fs.unlinkSync(filePath);
-      released = true;
-    }
-  };
 }
 
 function readReplacementRaw(root: string): string {
@@ -1443,7 +1468,10 @@ async function removeSandboxControlRootAttempt(
     `${manifest.engine}:${manifest.containerIdentity.id}`,
     { lockDomain: manifest.authorityEvidence.lockDomain }
   );
+  // Match controller operations: carrier first, stable root second. Replacement takes only the root lock.
+  let releaseRootLock = (): void => {};
   try {
+  releaseRootLock = acquireSandboxControlRootLock(resolvedRoot).release;
   if (fs.readFileSync(manifestPath, 'utf8') !== manifestRawBeforeLock) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
   }
@@ -1632,6 +1660,7 @@ async function removeSandboxControlRootAttempt(
   journal.write('carrier-removed');
   if (!options.retainRemovalJournal) clearSandboxRemovalJournal(manifest);
   } finally {
+    releaseRootLock();
     if (!options.resourceLock) resourceLock.release();
   }
 }
