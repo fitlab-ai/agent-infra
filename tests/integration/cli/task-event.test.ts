@@ -2148,6 +2148,21 @@ test('code-r7 completion accepts a directly repaired report', () => {
   const started = run(f.root, [f.id, 'code.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   assert.equal(JSON.parse(started.stdout).artifact, 'code-r7.md');
+  const staleStart = fs.readFileSync(f.file, 'utf8').replace(
+    'Code Task (Round 7, fix for review-code-r6.md) [started]',
+    'Code Task (Round 7) [started]'
+  );
+  fs.writeFileSync(f.file, staleStart);
+  const resumed = run(f.root, [
+    f.id, 'code.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', `${f.id}:code-resume-fix`, '--reason-code', 'review-finding',
+    '--fix-for', 'review-code-r6.md'
+  ]);
+  assert.equal(resumed.status, 0, resumed.stdout || resumed.stderr);
+  assert.equal(JSON.parse(resumed.stdout).status, 'applied');
+  const resumedContent = fs.readFileSync(f.file, 'utf8');
+  assert.match(resumedContent, /Code Task \(Round 7\) \[aborted\].*superseded by Code Task \(Round 7, fix for review-code-r6\.md\)/);
+  assert.match(resumedContent, /Code Task \(Round 7, fix for review-code-r6\.md\) \[started\]/);
   const beforeRecovery = fs.readFileSync(f.file);
   const artifactPath = path.join(f.dir, 'code-r7.md');
   const malformed = codeReport().replace(/## 实现输入[\s\S]*?(?=## 变更文件)/, '');

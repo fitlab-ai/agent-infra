@@ -395,6 +395,78 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
   return matches.length === 1 ? matches[0] : matches.length > 1 ? { conflict: true as const } : null;
 }
 
+function repairMissingCodeFixQualifier(
+  request: TaskEventRequest,
+  family: EventFamily,
+  open: { row: { step: string }; round: number; fixFor?: string; implementationInput?: string },
+  repoRoot: string
+) {
+  if (family !== 'code' || open.fixFor !== undefined || !request.fixFor || request.implementationInput !== undefined) {
+    return {
+      error: {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `open code start cannot be repaired (family=${family}, openFixFor=${open.fixFor ?? 'none'}, requestedFixFor=${request.fixFor ?? 'none'}, implementationInput=${request.implementationInput ?? 'none'})`
+      } as TaskEventError,
+      context: null
+    };
+  }
+  const repair = normalizeStarted(request, repoRoot);
+  if ('error' in repair) return { error: repair.error, context: repair.context };
+  if (repair.request.round !== open.round || repair.request.fixFor !== request.fixFor || repair.request.implementationInput !== undefined) {
+    return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: 'current code artifact context does not match the open round and requested fix input' } as TaskEventError, context: repair.context };
+  }
+  return repair;
+}
+
+function resolveOpenStartedEvent(
+  request: TaskEventRequest,
+  family: EventFamily,
+  open: { row: { step: string; agent: string; started: string; note: string }; round: number; fixFor?: string; implementationInput?: string },
+  repoRoot: string
+) {
+  if (open.row.agent !== request.agent) return { status: 'error' as const, error: { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' } as TaskEventError };
+  if (family === 'manual-validation' && request.transactionId !== undefined) {
+    const existingTransactionId = /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(open.row.note)?.[1];
+    if (existingTransactionId !== undefined && existingTransactionId !== request.transactionId) {
+      return { status: 'error' as const, error: { code: 'EVENT_LOG_CONFLICT', message: 'open manual-validation started event has a different transactionId' } as TaskEventError };
+    }
+  }
+  if (request.round !== undefined && request.round !== open.round) {
+    return { status: 'error' as const, error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with open round ${open.round}` } as TaskEventError };
+  }
+  if (request.fixFor !== undefined && request.fixFor !== open.fixFor) {
+    const repair = repairMissingCodeFixQualifier(request, family, open, repoRoot);
+    if (!repair) return { status: 'error' as const, error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` } as TaskEventError };
+    if ('error' in repair) return { status: 'error' as const, error: repair.error, context: repair.context };
+    return { status: 'repair' as const, repair: repair.request, context: repair.context, superseded: { action: open.row.step } };
+  }
+  if (request.implementationInput !== open.implementationInput) {
+    return { status: 'error' as const, error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` } as TaskEventError };
+  }
+  return {
+    status: 'replay' as const,
+    replay: {
+      ...request,
+      round: open.round,
+      artifact: artifactName(FAMILY[family].artifact, open.round),
+      fixFor: open.fixFor,
+      implementationInput: open.implementationInput
+    },
+    startedAt: open.row.started
+  };
+}
+
+function hasOtherOpenStarted(rows: ReturnType<typeof pairEntries>, allowedAction: string): boolean {
+  return rows.some((row) => row.started && !row.done && row.step !== allowedAction);
+}
+
+function hasConflictingOpenStarted(
+  rows: ReturnType<typeof pairEntries>,
+  recovery: { action: string } | null
+): boolean {
+  return recovery ? hasOtherOpenStarted(rows, recovery.action) : rows.some((row) => row.started && !row.done);
+}
+
 function reviewInputFamily(family: EventFamily): ArtifactFamily {
   return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
 }
@@ -581,31 +653,30 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const rows = startedBackedRows(pairEntries(section.entries));
   let normalized = request;
   let artifactContext: ArtifactContextResult | null = null;
+  let supersededOpenStart: { action: string } | null = null;
   if (initialParts.phase === 'started') {
     const openIdentity = openStartedIdentity(rows, initialParts.family);
     if (openIdentity && 'conflict' in openIdentity) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'artifact family has more than one open started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     if (openIdentity) {
-      if (openIdentity.row.agent !== request.agent) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      if (initialParts.family === 'manual-validation' && request.transactionId !== undefined) {
-        const existingTransactionId = /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(openIdentity.row.note)?.[1];
-        if (existingTransactionId !== undefined && existingTransactionId !== request.transactionId) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'open manual-validation started event has a different transactionId' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      }
-      if (request.round !== undefined && request.round !== openIdentity.round) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with open round ${openIdentity.round}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      if (request.fixFor !== undefined && request.fixFor !== openIdentity.fixFor) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      if (request.implementationInput !== openIdentity.implementationInput) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      normalized = { ...request, round: openIdentity.round, artifact: artifactName(FAMILY[initialParts.family].artifact, openIdentity.round), fixFor: openIdentity.fixFor, implementationInput: openIdentity.implementationInput };
-      return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '', identity(normalized), openIdentity.row.started, frontmatter, null);
+      const resolvedStart = resolveOpenStartedEvent(request, initialParts.family, openIdentity, resolved.repoRoot);
+      if (resolvedStart.status === 'error') return failed(request, resolvedStart.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      if (resolvedStart.status === 'replay') return successNoOp(resolvedStart.replay, resolved.taskId, resolved.taskMdPath, typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '', identity(resolvedStart.replay), resolvedStart.startedAt, frontmatter, null);
+      normalized = resolvedStart.repair;
+      artifactContext = resolvedStart.context;
+      supersededOpenStart = resolvedStart.superseded;
     }
-    if (rows.some((item) => item.started && !item.done)) {
+    if (hasConflictingOpenStarted(rows, supersededOpenStart)) {
       return failed(request, {
         code: 'EVENT_TRANSITION_INVALID',
         message: 'EXECUTION_BUSY: another lifecycle execution is open'
       }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }
-    const result = normalizeStarted(request, resolved.repoRoot);
-    artifactContext = result.context;
-    if ('error' in result) return failed(request, result.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, artifactContext });
-    normalized = result.request;
+    if (!supersededOpenStart) {
+      const result = normalizeStarted(request, resolved.repoRoot);
+      artifactContext = result.context;
+      if ('error' in result) return failed(request, result.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, artifactContext });
+      normalized = result.request;
+    }
   } else if (initialParts.phase === 'completed') {
     const identity = request.artifact ? parseArtifactName(request.artifact) : null;
     if (identity?.family === FAMILY[initialParts.family].artifact) normalized = { ...request, round: identity.round };
@@ -716,7 +787,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const capability = canStart(lifecycleAction(eventIdentity.family), facts.facts, trigger);
     const safetyFailure = capability.reasonCode === 'TASK_NOT_ACTIVE'
       || capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN';
-    if (!capability.allowed && (normalized.initiator === 'orchestrator' || safetyFailure)) {
+    if (!capability.allowed && (normalized.initiator === 'orchestrator' || safetyFailure)
+      && !(supersededOpenStart && capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN')) {
       return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
   }
@@ -792,7 +864,18 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   }
   const step = eventIdentity.phase === 'started' || eventIdentity.target === null ? currentStep : eventIdentity.target;
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
-  const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
+  const supersededBody = supersededOpenStart
+    ? appendActivityEntry(section, {
+      time: metadata.timestamp,
+      step: `${supersededOpenStart.action} [aborted]`,
+      agent: normalized.agent,
+      note: `superseded by ${eventIdentity.action}`
+    })
+    : section.body;
+  const body = appendActivityEntry(
+    supersededOpenStart ? { ...section, body: supersededBody } : section,
+    { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note }
+  );
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
   if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(parseCompletionFacts(frontmatter.completion_facts), currentFact));
   if (completedArtifact && ['analyze', 'plan', 'code'].includes(eventIdentity.family)) {

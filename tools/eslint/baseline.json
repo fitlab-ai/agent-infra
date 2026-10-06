@@ -217,14 +217,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/events.ts",
-      "ruleId": "complexity",
-      "messageId": "complex",
-      "normalizedMessage": "complexity=178",
-      "anchorSha256": "0ecea1f3b4912463dcc454891ffa84484b3fe134c1d9b52e7e4f197bdfe5ff6e",
-      "count": 1
-    },
-    {
       "file": "lib/task/delegation-receipts.ts",
       "ruleId": "complexity",
       "messageId": "complex",
@@ -2414,6 +2406,14 @@
       "messageId": "complex",
       "normalizedMessage": "complexity=19",
       "anchorSha256": "c7e2ae05d6e50bbd65059b3dd74e43ca85057e245448a1e32976b4b4b7a707a4",
+      "count": 1
+    },
+    {
+      "file": "lib/task/events.ts",
+      "ruleId": "complexity",
+      "messageId": "complex",
+      "normalizedMessage": "complexity=173",
+      "anchorSha256": "c8980517f0030c28cbdd3029bb298aa8c36b02081c36fbdbdd8781173e654b32",
       "count": 1
     },
     {
