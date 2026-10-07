@@ -63,7 +63,7 @@ test('task-bound control paths are rooted under the unique task runtime director
     base: path.join(root, 'old-control-base'), repoRoot: root, project: 'p', container: 'p-dev-feature',
     identity: { mode: 'task-bound', taskId }
   });
-  assert.equal(control.root, path.join(taskDir, '.runtime', 'sandbox-control'));
+  assert.equal(control.root, path.join(fs.realpathSync.native(taskDir), '.runtime', 'sandbox-control'));
   assert.equal(control.runtimeDir, path.join(control.root, 'runtime'));
 });
 
