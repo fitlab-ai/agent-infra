@@ -484,6 +484,7 @@ function mutateDelegationAdapterEvidenceAtResolved(
       const nextState = mutate(current);
       const serialized = JSON.stringify(nextState);
       if (serialized === undefined) throw new Error('Agent adapter evidence must be JSON serializable');
+      if (serialized === JSON.stringify(current)) return JSON.parse(serialized) as unknown;
       const adapterEvidence = Object.freeze({
         ...(found.receipt.adapterEvidence ?? {}),
         [adapterId]: JSON.parse(serialized) as unknown
@@ -1240,7 +1241,8 @@ function sealMatchingOrchestrationDelegation(
     modelFallbackReason?: string;
     reasoningEffortFallbackReason?: string;
   }>,
-  options: OrchestrationOptions = {}
+  options: OrchestrationOptions = {},
+  beforeSeal?: () => OrchestrationResult | null
 ): OrchestrationResult {
   const role = managedDelegationRole(event.nativeAgent);
   if (!role) return failed('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
@@ -1273,7 +1275,7 @@ function sealMatchingOrchestrationDelegation(
       actualReasoningEffort: event.actualReasoningEffort,
       modelFallbackReason: event.modelFallbackReason,
       reasoningEffortFallbackReason: event.reasoningEffortFallbackReason
-    }, options);
+    }, { runId: receipt.runId, receiptId: receipt.id }, options, beforeSeal);
   } catch (error) {
     return pauseOrchestration(
       matched.taskId,
@@ -1627,17 +1629,32 @@ function commitOrchestrationStageCompletion(plan: OrchestrationStageCompletion):
 function sealOrchestrationDelegation(
   taskRef: string,
   event: Parameters<typeof sealDelegation>[1],
-  options: OrchestrationOptions = {}
+  expected?: Readonly<{ runId: string; receiptId: string }>,
+  options: OrchestrationOptions = {},
+  beforeSeal?: () => OrchestrationResult | null
 ): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  const orchestrationOptions = options;
+  const resolved = resolveTaskRef(taskRef, { repoRoot: orchestrationOptions.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir, options);
-  if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
-  const result = sealDelegation(run.pendingDelegation, event, { now: options.now });
-  if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
-  const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
-  saveRun(resolved.taskDir, updated);
-  return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
+  return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-orchestration.seal', () => {
+    const run = readRun(resolved.taskDir, orchestrationOptions);
+    if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
+    if (expected && (run.runId !== expected.runId || run.pendingDelegation.id !== expected.receiptId)) {
+      return failed('ORCHESTRATION_DELEGATION_CHANGED', 'pending delegation changed while collecting completion evidence', resolved.taskId);
+    }
+    const preSealFailure = beforeSeal?.();
+    if (preSealFailure) return preSealFailure;
+    const current = beforeSeal ? readRun(resolved.taskDir, orchestrationOptions) : run;
+    if (!current?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
+    if (expected && (current.runId !== expected.runId || current.pendingDelegation.id !== expected.receiptId)) {
+      return failed('ORCHESTRATION_DELEGATION_CHANGED', 'pending delegation changed before it was sealed', resolved.taskId);
+    }
+    const result = sealDelegation(current.pendingDelegation, event, { now: orchestrationOptions.now });
+    if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, orchestrationOptions);
+    const updated = withUpdatedRun(current, { pendingDelegation: result.receipt });
+    saveRun(resolved.taskDir, updated);
+    return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
+  });
 }
 
 function advanceOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {

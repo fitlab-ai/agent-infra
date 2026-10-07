@@ -419,7 +419,7 @@ test('unsupported-client recovery remains paused when current guards do not hold
   assert.equal(result.run?.pause?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
 });
 
-test('Codex unsupported-client pauses remain paused', () => {
+test('Codex resumes a capability pause when delegation support is available', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: f.root, client: 'codex', modelPolicy
@@ -433,9 +433,9 @@ test('Codex unsupported-client pauses remain paused', () => {
   const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: f.root, client: 'codex', modelPolicy
   });
-  assert.equal(result.status, 'paused');
-  assert.equal(result.changed, false);
-  assert.deepEqual(result.run?.recoveryHistory, []);
+  assert.equal(result.status, 'running');
+  assert.equal(result.changed, true);
+  assert.equal(result.run?.recoveryHistory.at(-1)?.code, 'CLIENT_CAPABILITY_ENABLED');
 });
 
 test('current recoverable pauses resume directly without recovery provenance', () => {

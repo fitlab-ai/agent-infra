@@ -299,7 +299,7 @@ function orchestration(
         ? sealMatchingOrchestrationDelegation(
             input.client as AgentClientId, input.event as never, autoTaskOptions(context, options)
           )
-        : sealOrchestrationDelegation(taskRef, input.event as never, options);
+        : sealOrchestrationDelegation(taskRef, input.event as never, undefined, options);
     case 'advance': return advanceOrchestration(taskRef, options);
     case 'pause':
       return pauseOrchestration(

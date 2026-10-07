@@ -239,6 +239,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       });
       assertCurrentCanApply(base, binding);
       const state = reduceCodexLifecycleEvent(base.state, event);
+      if (state === base.state) return base;
       if (state.status === 'invalid' && state.error && NON_PERSISTENT_FAILURES.has(state.error.code)) {
         throw new Error(`${state.error.code}: ${state.error.message}`);
       }

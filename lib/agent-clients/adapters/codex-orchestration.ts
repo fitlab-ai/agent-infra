@@ -477,19 +477,25 @@ async function sealCodexOrchestrationDelegation(
       }
       return reconcileMatchingOrchestrationDelegation('codex', childThreadId, coreOptions(options));
     }
-    const consumed = store.consume(
-      childThreadId,
-      current.receipt.id,
-      existing.state.spawn?.hookDefinitionHash,
-      existing.taskBinding ?? undefined
-    );
-    if (consumed.consumer !== current.receipt.id || !consumed.consumedAt) {
-      return pauseBridge('ORCHESTRATION_CODEX_RECONCILIATION_FAILED', 'Codex lifecycle evidence was not consumed by the active receipt', options);
-    }
     return sealMatchingOrchestrationDelegation(
       'codex',
       { nativeAgent: record.state.startEvidence.nativeAgent, childId: childThreadId },
-      coreOptions(options)
+      coreOptions(options),
+      () => {
+        try {
+          const consumed = store.consumeWithinTaskLock(
+            childThreadId,
+            current.receipt.id,
+            existing.state.spawn?.hookDefinitionHash,
+            existing.taskBinding ?? undefined
+          );
+          return consumed.consumer === current.receipt.id && consumed.consumedAt
+            ? null
+            : bridgeFailure('ORCHESTRATION_CODEX_RECONCILIATION_FAILED', 'Codex lifecycle evidence was not consumed by the active receipt');
+        } catch (error) {
+          return codexSealFailure(error, options, 'child');
+        }
+      }
     );
   } catch (error) {
     return codexSealFailure(error, options, 'child');

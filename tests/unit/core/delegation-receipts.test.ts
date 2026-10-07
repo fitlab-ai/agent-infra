@@ -322,7 +322,7 @@ test('core accepts opaque client evidence after common delegation identity check
     actualReasoningEffort: 'high'
   };
   assert.equal(activateDelegation(prepared, { ...base, clientEvidence: { source: 'codex' } }).ok, true);
-  assert.equal(activateDelegation(prepared, { ...base, parentId: 'stolen-session' }).code, 'DELEGATION_IDENTITY_INVALID');
+  assert.equal(activateDelegation(prepared, { ...base, childId: 'parent-codex' }).code, 'DELEGATION_IDENTITY_INVALID');
 });
 
 test('legacy prepared receipts fail closed before activation and can be dispatched safely', () => {

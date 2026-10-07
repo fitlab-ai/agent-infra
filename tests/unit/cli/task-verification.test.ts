@@ -111,9 +111,14 @@ function producedCodexReceipt(taskId: string) {
   if (!completed.ok) throw new Error('failed to complete Codex receipt fixture');
   const sealed = sealDelegation(completed.receipt, {
     childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
-    clientEvidence: { records: { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } }, activationEvidence: {
-      stopRevision: 7, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z'
-    } }
+    clientEvidence: {
+      records: { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } },
+      activationEvidence: {
+        kind: 'codex-lifecycle-v2', startRevision: 4, ...codexLifecycleProvenance,
+        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
+        stopRevision: 7, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z'
+      }
+    }
   }, { now: () => '2026-01-01T00:00:02.000Z' });
   assert.equal(sealed.ok, true);
   if (!sealed.ok) throw new Error('failed to seal Codex receipt fixture');

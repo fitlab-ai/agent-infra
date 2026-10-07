@@ -191,11 +191,13 @@ function childMatchesReceipt(
   const stopState = record.state.stop;
   return Boolean(child && stopState)
     && child!.sessionId === start.parentThreadId
-    && child!.turnId === stop.turnId
+    && stopState!.turnId === child!.turnId
+    && (stopState!.source === 'parent-rollout'
+      ? stop.turnId === record.state.terminal?.turnId
+      : child!.turnId === stop.turnId)
     && child!.childThreadId === receipt.childId
     && child!.nativeAgent === start.nativeAgent
     && stopState!.childThreadId === receipt.childId
-    && stopState!.turnId === stop.turnId
     && stopState!.nativeAgent === start.nativeAgent
     && start.childThreadId === receipt.childId
     && start.parentThreadId === receipt.parentId
@@ -211,7 +213,6 @@ function hostEvidenceMatches(
   return start.hookDefinitionHash === host.hookDefinitionHash
     && host.capabilitySessionId === start.parentThreadId
     && host.capabilityTurnId === record.state.spawn?.turnId
-    && host.capabilityToolUseId === record.state.spawn?.toolUseId
     && host.spawnToolUseId === start.spawnToolUseId
     && Boolean(host.spawnObservedAt)
     && host.spawnObservedAt === record.spawnObservedAt

@@ -1129,12 +1129,6 @@ export async function serveSandboxControl(
             retiring = true;
             continue;
           }
-          if (!brokerOwns()) {
-            prepared.terminate(false);
-            active = null;
-            retiring = true;
-            continue;
-          }
           criticalRequestPhase(manifest, request, 'accepted-authorized', 'in-progress');
           writeAcceptedResponse(manifest, {
             version: 2, id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
