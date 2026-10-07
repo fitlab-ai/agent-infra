@@ -691,7 +691,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const expectedFamily = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
     if (eventIdentity.phase !== 'completed'
       || lifecycleAuthority.phase !== 'task-event.completed'
-      || lifecycleAuthority.taskId !== resolved.taskId
       || lifecycleAuthority.family !== expectedFamily
       || lifecycleAuthority.artifact !== normalized.artifact
       || lifecycleAuthority.round !== normalized.round

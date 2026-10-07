@@ -72,7 +72,7 @@ export type SandboxTaskCreateRequest = RequestBase & Readonly<{
 }>;
 export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   family: 'codex-controller';
-  command: 'open' | 'close' | 'verify' | 'attest-capability';
+  command: 'open' | 'close' | 'verify';
   args: string[];
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
@@ -223,17 +223,15 @@ export function isSandboxControlFamily(value: string): value is SandboxControlFa
   return SANDBOX_CONTROL_FAMILIES.includes(value as SandboxControlFamily);
 }
 
-function validControllerArgs(command: unknown, args: unknown): args is string[] {
-  if (!Array.isArray(args)) return false;
-  if (command !== 'attest-capability') return args.length === 0;
-  return args.length === 5 && args.every((arg) => typeof arg === 'string' && arg.length > 0 && arg.length <= 4096);
+function validControllerArgs(args: unknown): args is string[] {
+  return Array.isArray(args) && args.length === 0;
 }
 
 function validateCodexControllerRequest(request: Record<string, unknown>, manifest: SandboxControlManifest): SandboxCodexControllerRequest {
   const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
-    || !validControllerArgs(request.command, request.args)
-    || !['open', 'close', 'verify', 'attest-capability'].includes(request.command as string)
+    || !validControllerArgs(request.args)
+    || !['open', 'close', 'verify'].includes(request.command as string)
     || !validControllerProcess(request.controllerProcess)
     || (request.command === 'open' && request.controllerProof !== null)
     || (request.command !== 'open' && !validControllerProof(request.controllerProof))

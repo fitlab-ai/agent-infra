@@ -260,7 +260,6 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
     { Type: "bind", Source: gitMetadata.worktreeGitFile, Destination: "/workspace/.git", RW: false },
     { Type: "bind", Source: path.join(view.root, "active", ".short-ids.json"), Destination: "/workspace/.agents/workspace/active/.short-ids.json", RW: false },
-    { Type: "bind", Source: path.join(view.root, "task-runtime-mask"), Destination: `/workspace/.agents/workspace/active/${taskId}/.runtime`, RW: false },
     ...["completed", "blocked", "archive"].map((state) => ({
       Type: "bind",
       Source: path.join(view.root, state),

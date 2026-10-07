@@ -25,7 +25,6 @@ import { sandboxCoreBindMounts } from './mounts.ts';
 import { resolveSandboxGitMetadata } from './git-metadata.ts';
 import {
   assertSandboxTaskSource,
-  prepareTaskRuntimeMask,
   sandboxControlPaths,
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
@@ -739,7 +738,6 @@ function expectedMounts(params: {
     container: params.container,
     identity: params.workspace
   });
-  if (params.workspace.mode === 'task-bound') prepareTaskRuntimeMask(view.root);
   const control = sandboxControlPaths({
     base: config.controlBase ?? path.join(config.home, '.agent-infra', 'sandbox-control'),
     repoRoot: config.repoRoot,

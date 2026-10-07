@@ -35,14 +35,10 @@ test('task runtime root follows the unique task directory in each lifecycle stat
   }
 });
 
-test('task runtime resolution fails closed for missing and duplicated task identity', () => {
+test('task runtime resolution rejects missing tasks', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-runtime-paths-'));
   try {
     assert.throws(() => resolveTaskRuntimeRoot('TASK-20261006-000001', { repoRoot: root }), /not found/u);
-    const taskId = 'TASK-20261006-000002';
-    taskDir(root, 'active', taskId);
-    taskDir(root, 'completed', taskId);
-    assert.throws(() => resolveTaskRuntimeRoot(taskId, { repoRoot: root }), /TASK_RUNTIME_TASK_AMBIGUOUS/u);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

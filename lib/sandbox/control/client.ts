@@ -532,13 +532,6 @@ type CodexControllerVerified = Readonly<{
   error: null;
 }>;
 
-type CodexCapabilityAttested = Readonly<{
-  version: 1; status: 'attested'; changed: true; lease: null;
-  binding: Readonly<{ taskId: string; controlGeneration: string; controllerInstanceDigest: string }>;
-  evidence: Readonly<{ revision: number; sessionId: string; turnId: string; toolUseId: string; expiresAt: number }>;
-  error: null;
-}>;
-
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 }
@@ -559,52 +552,6 @@ function validBuild(value: unknown): boolean {
     && typeof build.packageVersion === 'string' && build.packageVersion.length > 0
     && typeof build.internalExecutableBuildHash === 'string' && /^[a-f0-9]{64}$/u.test(build.internalExecutableBuildHash)
     && typeof build.lifecycleContractHash === 'string' && /^[a-f0-9]{64}$/u.test(build.lifecycleContractHash);
-}
-
-function validAttestationBinding(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const binding = value as Record<string, unknown>;
-  return exactKeys(binding, ['controllerInstanceDigest', 'controlGeneration', 'taskId'])
-    && typeof binding.taskId === 'string' && typeof binding.controlGeneration === 'string'
-    && typeof binding.controllerInstanceDigest === 'string' && /^[a-f0-9]{64}$/u.test(binding.controllerInstanceDigest);
-}
-
-function validAttestationEvidence(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const evidence = value as Record<string, unknown>;
-  return exactKeys(evidence, ['expiresAt', 'revision', 'sessionId', 'toolUseId', 'turnId'])
-    && Number.isSafeInteger(evidence.revision) && Number.isSafeInteger(evidence.expiresAt)
-    && ['sessionId', 'turnId', 'toolUseId'].every((key) => typeof evidence[key] === 'string');
-}
-
-function parseCodexCapabilityAttestationResult(
-  response: SandboxControlResponse,
-  result: Record<string, unknown>
-): CodexCapabilityAttested {
-  if (!exactKeys(result, ['binding', 'changed', 'error', 'evidence', 'lease', 'status', 'version'])
-    || response.exitCode !== 0 || result.version !== 1 || result.status !== 'attested'
-    || result.changed !== true || result.lease !== null
-    || result.error !== null || !validAttestationBinding(result.binding) || !validAttestationEvidence(result.evidence)) {
-    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'capability attestation result is invalid', false, true);
-  }
-  return result as unknown as CodexCapabilityAttested;
-}
-
-function parseCodexCapabilityAttestationResponse(response: SandboxControlResponse): CodexCapabilityAttested {
-  if (response.phase !== 'completed' || response.error !== null || response.stderr !== '') {
-    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'capability attestation outer response is invalid', false, true);
-  }
-  try {
-    if (!response.stdout.endsWith('\n') || response.stdout.slice(0, -1).includes('\n')) throw new Error('not canonical');
-    const value = JSON.parse(response.stdout) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not an object');
-    const result = value as Record<string, unknown>;
-    if (result.status === 'failed') parseCodexControllerResult(response);
-    return parseCodexCapabilityAttestationResult(response, result);
-  } catch (error) {
-    if (error instanceof SandboxControlClientError) throw error;
-    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'capability attestation payload is invalid', false, true);
-  }
 }
 
 export function parseCodexControllerResult(response: SandboxControlResponse): CodexControllerOpened | CodexControllerClosed | CodexControllerVerified {
@@ -711,22 +658,6 @@ function requestCodexController(params: Readonly<{
     clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result does not match the request', false, true);
   }
   return result;
-}
-
-export function requestCodexCapabilityAttestation(params: Readonly<{
-  attestation: readonly [string, string, string, string, string];
-  controllerProof: CodexControllerLeaseProofV1;
-  channelDir?: string; statusDir?: string; token?: string; generation?: string; timeoutMs?: number;
-}>): CodexCapabilityAttested {
-  const auth = authority(params);
-  const issuedAt = Date.now();
-  const request: SandboxCodexControllerRequest = {
-    version: 4, id: randomUUID(), ...auth, issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: 'codex-controller', command: 'attest-capability', args: [...params.attestation],
-    controllerProcess: params.controllerProof.controllerProcess, controllerProof: params.controllerProof
-  };
-  return parseCodexCapabilityAttestationResponse(exchangeSandboxControl(request, params));
 }
 
 export function requestCodexControllerOpen(params: Omit<Parameters<typeof requestCodexController>[0], 'command' | 'controllerProof'>): CodexControllerOpened {

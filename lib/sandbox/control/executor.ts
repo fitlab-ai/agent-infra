@@ -36,8 +36,6 @@ import {
 } from '../../task/control-authority.ts';
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import { resolveAgentCapabilityStoreRoot } from '../../runtime/agent-runtime.ts';
 import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
@@ -303,36 +301,6 @@ type ExecuteRequestOptions = Readonly<{
   createTask?: typeof createTask;
 }>;
 
-function executeCapabilityAttestation(
-  manifest: SandboxControlManifest,
-  manifestPath: string,
-  request: Extract<SandboxControlRequest, { family: 'codex-controller' }>,
-  options: ExecuteRequestOptions
-): SandboxControlExecutionResult {
-  const binding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
-    manifest, manifestPath, proof: request.controllerProof!,
-    buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
-  });
-  const taskId = manifest.taskId;
-  if (!taskId) throw new Error('CODEX_CAPABILITY_PROVENANCE_MISMATCH: broker task identity is missing');
-  const [capabilityRef, sessionId, turnId, toolUseId, hookDefinitionHash] = request.args;
-  const capability = createCodexCapabilityStore({
-    root: resolveAgentCapabilityStoreRoot({ repoRoot: manifest.repoRoot, taskId })
-  }).attestByReference({
-    capabilityRef: capabilityRef!, expectedTaskId: taskId,
-    sessionId: sessionId!, turnId: turnId!, toolUseId: toolUseId!, hookDefinitionHash: hookDefinitionHash!,
-    buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot),
-    controller: { instanceDigest: binding.instanceDigest, controlGeneration: binding.controlGeneration }
-  });
-  return { exitCode: 0, stdout: `${JSON.stringify({
-    version: 1, status: 'attested', changed: true, lease: null,
-    binding: { taskId, controlGeneration: binding.controlGeneration, controllerInstanceDigest: binding.instanceDigest },
-    evidence: { revision: capability.revision, sessionId: capability.sessionId, turnId: capability.turnId,
-      toolUseId: capability.toolUseId, expiresAt: capability.expiresAt },
-    error: null
-  })}\n`, stderr: '' };
-}
-
 async function executeRequestInner(
   manifest: SandboxControlManifest,
   manifestPath: string,
@@ -466,21 +434,7 @@ export async function executeRequest(
   appendExecutorAudit(manifest, 'executor-request-start', fields);
   try {
     let result: SandboxControlExecutionResult;
-    if (request.family === 'codex-controller' && request.command === 'attest-capability') {
-      try {
-        result = executeCapabilityAttestation(manifest, manifestPath, request, options);
-      } catch (error) {
-        appendExecutorAudit(manifest, 'controller-operation-failed', {
-          ...requestAuditFields(manifest, request), controllerCommand: request.command,
-          errorCode: /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
-            ?? 'CODEX_SANDBOX_CONTROLLER_FAILED',
-          errorType: error instanceof Error ? error.name : typeof error,
-        });
-        result = controllerFailure(error);
-      }
-    } else {
-      result = await executeRequestInner(manifest, manifestPath, request, options);
-    }
+    result = await executeRequestInner(manifest, manifestPath, request, options);
     appendExecutorAudit(manifest, 'executor-request-finished', {
       requestId: request.id,
       requestFamily: request.family,

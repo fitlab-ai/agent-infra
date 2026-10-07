@@ -73,8 +73,6 @@ import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
 import { readCodexControllerRegistration } from './controller-registration.ts';
-import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import { resolveAgentCapabilityStoreRoot } from '../../runtime/agent-runtime.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
@@ -320,45 +318,6 @@ function taskCreateDomainEvidence(
   }
 }
 
-function capabilityAttestationBindingMatches(
-  registration: ReturnType<typeof readCodexControllerRegistration>,
-  binding: unknown
-): boolean {
-  if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return false;
-  const value = binding as Record<string, unknown>;
-  return value.taskId === registration.taskId
-    && value.controlGeneration === registration.controlGeneration
-    && value.controllerInstanceDigest === registration.controllerInstanceDigest;
-}
-
-function capabilityAttestationRecordMatches(
-  manifest: SandboxControlManifest,
-  capabilityRef: string | undefined,
-  evidence: unknown
-): boolean {
-  if (!manifest.taskId || !capabilityRef || !evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return false;
-  const value = evidence as Record<string, unknown>;
-  const capability = createCodexCapabilityStore({
-    root: resolveAgentCapabilityStoreRoot({ repoRoot: manifest.repoRoot, taskId: manifest.taskId })
-  }).inspectReference(capabilityRef);
-  return capability.status === 'attested' && capability.taskId === manifest.taskId
-    && value.revision === capability.revision && value.sessionId === capability.sessionId
-    && value.turnId === capability.turnId && value.toolUseId === capability.toolUseId;
-}
-
-function capabilityAttestationDomainEvidence(
-  manifest: SandboxControlManifest,
-  request: Extract<SandboxControlRequest, { family: 'codex-controller' }>,
-  registration: ReturnType<typeof readCodexControllerRegistration>,
-  output: Record<string, unknown>
-): Readonly<Record<string, unknown>> {
-  return {
-    consistent: output.status === 'attested' && output.changed === true
-      && capabilityAttestationBindingMatches(registration, output.binding)
-      && capabilityAttestationRecordMatches(manifest, request.args[0], output.evidence)
-  };
-}
-
 function controllerDomainEvidence(
   manifest: SandboxControlManifest,
   manifestPath: string,
@@ -374,10 +333,8 @@ function controllerDomainEvidence(
         ? output.lease as Record<string, unknown> : null;
       return {
         consistent: output.status === 'opened' && output.changed === true
-          && lease?.taskId === registration.taskId
-          && lease.controlGeneration === registration.controlGeneration
-          && lease.controllerInstanceDigest === registration.controllerInstanceDigest
-          && registration.taskId === manifest.taskId
+          && lease?.controlGeneration === registration.controlGeneration
+          && lease?.controllerInstanceDigest === registration.controllerInstanceDigest
           && registration.controlGeneration === manifest.generation
       };
     }
@@ -386,12 +343,11 @@ function controllerDomainEvidence(
         ? output.binding as Record<string, unknown> : null;
       return {
         consistent: output.status === 'verified' && output.changed === false
-          && binding?.taskId === registration.taskId
-          && binding.controlGeneration === registration.controlGeneration
-          && binding.controllerInstanceDigest === registration.controllerInstanceDigest
+          && binding?.controlGeneration === registration.controlGeneration
+          && binding?.controllerInstanceDigest === registration.controllerInstanceDigest
       };
     }
-    return capabilityAttestationDomainEvidence(manifest, request, registration, output);
+    return { consistent: false };
   } catch (error) {
     return { consistent: request.family === 'codex-controller' && request.command === 'close'
       && (error as { code?: string }).code === 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_MISSING'

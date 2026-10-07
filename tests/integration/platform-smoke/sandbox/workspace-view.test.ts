@@ -33,8 +33,7 @@ test('task-bound view contains only the scoped registry', () => {
     identity: { mode: 'task-bound', taskId: 'TASK-20260809-010203', shortId: '8' }
   });
 
-  assert.deepEqual(fs.readdirSync(view.root).sort(), ['active', 'archive', 'blocked', 'completed', 'task-runtime-mask']);
-  assert.deepEqual(fs.readdirSync(path.join(view.root, 'task-runtime-mask')), []);
+  assert.deepEqual(fs.readdirSync(view.root).sort(), ['active', 'archive', 'blocked', 'completed']);
   assert.deepEqual(fs.readdirSync(path.join(view.root, 'active')).sort(), ['.short-ids.json']);
   assert.equal(
     fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'),

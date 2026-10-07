@@ -191,7 +191,6 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
     fs.rmSync(hostPath, { recursive: true, force: true });
     fs.mkdirSync(hostPath, { recursive: true, mode: 0o700 });
   }
-  prepareTaskRuntimeMask(root);
 
   const active = path.join(root, 'active');
   const shortId = params.identity.mode === 'task-bound' && 'shortId' in params.identity
@@ -208,21 +207,6 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
     mode: 0o600
   });
   return { root };
-}
-
-export function prepareTaskRuntimeMask(workspaceViewRoot: string): string {
-  const root = path.resolve(workspaceViewRoot);
-  assertSafeDirectory(root, path.dirname(root));
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  fs.chmodSync(root, 0o700);
-  const taskRuntimeMask = path.join(root, 'task-runtime-mask');
-  assertSafeDirectory(taskRuntimeMask, root);
-  fs.mkdirSync(taskRuntimeMask, { recursive: true, mode: 0o555 });
-  if (fs.readdirSync(taskRuntimeMask).length > 0) {
-    throw new Error('SANDBOX_TASK_RUNTIME_MASK_NOT_EMPTY');
-  }
-  fs.chmodSync(taskRuntimeMask, 0o555);
-  return taskRuntimeMask;
 }
 
 export function materializeSandboxControl(params: Readonly<{

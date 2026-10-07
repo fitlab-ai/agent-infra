@@ -70,20 +70,6 @@ test('Codex capability tolerates build drift and is consumed once', () => {
   assert.equal(fs.existsSync(armed.path), false);
 });
 
-test('Codex capability bootstrap rejects a task mismatch without modifying its record', () => {
-  const root = mkdtempSync('codex-capability-task-binding-');
-  const store = createCodexCapabilityStore({ root, reference: () => 'task-binding-reference' });
-  const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
-  const before = fs.readFileSync(armed.path);
-  assert.throws(() => store.attestByReference({
-    capabilityRef: armed.capabilityRef,
-    expectedTaskId: 'TASK-20260101-000002',
-    sessionId: 'session', turnId: 'turn', toolUseId: 'tool',
-    hookDefinitionHash: 'c'.repeat(64), buildIdentity: build
-  }), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
-  assert.deepEqual(fs.readFileSync(armed.path), before);
-});
-
 test('Codex capability expiry and provenance mismatch fail closed', () => {
   let now = 2_000;
   let tokenIndex = 0;

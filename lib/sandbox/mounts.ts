@@ -76,10 +76,6 @@ export function sandboxCoreBindMounts(
       hostPaths: taskSources,
       containerPath: taskMountPath,
       readOnly: false
-    }, {
-      hostPaths: [path.join(overrides.workspaceViewRoot, 'task-runtime-mask')],
-      containerPath: path.posix.join(taskMountPath, '.runtime'),
-      readOnly: true
     });
   }
   mounts.push(
