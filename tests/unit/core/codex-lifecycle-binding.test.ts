@@ -137,6 +137,9 @@ test('Codex lifecycle store root resolves from the canonical task directory in e
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\n---\n`);
 
-  assert.equal(resolveCodexLifecycleStoreRoot(taskId, { repoRoot: repo }), path.join(taskDir, '.runtime', 'codex-lifecycle'));
+  assert.equal(
+    resolveCodexLifecycleStoreRoot(taskId, { repoRoot: repo }),
+    path.join(fs.realpathSync.native(taskDir), '.runtime', 'codex-lifecycle')
+  );
   assert.equal(fs.existsSync(path.join(repo, '.agents', 'workspace', '.runtime', 'codex-lifecycle')), false);
 });

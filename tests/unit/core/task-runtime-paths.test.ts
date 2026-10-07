@@ -25,7 +25,10 @@ test('task runtime root follows the unique task directory in each lifecycle stat
     ];
     for (const [state, taskId] of cases) {
       const dir = taskDir(root, state, taskId);
-      assert.equal(resolveTaskRuntimeRoot(taskId, { repoRoot: root }), path.join(dir, '.runtime'));
+      assert.equal(
+        resolveTaskRuntimeRoot(taskId, { repoRoot: root }),
+        path.join(fs.realpathSync.native(dir), '.runtime')
+      );
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

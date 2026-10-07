@@ -40,7 +40,7 @@ test('task-bound capability store resolves beneath the unique task runtime root'
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
   try {
     const env = { AGENT_INFRA_TASK_ID: taskId };
-    const runtimeRoot = path.join(taskDir, '.runtime');
+    const runtimeRoot = path.join(fs.realpathSync.native(taskDir), '.runtime');
     const controlRuntimeRoot = path.join(runtimeRoot, 'sandbox-control', 'private-capabilities');
     assert.equal(resolveAgentRuntimeRoot({ repoRoot, env }), runtimeRoot);
     assert.equal(
