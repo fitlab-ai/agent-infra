@@ -1,8 +1,9 @@
 // Active AI collaborator short tokens — the write-side whitelist for the
 // activity log. Migrated from lib/task/commands/log.ts so that the write-side
 // internal commands and the rendering side share one definition.
-export const KNOWN_AI_AGENTS: ReadonlySet<string> =
-  new Set(['claude', 'codex', 'antigravity', 'opencode', 'cursor', 'traecli']);
+export const AGENT_TOKEN_VALUES = ['claude', 'codex', 'antigravity', 'opencode', 'cursor', 'traecli'] as const;
+export type AgentToken = (typeof AGENT_TOKEN_VALUES)[number];
+export const KNOWN_AI_AGENTS: ReadonlySet<string> = new Set(AGENT_TOKEN_VALUES);
 
 // Long name -> short name mapping: `claude-code` reuses the existing
 // orchestration precedent, and `antigravity-cli` is the active client.
@@ -12,7 +13,7 @@ export const AGENT_LONG_NAMES: Readonly<Record<string, string>> = {
 };
 
 export const AGENT_USAGE_HINT =
-  "agent must be a short token (claude/codex/antigravity/opencode/cursor/traecli), " +
+  `agent must be a short token (${AGENT_TOKEN_VALUES.join('/')}), ` +
   "a long name (claude-code -> claude, antigravity-cli -> antigravity), or 'human'";
 
 // Strict write-side validation: the value must be exactly a short token, a
