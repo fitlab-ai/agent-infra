@@ -15,7 +15,7 @@ test('recovery registry covers the remaining broker families', () => {
   assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'complete')?.class, 'lifecycle-mutation');
   assert.equal(findSandboxControlRecoveryOperation('task-finalization', 'complete')?.class, 'finalization');
   assert.equal(findSandboxControlRecoveryOperation('task-create', 'create')?.class, 'task-create');
-  assert.equal(findSandboxControlRecoveryOperation('codex-controller', 'verify')?.class, 'codex-controller');
+  assert.equal(findSandboxControlRecoveryOperation('agent-client', 'controller.verify')?.class, 'agent-client-operation');
   assert.equal(digestControlRecoveryIntent('task-lifecycle', 'complete').length, 64);
 });
 

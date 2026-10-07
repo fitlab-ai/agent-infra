@@ -35,13 +35,8 @@ import {
   type TaskControlOperation
 } from '../../task/control-authority.ts';
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
-import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import {
-  closeCodexControllerRegistration,
-  CodexControllerRegistrationError,
-  openCodexControllerRegistration,
-  resolveCodexControllerBinding
-} from '../../agent-clients/adapters/codex-lifecycle/controller-registration.ts';
+import { executeAgentClientOperation, validateAgentClientOperation } from './agent-operation.ts';
+import type { AgentClientSandboxControlOperation } from '../../agent-clients/adapter.ts';
 
 export type SandboxControlExecutionResult = {
   exitCode: number;
@@ -234,24 +229,6 @@ function waitForGate(nonce: string, timeoutMs = 2_000): Promise<Readonly<{ owner
   });
 }
 
-function controllerFailure(error: unknown): SandboxControlExecutionResult {
-  const code = error instanceof CodexControllerRegistrationError
-    ? error.code
-    : /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
-      ?? 'CODEX_SANDBOX_CONTROLLER_FAILED';
-  const message = error instanceof CodexControllerRegistrationError
-    ? error.message
-    : `${code}: controller operation failed; inspect the sandbox controller and rebuild the sandbox if needed`;
-  const payload = {
-    version: 1,
-    status: 'failed',
-    changed: false,
-    lease: null,
-    error: { code, message, retryable: false }
-  };
-  return { exitCode: 1, stdout: `${JSON.stringify(payload)}\n`, stderr: '' };
-}
-
 function lifecycleFailure(code: string, message: string): SandboxControlExecutionResult {
   return {
     exitCode: 1,
@@ -296,9 +273,8 @@ function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalizat
 }
 
 type ExecuteRequestOptions = Readonly<{
-  buildIdentity?: typeof computeLifecycleBuildIdentity;
-  resolveControllerBinding?: typeof resolveCodexControllerBinding;
   createTask?: typeof createTask;
+  agentClientOperation?: AgentClientSandboxControlOperation;
 }>;
 
 async function executeRequestInner(
@@ -321,58 +297,9 @@ async function executeRequestInner(
       return taskCreateExecutionFailure(request.id, code, detail);
     }
   }
-  if (request.family === 'codex-controller') {
-    try {
-      if (request.command === 'verify') {
-        const binding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
-          manifest,
-          manifestPath,
-          proof: request.controllerProof!,
-          buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
-        });
-        return {
-          exitCode: 0,
-          stdout: `${JSON.stringify({
-            version: 1,
-            status: 'verified',
-            changed: false,
-            lease: null,
-            binding: {
-              taskId: manifest.taskId,
-              controlGeneration: binding.controlGeneration,
-              controllerInstanceDigest: binding.instanceDigest
-            },
-            error: null
-          })}\n`,
-          stderr: ''
-        };
-      }
-      const result = request.command === 'open'
-        ? openCodexControllerRegistration({
-            manifest,
-            manifestPath,
-            controllerProcess: request.controllerProcess!,
-            buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
-          })
-        : closeCodexControllerRegistration({
-            manifest,
-            manifestPath,
-            proof: request.controllerProof!
-          });
-      return { exitCode: 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
-    } catch (error) {
-      const errorCode = error instanceof CodexControllerRegistrationError
-        ? error.code
-        : /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
-          ?? 'CODEX_SANDBOX_CONTROLLER_FAILED';
-      appendExecutorAudit(manifest, 'controller-operation-failed', {
-        ...requestAuditFields(manifest, request),
-        controllerCommand: request.command,
-        errorCode,
-        errorType: error instanceof Error ? error.name : typeof error,
-      });
-      return controllerFailure(error);
-    }
+  if (request.family === 'agent-client') {
+    validateAgentClientOperation(request, manifest);
+    return executeAgentClientOperation(request, manifest, manifestPath, options.agentClientOperation);
   }
   if (request.family === 'task-finalization') {
     const parsed = parseTaskControlOperation(
@@ -501,17 +428,17 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   let result: SandboxControlExecutionResult;
   try {
     assertSandboxControlExecutorAuthority(manifest, gateOwner);
-    const operation = request.family === 'task-lifecycle'
+  const operation = request.family === 'task-lifecycle'
       ? (() => {
         try { return parseTaskControlOperation(request.family, request.args); } catch { return null; }
       })()
-      : null;
+      : request.family === 'agent-client' ? request.operation : null;
     const context = createSandboxControlAuditContext(manifest, {
       requestId: request.id,
       family: request.family,
-      operation: operation?.family === 'task-lifecycle'
+      operation: operation && typeof operation === 'object' && 'family' in operation && operation.family === 'task-lifecycle'
         ? operation.request.intent
-          : request.family === 'task-finalization' ? request.operation : null,
+        : request.family === 'task-finalization' || request.family === 'agent-client' ? request.operation : null,
       phase: 'started-committed',
       outcome: 'in-progress'
     });

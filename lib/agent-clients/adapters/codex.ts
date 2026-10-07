@@ -6,6 +6,7 @@ import {
 } from './codex-sandbox.ts';
 import { parseCodexLifecycleBinding } from './codex-lifecycle/binding.ts';
 import { isCodexDelegationReceiptEvidence, isCodexLifecycleActivationEvidence } from './codex-lifecycle/evidence.ts';
+import { codexControllerOperation } from './codex-lifecycle/controller-operation.ts';
 
 function codexCarrierError(code: string): Error {
   const error = new Error(code);
@@ -79,6 +80,7 @@ const codexAdapter = defineAgentClientAdapter({
       return recoverStartedLifecycleFromAdapter(...args);
     }
   },
+  sandboxControlOperation: codexControllerOperation,
   project: {
     ownedPathPrefixes: ['.codex/'],
     managed: ['.codex/hooks.json', '.codex/agents/'],

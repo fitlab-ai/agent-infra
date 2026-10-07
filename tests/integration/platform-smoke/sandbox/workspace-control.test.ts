@@ -56,7 +56,9 @@ import {
 import { bindTaskFinalizationReceipt, prepareTaskFinalization } from '../../../../lib/task/finalization.ts';
 import { createTask } from '../../../../lib/task/create-service.ts';
 import { platformResult } from '../../../../lib/platform/types.ts';
-import { parseCodexControllerResult, SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
+import { SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
+import { parseCodexControllerResult } from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-client.ts';
+import { validateAgentClientOperation } from '../../../../lib/sandbox/control/agent-operation.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import {
   closeCodexControllerRegistration,
@@ -557,18 +559,34 @@ test('typed controller verify returns only the live task binding without spawnin
     generation: manifest.generation,
     issuedAt: 1_000,
     expiresAt: 3_000,
-    family: 'codex-controller' as const,
-    command: 'verify' as const,
-    args: [] as [],
-    controllerProcess: proof.controllerProcess,
-    controllerProof: proof
+    family: 'agent-client' as const,
+    agentClient: 'codex',
+    operation: 'controller.verify',
+    payload: { proof }
   };
   const validated = validateSandboxControlRequest(request, manifest, { now: 2_000 });
-  assert.equal(request.command, 'verify');
+  assert.equal(request.operation, 'controller.verify');
   const before = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
   const result = await executeRequest(manifest, manifestPath, validated, {
-    buildIdentity: () => controllerBuild,
-    resolveControllerBinding: () => ({ instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: manifest.generation })
+    agentClientOperation: {
+      validate: () => undefined,
+      execute: () => Promise.resolve({
+        exitCode: 0,
+        stdout: `${JSON.stringify({
+          version: 1,
+          status: 'verified',
+          changed: false,
+          lease: null,
+          binding: {
+            taskId: manifest.taskId,
+            controlGeneration: manifest.generation,
+            controllerInstanceDigest: opened.lease.controllerInstanceDigest
+          },
+          error: null
+        })}\n`,
+        stderr: ''
+      })
+    }
   });
   assert.equal(result.exitCode, 0);
   assert.deepEqual(JSON.parse(result.stdout), {
@@ -594,19 +612,20 @@ test('typed controller verify requires matching process proof', () => {
     leaseSecret: 'b'.repeat(64),
     controllerProcess: { pid: 100, startTime: 10 }
   };
-  assert.throws(() => validateSandboxControlRequest({
+  const invalidRequest = validateSandboxControlRequest({
     version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
     token: manifest.token,
     generation: manifest.generation,
     issuedAt: 1_000,
     expiresAt: 3_000,
-    family: 'codex-controller',
-    command: 'verify',
-    args: [],
-    controllerProcess: { pid: 101, startTime: 10 },
-    controllerProof: proof
-  }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
+    family: 'agent-client',
+    agentClient: 'codex',
+    operation: 'controller.verify',
+    payload: { proof: { ...proof, controllerProcess: { pid: 101, startTime: 10 } } }
+  }, manifest, { now: 2_000 });
+  if (invalidRequest.family !== 'agent-client') throw new Error('expected agent-client request');
+  assert.throws(() => validateAgentClientOperation(invalidRequest, manifest), /REQUEST_INVALID/);
 });
 
 test('TypeScript control entries retain explicit strip-types startup', () => {
@@ -628,8 +647,6 @@ test('control requests are restricted to allowed families and rebound to the man
     expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'complete', '--agent', 'codex'],
-    controllerProcess: null,
-    controllerProof: null
   }, manifest, { now: 2_000 });
   assert.deepEqual(bindSandboxControlTask(request, manifest.taskId!), [
     'TASK-20260809-010203',
@@ -655,8 +672,6 @@ test('task finalization uses a typed task-bound request with manifest authority'
     operation: 'complete',
     agent: 'codex',
     args: [],
-    controllerProcess: null,
-    controllerProof: null
   }, manifest, { now: 2_000 });
   assert.equal(request.family, 'task-finalization');
   assert.equal(request.operation, 'complete');
@@ -727,8 +742,6 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       operation: 'complete',
       agent: 'codex',
         args: [],
-      controllerProcess: null,
-      controllerProof: null
     });
     assert.equal(result.exitCode, 0);
     const payload = JSON.parse(result.stdout);
@@ -752,8 +765,6 @@ test('control protocol rejects request v2 and controller result parser enforces 
     expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'status'],
-    controllerProcess: null,
-    controllerProof: null
   };
   assert.throws(() => validateSandboxControlRequest({ ...request, version: 2 }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
   const opened = {
@@ -822,8 +833,6 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'complete'],
-    controllerProcess: null,
-    controllerProof: null
   };
   assert.throws(
     () => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }),
@@ -836,11 +845,10 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
   const branchManifest = { ...manifest, mode: 'branch-only' as const, taskId: null };
   assert.throws(() => validateSandboxControlRequest({
     ...request,
-    family: 'codex-controller',
-    command: 'open',
-    args: [],
-    controllerProcess: { pid: 100, startTime: 10 },
-    controllerProof: null
+    family: 'agent-client',
+    agentClient: 'codex',
+    operation: 'controller.open',
+    payload: { controllerProcess: { pid: 100, startTime: 10 } }
   }, branchManifest, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-controller-denied-'));
   const manifestPath = path.join(root, 'manifest.json');
@@ -911,8 +919,6 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
       expiresAt: 3_000,
       family: 'task-create',
       candidate,
-      controllerProcess: null,
-      controllerProof: null
     }, { ...manifest, mode, taskId: mode === 'task-bound' ? manifest.taskId : null }, { now: 2_000 });
     assert.equal(request.family, 'task-create');
     assert.equal(request.candidate.title, candidate.title);
@@ -944,8 +950,6 @@ test('task-create executor preserves request identity when the host service thro
         acceptanceCriteria: [], openQuestions: []
       }
     },
-    controllerProcess: null,
-    controllerProof: null
   }, manifest, { now: 2_000 });
   const result = await executeRequest(manifest, '/manifest.json', request, {
     createTask: async () => { throw new Error('TASK_CREATE_TEST_ESCAPED_EXCEPTION'); }
@@ -1009,8 +1013,6 @@ test('task-create executor preserves accepted terminal status when the host serv
     expiresAt: 3_000,
     family: 'task-create',
     candidate,
-    controllerProcess: null,
-    controllerProof: null
   }, boundManifest, { now: 2_000 });
 
   try {
@@ -1240,8 +1242,6 @@ test('control request deadline and generation fail closed', () => {
     expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'status'],
-    controllerProcess: null,
-    controllerProof: null
   };
   assert.throws(
     () => validateSandboxControlRequest(request, manifest, { now: 3_001 }),

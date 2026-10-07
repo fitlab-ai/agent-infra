@@ -11,8 +11,7 @@ function boundControlContext(env: NodeJS.ProcessEnv): boolean {
   return [
     'AGENT_INFRA_CONTROL_TOKEN',
     'AGENT_INFRA_CONTROL_GENERATION',
-    'AGENT_INFRA_EXECUTOR_MANIFEST',
-    'AGENT_INFRA_CODEX_CONTROLLER_CONTEXT'
+    'AGENT_INFRA_EXECUTOR_MANIFEST'
   ].some((key) => typeof env[key] === 'string' && env[key]!.length > 0);
 }
 

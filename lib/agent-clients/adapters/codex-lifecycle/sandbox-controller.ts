@@ -10,7 +10,7 @@ import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
   requestCodexControllerVerify
-} from '../../../sandbox/control/client.ts';
+} from './controller-client.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {

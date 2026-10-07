@@ -31,6 +31,7 @@ function fixture() {
   fs.mkdirSync(path.join(root, 'lib', 'internal'), { recursive: true });
   fs.mkdirSync(path.join(root, 'lib', 'task'), { recursive: true });
   fs.mkdirSync(path.join(root, 'lib', 'agent-clients', 'adapters', 'codex-lifecycle'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'lib', 'sandbox', 'control'), { recursive: true });
   fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }));
   for (const file of [
@@ -43,6 +44,9 @@ function fixture() {
     'lib/task/orchestration.ts',
     'lib/agent-clients/adapters/codex-lifecycle/build-identity.ts',
     'lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/controller-client.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/controller-operation.ts',
+    'lib/sandbox/control/agent-operation.ts',
     'lib/agent-clients/adapters/codex-lifecycle/app-server.ts',
     'lib/agent-clients/adapters/codex-lifecycle/evidence.ts',
     'lib/agent-clients/adapters/codex-lifecycle/store.ts'
