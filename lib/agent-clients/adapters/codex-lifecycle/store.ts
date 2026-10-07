@@ -1,16 +1,19 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  mutateDelegationAdapterEvidence,
+  mutateDelegationAdapterEvidenceWithinTaskLock,
+  readRun
+} from '../../../task/orchestration.ts';
+import type { DelegationReceipt } from '../../../task/delegation-receipts.ts';
+import { resolveTaskRef } from '../../../task/resolve-ref.ts';
 import {
   createCodexLifecycleState,
   expireCodexLifecycleState,
   reduceCodexLifecycleEvent
 } from './evidence.ts';
-import type {
-  CodexLifecycleEvent,
-  CodexLifecycleState
-} from './evidence.ts';
+import type { CodexLifecycleEvent, CodexLifecycleState } from './evidence.ts';
 import type { CodexLifecycleTaskBinding } from './binding.ts';
 
 type StoredCodexLifecycle = Readonly<{
@@ -24,9 +27,34 @@ type StoredCodexLifecycle = Readonly<{
   updatedAt: string;
 }>;
 
+type CodexLifecycleActivationEvidence = Readonly<{
+  kind: 'codex-lifecycle-v2';
+  hookDefinitionHash: string;
+  startRevision: number;
+  protocolVersion?: number;
+  packageVersion?: string;
+  internalExecutableBuildHash?: string;
+  lifecycleContractHash?: string;
+  hookSource?: 'project' | 'managed' | 'isolated-user';
+  hookSourcePathDigest?: string;
+  hookSourceHash?: string;
+  capabilitySessionId?: string;
+  capabilityTurnId?: string;
+  capabilityToolUseId?: string;
+  spawnToolUseId?: string;
+  spawnObservedAt?: string;
+  controllerInstanceDigest?: string | null;
+  controlGeneration?: string | null;
+}>;
+
+type CodexAdapterState = Readonly<{
+  records: Readonly<Record<string, StoredCodexLifecycle>>;
+  activationEvidence?: CodexLifecycleActivationEvidence;
+}>;
+
 type CodexLifecycleStoreOptions = Readonly<{
-  root?: string;
-  taskId?: string;
+  repoRoot?: string;
+  taskId: string;
   cliVersion: string;
   now?: () => string;
 }>;
@@ -38,56 +66,50 @@ type CodexLifecycleStoreResult = Readonly<{
 }>;
 
 type ActiveCodexLifecycleEvidenceQuery = Readonly<{
-  nativeAgent: string;
   hookDefinitionHash: string;
+  identity?: Readonly<{ sessionId: string; turnId: string; toolUseId: string }>;
 }>;
 
-const LOCK_RETRY_MS = 10;
-const LOCK_TIMEOUT_MS = 1_000;
-const LOCK_STALE_MS = 30_000;
+function readCodexLifecycleActivationEvidence(receipt: DelegationReceipt): CodexLifecycleActivationEvidence | null {
+  const state = storedEvidence(receipt.adapterEvidence?.codex);
+  return state.activationEvidence && typeof state.activationEvidence === 'object'
+    ? state.activationEvidence
+    : null;
+}
+
 const NON_PERSISTENT_FAILURES = new Set([
   'CODEX_EVIDENCE_IDENTITY_MISMATCH',
   'CODEX_EVIDENCE_PARENT_MISMATCH',
   'CODEX_EVIDENCE_REPLAY_CONFLICT'
 ]);
 
-function digest(value: string): string {
-  return crypto.createHash('sha256').update(value).digest('hex');
+function recordKey(sessionId: string, turnId: string, toolUseId: string): string {
+  return crypto.createHash('sha256').update(`${sessionId}\0${turnId}\0${toolUseId}`).digest('hex');
 }
 
-function readRecord(file: string): StoredCodexLifecycle {
-  const value = JSON.parse(fs.readFileSync(file, 'utf8')) as StoredCodexLifecycle;
-  if (!validStoredTaskBinding(value.taskBinding)
-    || !validStoredLifecycleMetadata(value)
-    || !validSpawnObservedAt(value.spawnObservedAt)) {
-    throw new Error(`Codex lifecycle record '${path.basename(file)}' is invalid`);
-  }
-  return Object.freeze({ ...value, spawnObservedAt: value.spawnObservedAt ?? null });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function validStoredTaskBinding(value: StoredCodexLifecycle['taskBinding']): boolean {
-  return value === null || (
-    typeof value === 'object'
-    && /^TASK-[0-9]{8}-[0-9]{6}$/u.test(value.taskId)
-    && typeof value.runId === 'string'
-    && value.runId.trim() === value.runId
-    && value.runId.length > 0
-    && typeof value.receiptId === 'string'
-    && value.receiptId.trim() === value.receiptId
-    && value.receiptId.length > 0
-  );
+function storedEvidence(value: unknown): CodexAdapterState {
+  if (!isRecord(value) || !isRecord(value.records)) return Object.freeze({ records: Object.freeze({}) });
+  return value as unknown as CodexAdapterState;
 }
 
-function validStoredLifecycleMetadata(value: StoredCodexLifecycle): boolean {
-  return value.schemaVersion === 2
-    && Number.isSafeInteger(value.revision)
-    && value.revision >= 1
-    && Boolean(value.state)
-    && value.state.schemaVersion === 1;
+function receipts(taskDir: string): readonly DelegationReceipt[] {
+  const run = readRun(taskDir);
+  return run ? Object.freeze([...run.receipts, ...(run.pendingDelegation ? [run.pendingDelegation] : [])]) : [];
 }
 
-function validSpawnObservedAt(value: string | null | undefined): boolean {
-  return value == null || (typeof value === 'string' && Number.isFinite(Date.parse(value)));
+function allRecords(taskDir: string): readonly StoredCodexLifecycle[] {
+  return Object.freeze(receipts(taskDir).flatMap((receipt) => {
+    const state = storedEvidence(receipt.adapterEvidence?.codex);
+    return Object.values(state.records);
+  }));
+}
+
+function lifecyclePath(taskDir: string): string {
+  return path.join(taskDir, '.runtime', 'orchestration.json');
 }
 
 function assertCurrentCanApply(
@@ -100,103 +122,63 @@ function assertCurrentCanApply(
   if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
 }
 
-function recordFiles(root: string): string[] {
-  if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root)
-    .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
-    .map((name) => path.join(root, name));
-}
-
 function hasActiveCodexLifecycleEvidence(
-  root: string,
+  taskDir: string,
   query: ActiveCodexLifecycleEvidenceQuery
 ): boolean {
-  return recordFiles(root).map((file) => readRecord(file)).some((record) => {
-    const evidence = record.state.startEvidence;
+  return allRecords(taskDir).some((record) => {
     return record.consumer === null
-      && ['start-ready', 'observed-terminal', 'stop-ready'].includes(record.state.status)
-      && evidence?.nativeAgent === query.nativeAgent
-      && evidence.hookDefinitionHash === query.hookDefinitionHash;
+      && !['invalid', 'expired'].includes(record.state.status)
+      && record.state.spawn?.hookDefinitionHash === query.hookDefinitionHash
+      && (!query.identity || record.state.spawn?.sessionId === query.identity.sessionId
+        && record.state.spawn.turnId === query.identity.turnId
+        && record.state.spawn.toolUseId === query.identity.toolUseId);
   });
-}
-
-function writeRecord(file: string, record: StoredCodexLifecycle, expectedRevision: number): void {
-  const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(temp, `${JSON.stringify(record, null, 2)}\n`, {
-    encoding: 'utf8',
-    flag: 'wx',
-    mode: 0o600
-  });
-  try {
-    const actualRevision = fs.existsSync(file) ? readRecord(file).revision : 0;
-    if (actualRevision !== expectedRevision) {
-      throw new Error(`Codex lifecycle revision changed from ${expectedRevision} to ${actualRevision}`);
-    }
-    fs.renameSync(temp, file);
-    fs.chmodSync(file, 0o600);
-  } finally {
-    if (fs.existsSync(temp)) fs.unlinkSync(temp);
-  }
 }
 
 function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
-  if (options.taskId !== undefined && !/^TASK-[0-9]{8}-[0-9]{6}$/u.test(options.taskId)) {
+  if (!/^TASK-[0-9]{8}-[0-9]{6}$/u.test(options.taskId)) {
     throw new Error('Codex lifecycle store task id is invalid');
   }
-  const root = options.root ?? '';
-  if (!root) throw new Error('Codex lifecycle store root is required');
+  const repoRoot = options.repoRoot ?? process.cwd();
+  const resolved = resolveTaskRef(options.taskId, { repoRoot });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  const taskDir = resolved.taskDir;
   const now = options.now ?? (() => new Date().toISOString());
 
-  function withWriteLock<T>(operation: () => T): T {
-    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-    fs.chmodSync(root, 0o700);
-    const lock = path.join(root, '.write.lock');
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
-    let descriptor: number | null = null;
-    while (descriptor === null) {
-      try {
-        descriptor = fs.openSync(lock, 'wx', 0o600);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        try {
-          if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS) {
-            fs.unlinkSync(lock);
-            continue;
-          }
-        } catch (lockError) {
-          if ((lockError as NodeJS.ErrnoException).code === 'ENOENT') continue;
-          throw lockError;
-        }
-        if (Date.now() >= deadline) throw new Error('Codex lifecycle store is busy');
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
-      }
+  function currentBinding(): CodexLifecycleTaskBinding {
+    const run = readRun(taskDir);
+    const receipt = run?.pendingDelegation;
+    if (!run || !receipt || receipt.client !== 'codex') {
+      throw new Error('Codex lifecycle evidence has no current task delegation');
     }
-    try {
-      return operation();
-    } finally {
-      fs.closeSync(descriptor);
-      fs.unlinkSync(lock);
-    }
+    return Object.freeze({ taskId: receipt.taskId, runId: receipt.runId, receiptId: receipt.id });
   }
 
-  function findByChild(childThreadId: string): string[] {
-    return recordFiles(root).filter((file) => {
-      const child = readRecord(file).state.child;
-      return child?.childThreadId === childThreadId;
-    });
+  function findByChild(childThreadId: string): StoredCodexLifecycle[] {
+    return allRecords(taskDir).filter((record) => record.state.child?.childThreadId === childThreadId);
   }
 
-  function locate(event: CodexLifecycleEvent): string {
+  function locate(event: CodexLifecycleEvent): StoredCodexLifecycle {
     if (event.type === 'hook-spawn') {
-      return path.join(root, `${digest(`${event.sessionId}\0${event.turnId}\0${event.toolUseId}`)}.json`);
+      const key = recordKey(event.sessionId, event.turnId, event.toolUseId);
+      const existing = allRecords(taskDir).find((record) => record.spawnObservedAt && record.state.spawn
+        && recordKey(record.state.spawn.sessionId, record.state.spawn.turnId, record.state.spawn.toolUseId) === key);
+      return existing ?? Object.freeze({
+        schemaVersion: 2,
+        revision: 0,
+        taskBinding: event.taskBinding ?? null,
+        state: createCodexLifecycleState(options.cliVersion),
+        consumer: null,
+        consumedAt: null,
+        spawnObservedAt: null,
+        updatedAt: now()
+      });
     }
     if (event.type === 'hook-child') {
-      const matches = recordFiles(root).filter((file) => {
-        const state = readRecord(file).state;
-        return state.spawn?.sessionId === event.parentThreadId
-          && state.spawn.nativeAgent === event.nativeAgent
-          && (!state.child || state.child.childThreadId === event.childThreadId);
-      });
+      const matches = allRecords(taskDir).filter((record) => record.state.spawn?.sessionId === event.parentThreadId
+        && record.state.spawn.nativeAgent === event.nativeAgent
+        && (!record.state.child || record.state.child.childThreadId === event.childThreadId));
       if (matches.length !== 1) {
         throw new Error(matches.length === 0
           ? 'Codex lifecycle parent session and agent correlation was not found'
@@ -213,44 +195,62 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     return matches[0]!;
   }
 
+  function update(
+    binding: CodexLifecycleTaskBinding,
+    key: string,
+    mutate: (current: StoredCodexLifecycle | null) => StoredCodexLifecycle,
+    taskLockHeld = false
+  ): StoredCodexLifecycle {
+    let result: StoredCodexLifecycle | null = null;
+    const updateState = taskLockHeld ? mutateDelegationAdapterEvidenceWithinTaskLock : mutateDelegationAdapterEvidence;
+    updateState(options.taskId, binding.receiptId, 'codex', (value) => {
+      const currentState = storedEvidence(value);
+      const current = currentState.records[key] ?? null;
+      result = mutate(current);
+      return Object.freeze({
+        ...currentState,
+        records: Object.freeze({ ...currentState.records, [key]: result })
+      });
+    }, { repoRoot, now });
+    if (!result) throw new Error('Codex lifecycle record was not updated');
+    return result;
+  }
+
   function apply(event: CodexLifecycleEvent): CodexLifecycleStoreResult {
-    if (event.type !== 'hook-spawn') locate(event);
-    return withWriteLock(() => {
-      const file = locate(event);
-      const observedAt = now();
-      const binding = event.type === 'hook-spawn' ? event.taskBinding ?? null : null;
-      const current = fs.existsSync(file)
-        ? readRecord(file)
-        : Object.freeze({
-            schemaVersion: 2 as const,
-            revision: 0,
-            taskBinding: binding,
-            state: createCodexLifecycleState(options.cliVersion),
-            consumer: null,
-            consumedAt: null,
-            spawnObservedAt: null,
-            updatedAt: observedAt
-          });
-      assertCurrentCanApply(current, binding);
-      const nextState = reduceCodexLifecycleEvent(current.state, event);
-      if (nextState.status === 'invalid' && nextState.error && NON_PERSISTENT_FAILURES.has(nextState.error.code)) {
-        throw new Error(`${nextState.error.code}: ${nextState.error.message}`);
-      }
-      const next = Object.freeze({
+    const existing = event.type === 'hook-spawn' ? null : locate(event);
+    const binding = event.type === 'hook-spawn' ? event.taskBinding ?? currentBinding() : existing?.taskBinding;
+    if (!binding) throw new Error('Codex lifecycle event has no task receipt binding');
+    const key = event.type === 'hook-spawn'
+      ? recordKey(event.sessionId, event.turnId, event.toolUseId)
+      : existing?.state.spawn
+        ? recordKey(existing.state.spawn.sessionId, existing.state.spawn.turnId, existing.state.spawn.toolUseId)
+        : '';
+    const observedAt = now();
+    const next = update(binding, key, (current) => {
+      const base = current ?? Object.freeze({
         schemaVersion: 2 as const,
-        revision: current.revision + 1,
-        taskBinding: current.taskBinding,
-        state: nextState,
+        revision: 0,
+        taskBinding: binding,
+        state: createCodexLifecycleState(options.cliVersion),
         consumer: null,
         consumedAt: null,
-        spawnObservedAt: event.type === 'hook-spawn' && current.revision === 0
-          ? observedAt
-          : current.spawnObservedAt,
+        spawnObservedAt: null,
         updatedAt: observedAt
       });
-      writeRecord(file, next, current.revision);
-      return Object.freeze({ path: file, revision: next.revision, state: next.state });
+      assertCurrentCanApply(base, binding);
+      const state = reduceCodexLifecycleEvent(base.state, event);
+      if (state.status === 'invalid' && state.error && NON_PERSISTENT_FAILURES.has(state.error.code)) {
+        throw new Error(`${state.error.code}: ${state.error.message}`);
+      }
+      return Object.freeze({
+        ...base,
+        revision: base.revision + 1,
+        state,
+        spawnObservedAt: event.type === 'hook-spawn' && base.revision === 0 ? observedAt : base.spawnObservedAt,
+        updatedAt: observedAt
+      });
     });
+    return Object.freeze({ path: lifecyclePath(taskDir), revision: next.revision, state: next.state });
   }
 
   function applyToSpawn(
@@ -258,118 +258,52 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     event: Extract<CodexLifecycleEvent, { type: 'hook-child' }>,
     expectedRevision: number
   ): CodexLifecycleStoreResult {
-    const file = path.join(root, `${digest(`${identity.sessionId}\0${identity.turnId}\0${identity.toolUseId}`)}.json`);
-    if (!fs.existsSync(file)) throw new Error('Codex lifecycle spawn identity was not found');
-    const before = readRecord(file);
-    if (JSON.stringify(before.taskBinding) !== JSON.stringify(identity.taskBinding)) {
-      throw new Error('Codex lifecycle task binding does not match the stored spawn');
-    }
-    return withWriteLock(() => {
-      const current = readRecord(file);
-      if (JSON.stringify(current.taskBinding) !== JSON.stringify(identity.taskBinding)) {
+    const key = recordKey(identity.sessionId, identity.turnId, identity.toolUseId);
+    const current = allRecords(taskDir).find((record) => record.state.spawn
+      && recordKey(record.state.spawn.sessionId, record.state.spawn.turnId, record.state.spawn.toolUseId) === key);
+    if (!current) throw new Error('Codex lifecycle spawn identity was not found');
+    const next = update(identity.taskBinding, key, (latest) => {
+      if (!latest || JSON.stringify(latest.taskBinding) !== JSON.stringify(identity.taskBinding)) {
         throw new Error('Codex lifecycle task binding does not match the stored spawn');
       }
-      if (current.revision !== expectedRevision) {
-        throw new Error(`Codex lifecycle revision changed from ${expectedRevision} to ${current.revision}`);
+      if (latest.revision !== expectedRevision) {
+        throw new Error(`Codex lifecycle revision changed from ${expectedRevision} to ${latest.revision}`);
       }
-      if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
-      if (
-        current.state.spawn?.sessionId !== identity.sessionId
-        || current.state.spawn.turnId !== identity.turnId
-        || current.state.spawn.toolUseId !== identity.toolUseId
-        || current.state.spawn.nativeAgent !== event.nativeAgent
+      if (latest.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${latest.consumer}'`);
+      if (latest.state.spawn?.sessionId !== identity.sessionId
+        || latest.state.spawn.turnId !== identity.turnId
+        || latest.state.spawn.toolUseId !== identity.toolUseId
+        || latest.state.spawn.nativeAgent !== event.nativeAgent
         || event.sessionId !== identity.sessionId
-        || event.parentThreadId !== identity.sessionId
-      ) throw new Error('Codex lifecycle spawn identity does not match the stored event');
-      const nextState = reduceCodexLifecycleEvent(current.state, event);
-      if (nextState.status === 'invalid' && nextState.error && NON_PERSISTENT_FAILURES.has(nextState.error.code)) {
-        throw new Error(`${nextState.error.code}: ${nextState.error.message}`);
+        || event.parentThreadId !== identity.sessionId) {
+        throw new Error('Codex lifecycle spawn identity does not match the stored event');
       }
-      if (nextState === current.state) return Object.freeze({ path: file, revision: current.revision, state: current.state });
-      const next = Object.freeze({
-        ...current,
-        revision: current.revision + 1,
-        state: nextState,
-        updatedAt: now()
-      });
-      writeRecord(file, next, current.revision);
-      return Object.freeze({ path: file, revision: next.revision, state: next.state });
+      const state = reduceCodexLifecycleEvent(latest.state, event);
+      if (state.status === 'invalid' && state.error && NON_PERSISTENT_FAILURES.has(state.error.code)) {
+        throw new Error(`${state.error.code}: ${state.error.message}`);
+      }
+      return state === latest.state ? latest : Object.freeze({ ...latest, revision: latest.revision + 1, state, updatedAt: now() });
     });
+    return Object.freeze({ path: lifecyclePath(taskDir), revision: next.revision, state: next.state });
   }
 
   function findByParent(parentThreadId: string): readonly StoredCodexLifecycle[] {
-    const matches = recordFiles(root)
-      .map((file) => readRecord(file))
-      .filter((record) => record.state.startEvidence?.parentThreadId === parentThreadId
-        && ['start-ready', 'observed-terminal', 'stop-ready'].includes(record.state.status));
+    const matches = allRecords(taskDir).filter((record) => record.state.startEvidence?.parentThreadId === parentThreadId
+      && ['start-ready', 'observed-terminal', 'stop-ready'].includes(record.state.status));
     const unconsumed = matches.filter((record) => !record.consumer);
     if (unconsumed.length > 1) throw new Error(`Codex lifecycle parent '${parentThreadId}' has ambiguous active children`);
-    if (unconsumed.length === 1) return Object.freeze(unconsumed);
-    return Object.freeze(matches
-      .filter((record) => record.consumer && record.state.status === 'stop-ready')
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+    return Object.freeze(unconsumed.length === 1 ? unconsumed : matches.filter((record) => record.consumer));
   }
 
   function findByTaskBinding(binding: CodexLifecycleTaskBinding): readonly StoredCodexLifecycle[] {
-    return Object.freeze(recordFiles(root)
-      .map((file) => readRecord(file))
-      .filter((record) => record.taskBinding?.runId === binding.runId
-        && record.taskBinding.receiptId === binding.receiptId));
+    return Object.freeze(allRecords(taskDir).filter((record) => record.taskBinding?.runId === binding.runId
+      && record.taskBinding.receiptId === binding.receiptId));
   }
 
   function read(childThreadId: string): StoredCodexLifecycle {
     const matches = findByChild(childThreadId);
-    if (matches.length === 0) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
-    if (matches.length > 1) throw new Error(`Codex lifecycle child '${childThreadId}' is ambiguous`);
-    return readRecord(matches[0]!);
-  }
-
-  function consumeInternal(
-    childThreadId: string,
-    consumer: string,
-    expectedHookDefinitionHash?: string,
-    expectedTaskBinding?: CodexLifecycleTaskBinding
-  ): StoredCodexLifecycle {
-    if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
-    const preflightMatches = findByChild(childThreadId);
-    if (preflightMatches.length !== 1) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
-    const preflightRecord = readRecord(preflightMatches[0]!);
-    if (expectedTaskBinding && JSON.stringify(preflightRecord.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
-      throw new Error('Codex lifecycle task binding does not match the expected receipt');
-    }
-    return withWriteLock(() => {
-      const matches = findByChild(childThreadId);
-      if (matches.length !== 1) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
-      const file = matches[0]!;
-      const current = readRecord(file);
-      if (expectedTaskBinding && JSON.stringify(current.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
-        throw new Error('Codex lifecycle task binding does not match the expected receipt');
-      }
-      if (current.consumer) {
-        if (current.consumer !== consumer) {
-          throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
-        }
-        if (
-          expectedHookDefinitionHash
-          && current.state.startEvidence?.hookDefinitionHash !== expectedHookDefinitionHash
-        ) throw new Error('Codex lifecycle hook definition hash is stale');
-        return current;
-      }
-      if (current.state.status !== 'stop-ready') throw new Error('Codex lifecycle evidence is not stop-ready');
-      if (
-        expectedHookDefinitionHash
-        && current.state.startEvidence?.hookDefinitionHash !== expectedHookDefinitionHash
-      ) throw new Error('Codex lifecycle hook definition hash is stale');
-      const next = Object.freeze({
-        ...current,
-        revision: current.revision + 1,
-        consumer,
-        consumedAt: now(),
-        updatedAt: now()
-      });
-      writeRecord(file, next, current.revision);
-      return next;
-    });
+    if (matches.length !== 1) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
+    return matches[0]!;
   }
 
   function consume(
@@ -379,41 +313,73 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     expectedTaskBinding?: CodexLifecycleTaskBinding
   ): StoredCodexLifecycle {
     if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
-    return consumeInternal(childThreadId, consumer, expectedHookDefinitionHash, expectedTaskBinding);
-  }
-
-  function expireBefore(cutoff: string): number {
-    return withWriteLock(() => {
-      let changed = 0;
-      for (const file of recordFiles(root)) {
-        const current = readRecord(file);
-        if (current.updatedAt >= cutoff) continue;
-        if (current.consumer || ['invalid', 'expired', 'stop-ready'].includes(current.state.status)) {
-          fs.unlinkSync(file);
-          changed += 1;
-          continue;
-        }
-        const expiredState = expireCodexLifecycleState(current.state);
-        if (expiredState === current.state) continue;
-        writeRecord(file, Object.freeze({
-          ...current,
-          revision: current.revision + 1,
-          state: expiredState,
-          updatedAt: now()
-        }), current.revision);
-        changed += 1;
+    const current = read(childThreadId);
+    const binding = expectedTaskBinding ?? current.taskBinding;
+    if (!binding) throw new Error('Codex lifecycle task receipt binding is missing');
+    const spawn = current.state.spawn;
+    if (!spawn) throw new Error('Codex lifecycle spawn evidence is missing');
+    const key = recordKey(spawn.sessionId, spawn.turnId, spawn.toolUseId);
+    return update(binding, key, (latest) => {
+      if (!latest || expectedTaskBinding && JSON.stringify(latest.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
+        throw new Error('Codex lifecycle task binding does not match the expected receipt');
       }
-      return changed;
+      if (latest.consumer && latest.consumer !== consumer) {
+        throw new Error(`Codex lifecycle evidence was already consumed by '${latest.consumer}'`);
+      }
+      if (latest.state.status !== 'stop-ready') throw new Error('Codex lifecycle evidence is not stop-ready');
+      if (expectedHookDefinitionHash && latest.state.startEvidence?.hookDefinitionHash !== expectedHookDefinitionHash) {
+        throw new Error('Codex lifecycle hook definition hash is stale');
+      }
+      if (latest.consumer) return latest;
+      return Object.freeze({ ...latest, revision: latest.revision + 1, consumer, consumedAt: now(), updatedAt: now() });
     });
   }
 
-  return Object.freeze({ taskId: options.taskId ?? null, root, apply, applyToSpawn, consume, expireBefore, findByParent, findByTaskBinding, read });
+  function consumeWithinTaskLock(
+    childThreadId: string,
+    consumer: string,
+    expectedHookDefinitionHash?: string,
+    expectedTaskBinding?: CodexLifecycleTaskBinding
+  ): StoredCodexLifecycle {
+    if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
+    const current = read(childThreadId);
+    const binding = expectedTaskBinding ?? current.taskBinding;
+    if (!binding || !current.state.spawn) throw new Error('Codex lifecycle task receipt binding is missing');
+    const key = recordKey(current.state.spawn.sessionId, current.state.spawn.turnId, current.state.spawn.toolUseId);
+    return update(binding, key, (latest) => {
+      if (!latest || expectedTaskBinding && JSON.stringify(latest.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
+        throw new Error('Codex lifecycle task binding does not match the expected receipt');
+      }
+      if (latest.consumer && latest.consumer !== consumer) {
+        throw new Error(`Codex lifecycle evidence was already consumed by '${latest.consumer}'`);
+      }
+      if (latest.state.status !== 'stop-ready') throw new Error('Codex lifecycle evidence is not stop-ready');
+      if (expectedHookDefinitionHash && latest.state.startEvidence?.hookDefinitionHash !== expectedHookDefinitionHash) {
+        throw new Error('Codex lifecycle hook definition hash is stale');
+      }
+      return latest.consumer ? latest : Object.freeze({ ...latest, revision: latest.revision + 1, consumer, consumedAt: now(), updatedAt: now() });
+    }, true);
+  }
+
+  function expireBefore(cutoff: string): number {
+    let changed = 0;
+    for (const record of allRecords(taskDir)) {
+      if (record.updatedAt >= cutoff || !record.taskBinding?.receiptId || !record.state.spawn) continue;
+      const key = recordKey(record.state.spawn.sessionId, record.state.spawn.turnId, record.state.spawn.toolUseId);
+      update(record.taskBinding, key, (latest) => {
+        if (!latest || latest.updatedAt >= cutoff || latest.consumer
+          || ['invalid', 'expired', 'stop-ready'].includes(latest.state.status)) return latest ?? record;
+        const state = expireCodexLifecycleState(latest.state);
+        if (state === latest.state) return latest;
+        changed += 1;
+        return Object.freeze({ ...latest, revision: latest.revision + 1, state, updatedAt: now() });
+      });
+    }
+    return changed;
+  }
+
+  return Object.freeze({ taskId: options.taskId, root: path.join(taskDir, '.runtime'), apply, applyToSpawn, consume, consumeWithinTaskLock, expireBefore, findByParent, findByTaskBinding, read });
 }
 
-export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence };
-export type {
-  ActiveCodexLifecycleEvidenceQuery,
-  CodexLifecycleStoreOptions,
-  CodexLifecycleStoreResult,
-  StoredCodexLifecycle
-};
+export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence, readCodexLifecycleActivationEvidence };
+export type { ActiveCodexLifecycleEvidenceQuery, CodexLifecycleActivationEvidence, CodexLifecycleStoreOptions, CodexLifecycleStoreResult, StoredCodexLifecycle };

@@ -334,7 +334,6 @@ test('task-orchestration hook-stop explicit taskRef branch forwards model/effort
       modelFallbackReason: null, reasoningEffortFallbackReason: null,
       parentId: 'parent-1', childId: 'child-1', spawnMode: null, agent: 'claude',
       status: 'stage-completed', workspaceSnapshotScope: 'task',
-      lifecycleProvenance: null, hostEvidence: null,
       beforeFingerprint: 'before', afterFingerprint: null,
       changedPaths: [], createdAt: '2026-01-01T00:00:00.000Z',
       preparedMonotonicMs: 0, spawnDispatchMonotonicMs: 0, activationDeadlineMonotonicMs: 15000,

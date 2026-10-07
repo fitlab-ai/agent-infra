@@ -7,44 +7,6 @@ import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 type DelegationRole = 'executor' | 'reviewer';
 type DelegationStage = 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code' | 'commit';
 type DelegationStatus = 'prepared' | 'activated' | 'stage-completed' | 'sealed' | 'consumed' | 'aborted' | 'expired';
-type DelegationHostEvidence = Readonly<{
-  kind: 'codex-lifecycle-v1' | 'codex-lifecycle-v2';
-  hookDefinitionHash: string;
-  startRevision: number;
-  stopRevision: number | null;
-  consumer: string | null;
-  consumedAt: string | null;
-  protocolVersion?: number;
-  packageVersion?: string;
-  internalExecutableBuildHash?: string;
-  lifecycleContractHash?: string;
-  hookSource?: 'project' | 'managed' | 'isolated-user';
-  hookSourcePathDigest?: string;
-  hookSourceHash?: string;
-  capabilitySessionId?: string;
-  capabilityTurnId?: string;
-  capabilityToolUseId?: string;
-  spawnToolUseId?: string;
-  spawnObservedAt?: string;
-  controllerInstanceDigest?: string | null;
-  controlGeneration?: string | null;
-}>;
-type DelegationLifecycleProvenance = Readonly<{
-  protocolVersion: number;
-  packageVersion: string;
-  internalExecutableBuildHash: string;
-  lifecycleContractHash: string;
-  hookDefinitionHash: string;
-  hookSource: 'project' | 'managed' | 'isolated-user';
-  hookSourcePathDigest: string;
-  hookSourceHash: string;
-  capabilitySessionId: string;
-  capabilityTurnId: string;
-  capabilityToolUseId: string;
-  controllerInstanceDigest: string | null;
-  controlGeneration: string | null;
-}>;
-
 type DelegationReceipt = Readonly<{
   id: string;
   taskId: string;
@@ -66,8 +28,7 @@ type DelegationReceipt = Readonly<{
   agent: string | null;
   status: DelegationStatus;
   workspaceSnapshotScope?: 'task';
-  lifecycleProvenance?: DelegationLifecycleProvenance | null;
-  hostEvidence?: DelegationHostEvidence | null;
+  adapterEvidence?: Readonly<Record<string, unknown>>;
   beforeFingerprint: string;
   afterFingerprint: string | null;
   changedPaths: readonly string[];
@@ -116,76 +77,35 @@ function nullableSafeInteger(value: unknown): value is number | null {
   return value === null || (Number.isSafeInteger(value) && (value as number) >= 0);
 }
 
-const LIFECYCLE_PROVENANCE_KEYS = [
-  'protocolVersion', 'packageVersion', 'internalExecutableBuildHash', 'lifecycleContractHash',
-  'hookDefinitionHash', 'hookSource', 'hookSourcePathDigest', 'hookSourceHash',
-  'capabilitySessionId', 'capabilityTurnId', 'capabilityToolUseId',
-  'controllerInstanceDigest', 'controlGeneration'
-] as const;
-
-function isDelegationLifecycleProvenance(value: unknown): value is DelegationLifecycleProvenance {
-  if (!hasExactKeys(value, LIFECYCLE_PROVENANCE_KEYS)) return false;
-  return Number.isSafeInteger(value.protocolVersion)
-    && (value.protocolVersion as number) > 0
-    && exactText(value.packageVersion)
-    && exactText(value.internalExecutableBuildHash)
-    && exactText(value.lifecycleContractHash)
-    && exactText(value.hookDefinitionHash)
-    && ['project', 'managed', 'isolated-user'].includes(value.hookSource as string)
-    && exactText(value.hookSourcePathDigest)
-    && exactText(value.hookSourceHash)
-    && exactText(value.capabilitySessionId)
-    && exactText(value.capabilityTurnId)
-    && exactText(value.capabilityToolUseId)
-    && nullableText(value.controllerInstanceDigest)
-    && nullableText(value.controlGeneration);
-}
-
-const HOST_EVIDENCE_REQUIRED_KEYS = [
-  'kind', 'hookDefinitionHash', 'startRevision', 'stopRevision', 'consumer', 'consumedAt'
-] as const;
-const HOST_EVIDENCE_OPTIONAL_KEYS = [
-  'protocolVersion', 'packageVersion', 'internalExecutableBuildHash', 'lifecycleContractHash',
-  'hookSource', 'hookSourcePathDigest', 'hookSourceHash', 'capabilitySessionId',
-  'capabilityTurnId', 'capabilityToolUseId', 'spawnToolUseId', 'spawnObservedAt',
-  'controllerInstanceDigest', 'controlGeneration'
-] as const;
-
-function isDelegationHostEvidence(value: unknown): value is DelegationHostEvidence {
-  if (!hasExactKeys(value, HOST_EVIDENCE_REQUIRED_KEYS, HOST_EVIDENCE_OPTIONAL_KEYS)) return false;
-  if (!['codex-lifecycle-v1', 'codex-lifecycle-v2'].includes(value.kind as string)) return false;
-  if (!exactText(value.hookDefinitionHash)
-    || !Number.isSafeInteger(value.startRevision) || (value.startRevision as number) < 1
-    || !nullableSafeInteger(value.stopRevision)
-    || !nullableText(value.consumer)
-    || !nullableText(value.consumedAt)) return false;
-  if (value.kind === 'codex-lifecycle-v1') return true;
-  return Number.isSafeInteger(value.protocolVersion)
-    && (value.protocolVersion as number) > 0
-    && exactText(value.packageVersion)
-    && exactText(value.internalExecutableBuildHash)
-    && exactText(value.lifecycleContractHash)
-    && ['project', 'managed', 'isolated-user'].includes(value.hookSource as string)
-    && exactText(value.hookSourcePathDigest)
-    && exactText(value.hookSourceHash)
-    && exactText(value.capabilitySessionId)
-    && exactText(value.capabilityTurnId)
-    && exactText(value.spawnToolUseId)
-    && exactText(value.spawnObservedAt)
-    && nullableText(value.controllerInstanceDigest)
-    && nullableText(value.controlGeneration);
-}
-
 const RECEIPT_KEYS = [
   'id', 'taskId', 'runId', 'role', 'stage', 'round', 'artifact', 'client',
   'requestedModel', 'requestedReasoningEffort', 'actualModel', 'actualReasoningEffort',
   'modelFallbackReason', 'reasoningEffortFallbackReason', 'parentId', 'childId',
-  'spawnMode', 'agent', 'status', 'workspaceSnapshotScope', 'lifecycleProvenance',
-  'hostEvidence', 'beforeFingerprint', 'afterFingerprint', 'changedPaths', 'createdAt',
+  'spawnMode', 'agent', 'status', 'workspaceSnapshotScope',
+  'beforeFingerprint', 'afterFingerprint', 'changedPaths', 'createdAt',
   'preparedMonotonicMs', 'spawnDispatchMonotonicMs', 'activationDeadlineMonotonicMs',
   'spawnDispatchedAt', 'activationDeadlineAt', 'startEvidenceMonotonicMs',
   'activatedMonotonicMs', 'activatedAt', 'sealedAt', 'consumedAt'
 ] as const;
+const RECEIPT_OPTIONAL_KEYS = ['adapterEvidence'] as const;
+
+function isJsonRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  try {
+    return JSON.parse(JSON.stringify(value)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function withClientEvidence(receipt: DelegationReceipt, evidence: unknown): Readonly<Record<string, unknown>> | null {
+  if (evidence === undefined) return receipt.adapterEvidence ?? Object.freeze({});
+  if (!isJsonRecord(evidence)) return null;
+  return Object.freeze({
+    ...(receipt.adapterEvidence ?? {}),
+    [receipt.client]: JSON.parse(JSON.stringify(evidence)) as unknown
+  });
+}
 
 function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
   const dispatchFields = [
@@ -209,7 +129,6 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
       && receipt.modelFallbackReason === null
       && receipt.reasoningEffortFallbackReason === null
       && receipt.agent === null
-      && receipt.hostEvidence === null
       && receipt.startEvidenceMonotonicMs === null
       && receipt.activatedMonotonicMs === null
       && receipt.activatedAt === null
@@ -238,18 +157,12 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
   }
 
   if (receipt.status === 'aborted') {
-    const host = receipt.hostEvidence;
     return receipt.agent === null
       && receipt.afterFingerprint === null
       && receipt.changedPaths.length === 0
       && receipt.sealedAt === null
       && receipt.consumedAt === null
-      && host !== null
-      && host !== undefined
-      && Number.isSafeInteger(host.stopRevision)
-      && (host.stopRevision as number) > host.startRevision
-      && host.consumer === receipt.id
-      && exactText(host.consumedAt);
+      && receipt.childId !== null;
   }
 
   if (
@@ -271,7 +184,7 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
 }
 
 function isDelegationReceipt(value: unknown): value is DelegationReceipt {
-  if (!hasExactKeys(value, RECEIPT_KEYS)) return false;
+  if (!hasExactKeys(value, RECEIPT_KEYS, RECEIPT_OPTIONAL_KEYS)) return false;
   const structurallyValid = exactText(value.id)
     && exactText(value.taskId)
     && exactText(value.runId)
@@ -293,8 +206,7 @@ function isDelegationReceipt(value: unknown): value is DelegationReceipt {
     && nullableText(value.agent)
     && ['prepared', 'activated', 'stage-completed', 'sealed', 'consumed', 'aborted', 'expired'].includes(value.status as string)
     && value.workspaceSnapshotScope === 'task'
-    && (value.lifecycleProvenance === null || isDelegationLifecycleProvenance(value.lifecycleProvenance))
-    && (value.hostEvidence === null || isDelegationHostEvidence(value.hostEvidence))
+    && (value.adapterEvidence === undefined || isJsonRecord(value.adapterEvidence))
     && exactText(value.beforeFingerprint)
     && nullableText(value.afterFingerprint)
     && Array.isArray(value.changedPaths)
@@ -314,13 +226,6 @@ function isDelegationReceipt(value: unknown): value is DelegationReceipt {
   if (!structurallyValid) return false;
   const receipt = value as unknown as DelegationReceipt;
   if (!hasStatusBoundEvidence(receipt)) return false;
-  const host = receipt.hostEvidence;
-  if (receipt.client === 'codex' && receipt.activatedAt !== null) {
-    if (host?.kind !== 'codex-lifecycle-v2' || host.capabilitySessionId !== receipt.parentId) return false;
-    if (['sealed', 'consumed'].includes(receipt.status)) {
-      return Number.isSafeInteger(host.stopRevision) && host.stopRevision! > host.startRevision;
-    }
-  }
   return true;
 }
 
@@ -342,35 +247,18 @@ function foldBlankToNull(value: string | undefined): string | null {
   return value?.trim() ? value : null;
 }
 
-function validateSealHostEvidence(receipt: DelegationReceipt, evidence: NonNullable<Parameters<typeof sealDelegation>[1]['hostEvidence']>): ReceiptFailure | null {
-  if (!receipt.hostEvidence
-    || !Number.isSafeInteger(evidence.stopRevision)
-    || evidence.stopRevision <= receipt.hostEvidence.startRevision
-    || evidence.consumer !== receipt.id
-    || !evidence.consumedAt.trim()) {
-    return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex stop evidence reference is invalid');
-  }
-  return null;
-}
-
 function validateSealRequest(
   receipt: DelegationReceipt,
-  event: Parameters<typeof sealDelegation>[1],
-  options: NonNullable<Parameters<typeof sealDelegation>[2]>
+  event: Parameters<typeof sealDelegation>[1]
 ): ReceiptFailure | null {
   if (receipt.status !== 'stage-completed') {
     return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected stage-completed`);
-  }
-  if (receipt.client === 'codex' && options.requireHostEvidence !== false && !event.hostEvidence) {
-    return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex sealing requires consumed lifecycle-v2 host evidence');
   }
   if (event.childId !== receipt.childId || event.exitCode !== 0) {
     return fail('DELEGATION_STOP_INVALID', 'native stop identity or exit status is invalid');
   }
   const reviewerPathFailure = validateReviewerSealPaths(receipt, event.changedPaths);
-  if (reviewerPathFailure) return reviewerPathFailure;
-  if (event.hostEvidence) return validateSealHostEvidence(receipt, event.hostEvidence);
-  return null;
+  return reviewerPathFailure;
 }
 
 function validateReviewerSealPaths(receipt: DelegationReceipt, changedPaths: readonly string[]): ReceiptFailure | null {
@@ -388,12 +276,13 @@ function validateReviewerSealPaths(receipt: DelegationReceipt, changedPaths: rea
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'spawnDispatchedAt' | 'activationDeadlineAt' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
+  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'spawnDispatchedAt' | 'activationDeadlineAt' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
   options: { id?: () => string; now?: () => string; monotonicNow?: () => number } = {}
 ): DelegationReceipt {
   const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
   return Object.freeze({
     ...input,
+    adapterEvidence: Object.freeze({ ...(input.adapterEvidence ?? {}) }),
     id: (options.id ?? randomUUID)(),
     actualModel: null,
     actualReasoningEffort: null,
@@ -404,7 +293,6 @@ function prepareDelegation(
     spawnMode: null,
     agent: null,
     status: 'prepared' as const,
-    hostEvidence: null,
     afterFingerprint: null,
     changedPaths: Object.freeze([]),
     createdAt: (options.now ?? (() => new Date().toISOString()))(),
@@ -454,27 +342,18 @@ function activateDelegation(
     actualReasoningEffort?: string;
     modelFallbackReason?: string;
     reasoningEffortFallbackReason?: string;
-    hostEvidence?: Readonly<{
-      kind: 'codex-lifecycle-v1' | 'codex-lifecycle-v2';
-      hookDefinitionHash: string;
-      startRevision: number;
-      protocolVersion?: number;
-      packageVersion?: string;
-      internalExecutableBuildHash?: string;
-      lifecycleContractHash?: string;
-      hookSource?: 'project' | 'managed' | 'isolated-user';
-      hookSourcePathDigest?: string;
-      hookSourceHash?: string;
-      capabilitySessionId?: string;
-      capabilityTurnId?: string;
-      capabilityToolUseId?: string;
-      spawnToolUseId?: string;
-      spawnObservedAt?: string;
-      controllerInstanceDigest?: string | null;
-      controlGeneration?: string | null;
-    }>;
+    clientEvidence?: unknown;
   }>,
-  options: { now?: () => string; monotonicNow?: () => number } = {}
+  options: {
+    now?: () => string;
+    monotonicNow?: () => number;
+    evidencePolicy?: Readonly<{
+      spawnModeRequired?: boolean;
+      actualModelRequired?: boolean;
+      actualReasoningEffortRequired?: boolean;
+      fallbackReasonRequired?: boolean;
+    }>;
+  } = {}
 ): ReceiptResult {
   const managedRole = managedDelegationRole(event.nativeAgent);
   if (!managedRole) return fail('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
@@ -498,34 +377,29 @@ function activateDelegation(
   if (!event.parentId || (receipt.parentId !== null && event.parentId !== receipt.parentId) || !event.childId || event.childId === event.parentId) {
     return fail('DELEGATION_IDENTITY_INVALID', 'native parent/child identity does not match the prepared delegation');
   }
-  // spawnMode 的必需性按 client 判断：claude-code 宿主结构上不提供该字段，跳过；其余 client 维持硬校验
-  if (receipt.client !== 'claude-code' && event.spawnMode !== 'fresh') {
+  const evidencePolicy = options.evidencePolicy ?? {};
+  if (evidencePolicy.spawnModeRequired !== false && event.spawnMode !== 'fresh') {
     return fail('DELEGATION_FORK_FORBIDDEN', `spawn mode '${event.spawnMode}' is not fresh`);
   }
-  // model/effort 维度：claude-code 如实记录、不做门禁；其余 client 维持现状硬校验（HDR-2）
   const actualModel = foldBlankToNull(event.actualModel);
   const actualReasoningEffort = foldBlankToNull(event.actualReasoningEffort);
-  if (receipt.client !== 'claude-code') {
+  if (evidencePolicy.actualModelRequired !== false) {
     if (!actualModel || actualModel.trim() !== actualModel) {
       return fail('DELEGATION_MODEL_IDENTITY_MISSING', 'native start event must provide a non-empty actual model identity');
     }
   }
   if (actualModel !== null && actualModel !== receipt.requestedModel) {
-    if (receipt.client !== 'claude-code' && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
+    if (evidencePolicy.fallbackReasonRequired !== false && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
       return fail('DELEGATION_MODEL_FALLBACK_UNRECORDED', 'actual model differs from requested model without a fallback reason');
     }
   }
-  if (receipt.client !== 'claude-code') {
+  if (evidencePolicy.actualReasoningEffortRequired !== false) {
     if (!actualReasoningEffort || actualReasoningEffort.trim() !== actualReasoningEffort) {
       return fail('DELEGATION_REASONING_EFFORT_MISSING', 'native start event must provide a non-empty actual reasoning effort');
     }
   }
-  if (
-    receipt.client === 'codex'
-    && event.hostEvidence?.kind !== 'codex-lifecycle-v2'
-  ) return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex activation requires trusted lifecycle-v2 host evidence');
   if (actualReasoningEffort !== null && actualReasoningEffort !== receipt.requestedReasoningEffort) {
-    if (receipt.client !== 'claude-code' && (!event.reasoningEffortFallbackReason || event.reasoningEffortFallbackReason.trim() === '')) {
+    if (evidencePolicy.fallbackReasonRequired !== false && (!event.reasoningEffortFallbackReason || event.reasoningEffortFallbackReason.trim() === '')) {
       return fail('DELEGATION_REASONING_EFFORT_FALLBACK_UNRECORDED', 'actual reasoning effort differs from requested effort without a fallback reason');
     }
   }
@@ -540,19 +414,8 @@ function activateDelegation(
   ) {
     return fail('DELEGATION_REASONING_EFFORT_FALLBACK_INVALID', 'reasoning-effort fallback reason is only valid when actual effort differs');
   }
-  if (
-    event.hostEvidence
-    && (
-      receipt.client !== 'codex'
-      || !event.hostEvidence.hookDefinitionHash.trim()
-      || !Number.isSafeInteger(event.hostEvidence.startRevision)
-      || event.hostEvidence.startRevision < 1
-    )
-  ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence reference is invalid');
-  if (event.hostEvidence?.kind === 'codex-lifecycle-v2'
-    && event.hostEvidence.capabilitySessionId !== event.parentId) {
-    return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence does not match the observed parent');
-  }
+  const adapterEvidence = withClientEvidence(receipt, event.clientEvidence);
+  if (!adapterEvidence) return fail('DELEGATION_ADAPTER_EVIDENCE_INVALID', 'adapter evidence must be a JSON object');
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'activated',
@@ -563,12 +426,7 @@ function activateDelegation(
     actualReasoningEffort,
     modelFallbackReason: event.modelFallbackReason ?? null,
     reasoningEffortFallbackReason: event.reasoningEffortFallbackReason ?? null,
-    hostEvidence: event.hostEvidence ? Object.freeze({
-      ...event.hostEvidence,
-      stopRevision: null,
-      consumer: null,
-      consumedAt: null
-    }) : receipt.hostEvidence ?? null,
+    adapterEvidence,
     startEvidenceMonotonicMs: monotonic,
     activatedMonotonicMs: (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))(),
     activatedAt: new Date(wallNow).toISOString()
@@ -587,31 +445,14 @@ function abortPreparedDelegation(receipt: DelegationReceipt): ReceiptResult {
 
 function abortActivatedDelegation(
   receipt: DelegationReceipt,
-  event: Readonly<{ childId: string; stopRevision: number; consumer: string; consumedAt: string }>
+  event: Readonly<{ childId: string; clientEvidence?: unknown }>
 ): ReceiptResult {
   if (receipt.status !== 'activated') {
     return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected activated`);
   }
-  if (
-    receipt.client !== 'codex'
-    || !receipt.lifecycleProvenance
-    || receipt.hostEvidence?.kind !== 'codex-lifecycle-v2'
-    || typeof receipt.lifecycleProvenance.controllerInstanceDigest !== 'string'
-    || typeof receipt.lifecycleProvenance.controlGeneration !== 'string'
-    || typeof receipt.hostEvidence.controllerInstanceDigest !== 'string'
-    || typeof receipt.hostEvidence.controlGeneration !== 'string'
-  ) {
-    return fail('DELEGATION_RECOVERY_EVIDENCE_INVALID', 'activated delegation lacks the current Codex controller binding');
-  }
-  if (
-    event.childId !== receipt.childId
-    || !Number.isSafeInteger(event.stopRevision)
-    || event.stopRevision <= receipt.hostEvidence.startRevision
-    || event.consumer !== receipt.id
-    || !exactText(event.consumedAt)
-  ) {
-    return fail('DELEGATION_RECOVERY_EVIDENCE_INVALID', 'recovery stop evidence does not match the activated delegation');
-  }
+  if (event.childId !== receipt.childId) return fail('DELEGATION_RECOVERY_EVIDENCE_INVALID', 'recovery child does not match the activated delegation');
+  const adapterEvidence = withClientEvidence(receipt, event.clientEvidence);
+  if (!adapterEvidence) return fail('DELEGATION_ADAPTER_EVIDENCE_INVALID', 'adapter evidence must be a JSON object');
   return {
     ok: true,
     receipt: Object.freeze({
@@ -622,12 +463,7 @@ function abortActivatedDelegation(
       changedPaths: Object.freeze([]),
       sealedAt: null,
       consumedAt: null,
-      hostEvidence: Object.freeze({
-        ...receipt.hostEvidence,
-        stopRevision: event.stopRevision,
-        consumer: event.consumer,
-        consumedAt: event.consumedAt
-      })
+      adapterEvidence
     })
   };
 }
@@ -657,12 +493,14 @@ function sealDelegation(
     actualReasoningEffort?: string;
     modelFallbackReason?: string;
     reasoningEffortFallbackReason?: string;
-    hostEvidence?: Readonly<{ stopRevision: number; consumer: string; consumedAt: string }>;
+    clientEvidence?: unknown;
   }>,
-  options: { now?: () => string; requireHostEvidence?: boolean } = {}
+  options: { now?: () => string } = {}
 ): ReceiptResult {
-  const validationFailure = validateSealRequest(receipt, event, options);
+  const validationFailure = validateSealRequest(receipt, event);
   if (validationFailure) return validationFailure;
+  const adapterEvidence = withClientEvidence(receipt, event.clientEvidence);
+  if (!adapterEvidence) return fail('DELEGATION_ADAPTER_EVIDENCE_INVALID', 'adapter evidence must be a JSON object');
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'sealed',
@@ -672,10 +510,7 @@ function sealDelegation(
     actualReasoningEffort: receipt.actualReasoningEffort ?? foldBlankToNull(event.actualReasoningEffort),
     modelFallbackReason: receipt.modelFallbackReason ?? event.modelFallbackReason ?? null,
     reasoningEffortFallbackReason: receipt.reasoningEffortFallbackReason ?? event.reasoningEffortFallbackReason ?? null,
-    hostEvidence: event.hostEvidence && receipt.hostEvidence ? Object.freeze({
-      ...receipt.hostEvidence,
-      ...event.hostEvidence
-    }) : receipt.hostEvidence ?? null,
+    adapterEvidence,
     sealedAt: (options.now ?? (() => new Date().toISOString()))()
   }) };
 }
@@ -704,8 +539,6 @@ export {
   sealDelegation
 };
 export type {
-  DelegationHostEvidence,
-  DelegationLifecycleProvenance,
   DelegationReceipt,
   DelegationRole,
   DelegationStage,

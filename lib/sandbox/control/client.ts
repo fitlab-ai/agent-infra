@@ -16,7 +16,7 @@ import {
 import type {
   CodexControllerLeaseProofV1,
   CodexControllerOpened
-} from './controller-registration.ts';
+} from '../../agent-clients/adapters/codex-lifecycle/controller-registration.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';

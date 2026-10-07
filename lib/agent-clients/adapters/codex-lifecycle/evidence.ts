@@ -101,6 +101,44 @@ type CodexLifecycleStatus =
 
 type CodexEvidenceError = Readonly<{ code: string; message: string }>;
 
+function isCodexLifecycleActivationEvidence(value: unknown, parentId: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  const evidence = state.activationEvidence;
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return false;
+  const activation = evidence as Record<string, unknown>;
+  return activation.kind === 'codex-lifecycle-v2'
+    && typeof activation.hookDefinitionHash === 'string'
+    && activation.hookDefinitionHash.trim() !== ''
+    && Number.isSafeInteger(activation.startRevision)
+    && (activation.startRevision as number) >= 1
+    && activation.capabilitySessionId === parentId;
+}
+
+function isCodexDelegationReceiptEvidence(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const receipt = value as Record<string, unknown>;
+  if (receipt.client !== 'codex' || typeof receipt.id !== 'string') return false;
+  const status = receipt.status;
+  if (!['activated', 'stage-completed', 'sealed', 'consumed', 'aborted'].includes(status as string)) return true;
+  const adapterEvidence = receipt.adapterEvidence;
+  if (!adapterEvidence || typeof adapterEvidence !== 'object' || Array.isArray(adapterEvidence)) return false;
+  const codex = (adapterEvidence as Record<string, unknown>).codex;
+  if (!codex || typeof codex !== 'object' || Array.isArray(codex)) return false;
+  const state = codex as Record<string, unknown>;
+  if (!isCodexLifecycleActivationEvidence(state, String(receipt.parentId ?? ''))) return false;
+  if (!['sealed', 'consumed', 'aborted'].includes(status as string)) return true;
+  const records = state.records;
+  if (!records || typeof records !== 'object' || Array.isArray(records)) return false;
+  return Object.values(records as Record<string, unknown>).some((record) => {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return false;
+    const evidence = record as Record<string, unknown>;
+    return evidence.consumer === receipt.id
+      && typeof evidence.consumedAt === 'string'
+      && evidence.consumedAt.trim() !== '';
+  });
+}
+
 type CodexLifecycleState = Readonly<{
   schemaVersion: 1;
   cliVersion: string;
@@ -332,6 +370,8 @@ function expireCodexLifecycleState(state: CodexLifecycleState): CodexLifecycleSt
 export {
   createCodexLifecycleState,
   expireCodexLifecycleState,
+  isCodexLifecycleActivationEvidence,
+  isCodexDelegationReceiptEvidence,
   reduceCodexLifecycleEvent
 };
 export type {

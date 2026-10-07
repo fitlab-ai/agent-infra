@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { getProcessIdentityState, type ProcessIdentity } from '../../../server/process-state.ts';
-import type { CodexControllerLeaseProofV1, CodexControllerLeaseV1 } from '../../../sandbox/control/controller-registration.ts';
+import type { CodexControllerLeaseProofV1, CodexControllerLeaseV1 } from './controller-registration.ts';
 import {
   computeLifecycleBuildIdentity,
   verifyLifecycleBuildIdentity,

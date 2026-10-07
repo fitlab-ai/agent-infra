@@ -715,7 +715,6 @@ test('orchestrated commit is rejected because lifecycle commit delegation was re
       requestedModel: 'executor-model',
       requestedReasoningEffort: 'xhigh',
       workspaceSnapshotScope: 'task',
-      lifecycleProvenance: null,
       beforeFingerprint: 'before'
     }, { id: () => 'receipt-1' });
     const dispatched = dispatchDelegation(prepared);

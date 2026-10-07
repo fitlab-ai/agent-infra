@@ -45,12 +45,6 @@ import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 import { parseCompletionFacts, type CompletionFact } from './completion-facts.ts';
-import {
-  consumeLifecycleRecoveryAttestation,
-  lifecycleRecoveryAttestationDigest,
-  validateLifecycleRecoveryAttestation,
-  type LifecycleRecoveryAttestationV1
-} from './control-authority.ts';
 import { readManualValidationCompletion } from './manual-validation-completion.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 
@@ -93,8 +87,6 @@ type TaskEventError = { code: TaskEventErrorCode; message: string };
 type TaskEventOptions = TaskWriteOptions & {
   commitOrchestrationCompletion?: (plan: OrchestrationStageCompletion) => void;
   lockAlreadyHeld?: boolean;
-  lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
-  deferLifecycleRecoveryConsumption?: boolean;
 };
 type TaskEventResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed'; changed: boolean;
@@ -682,22 +674,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (identity?.family === FAMILY[initialParts.family].artifact) normalized = { ...request, round: identity.round };
   }
   const eventIdentity = identity(normalized);
-  const lifecycleAuthority = options.lifecycleRecoveryAttestation ?? null;
-  if (lifecycleAuthority) {
-    try { validateLifecycleRecoveryAttestation(lifecycleAuthority); }
-    catch (error) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-    }
-    const expectedFamily = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
-    if (eventIdentity.phase !== 'completed'
-      || lifecycleAuthority.phase !== 'task-event.completed'
-      || lifecycleAuthority.family !== expectedFamily
-      || lifecycleAuthority.artifact !== normalized.artifact
-      || lifecycleAuthority.round !== normalized.round
-      || (normalized.requestId !== undefined && lifecycleAuthority.lifecycleRequestId !== normalized.requestId)) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'lifecycle completion authority does not match the event tuple' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-    }
-  }
   const currentStep = typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '';
   const matchingRows = rows.filter((item) => item.step === eventIdentity.action);
   const manual = eventIdentity.family === 'manual-validation';

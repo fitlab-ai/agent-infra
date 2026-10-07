@@ -283,7 +283,6 @@ test('collectOrchestration projects persisted pause and pending delegation state
     artifact: 'code.md',
     client: 'claude-code',
     workspaceSnapshotScope: 'task',
-    lifecycleProvenance: null,
     beforeFingerprint: 'before',
     requestedModel: 'executor-model',
     requestedReasoningEffort: 'high'

@@ -1,12 +1,6 @@
 import path from 'node:path';
 import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 
-type RuntimeResolutionOptions = Readonly<{
-  repoRoot?: string;
-  env?: NodeJS.ProcessEnv;
-  taskId?: string;
-}>;
-
 function runtimeError(code: string, message: string): Error {
   const error = new Error(`${code}: ${message}`);
   error.name = code;
@@ -45,20 +39,4 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
     );
   }
   return path.join(path.resolve(options.repoRoot ?? process.cwd()), '.agents', 'workspace', '.runtime');
-}
-
-export function resolveAgentCapabilityStoreRoot(options: RuntimeResolutionOptions = {}): string {
-  const env = options.env ?? process.env;
-  const taskId = options.taskId ?? env.AGENT_INFRA_TASK_ID;
-  if (taskId) {
-    return path.join(
-      resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot }),
-      'sandbox-control', 'private-capabilities', 'clients', 'codex', 'capabilities'
-    );
-  }
-  if (env.AGENT_INFRA_RUNTIME_DIR) {
-    return path.join(resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env }), 'clients', 'codex', 'capabilities');
-  }
-  const runtimeRoot = resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env });
-  return path.join(runtimeRoot, 'codex-capabilities');
 }

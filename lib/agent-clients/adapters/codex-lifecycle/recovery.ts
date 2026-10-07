@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
-import { createCodexLifecycleStore } from './store.ts';
-import type { StoredCodexLifecycle } from './store.ts';
+import { createCodexLifecycleStore, readCodexLifecycleActivationEvidence } from './store.ts';
+import type { CodexLifecycleActivationEvidence, StoredCodexLifecycle } from './store.ts';
 import { managedDelegationRole } from '../../../task/delegation-receipts.ts';
 import type { DelegationReceipt } from '../../../task/delegation-receipts.ts';
 import { normalizeAgentToken } from '../../tokens.ts';
@@ -10,7 +10,6 @@ import type { ActivityLogSection, StepRow } from '../../../task/activity-log.ts'
 import { captureTaskWriteMetadata, writeTask } from '../../../task/write.ts';
 import { parseTypedTaskFrontmatter } from '../../../task/frontmatter.ts';
 import { resolveTaskRef } from '../../../task/resolve-ref.ts';
-import { resolveCodexLifecycleStoreRoot } from './binding.ts';
 import {
   recoverActivatedOrchestrationDelegationUnderLock,
   readRun
@@ -97,7 +96,7 @@ function readLifecycleStore(
   taskId: string
 ): ReturnType<typeof createCodexLifecycleStore> {
   return options.lifecycleStore ?? createCodexLifecycleStore({
-    root: resolveCodexLifecycleStoreRoot(taskId, { repoRoot }),
+    repoRoot,
     taskId,
     cliVersion: 'recovery',
     now: options.now
@@ -141,12 +140,11 @@ function stopRecordMatchesReceipt(record: StoredCodexLifecycle, receipt: Delegat
 function stopEvidenceMatchesReceipt(record: StoredCodexLifecycle, receipt: DelegationReceipt): boolean {
   const start = record.state.startEvidence;
   const stop = record.state.stopEvidence;
-  const provenance = receipt.lifecycleProvenance;
-  const host = receipt.hostEvidence;
+  const host = readCodexLifecycleActivationEvidence(receipt);
   if (!stopRecordHasRequiredEvidence(record, receipt, start, stop, host)) return false;
-  return spawnMatchesReceipt(record, receipt, provenance!, host!, start!)
+  return spawnMatchesReceipt(record, receipt, host!, start!)
     && childMatchesReceipt(record, receipt, start!, stop!)
-    && hostEvidenceMatches(record, receipt, provenance!, host!, start!);
+    && hostEvidenceMatches(record, receipt, host!, start!);
 }
 
 function stopRecordHasRequiredEvidence(
@@ -154,10 +152,9 @@ function stopRecordHasRequiredEvidence(
   receipt: DelegationReceipt,
   start: StoredCodexLifecycle['state']['startEvidence'],
   stop: StoredCodexLifecycle['state']['stopEvidence'],
-  host: DelegationReceipt['hostEvidence']
+  host: CodexLifecycleActivationEvidence | null
 ): boolean {
   return receipt.client === 'codex'
-    && Boolean(receipt.lifecycleProvenance)
     && host?.kind === 'codex-lifecycle-v2'
     && Boolean(start && stop && record.state.spawn && record.state.child && record.state.stop)
     && record.state.status === 'stop-ready'
@@ -168,17 +165,16 @@ function stopRecordHasRequiredEvidence(
 function spawnMatchesReceipt(
   record: StoredCodexLifecycle,
   receipt: DelegationReceipt,
-  provenance: NonNullable<DelegationReceipt['lifecycleProvenance']>,
-  host: NonNullable<DelegationReceipt['hostEvidence']>,
+  host: CodexLifecycleActivationEvidence,
   start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>
 ): boolean {
   const spawn = record.state.spawn;
   return Boolean(spawn)
     && spawn!.sessionId === start.parentThreadId
-    && spawn!.turnId === provenance.capabilityTurnId
+    && spawn!.turnId === host.capabilityTurnId
     && spawn!.toolUseId === host.spawnToolUseId
     && spawn!.nativeAgent === start.nativeAgent
-    && spawn!.hookDefinitionHash === provenance.hookDefinitionHash
+    && spawn!.hookDefinitionHash === host.hookDefinitionHash
     && spawn!.requestedModel === receipt.requestedModel
     && spawn!.requestedReasoningEffort === receipt.requestedReasoningEffort
     && spawn!.taskBinding?.runId === receipt.runId
@@ -209,34 +205,22 @@ function childMatchesReceipt(
 function hostEvidenceMatches(
   record: StoredCodexLifecycle,
   receipt: DelegationReceipt,
-  provenance: NonNullable<DelegationReceipt['lifecycleProvenance']>,
-  host: NonNullable<DelegationReceipt['hostEvidence']>,
+  host: CodexLifecycleActivationEvidence,
   start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>
 ): boolean {
-  return hostProvenanceMatches(record, receipt, provenance, host, start)
-    && hostRevisionMatches(record, receipt, host);
-}
-
-function hostProvenanceMatches(
-  record: StoredCodexLifecycle,
-  receipt: DelegationReceipt,
-  provenance: NonNullable<DelegationReceipt['lifecycleProvenance']>,
-  host: NonNullable<DelegationReceipt['hostEvidence']>,
-  start: NonNullable<StoredCodexLifecycle['state']['startEvidence']>
-): boolean {
-  return start.hookDefinitionHash === provenance.hookDefinitionHash
-    && host.hookDefinitionHash === provenance.hookDefinitionHash
-    && host.capabilitySessionId === provenance.capabilitySessionId
-    && host.capabilityTurnId === provenance.capabilityTurnId
-    && host.capabilityToolUseId === provenance.capabilityToolUseId
+  return start.hookDefinitionHash === host.hookDefinitionHash
+    && host.capabilitySessionId === start.parentThreadId
+    && host.capabilityTurnId === record.state.spawn?.turnId
+    && host.capabilityToolUseId === record.state.spawn?.toolUseId
     && host.spawnToolUseId === start.spawnToolUseId
     && Boolean(host.spawnObservedAt)
     && host.spawnObservedAt === record.spawnObservedAt
-    && host.controllerInstanceDigest === provenance.controllerInstanceDigest
-    && host.controlGeneration === provenance.controlGeneration;
+    && typeof host.controllerInstanceDigest === 'string'
+    && typeof host.controlGeneration === 'string'
+    && hostRevisionMatches(record, receipt, host);
 }
 
-function hostRevisionMatches(record: StoredCodexLifecycle, receipt: DelegationReceipt, host: NonNullable<DelegationReceipt['hostEvidence']>): boolean {
+function hostRevisionMatches(record: StoredCodexLifecycle, receipt: DelegationReceipt, host: CodexLifecycleActivationEvidence): boolean {
   return typeof host.controllerInstanceDigest === 'string'
     && typeof host.controlGeneration === 'string'
     && host.startRevision >= 1
@@ -354,7 +338,7 @@ function recoverActiveLifecycle(
   if ('result' in rowResult) return rowResult.result;
   const evidenceResult = consumeRecoveryEvidence(request, taskId, repoRoot, pending, options);
   if ('result' in evidenceResult) return evidenceResult.result;
-  return finishActiveRecovery(request, taskId, section, repoRoot, pending, rowResult.row, evidenceResult.consumed, options);
+  return finishActiveRecovery(request, taskId, section, repoRoot, pending, rowResult.row, options);
 }
 
 function matchingActiveRecoveryRow(
@@ -391,7 +375,7 @@ function consumeRecoveryEvidence(
   let consumed = stored;
   if (stored.consumer === null) {
     try {
-      consumed = store.consume(pending.childId!, pending.id, pending.hostEvidence?.hookDefinitionHash, {
+      consumed = store.consumeWithinTaskLock(pending.childId!, pending.id, stored.state.startEvidence?.hookDefinitionHash, {
         taskId: pending.taskId, runId: pending.runId, receiptId: pending.id
       });
     } catch (error) {
@@ -410,7 +394,6 @@ function finishActiveRecovery(
   repoRoot: string,
   pending: DelegationReceipt,
   row: StepRow,
-  consumed: StoredCodexLifecycle,
   options: LifecycleRecoveryOptions
 ): LifecycleRecoveryResult {
   const recovered = recoverActivatedOrchestrationDelegationUnderLock(taskId, {
@@ -419,10 +402,7 @@ function finishActiveRecovery(
     round: pending.round,
     artifact: pending.artifact,
     startedAgent: request.agent,
-    childId: pending.childId!,
-    stopRevision: consumed.revision,
-    consumer: pending.id,
-    consumedAt: consumed.consumedAt!
+    childId: pending.childId!
   }, { ...options.orchestration, repoRoot, now: options.now });
   if (recovered.status === 'failed' || !recovered.run) {
     return failure(request, 'owner-unknown', recovered.error?.code ?? 'RECOVERY_ORCHESTRATION_FAILED', recovered.error?.message ?? 'orchestration recovery failed', { taskId, receiptId: pending.id, childId: pending.childId });

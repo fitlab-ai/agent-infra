@@ -1,6 +1,3 @@
-import path from 'node:path';
-
-import { resolveTaskRuntimeRoot } from '../../../task/runtime-paths.ts';
 import { managedDelegationRole } from '../../../task/delegation-receipts.ts';
 
 const MARKER_PREFIX = '__agent_infra_binding_';
@@ -101,10 +98,6 @@ function parseCodexLifecycleBinding(taskName: string): Readonly<{
   }
 }
 
-function resolveCodexLifecycleStoreRoot(taskRef: string, options: Readonly<{ repoRoot?: string }> = {}): string {
-  return path.join(resolveTaskRuntimeRoot(taskRef, options), 'codex-lifecycle');
-}
-
 function verifyCodexLifecycleTaskBinding(
   binding: CodexLifecycleTaskBinding,
   run: Readonly<{ taskId: string; runId: string; status: string; pendingDelegation: Readonly<{
@@ -149,7 +142,6 @@ export {
   appendCodexLifecycleBinding,
   encodeCodexLifecycleBinding,
   parseCodexLifecycleBinding,
-  resolveCodexLifecycleStoreRoot,
   verifyCodexLifecycleTaskBinding
 };
 export type { CodexLifecycleTaskBinding };

@@ -46,6 +46,10 @@ type AgentClientModelSelectionContext =
 type AgentClientDelegationEvidence = Readonly<{
   actualModel: 'host-event' | 'app-server' | 'unavailable';
   actualReasoningEffort: 'host-event' | 'app-server' | 'spawn-ack' | 'unavailable';
+  spawnModeRequired?: boolean;
+  actualModelRequired?: boolean;
+  actualReasoningEffortRequired?: boolean;
+  fallbackReasonRequired?: boolean;
 }>;
 
 type AgentClientLifecycleRecoveryRequest = Readonly<{
@@ -68,6 +72,8 @@ type AgentClientLifecycleRecoveryResult = Readonly<{
 }>;
 
 type AgentClientOrchestrationAdapter = Readonly<{
+  validateActivationEvidence?: (evidence: unknown, parentId: string) => boolean;
+  validateReceiptEvidence?: (receipt: unknown) => boolean;
   createLaunchCarrier?: (
     adapterContext: string,
     identity: Readonly<{ stage: string; round: number; role: string }>
@@ -399,6 +405,9 @@ function defineAgentClientAdapter(
     !evidence
     || !['host-event', 'app-server', 'unavailable'].includes(evidence.actualModel)
     || !['host-event', 'app-server', 'spawn-ack', 'unavailable'].includes(evidence.actualReasoningEffort)
+    || ['spawnModeRequired', 'actualModelRequired', 'actualReasoningEffortRequired', 'fallbackReasonRequired']
+      .some((key) => evidence[key as keyof AgentClientDelegationEvidence] !== undefined
+        && typeof evidence[key as keyof AgentClientDelegationEvidence] !== 'boolean')
   ) {
     throw new Error(`Agent Client '${candidate.id}' has invalid delegation evidence`);
   }

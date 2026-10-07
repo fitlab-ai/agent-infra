@@ -68,7 +68,6 @@ function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFil
     }
     if (!stat.isFile() && !stat.isSymbolicLink()) return;
     if (/^\.agents\/workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/orchestration\.json$/u.test(relative)) return;
-    if (/^\.agents\/workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/codex-lifecycle\//u.test(relative)) return;
     const content = stat.isSymbolicLink()
       ? Buffer.from(fs.readlinkSync(absolute))
       : fs.readFileSync(absolute);

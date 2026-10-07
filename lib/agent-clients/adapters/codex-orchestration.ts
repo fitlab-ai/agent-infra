@@ -3,14 +3,14 @@ import {
   resolveCodexSpawnedChild,
   resolveCodexTerminal,
   resolveCodexThread
-} from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
-import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
+} from './codex-lifecycle/app-server.ts';
+import { createCodexLifecycleStore } from './codex-lifecycle/store.ts';
 import {
   computeLifecycleBuildIdentity,
   type LifecycleBuildIdentity,
-} from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import type { AgentClientId } from '../agent-clients/types.ts';
-import { resolveTaskRef } from './resolve-ref.ts';
+} from './codex-lifecycle/build-identity.ts';
+import type { AgentClientId } from '../types.ts';
+import { resolveTaskRef } from '../../task/resolve-ref.ts';
 import {
   activateMatchingOrchestrationDelegation,
   hasActivatableOrchestrationDelegation,
@@ -19,20 +19,20 @@ import {
   pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation,
   reconcileMatchingOrchestrationDelegation,
+  readDelegationAdapterEvidence,
   readRun,
-  sealMatchingOrchestrationDelegationWithHostEvidence
-} from './orchestration.ts';
-import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
-import { managedDelegationRole } from './delegation-receipts.ts';
+  sealMatchingOrchestrationDelegation
+} from '../../task/orchestration.ts';
+import type { OrchestrationOptions, OrchestrationResult } from '../../task/orchestration.ts';
+import { managedDelegationRole } from '../../task/delegation-receipts.ts';
 import {
   encodeCodexLifecycleBinding,
-  resolveCodexLifecycleStoreRoot,
   parseCodexLifecycleBinding,
   verifyCodexLifecycleTaskBinding,
   type CodexLifecycleTaskBinding
-} from '../agent-clients/adapters/codex-lifecycle/binding.ts';
-import { reduceCodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
-import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
+} from './codex-lifecycle/binding.ts';
+import { reduceCodexLifecycleEvent } from './codex-lifecycle/evidence.ts';
+import type { CodexLifecycleEvent } from './codex-lifecycle/evidence.ts';
 
 type LifecycleStore = ReturnType<typeof createCodexLifecycleStore>;
 type TaskRunWithPendingDelegation = NonNullable<ReturnType<typeof readRun>> & Readonly<{
@@ -260,7 +260,7 @@ async function prepareCodexOrchestrationDelegation(
     await (options.preflight ?? preflightCodexLifecycleEvidence)(
       repoRoot,
       undefined,
-      resolveCodexLifecycleStoreRoot(resolved.taskId, { repoRoot })
+      resolved.taskId
     );
     const prepared = prepareOrchestrationDelegation(taskRef, input, coreOptions(options));
     const receipt = prepared.run?.pendingDelegation;
@@ -299,6 +299,12 @@ async function activateCodexOrchestrationDelegation(
     const record = applyCollectedActivationEvidence(childThreadId, options, store, bound, events);
     if ('status' in record) return record;
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
+    const storedAdapterEvidence = readDelegationAdapterEvidence(
+      bound.receipt.taskId, bound.receipt.id, 'codex', coreOptions(options)
+    );
+    const adapterState = typeof storedAdapterEvidence === 'object' && storedAdapterEvidence !== null && !Array.isArray(storedAdapterEvidence)
+      ? storedAdapterEvidence as Record<string, unknown>
+      : {};
     const activated = activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,
       childId: evidence.childThreadId,
@@ -310,7 +316,9 @@ async function activateCodexOrchestrationDelegation(
       ...(evidence.reasoningEffortFallbackReason
         ? { reasoningEffortFallbackReason: evidence.reasoningEffortFallbackReason }
         : {}),
-      hostEvidence: {
+      clientEvidence: {
+        ...adapterState,
+        activationEvidence: {
         kind: 'codex-lifecycle-v2',
         hookDefinitionHash: evidence.hookDefinitionHash,
         startRevision: record.revision,
@@ -322,6 +330,7 @@ async function activateCodexOrchestrationDelegation(
         spawnObservedAt: record.spawnObservedAt ?? undefined,
         controllerInstanceDigest: null,
         controlGeneration: null
+        }
       }
     }, coreOptions(options));
     return activated;
@@ -456,28 +465,30 @@ async function sealCodexOrchestrationDelegation(
     if (record.state.status !== 'stop-ready' || !evidence || !record.state.startEvidence) {
       return pauseBridge('ORCHESTRATION_CODEX_STOP_EVIDENCE_INVALID', 'Codex lifecycle stop evidence is not ready', options);
     }
-    return sealMatchingOrchestrationDelegationWithHostEvidence(
+    const current = recordMatchesTaskReceipt(childThreadId, options);
+    const latest = store.read(childThreadId);
+    if (!sameTaskReceipt(bound.receipt, current.receipt) || !sameLifecycleRevision(record, latest)
+      || !sameTaskBinding(latest.taskBinding, current.binding)) {
+      throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: task receipt changed before lifecycle evidence consumption');
+    }
+    if (current.receipt.status === 'sealed') {
+      if (latest.consumer !== current.receipt.id || !latest.consumedAt) {
+        return pauseBridge('ORCHESTRATION_CODEX_RECONCILIATION_FAILED', 'Codex lifecycle evidence was not consumed by the sealed receipt', options);
+      }
+      return reconcileMatchingOrchestrationDelegation('codex', childThreadId, coreOptions(options));
+    }
+    const consumed = store.consume(
+      childThreadId,
+      current.receipt.id,
+      existing.state.spawn?.hookDefinitionHash,
+      existing.taskBinding ?? undefined
+    );
+    if (consumed.consumer !== current.receipt.id || !consumed.consumedAt) {
+      return pauseBridge('ORCHESTRATION_CODEX_RECONCILIATION_FAILED', 'Codex lifecycle evidence was not consumed by the active receipt', options);
+    }
+    return sealMatchingOrchestrationDelegation(
       'codex',
       { nativeAgent: record.state.startEvidence.nativeAgent, childId: childThreadId },
-      (receipt) => {
-        const current = recordMatchesTaskReceipt(childThreadId, options);
-        const latest = store.read(childThreadId);
-        if (!sameTaskReceipt(bound.receipt, current.receipt) || !sameTaskReceipt(receipt, current.receipt)
-          || !sameLifecycleRevision(record, latest) || !sameTaskBinding(latest.taskBinding, current.binding)) {
-          throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: task receipt changed before lifecycle evidence consumption');
-        }
-        const consumed = store.consume(
-          childThreadId,
-          receipt.id,
-          receipt.hostEvidence?.hookDefinitionHash,
-          existing.taskBinding ?? undefined
-        );
-        return {
-          stopRevision: consumed.revision,
-          consumer: consumed.consumer!,
-          consumedAt: consumed.consumedAt!
-        };
-      },
       coreOptions(options)
     );
   } catch (error) {
@@ -592,6 +603,15 @@ function reconcileCodexOrchestrationDelegation(
   childThreadId: string,
   options: CodexBridgeOptions = {}
 ): OrchestrationResult {
+  try {
+    const bound = recordMatchesTaskReceipt(childThreadId, options);
+    const record = requiredStore(options).read(childThreadId);
+    if (bound.receipt.status !== 'sealed' || record.consumer !== bound.receipt.id || !record.consumedAt) {
+      return pauseBridge('ORCHESTRATION_CODEX_RECONCILIATION_FAILED', 'Codex lifecycle evidence was not consumed by the sealed receipt', options);
+    }
+  } catch (error) {
+    return codexSealFailure(error, options, 'child');
+  }
   return reconcileMatchingOrchestrationDelegation('codex', childThreadId, coreOptions(options));
 }
 

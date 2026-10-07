@@ -7,8 +7,9 @@ import semver from 'semver';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { CodexLifecycleEvent } from './evidence.ts';
-import { parseCodexLifecycleBinding, resolveCodexLifecycleStoreRoot } from './binding.ts';
-import { resolveTaskContext } from '../../../task/resolve-ref.ts';
+import { parseCodexLifecycleBinding } from './binding.ts';
+import { hasActiveCodexLifecycleEvidence } from './store.ts';
+import { resolveTaskContext, resolveTaskRef } from '../../../task/resolve-ref.ts';
 
 type JsonObject = Record<string, unknown>;
 type ThreadResolution = Readonly<{
@@ -211,30 +212,6 @@ function parseCodexHooksList(
   return Object.freeze(hooks);
 }
 
-function hasCodexRuntimeLiveness(
-  runtimeRoot: string,
-  hookDefinitionHash: string,
-  identity?: CodexRuntimeIdentity
-): boolean {
-  if (!identity || !fs.existsSync(runtimeRoot)) return false;
-  return fs.readdirSync(runtimeRoot)
-    .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
-    .some((name) => {
-      try {
-        const record = object(JSON.parse(fs.readFileSync(path.join(runtimeRoot, name), 'utf8')));
-        const state = object(record?.state);
-        const spawnEvent = object(state?.spawn);
-        return !['invalid', 'expired'].includes(String(state?.status))
-          && spawnEvent?.hookDefinitionHash === hookDefinitionHash
-          && spawnEvent.sessionId === identity.sessionId
-          && spawnEvent.turnId === identity.turnId
-          && spawnEvent.toolUseId === identity.toolUseId;
-      } catch {
-        return false;
-      }
-    });
-}
-
 function parseCodexThreadResolution(readValue: unknown, rolloutRecords: readonly unknown[]): ThreadResolution {
   const readRoot = object(readValue);
   const thread = object(readRoot?.thread);
@@ -291,14 +268,15 @@ function parseCodexThreadResolution(readValue: unknown, rolloutRecords: readonly
   });
 }
 
-function resolvePreflightLifecycleStoreRoot(
+function resolvePreflightTaskDir(
   repoRoot: string,
-  lifecycleStoreRoot?: string
+  taskId?: string
 ): string | undefined {
-  if (lifecycleStoreRoot) return lifecycleStoreRoot;
   try {
-    const context = resolveTaskContext(undefined, { repoRoot });
-    return context.ok ? resolveCodexLifecycleStoreRoot(context.taskId, { repoRoot }) : undefined;
+    const context = taskId
+      ? resolveTaskRef(taskId, { repoRoot })
+      : resolveTaskContext(undefined, { repoRoot });
+    return context.ok ? context.taskDir : undefined;
   } catch {
     return undefined;
   }
@@ -597,14 +575,13 @@ async function resolveCodexTerminal(
 async function preflightCodexLifecycleEvidence(
   repoRoot: string = process.cwd(),
   runtimeIdentity?: CodexRuntimeIdentity,
-  lifecycleStoreRoot?: string
+  taskId?: string
 ) {
   const { cliVersion, hooksRaw } = validateStaticCodexPreflight(repoRoot);
   const hookDefinitionHash = crypto.createHash('sha256').update(hooksRaw).digest('hex');
-  const runtimeRoot = resolvePreflightLifecycleStoreRoot(repoRoot, lifecycleStoreRoot);
-  const runtimeLiveness = runtimeRoot
-    ? hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity)
-    : false;
+  const taskDir = resolvePreflightTaskDir(repoRoot, taskId);
+  const runtimeLiveness = Boolean(taskDir && runtimeIdentity
+    && hasActiveCodexLifecycleEvidence(taskDir, { hookDefinitionHash, identity: runtimeIdentity }));
   const host = await discoverLifecycleHooks(repoRoot);
   return Object.freeze({
     cliVersion,
@@ -704,8 +681,6 @@ async function discoverLifecycleHooks(repoRoot: string): Promise<Readonly<{
 
 export {
   CodexAppServerTransport,
-  hasCodexRuntimeLiveness,
-  resolvePreflightLifecycleStoreRoot,
   parseCodexModelReroute,
   parseCodexHooksList,
   parseCodexThreadResolution,

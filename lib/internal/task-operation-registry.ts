@@ -56,7 +56,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'agent-client', 'model-selection', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'agent-client', 'launch-carrier', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'codex-lifecycle', 'preflight', 'non-task', 'diagnostic', 'none'),
-    descriptor('internal', 'codex-lifecycle', 'capability-arm', 'conditional', 'progress'),
     descriptor('internal', 'codex-lifecycle', 'hook-event', 'conditional', 'progress'),
     descriptor('internal', 'codex-lifecycle', 'resolve-start', 'conditional', 'progress'),
     descriptor('internal', 'codex-lifecycle', 'resolve-stop', 'conditional', 'progress'),

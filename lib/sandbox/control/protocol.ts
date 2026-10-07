@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
 import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
-import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
+import type { CodexControllerLeaseProofV1 } from '../../agent-clients/adapters/codex-lifecycle/controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
 

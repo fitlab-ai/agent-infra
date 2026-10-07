@@ -23,14 +23,13 @@ import {
   sealDelegation
 } from './delegation-receipts.ts';
 import type {
-  DelegationLifecycleProvenance,
   DelegationReceipt,
   DelegationRole,
   DelegationStage
 } from './delegation-receipts.ts';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
-import { resolveCodexLifecycleStoreRoot } from '../agent-clients/adapters/codex-lifecycle/binding.ts';
 import {
+  getAgentClientAdapter,
   getAgentClientCapability,
   getAgentClientDelegationEvidence,
   getAgentClientModelSelection
@@ -50,8 +49,6 @@ import type { RepositorySnapshot } from './workspace-snapshot.ts';
 import type { WorkspaceSnapshotContext } from './workspace-snapshot.ts';
 import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
-import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex-lifecycle/store.ts';
-import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
@@ -66,12 +63,12 @@ type ModelPolicySource = Readonly<{
   client: AgentClientId;
   resolvedAt: string;
 }>;
-type ClaudeCodeCapabilityRecovery = Readonly<{
+type ClientCapabilityRecovery = Readonly<{
   code: 'CLIENT_CAPABILITY_ENABLED';
   recoveredAt: string;
   previousStatus: 'paused';
   previousPause: Readonly<{ code: 'ORCHESTRATION_CLIENT_UNSUPPORTED'; message: string; recoverable: boolean }>;
-  client: 'claude-code';
+  client: AgentClientId;
   guards: Readonly<{
     stepCount: 0;
     nextStage: null;
@@ -83,7 +80,7 @@ type ClaudeCodeCapabilityRecovery = Readonly<{
   }>;
   resultingStatus: 'running';
 }>;
-type OrchestrationRecovery = ClaudeCodeCapabilityRecovery;
+type OrchestrationRecovery = ClientCapabilityRecovery;
 type CleanCompletionEvidence = Readonly<{
   kind: 'reviewed-head-clean';
   observedAt: string;
@@ -136,7 +133,7 @@ type OrchestrationResult = Readonly<{
     client?: AgentClientId;
     missingFields?: readonly string[];
     modelSelectionContext?: ReturnType<typeof getAgentClientModelSelection>;
-    detail?: CodexCapabilityProvenanceDetail;
+    detail?: unknown;
   }> | null;
 }>;
 type OrchestrationStageIdentity = Readonly<{
@@ -265,7 +262,7 @@ function isRecovery(value: unknown): value is OrchestrationRecovery {
     && value.previousStatus === 'paused'
     && isPause(value.previousPause)
     && value.previousPause.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
-    && value.client === 'claude-code'
+    && isAgentClientId(value.client)
     && hasExactKeys(guards, RECOVERY_GUARD_KEYS)
     && guards.stepCount === 0
     && guards.nextStage === null
@@ -421,6 +418,97 @@ function readRun(taskDir: string, options: Pick<OrchestrationOptions, 'diagnosti
   }
 }
 
+function findDelegation(run: OrchestrationRun, receiptId: string): Readonly<{
+  receipt: DelegationReceipt;
+  location: 'pending' | 'history';
+}> | null {
+  if (run.pendingDelegation?.id === receiptId) return { receipt: run.pendingDelegation, location: 'pending' };
+  const receipt = run.receipts.find((entry) => entry.id === receiptId);
+  return receipt ? { receipt, location: 'history' } : null;
+}
+
+function readDelegationAdapterEvidence(
+  taskRef: string,
+  receiptId: string,
+  adapterId: AgentClientId,
+  options: OrchestrationOptions = {}
+): unknown {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  const run = readRun(resolved.taskDir, options);
+  const found = run && findDelegation(run, receiptId);
+  if (!found || found.receipt.client !== adapterId) return null;
+  return found.receipt.adapterEvidence?.[adapterId] ?? null;
+}
+
+function mutateDelegationAdapterEvidence(
+  taskRef: string,
+  receiptId: string,
+  adapterId: AgentClientId,
+  mutate: (current: unknown) => unknown,
+  options: OrchestrationOptions = {}
+): unknown {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options, false);
+}
+
+function mutateDelegationAdapterEvidenceWithinTaskLock(
+  taskRef: string,
+  receiptId: string,
+  adapterId: AgentClientId,
+  mutate: (current: unknown) => unknown,
+  options: OrchestrationOptions = {}
+): unknown {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options, true);
+}
+
+function mutateDelegationAdapterEvidenceAtResolved(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  receiptId: string,
+  adapterId: AgentClientId,
+  mutate: (current: unknown) => unknown,
+  options: OrchestrationOptions,
+  taskLockHeld: boolean
+): unknown {
+  const update = () => {
+    try {
+      const run = readRun(resolved.taskDir, options);
+      const found = run && findDelegation(run, receiptId);
+      if (!run || !found || found.receipt.client !== adapterId) {
+        throw new Error('ORCHESTRATION_DELEGATION_MISSING: adapter evidence has no matching task receipt');
+      }
+      const current = found.receipt.adapterEvidence?.[adapterId] ?? null;
+      const nextState = mutate(current);
+      const serialized = JSON.stringify(nextState);
+      if (serialized === undefined) throw new Error('Agent adapter evidence must be JSON serializable');
+      const adapterEvidence = Object.freeze({
+        ...(found.receipt.adapterEvidence ?? {}),
+        [adapterId]: JSON.parse(serialized) as unknown
+      });
+      const nextReceipt = Object.freeze({ ...found.receipt, adapterEvidence });
+      const updated = found.location === 'pending'
+        ? withUpdatedRun(run, { pendingDelegation: nextReceipt }, options.now)
+        : withUpdatedRun(run, {
+            receipts: Object.freeze(run.receipts.map((receipt) => receipt.id === receiptId ? nextReceipt : receipt))
+          }, options.now);
+      saveRun(resolved.taskDir, updated);
+      return JSON.parse(serialized) as unknown;
+    } catch (error) {
+      mutationError = error;
+      return null;
+    }
+  };
+  let mutationError: unknown;
+  const result = taskLockHeld
+    ? update()
+    : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `agent-adapter.${adapterId}.evidence`, update);
+  if (mutationError) throw mutationError;
+  return result;
+}
+
 function atomicWrite(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
@@ -485,10 +573,11 @@ function resolveProjectPolicy(repoRoot: string, client: AgentClientId): Orchestr
   return normalizeAgentClients(raw).state[client].orchestration;
 }
 
-function canRecoverClaudeCodeUnsupportedPause(run: OrchestrationRun, taskDir: string): boolean {
+function canRecoverUnsupportedClientPause(run: OrchestrationRun): boolean {
   return run.status === 'paused'
     && run.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
-    && run.modelPolicySource?.client === 'claude-code'
+    && isAgentClientId(run.modelPolicySource?.client)
+    && supportsLifecycleDelegation(run.modelPolicySource.client)
     && run.stepCount === 0
     && run.nextStage === null
     && run.baseline === ''
@@ -527,17 +616,16 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
       }
     }
     if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED') {
-      if (existing.modelPolicySource.client !== 'claude-code'
-        || !canRecoverClaudeCodeUnsupportedPause(existing, resolved.taskDir)) {
+      if (!canRecoverUnsupportedClientPause(existing)) {
         return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
       }
       const now = (options.now ?? (() => new Date().toISOString()))();
-      const recovery: ClaudeCodeCapabilityRecovery = {
+      const recovery: ClientCapabilityRecovery = {
         code: 'CLIENT_CAPABILITY_ENABLED',
         recoveredAt: now,
         previousStatus: 'paused',
-        previousPause: existing.pause as ClaudeCodeCapabilityRecovery['previousPause'],
-        client: 'claude-code',
+        previousPause: existing.pause as ClientCapabilityRecovery['previousPause'],
+        client: existing.modelPolicySource.client,
         guards: {
           stepCount: 0,
           nextStage: null,
@@ -882,7 +970,6 @@ function prepareOrchestrationDelegationUnlocked(
     client: AgentClientId;
     requestedModel?: string;
     requestedReasoningEffort?: string;
-    lifecycleProvenance?: DelegationLifecycleProvenance;
   }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
@@ -925,7 +1012,6 @@ function prepareOrchestrationDelegationUnlocked(
     requestedModel: input.requestedModel!,
     requestedReasoningEffort: input.requestedReasoningEffort!,
     workspaceSnapshotScope: 'task',
-    lifecycleProvenance: input.lifecycleProvenance ?? null,
     beforeFingerprint
   }, { id: options.id, now: options.now, monotonicNow: options.monotonicNow });
   const updated = withUpdatedRun(activeRun, {
@@ -942,7 +1028,6 @@ function prepareOrchestrationDelegation(
     client: AgentClientId;
     requestedModel?: string;
     requestedReasoningEffort?: string;
-    lifecycleProvenance?: DelegationLifecycleProvenance;
   }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
@@ -1121,7 +1206,8 @@ function activateMatchingOrchestrationDelegation(
       && (receipt.actualReasoningEffort ?? null) === foldBlankToNull(event.actualReasoningEffort)
       && receipt.modelFallbackReason === (event.modelFallbackReason ?? null)
       && receipt.reasoningEffortFallbackReason === (event.reasoningEffortFallbackReason ?? null)
-      && receipt.hostEvidence?.hookDefinitionHash === event.hostEvidence?.hookDefinitionHash;
+      && (event.clientEvidence === undefined
+        || JSON.stringify(receipt.adapterEvidence?.[client]) === JSON.stringify(event.clientEvidence));
     if (!sameEvidence) {
       return pauseOrchestration(replay.taskId, 'DELEGATION_REPLAY_CONFLICT', 'replayed native start evidence conflicts with the active receipt', true, options);
     }
@@ -1199,74 +1285,6 @@ function sealMatchingOrchestrationDelegation(
   }
 }
 
-function sealMatchingOrchestrationDelegationWithHostEvidence(
-  client: AgentClientId,
-  event: Readonly<{ nativeAgent: string; childId: string }>,
-  consumeEvidence: (receipt: DelegationReceipt) => Readonly<{
-    stopRevision: number;
-    consumer: string;
-    consumedAt: string;
-  }>,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const role = managedDelegationRole(event.nativeAgent);
-  if (!role) return failed('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
-  const matched = uniqueMatchingDelegation(
-    client,
-    (receipt) => (
-      (receipt.status === 'stage-completed' || receipt.status === 'sealed')
-      && receipt.childId === event.childId
-    ),
-    options
-  );
-  if ('status' in matched) return matched;
-  const receipt = matched.run.pendingDelegation!;
-  if (receipt.status === 'sealed') {
-    return reconcileMatchingOrchestrationDelegation(client, event.childId, options);
-  }
-  if (receipt.role !== role) {
-    return pauseOrchestration(matched.taskId, 'DELEGATION_ROLE_MISMATCH', `managed role ${role} does not match ${receipt.role}`, true, options);
-  }
-  const repoRoot = options.repoRoot ?? process.cwd();
-  try {
-    const gitRoot = gitRootFor(repoRoot, options);
-    const snapshotTaskId = receipt.workspaceSnapshotScope === 'task' ? receipt.taskId : null;
-    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
-      gitRoot,
-      stateRoot: repoRoot,
-      taskId: snapshotTaskId
-    });
-    const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(gitRoot, receipt.beforeFingerprint, afterFingerprint);
-    const baseEvent = { childId: event.childId, exitCode: 0, afterFingerprint, changedPaths };
-    const validated = sealDelegation(receipt, baseEvent, { now: options.now, requireHostEvidence: false });
-    if (!validated.ok) {
-      return pauseOrchestration(matched.taskId, validated.code, validated.message, true, options);
-    }
-    const hostEvidence = consumeEvidence(receipt);
-    const sealed = sealDelegation(receipt, { ...baseEvent, hostEvidence }, { now: options.now });
-    if (!sealed.ok) return pauseOrchestration(matched.taskId, sealed.code, sealed.message, true, options);
-    const resolved = resolveTaskRef(matched.taskId, { repoRoot });
-    if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-    const updated = withUpdatedRun(matched.run, { pendingDelegation: sealed.receipt }, options.now);
-    saveRun(resolved.taskDir, updated);
-    return { status: 'running', changed: true, taskId: matched.taskId, run: updated, next: null, error: null };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return codexHostEvidenceSealError(message, matched.taskId, options);
-  }
-}
-
-function codexHostEvidenceSealError(
-  message: string,
-  taskId: string,
-  options: OrchestrationOptions
-): OrchestrationResult {
-  if (/TASK_BINDING_MISMATCH|CODEX_EVIDENCE_(?:IDENTITY_MISMATCH|PARENT_MISMATCH|REPLAY_CONFLICT)|identity mismatch|receipt changed|ambiguous|already consumed|revision changed|does not match the stored spawn/iu.test(message)) {
-    return failed('ORCHESTRATION_CODEX_EVIDENCE_IDENTITY_MISMATCH', message, taskId);
-  }
-  return pauseOrchestration(taskId, 'ORCHESTRATION_CODEX_EVIDENCE_FAILED', message, true, options);
-}
-
 function reconcileMatchingOrchestrationDelegation(
   client: AgentClientId,
   childId: string,
@@ -1279,15 +1297,11 @@ function reconcileMatchingOrchestrationDelegation(
   );
   if ('status' in matched) return matched;
   const receipt = matched.run.pendingDelegation!;
-  if (
-    receipt.status !== 'sealed'
-    || receipt.hostEvidence?.consumer !== receipt.id
-    || receipt.hostEvidence.consumedAt === null
-  ) {
+  if (receipt.status !== 'sealed' || receipt.childId !== childId) {
     return pauseOrchestration(
       matched.taskId,
-      'ORCHESTRATION_CODEX_RECONCILIATION_FAILED',
-      'Codex native spawn did not produce one sealed receipt with consumed host evidence',
+      'ORCHESTRATION_DELEGATION_RECONCILIATION_FAILED',
+      'native child did not produce one sealed delegation receipt',
       true,
       options
     );
@@ -1307,9 +1321,21 @@ function activateOrchestrationDelegation(
   if (run.status !== 'running') {
     return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
   }
+  const validateAdapterEvidence = getAgentClientAdapter(run.pendingDelegation.client)
+    .orchestrationAdapter?.validateActivationEvidence;
+  if (validateAdapterEvidence && !validateAdapterEvidence(event.clientEvidence, event.parentId)) {
+    return pauseOrchestration(
+      taskRef,
+      'DELEGATION_ADAPTER_EVIDENCE_REQUIRED',
+      'native activation lacks valid evidence from the agent adapter',
+      true,
+      options
+    );
+  }
   const result = activateDelegation(run.pendingDelegation, event, {
     now: options.now,
-    monotonicNow: options.monotonicNow
+    monotonicNow: options.monotonicNow,
+    evidencePolicy: getAgentClientDelegationEvidence(run.pendingDelegation.client)
   });
   if (!result.ok) {
     if (result.code === 'DELEGATION_IGNORED') return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
@@ -1412,22 +1438,12 @@ function recoverPreparedOrchestrationDelegation(
       ) {
         return failed('ORCHESTRATION_PREPARED_RECOVERY_EARLY', 'prepared receipt activation deadline has not elapsed', resolved.taskId);
       }
-      const activeLifecycleEvidence = options.hasActiveLifecycleEvidence?.(receipt)
-        ?? (
-          receipt.client === 'codex'
-          && receipt.lifecycleProvenance
-          && hasActiveCodexLifecycleEvidence(
-          resolveCodexLifecycleStoreRoot(resolved.taskId, { repoRoot: resolved.repoRoot }),
-            {
-              nativeAgent: `agent-infra-lifecycle-${receipt.role}`,
-              hookDefinitionHash: receipt.lifecycleProvenance.hookDefinitionHash
-            }
-          )
-        );
-      if (activeLifecycleEvidence) {
+      const activeAdapterEvidence = options.hasActiveLifecycleEvidence?.(receipt)
+        ?? Object.keys(receipt.adapterEvidence ?? {}).length > 0;
+      if (activeAdapterEvidence) {
         return failed(
           'ORCHESTRATION_PREPARED_RECOVERY_ACTIVE_EVIDENCE',
-          'active Codex lifecycle evidence blocks prepared receipt recovery',
+          'active agent adapter evidence blocks prepared receipt recovery',
           resolved.taskId
         );
       }
@@ -1468,9 +1484,7 @@ type ActivatedRecoveryEvent = Readonly<{
   artifact: string;
   startedAgent: string;
   childId: string;
-  stopRevision: number;
-  consumer: string;
-  consumedAt: string;
+  clientEvidence?: unknown;
 }>;
 
 function recoveryReceiptMatches(
@@ -1516,9 +1530,7 @@ function recoverActivatedOrchestrationDelegationUnderLock(
   }
   const aborted = abortActivatedDelegation(receipt, {
     childId: event.childId,
-    stopRevision: event.stopRevision,
-    consumer: event.consumer,
-    consumedAt: event.consumedAt
+    clientEvidence: event.clientEvidence
   });
   if (!aborted.ok) return failed(aborted.code, aborted.message, resolved.taskId);
   const updated = withUpdatedRun(run, {
@@ -1679,6 +1691,9 @@ export {
   hasSealableOrchestrationDelegation,
   OrchestrationStateError,
   orchestrationPath,
+  readDelegationAdapterEvidence,
+  mutateDelegationAdapterEvidence,
+  mutateDelegationAdapterEvidenceWithinTaskLock,
   pauseMatchingOrchestrationDelegation,
   pauseOrchestration,
   planOrchestrationStageCompletion,
@@ -1689,7 +1704,6 @@ export {
   recoverActivatedOrchestrationDelegationUnderLock,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
-  sealMatchingOrchestrationDelegationWithHostEvidence,
   sealOrchestrationDelegation,
   statusOrchestration,
 };

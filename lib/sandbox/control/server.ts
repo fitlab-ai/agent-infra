@@ -72,7 +72,7 @@ import {
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
-import { readCodexControllerRegistration } from './controller-registration.ts';
+import { readCodexControllerRegistration } from '../../agent-clients/adapters/codex-lifecycle/controller-registration.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,

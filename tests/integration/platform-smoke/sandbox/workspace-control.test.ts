@@ -63,7 +63,7 @@ import {
   openCodexControllerRegistration,
   readCodexControllerRegistration,
   resolveCodexControllerBinding
-} from '../../../../lib/sandbox/control/controller-registration.ts';
+} from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-registration.ts';
 import { onPlatforms } from '../../../helpers.ts';
 
 function testRoot(prefix: string): string {

@@ -182,35 +182,22 @@ function fixture(step = 'requirement-analysis-review') {
 
 function orchestrationReceipt(taskId: string, overrides: Record<string, unknown> = {}) {
   const status = typeof overrides.status === 'string' ? overrides.status : 'activated';
-  const lifecycleProvenance = {
-    protocolVersion: 3, packageVersion: '0.9.9-alpha.0',
-    internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
-    hookDefinitionHash: 'hook-hash', hookSource: 'project',
-    hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-    capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
-    capabilityToolUseId: 'capability-tool', controllerInstanceDigest: null,
-    controlGeneration: null
-  } as const;
-  const hostEvidence = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(status)
-    ? {
-        kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4,
-        stopRevision: null, consumer: null, consumedAt: null, protocolVersion: 3,
-        packageVersion: '0.9.9-alpha.0', internalExecutableBuildHash: 'a'.repeat(64),
-        lifecycleContractHash: 'b'.repeat(64), hookSource: 'project',
-        hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-        capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
-        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
-        controllerInstanceDigest: null, controlGeneration: null
-      }
-    : null;
+  const adapterEvidence = ['activated', 'stage-completed', 'sealed', 'consumed', 'aborted'].includes(status)
+    ? { codex: {
+        activationEvidence: { kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4, capabilitySessionId: 'parent-1' },
+        records: ['sealed', 'consumed', 'aborted'].includes(status)
+          ? { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } }
+          : {}
+      } }
+    : {};
   return {
     id: 'receipt-1', taskId, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
     artifact: 'plan.md', client: 'codex', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh',
     modelFallbackReason: null, reasoningEffortFallbackReason: null,
     parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: null,
-    status, workspaceSnapshotScope: 'task', lifecycleProvenance,
-    hostEvidence, beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
+    status, workspaceSnapshotScope: 'task', adapterEvidence,
+    beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
     createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
     spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
     spawnDispatchedAt: '2026-01-01T00:00:00.000Z',

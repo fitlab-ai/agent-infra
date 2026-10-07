@@ -46,8 +46,21 @@ function fixture(stopReady = true) {
   const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: requirement-analysis\nassigned_to: codex\nupdated_at: old\nagent_infra_version: v0.9.16-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
+  assert.equal(beginOrResumeOrchestration(TASK_ID, {
+    repoRoot: root, client: 'codex', modelPolicy: MODEL_POLICY,
+    id: () => 'run-1', now: () => '2026-01-01T00:00:00.000Z'
+  }).status, 'running');
+  assert.equal(prepareOrchestrationDelegation(TASK_ID, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'high'
+  }, {
+    repoRoot: root, supportsLifecycleDelegation: () => true, captureWorkspace: () => 'before-tree',
+    id: () => 'receipt-1', now: () => '2026-01-01T00:00:00.100Z', monotonicNow: () => 10
+  }).status, 'running');
+  assert.equal(dispatchOrchestrationDelegation(TASK_ID, {
+    repoRoot: root, now: () => '2026-01-01T00:00:00.150Z', monotonicNow: () => 20
+  }).status, 'running');
   const store = createCodexLifecycleStore({
-    root: path.join(root, 'runtime-lifecycle'),
+    repoRoot: root,
     taskId: TASK_ID,
     cliVersion: '0.147.0',
     now: () => '2026-01-01T00:00:00.200Z'
@@ -60,24 +73,14 @@ function fixture(stopReady = true) {
     store.apply({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });
     store.apply({ type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child', nativeAgent: 'agent-infra-lifecycle-executor' });
   }
-
-  assert.equal(beginOrResumeOrchestration(TASK_ID, {
-    repoRoot: root, client: 'codex', modelPolicy: MODEL_POLICY,
-    id: () => 'run-1', now: () => '2026-01-01T00:00:00.000Z'
-  }).status, 'running');
-  assert.equal(prepareOrchestrationDelegation(TASK_ID, {
-    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'high', lifecycleProvenance: PROVENANCE
-  }, {
-    repoRoot: root, supportsLifecycleDelegation: () => true, captureWorkspace: () => 'before-tree',
-    id: () => 'receipt-1', now: () => '2026-01-01T00:00:00.100Z', monotonicNow: () => 10
-  }).status, 'running');
-  assert.equal(dispatchOrchestrationDelegation(TASK_ID, {
-    repoRoot: root, now: () => '2026-01-01T00:00:00.150Z', monotonicNow: () => 20
-  }).status, 'running');
+  const preActivationReceipt = readRun(taskDir)!.pendingDelegation!;
   assert.equal(activateOrchestrationDelegation(TASK_ID, {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child', parentId: 'parent', spawnMode: 'fresh',
     actualModel: 'executor-model', actualReasoningEffort: 'high',
-    hostEvidence: { kind: 'codex-lifecycle-v2', startRevision: 4, ...PROVENANCE, spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:00.200Z' }
+    clientEvidence: {
+      ...preActivationReceipt.adapterEvidence?.codex as Record<string, unknown>,
+      activationEvidence: { kind: 'codex-lifecycle-v2', startRevision: 4, ...PROVENANCE, spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:00.200Z' }
+    }
   }, {
     repoRoot: root, now: () => '2026-01-01T00:00:00.300Z', monotonicNow: () => 30
   }).status, 'running');
@@ -108,7 +111,7 @@ test('automatic recovery consumes trusted stop evidence and closes the activated
     assert.equal(run.pendingDelegation, null);
     assert.equal(run.receipts.length, 1);
     assert.equal(run.receipts[0]!.status, 'aborted');
-    assert.equal(run.receipts[0]!.hostEvidence?.consumer, 'receipt-1');
+    assert.equal(Object.values((run.receipts[0]!.adapterEvidence?.codex as { records: Record<string, { consumer: string | null }> }).records)[0]?.consumer, 'receipt-1');
     assert.equal(f.store.read('child').consumer, 'receipt-1');
     const content = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
     assert.match(content, /Analyze Task \(Round 1\) \[aborted\].*receipt=receipt-1; child=child/u);
@@ -176,8 +179,6 @@ test('automatic recovery rejects a replaced task receipt without changing eviden
     const runBefore = fs.readFileSync(runPath);
     const taskPath = path.join(f.taskDir, 'task.md');
     const taskBefore = fs.readFileSync(taskPath);
-    const evidenceFiles = fs.readdirSync(f.store.root).sort();
-    const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(f.store.root, name))]));
 
     const recovered = recover(f);
 
@@ -185,8 +186,7 @@ test('automatic recovery rejects a replaced task receipt without changing eviden
     assert.equal(recovered.error?.code, 'RECOVERY_TASK_BINDING_MISMATCH');
     assert.deepEqual(fs.readFileSync(runPath), runBefore);
     assert.deepEqual(fs.readFileSync(taskPath), taskBefore);
-    assert.deepEqual(fs.readdirSync(f.store.root).sort(), evidenceFiles);
-    for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(f.store.root, name)), evidenceBefore.get(name));
+    assert.deepEqual(fs.readFileSync(path.join(f.store.root, 'orchestration.json')), runBefore);
     assert.equal(f.store.read('child').consumer, null);
   } finally { cleanup(f); }
 });
@@ -194,10 +194,10 @@ test('automatic recovery rejects a replaced task receipt without changing eviden
 test('automatic recovery rejects mismatched native associations without consuming or changing any bytes', () => {
   const f = fixture();
   try {
-    const evidenceName = fs.readdirSync(f.store.root).find((name) => name.endsWith('.json'))!;
-    const evidencePath = path.join(f.store.root, evidenceName);
+    const evidencePath = path.join(f.store.root, 'orchestration.json');
     const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
-    evidence.state.spawn.nativeAgent = 'agent-infra-lifecycle-reviewer';
+    const key = Object.keys(evidence.pendingDelegation.adapterEvidence.codex.records)[0]!;
+    evidence.pendingDelegation.adapterEvidence.codex.records[key].state.spawn.nativeAgent = 'agent-infra-lifecycle-reviewer';
     fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
     const evidenceBefore = fs.readFileSync(evidencePath);
     const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');

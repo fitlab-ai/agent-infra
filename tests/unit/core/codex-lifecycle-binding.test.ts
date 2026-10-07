@@ -8,10 +8,10 @@ import {
   appendCodexLifecycleBinding,
   encodeCodexLifecycleBinding,
   parseCodexLifecycleBinding,
-  resolveCodexLifecycleStoreRoot,
   verifyCodexLifecycleTaskBinding
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
 import { codexAdapter } from '../../../lib/agent-clients/adapters/codex.ts';
+import { resolveTaskRuntimeRoot } from '../../../lib/task/runtime-paths.ts';
 
 const roots = new Set<string>();
 after(() => {
@@ -128,7 +128,7 @@ test('Codex lifecycle binding accepts only the exact current task run receipt an
   assert.throws(() => verifyCodexLifecycleTaskBinding(binding, run, 'agent-infra-lifecycle-reviewer'));
 });
 
-test('Codex lifecycle store root resolves from the canonical task directory in every task state', () => {
+test('task runtime root resolves from the canonical task directory in every task state', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-binding-'));
   roots.add(repo);
   const taskId = 'TASK-20261005-122106';
@@ -136,9 +136,6 @@ test('Codex lifecycle store root resolves from the canonical task directory in e
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\n---\n`);
 
-  assert.equal(
-    resolveCodexLifecycleStoreRoot(taskId, { repoRoot: repo }),
-    path.join(fs.realpathSync.native(taskDir), '.runtime', 'codex-lifecycle')
-  );
-  assert.equal(fs.existsSync(path.join(repo, '.agents', 'workspace', '.runtime', 'codex-lifecycle')), false);
+  assert.equal(resolveTaskRuntimeRoot(taskId, { repoRoot: repo }), path.join(fs.realpathSync.native(taskDir), '.runtime'));
+  assert.equal(fs.existsSync(path.join(repo, '.agents', 'workspace', '.runtime')), false);
 });

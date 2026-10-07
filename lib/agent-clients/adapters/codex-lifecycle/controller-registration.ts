@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import { parseLinuxProcessStat, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
-import { commandForEngine, runProbe } from '../shell.ts';
-import type { SandboxControlManifest } from './protocol.ts';
+import type { LifecycleBuildIdentity } from './build-identity.ts';
+import { parseLinuxProcessStat, type ProcessIdentity, type ProcessIdentityState } from '../../../server/process-state.ts';
+import { commandForEngine, runProbe } from '../../../sandbox/shell.ts';
+import type { SandboxControlManifest } from '../../../sandbox/control/protocol.ts';
 
 const CONTROLLER_TTL_MS = 4 * 60 * 60 * 1_000;
 const HEX_256 = /^[a-f0-9]{64}$/u;

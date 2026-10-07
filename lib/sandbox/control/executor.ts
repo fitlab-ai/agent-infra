@@ -41,7 +41,7 @@ import {
   CodexControllerRegistrationError,
   openCodexControllerRegistration,
   resolveCodexControllerBinding
-} from './controller-registration.ts';
+} from '../../agent-clients/adapters/codex-lifecycle/controller-registration.ts';
 
 export type SandboxControlExecutionResult = {
   exitCode: number;

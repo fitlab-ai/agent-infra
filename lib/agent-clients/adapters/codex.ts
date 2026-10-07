@@ -5,6 +5,7 @@ import {
   codexRecoveryChecks
 } from './codex-sandbox.ts';
 import { parseCodexLifecycleBinding } from './codex-lifecycle/binding.ts';
+import { isCodexDelegationReceiptEvidence, isCodexLifecycleActivationEvidence } from './codex-lifecycle/evidence.ts';
 
 function codexCarrierError(code: string): Error {
   const error = new Error(code);
@@ -66,9 +67,11 @@ const codexAdapter = defineAgentClientAdapter({
     actualReasoningEffort: 'app-server'
   },
   orchestrationAdapter: {
+    validateActivationEvidence: isCodexLifecycleActivationEvidence,
+    validateReceiptEvidence: isCodexDelegationReceiptEvidence,
     createLaunchCarrier: codexLaunchCarrier,
     prepareDelegation: async (...args) => {
-      const { prepareCodexOrchestrationDelegation } = await import('../../task/codex-orchestration.ts');
+      const { prepareCodexOrchestrationDelegation } = await import('./codex-orchestration.ts');
       return prepareCodexOrchestrationDelegation(...args);
     },
     recoverStarted: async (...args) => {

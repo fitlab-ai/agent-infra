@@ -5,11 +5,9 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 
 import {
-  hasCodexRuntimeLiveness,
   parseCodexHooksList,
   parseCodexThreadResolution,
   parseCodexTurnCompleted,
-  resolvePreflightLifecycleStoreRoot,
   resolveCodexSpawnedChild,
   resolveCodexTerminal,
   resolveCodexThread,
@@ -431,25 +429,4 @@ test('Codex preflight validates exact lifecycle hooks and current spawn identity
     hooks: { PreToolUse: [], PostToolUse: [], SubagentStart: [], SubagentStop: [] }
   }), /hooks are invalid/);
 
-  const root = temporaryRoot('codex-lifecycle-liveness-');
-  fs.writeFileSync(path.join(root, `${'a'.repeat(64)}.json`), JSON.stringify({
-    state: {
-      status: 'observed-spawn',
-      spawn: {
-        sessionId: 'session', turnId: 'turn', toolUseId: 'tool', hookDefinitionHash: 'hash'
-      }
-    }
-  }));
-  assert.equal(hasCodexRuntimeLiveness(root, 'hash', {
-    sessionId: 'session', turnId: 'turn', toolUseId: 'tool'
-  }), true);
-  assert.equal(hasCodexRuntimeLiveness(root, 'hash', {
-    sessionId: 'old-session', turnId: 'turn', toolUseId: 'tool'
-  }), false);
-  assert.equal(hasCodexRuntimeLiveness(root, 'hash'), false);
-});
-
-test('Codex preflight has no lifecycle root when task context is unresolved', () => {
-  const root = temporaryRoot('codex-preflight-unbound-');
-  assert.equal(resolvePreflightLifecycleStoreRoot(root), undefined);
 });
