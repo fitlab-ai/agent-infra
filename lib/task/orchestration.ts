@@ -297,12 +297,11 @@ const ORCHESTRATION_RUN_KEYS = [
   'pause', 'commitAuthorization', 'completionEvidence', 'createdAt', 'updatedAt'
 ] as const;
 
-function orchestrationStateReasonCodes(value: unknown, expectedTaskId?: string): string[] {
+function orchestrationStateReasonCodes(value: unknown): string[] {
   if (!hasExactKeys(value, ORCHESTRATION_RUN_KEYS)) return ['top-level-keys'];
   const record = value;
   const reasons: string[] = [];
   if (!exactText(record.taskId)) reasons.push('taskId');
-  else if (expectedTaskId !== undefined && record.taskId !== expectedTaskId) reasons.push('taskId-mismatch');
   if (!exactText(record.runId)) reasons.push('runId');
   if (!['running', 'paused', 'completed'].includes(record.status as string)) reasons.push('status');
   if (!(record.nextStage === null || ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'commit'].includes(record.nextStage as string))) {
@@ -329,7 +328,7 @@ function orchestrationStateReasonCodes(value: unknown, expectedTaskId?: string):
   if (Array.isArray(record.receipts) && record.receipts.every(isDelegationReceipt)
     && (record.pendingDelegation === null || isDelegationReceipt(record.pendingDelegation))) {
     const receipts = [...record.receipts, ...(record.pendingDelegation ? [record.pendingDelegation] : [])];
-    if (receipts.some((receipt) => receipt.taskId !== record.taskId || receipt.runId !== record.runId)) {
+    if (receipts.some((receipt) => receipt.runId !== record.runId)) {
       reasons.push('receipt-identity');
     }
   }
@@ -377,7 +376,7 @@ function fileObservation(file: string): OrchestrationDiagnosticFields {
 }
 
 function parseOrchestrationRun(value: unknown, expectedTaskId?: string): OrchestrationRun {
-  const reasonCodes = orchestrationStateReasonCodes(value, expectedTaskId);
+  const reasonCodes = orchestrationStateReasonCodes(value);
   if (reasonCodes.length > 0) throw new OrchestrationStateError(expectedTaskId ?? null, reasonCodes);
   return value as OrchestrationRun;
 }
@@ -1476,11 +1475,9 @@ type ActivatedRecoveryEvent = Readonly<{
 
 function recoveryReceiptMatches(
   receipt: DelegationReceipt,
-  taskId: string,
   event: ActivatedRecoveryEvent
 ): boolean {
-  return receipt.taskId === taskId
-    && receipt.stage === event.stage
+  return receipt.stage === event.stage
     && receipt.round === event.round
     && receipt.artifact === event.artifact
     && receipt.childId === event.childId
@@ -1502,7 +1499,7 @@ function recoverActivatedOrchestrationDelegationUnderLock(
   ];
   const receipt = matches.find((candidate) => candidate.id === event.receiptId);
   if (!receipt) return failed('ORCHESTRATION_DELEGATION_MISSING', 'recovery receipt does not exist', resolved.taskId);
-  if (!recoveryReceiptMatches(receipt, resolved.taskId, event)) {
+  if (!recoveryReceiptMatches(receipt, event)) {
     return failed('ORCHESTRATION_PROVENANCE_MISMATCH', 'recovery selector does not match the delegation receipt', resolved.taskId);
   }
   if (receipt.status === 'aborted' && run.pendingDelegation === null) {

@@ -75,8 +75,7 @@ function taskRunMatchesReceipt(
   const receipt = run?.pendingDelegation;
   const role = nativeAgent.endsWith('reviewer') ? 'reviewer' : 'executor';
   return run?.status === 'running'
-    && receipt?.taskId === binding.taskId
-    && receipt.runId === binding.runId
+    && receipt?.runId === binding.runId
     && receipt.id === binding.receiptId
     && receipt.client === 'codex'
     && receipt.role === role;
@@ -91,9 +90,7 @@ function recordMatchesTaskReceipt(childThreadId: string, options: CodexBridgeOpt
     throw new Error(`CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: ${error instanceof Error ? error.message : String(error)}`);
   }
   const binding = record.taskBinding;
-  if (!binding || (store.taskId && binding.taskId !== store.taskId)) {
-    throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: lifecycle record task does not match its store');
-  }
+  if (!binding) throw new Error('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH: lifecycle record has no receipt binding');
   const repoRoot = options.repoRoot ?? options.orchestrationOptions?.repoRoot ?? process.cwd();
   const resolved = resolveTaskRef(binding.taskId, { repoRoot });
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
@@ -110,7 +107,7 @@ function sameTaskReceipt(
   left: Readonly<{ taskId: string; runId: string; id: string }>,
   right: Readonly<{ taskId: string; runId: string; id: string }>
 ): boolean {
-  return left.taskId === right.taskId && left.runId === right.runId && left.id === right.id;
+  return left.runId === right.runId && left.id === right.id;
 }
 
 function sameLifecycleRevision(
@@ -125,8 +122,7 @@ function sameTaskBinding(
   left: CodexLifecycleTaskBinding | null,
   right: CodexLifecycleTaskBinding | null
 ): boolean {
-  return left?.taskId === right?.taskId
-    && left?.runId === right?.runId
+  return left?.runId === right?.runId
     && left?.receiptId === right?.receiptId;
 }
 
@@ -366,9 +362,6 @@ function verifySpawnTask(
     requestedModel: spawn.requestedModel,
     requestedReasoningEffort: spawn.requestedReasoningEffort
   });
-  if (store.taskId && store.taskId !== binding.taskId) {
-    return bridgeFailure('CODEX_LIFECYCLE_TASK_BINDING_MISMATCH', 'Codex lifecycle store task does not match spawn binding');
-  }
   return { taskDir: resolved.taskDir };
 }
 
@@ -497,7 +490,7 @@ function findCurrentParentReceipt(store: LifecycleStore, repoRoot: string) {
   const resolved = resolveTaskRef(store.taskId, { repoRoot });
   if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
   const pending = readRun(resolved.taskDir)?.pendingDelegation;
-  if (!pending || pending.taskId !== store.taskId || pending.client !== 'codex') {
+  if (!pending || pending.client !== 'codex') {
     return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
   }
   return { pending };

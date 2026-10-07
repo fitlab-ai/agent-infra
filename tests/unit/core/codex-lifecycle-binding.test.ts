@@ -122,7 +122,6 @@ test('Codex lifecycle binding accepts only the exact current task run receipt an
     requestedModel: 'model', requestedReasoningEffort: 'high'
   }));
   for (const mismatch of [
-    { ...binding, taskId: 'TASK-20261005-122107' },
     { ...binding, runId: 'run-2' },
     { ...binding, receiptId: 'receipt-2' }
   ]) assert.throws(() => verifyCodexLifecycleTaskBinding(mismatch, run, 'agent-infra-lifecycle-executor'));

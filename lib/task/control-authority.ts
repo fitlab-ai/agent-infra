@@ -525,10 +525,8 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
   if (context.lifecycleRecoveryAttestation) validateLifecycleRecoveryAttestation(context.lifecycleRecoveryAttestation);
 }
 
-function operationTaskId(context: TaskControlExecutionContext, taskRef: string): void {
-  if (context.source === 'sandbox-executor' && taskRef !== 'auto' && taskRef !== context.taskId) {
-    throw new Error('TASK_CONTROL_CONTEXT_TASK_MISMATCH: operation task does not match the sandbox manifest');
-  }
+function boundTaskRef(context: TaskControlExecutionContext, taskRef: string): string {
+  return context.source === 'sandbox-executor' ? context.taskId : taskRef;
 }
 
 function autoTaskOptions(
@@ -610,40 +608,40 @@ function orchestration(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-orchestration' }>
 ): OrchestrationResult | Promise<OrchestrationResult> {
-  operationTaskId(context, operation.taskRef);
+  const taskRef = boundTaskRef(context, operation.taskRef);
   const input = operation.input;
   const options = domainOptions(context, operation.options);
   switch (operation.intent) {
     case 'begin-or-resume':
-      return beginOrResumeOrchestration(operation.taskRef, {
+      return beginOrResumeOrchestration(taskRef, {
         ...options,
         client: input.client as AgentClientId,
         maxSteps: input.maxSteps as number | undefined,
         modelPolicy: input.modelPolicy as OrchestrationOptions['modelPolicy']
       });
-    case 'route': return routeOrchestration(operation.taskRef, options);
-    case 'status': return statusOrchestration(operation.taskRef, options);
-    case 'prepare': return prepareTaskOrchestration(context, operation, options);
-    case 'dispatch': return dispatchOrchestrationDelegation(operation.taskRef, options);
+    case 'route': return routeOrchestration(taskRef, options);
+    case 'status': return statusOrchestration(taskRef, options);
+    case 'prepare': return prepareTaskOrchestration(context, { ...operation, taskRef }, options);
+    case 'dispatch': return dispatchOrchestrationDelegation(taskRef, options);
     case 'await-activation':
-      return awaitOrchestrationDelegationActivation(operation.taskRef, input.event as never, options);
-    case 'recover-prepared': return recoverPreparedOrchestrationDelegation(operation.taskRef, options);
+      return awaitOrchestrationDelegationActivation(taskRef, input.event as never, options);
+    case 'recover-prepared': return recoverPreparedOrchestrationDelegation(taskRef, options);
     case 'hook-start':
       return input.auto === true
         ? activateMatchingOrchestrationDelegation(
             input.client as AgentClientId, input.event as never, autoTaskOptions(context, options)
           )
-        : activateOrchestrationDelegation(operation.taskRef, input.event as never, options);
+        : activateOrchestrationDelegation(taskRef, input.event as never, options);
     case 'hook-stop':
       return input.auto === true
         ? sealMatchingOrchestrationDelegation(
             input.client as AgentClientId, input.event as never, autoTaskOptions(context, options)
           )
-        : sealOrchestrationDelegation(operation.taskRef, input.event as never, options);
-    case 'advance': return advanceOrchestration(operation.taskRef, options);
+        : sealOrchestrationDelegation(taskRef, input.event as never, options);
+    case 'advance': return advanceOrchestration(taskRef, options);
     case 'pause':
       return pauseOrchestration(
-        operation.taskRef,
+        taskRef,
         input.code as string,
         input.message as string,
         input.recoverable as boolean,
@@ -701,12 +699,16 @@ export function dispatchTaskControlOperation(
   assertTaskControlExecutionContext(context);
   assertTaskControlOperation(operation);
   if (operation.family === 'task-lifecycle') {
-    operationTaskId(context, operation.request.taskRef);
-    return applyLifecycleWithAuthority(context, operation.request);
+    return applyLifecycleWithAuthority(context, {
+      ...operation.request,
+      taskRef: boundTaskRef(context, operation.request.taskRef)
+    });
   }
   if (operation.family === 'task-finalization') {
-    operationTaskId(context, operation.request.taskRef);
-    return applyTaskFinalization(operation.request, {
+    return applyTaskFinalization({
+      ...operation.request,
+      taskRef: boundTaskRef(context, operation.request.taskRef)
+    }, {
       repoRoot: context.repoRoot,
       ...(context.source === 'sandbox-executor' ? {
         controlBinding: { generation: context.generation, requestId: context.requestId },

@@ -294,7 +294,7 @@ test('codex-lifecycle bridge rejects an unbound managed spawn before creating li
   assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.runtime')), false);
 });
 
-test('codex-lifecycle rejects receipt, branch, and multiple-task mismatches without lifecycle writes', async () => {
+test('codex-lifecycle rejects a wrong receipt without lifecycle writes', async () => {
   const { root, env, hookDefinitionHash } = fixture();
   const task = await prepareLifecycleTask(root, hookDefinitionHash);
   const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
@@ -312,23 +312,6 @@ test('codex-lifecycle rejects receipt, branch, and multiple-task mismatches with
   assert.equal(wrongReceipt.status, 1, `${wrongReceipt.stderr}\n${wrongReceipt.stdout}`);
   assert.deepEqual(fs.readFileSync(runPath), originalRun);
   assert.equal(fs.existsSync(task.storeRoot), false);
-
-  assert.equal(spawnSync('git', ['branch', '-M', 'agent-infra-feature-moved'], { cwd: root, encoding: 'utf8' }).status, 0);
-  const changedBranch = event(task.bindingMarker);
-  assert.equal(changedBranch.status, 1, `${changedBranch.stderr}\n${changedBranch.stdout}`);
-  assert.deepEqual(fs.readFileSync(runPath), originalRun);
-  assert.equal(fs.existsSync(task.storeRoot), false);
-
-  const secondTaskId = 'TASK-20260101-000002';
-  const secondTaskDir = path.join(root, '.agents', 'workspace', 'active', secondTaskId);
-  fs.mkdirSync(secondTaskDir, { recursive: true });
-  fs.writeFileSync(path.join(secondTaskDir, 'task.md'), `---\nid: ${secondTaskId}\nstatus: active\nbranch: agent-infra-feature-test\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
-  assert.equal(spawnSync('git', ['branch', '-M', 'agent-infra-feature-test'], { cwd: root, encoding: 'utf8' }).status, 0);
-  const ambiguous = event(task.bindingMarker);
-  assert.equal(ambiguous.status, 1, `${ambiguous.stderr}\n${ambiguous.stdout}`);
-  assert.deepEqual(fs.readFileSync(runPath), originalRun);
-  assert.equal(fs.existsSync(task.storeRoot), false);
-  assert.equal(fs.existsSync(path.join(secondTaskDir, '.runtime')), false);
 });
 
 test('codex-lifecycle rejects a stop from an old receipt without changing evidence or the current run', async () => {

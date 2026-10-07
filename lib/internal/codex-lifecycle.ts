@@ -108,21 +108,17 @@ function hookDefinitionHash(): string {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-function controllerBinding(taskId: string) {
-  if (process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== taskId) {
-    throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: sandbox task view does not match lifecycle binding');
-  }
+function controllerBinding() {
   const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
   if (!contextPath) return undefined;
   const context = verifyCodexSandboxControllerContextWithWarnings(contextPath, { repoRoot: process.cwd() }).context;
-  if (context.taskId !== taskId) throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: controller task does not match lifecycle binding');
   return {
     instanceDigest: context.controllerInstanceDigest,
     controlGeneration: context.controlGeneration
   };
 }
 
-function resolveLifecycleTaskContext(expectedTaskId?: string) {
+function resolveLifecycleTaskContext() {
   const controllerPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
   const taskId = controllerPath
     ? verifyCodexSandboxControllerContextWithWarnings(controllerPath, { repoRoot: process.cwd() }).context.taskId
@@ -131,9 +127,6 @@ function resolveLifecycleTaskContext(expectedTaskId?: string) {
     ? resolveTaskRef(taskId, { repoRoot: process.cwd() })
     : resolveTaskContext(undefined, { repoRoot: process.cwd() });
   if (!context.ok) throw new Error(`${context.code}: ${context.message}`);
-  if (expectedTaskId && context.taskId !== expectedTaskId) {
-    throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: task context does not match lifecycle binding');
-  }
   return context;
 }
 
@@ -142,7 +135,7 @@ function verifyPendingBinding(
   nativeAgent: string,
   expected: Readonly<{ requestedModel?: string; requestedReasoningEffort?: string }> = {}
 ) {
-  const resolved = resolveLifecycleTaskContext(binding.taskId);
+  const resolved = resolveLifecycleTaskContext();
   const run = readRun(resolved.taskDir);
   if (!run) throw new Error('Codex lifecycle task binding has no current orchestration run');
   verifyCodexLifecycleTaskBinding(binding, run, nativeAgent, expected);
@@ -160,7 +153,6 @@ function verifyStoredBinding(
   const receipt = run?.pendingDelegation;
   if (!receipt || run?.status !== 'running'
     || receipt.id !== binding.receiptId
-    || receipt.taskId !== binding.taskId
     || receipt.runId !== binding.runId
     || receipt.client !== 'codex'
     || receipt.role !== nativeRole(nativeAgent)) {
@@ -169,7 +161,7 @@ function verifyStoredBinding(
 }
 
 function sameTaskBinding(left: CodexLifecycleTaskBinding | null | undefined, right: CodexLifecycleTaskBinding): boolean {
-  return left?.taskId === right.taskId && left.runId === right.runId && left.receiptId === right.receiptId;
+  return left?.runId === right.runId && left.receiptId === right.receiptId;
 }
 
 function nativeRole(nativeAgent: string): string | null {
@@ -348,11 +340,10 @@ async function attestCapabilityReference(payload: unknown): Promise<boolean> {
   const capabilityRef = payloadText(payload, 'capabilityRef');
   if (!capabilityRef) return false;
   const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  let taskId = process.env.AGENT_INFRA_TASK_ID;
   if (contextPath) {
     const { context } = verifyCodexSandboxControllerContextWithWarnings(contextPath, { repoRoot: process.cwd() });
-    if (context.taskId !== process.env.AGENT_INFRA_TASK_ID) {
-      throw new Error('CODEX_LIFECYCLE_TASK_CONTEXT_MISMATCH: controller task does not match sandbox task');
-    }
+    taskId = context.taskId;
     const sessionId = payloadText(payload, 'sessionId');
     const turnId = payloadText(payload, 'turnId');
     const toolUseId = payloadText(payload, 'toolUseId');
@@ -370,9 +361,9 @@ async function attestCapabilityReference(payload: unknown): Promise<boolean> {
   if (process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_CONTROL_TOKEN) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_REQUIRED: capability attestation requires a verified controller');
   }
-  const capabilityStore = createCodexCapabilityStore({ taskId: process.env.AGENT_INFRA_TASK_ID });
+  const capabilityStore = createCodexCapabilityStore({ taskId });
   const armed = capabilityStore.inspectReference(capabilityRef);
-  const expectedTaskId = process.env.AGENT_INFRA_TASK_ID ?? resolveLifecycleTaskContext(armed.taskId).taskId;
+  const expectedTaskId = taskId ?? resolveLifecycleTaskContext().taskId;
   const capability = capabilityStore.attestByReference({
     capabilityRef,
     expectedTaskId,
@@ -381,7 +372,7 @@ async function attestCapabilityReference(payload: unknown): Promise<boolean> {
     toolUseId: payloadText(payload, 'toolUseId'),
     hookDefinitionHash: payloadText(payload, 'hookDefinitionHash'),
     buildIdentity: computeLifecycleBuildIdentity(process.cwd()),
-    controller: controllerBinding(armed.taskId)
+    controller: controllerBinding()
   });
   output({
     status: capability.status, changed: true,
@@ -471,7 +462,7 @@ function armCapability(parsed: Parsed): void {
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
   const armed = createCodexCapabilityStore({ taskId: resolved.taskId }).arm({
     taskId: resolved.taskId, buildIdentity: computeLifecycleBuildIdentity(process.cwd()),
-    controller: controllerBinding(resolved.taskId)
+    controller: controllerBinding()
   });
   output({
     status: 'armed', changed: true, capabilityRef: armed.capabilityRef, marker: armed.marker,

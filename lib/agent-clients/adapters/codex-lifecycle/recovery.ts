@@ -134,8 +134,7 @@ function validateStopRecord(
 }
 
 function stopRecordMatchesReceipt(record: StoredCodexLifecycle, receipt: DelegationReceipt): boolean {
-  return record.taskBinding?.taskId === receipt.taskId
-    && record.taskBinding.runId === receipt.runId
+  return record.taskBinding?.runId === receipt.runId
     && record.taskBinding.receiptId === receipt.id;
 }
 
@@ -182,8 +181,7 @@ function spawnMatchesReceipt(
     && spawn!.hookDefinitionHash === provenance.hookDefinitionHash
     && spawn!.requestedModel === receipt.requestedModel
     && spawn!.requestedReasoningEffort === receipt.requestedReasoningEffort
-    && spawn!.taskBinding?.taskId === receipt.taskId
-    && spawn!.taskBinding.runId === receipt.runId
+    && spawn!.taskBinding?.runId === receipt.runId
     && spawn!.taskBinding.receiptId === receipt.id;
 }
 

@@ -282,25 +282,6 @@ test('task-scoped prepare does not inspect an unrelated active task', () => {
   assert.equal(fs.readFileSync(path.join(otherTaskDir, '.runtime', 'orchestration.json'), 'utf8'), '{"schemaVersion":3}\n');
 });
 
-test('persisted run identity is bound to its task directory', () => {
-  const f = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
-  const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
-  persisted.taskId = 'TASK-20990101-999999';
-  fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
-
-  assert.throws(() => readRun(f.taskDir), { name: 'OrchestrationStateError' });
-  assert.throws(
-    () => statusOrchestration('TASK-20260101-000001', { repoRoot: f.root }),
-    { name: 'OrchestrationStateError' }
-  );
-  assert.equal(
-    beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).error?.code,
-    'ORCHESTRATION_STATE_INVALID'
-  );
-});
-
 test('completed current runs are idempotent across client changes', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });

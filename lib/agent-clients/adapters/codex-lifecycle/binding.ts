@@ -128,9 +128,7 @@ function codexReceiptMatchesBinding(
   const receipt = run.pendingDelegation;
   return Boolean(receipt)
     && run.status === 'running'
-    && run.taskId === binding.taskId
     && run.runId === binding.runId
-    && receipt!.taskId === binding.taskId
     && receipt!.runId === binding.runId
     && receipt!.id === binding.receiptId
     && receipt!.client === 'codex'
