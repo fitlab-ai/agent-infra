@@ -36,8 +36,9 @@ function validate(params: Readonly<{
   const expectedKeys = operation === 'controller.open' ? ['controllerProcess'] : ['proof'];
   if (!['controller.open', 'controller.close', 'controller.verify'].includes(operation)
     || Object.keys(payload).sort().join(',') !== expectedKeys.sort().join(',')
-    || !validProcess(payload.controllerProcess)
-    || (operation === 'controller.open' ? !validProcess(payload.controllerProcess) : !validProof(payload.proof))) {
+    || (operation === 'controller.open'
+      ? !validProcess(payload.controllerProcess)
+      : !validProof(payload.proof))) {
     throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: controller operation payload is invalid');
   }
   if (manifest.mode !== 'task-bound' || !manifest.taskId) {

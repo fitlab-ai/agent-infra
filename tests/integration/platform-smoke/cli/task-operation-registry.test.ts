@@ -48,13 +48,18 @@ function routeKey(command: string, selector: string): string {
 }
 
 function routeKeysFromHandlerBranches(): Set<string> {
-  const internalDir = path.resolve(process.cwd(), 'lib/internal');
+  const handlerDirs = [
+    path.resolve(process.cwd(), 'lib/internal'),
+    path.resolve(process.cwd(), 'lib/agent-clients/adapters/codex-lifecycle')
+  ];
   const marker = /internalHandlerRoute\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/gu;
   const keys = new Set<string>();
-  for (const name of fs.readdirSync(internalDir).filter((entry) => entry.endsWith('.ts'))) {
-    if (name === 'cli-route-inventory.ts') continue;
-    const source = fs.readFileSync(path.join(internalDir, name), 'utf8');
-    for (const match of source.matchAll(marker)) keys.add(routeKey(match[1]!, match[2]!));
+  for (const directory of handlerDirs) {
+    for (const name of fs.readdirSync(directory).filter((entry) => entry.endsWith('.ts'))) {
+      if (directory.endsWith('/internal') && name === 'cli-route-inventory.ts') continue;
+      const source = fs.readFileSync(path.join(directory, name), 'utf8');
+      for (const match of source.matchAll(marker)) keys.add(routeKey(match[1]!, match[2]!));
+    }
   }
   // Shared domain commands have no CLI-local branch marker: exercise their parsers.
   for (const [command, selector] of [

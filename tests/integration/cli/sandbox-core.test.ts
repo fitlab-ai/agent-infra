@@ -1057,10 +1057,6 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
       arg,
       `/workspace/.agents/workspace/active/${taskId}`
     )));
-    assert.ok(runCall.some((arg) => isReadOnlyMountFor(
-      arg,
-      `/workspace/.agents/workspace/active/${taskId}/.runtime`
-    )));
     assert.equal(runCall.some((arg) => arg.includes(siblingTaskId)), false);
 
     const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", branch);

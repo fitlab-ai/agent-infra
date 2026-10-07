@@ -371,15 +371,18 @@ test('codex-lifecycle bridge rechecks the current receipt after async resolution
     nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
     taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
   });
-  const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
-  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
   const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const evidenceFiles = fs.readdirSync(task.storeRoot).filter((name) => name !== path.basename(runPath)).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
   const result = run(root, { ...env, REPLACE_PENDING_RECEIPT: runPath }, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }));
   assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
-  assert.deepEqual(fs.readdirSync(task.storeRoot).sort(), evidenceFiles);
+  assert.deepEqual(
+    fs.readdirSync(task.storeRoot).filter((name) => name !== path.basename(runPath)).sort(),
+    evidenceFiles
+  );
   for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
   assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.id, 'receipt-replaced');
   assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);

@@ -605,27 +605,29 @@ test('typed controller verify returns only the live task binding without spawnin
   assert.equal(fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8'), before);
 });
 
-test('typed controller verify requires matching process proof', () => {
+test('typed controller verify rejects a proof for a different process', () => {
   const proof = {
     version: 1 as const,
     leaseId: 'a'.repeat(64),
     leaseSecret: 'b'.repeat(64),
     controllerProcess: { pid: 100, startTime: 10 }
   };
-  const invalidRequest = validateSandboxControlRequest({
-    version: 4,
-    id: '12345678-1234-1234-1234-123456789abc',
-    token: manifest.token,
-    generation: manifest.generation,
-    issuedAt: 1_000,
-    expiresAt: 3_000,
-    family: 'agent-client',
-    agentClient: 'codex',
-    operation: 'controller.verify',
-    payload: { proof: { ...proof, controllerProcess: { pid: 101, startTime: 10 } } }
-  }, manifest, { now: 2_000 });
-  if (invalidRequest.family !== 'agent-client') throw new Error('expected agent-client request');
-  assert.throws(() => validateAgentClientOperation(invalidRequest, manifest), /REQUEST_INVALID/);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-process-proof-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
+  openCodexControllerRegistration({
+    manifest,
+    manifestPath,
+    controllerProcess: proof.controllerProcess,
+    buildIdentity: controllerBuild
+  }, { probeProcess: () => 'alive' });
+  assert.throws(() => resolveCodexControllerBinding({
+    manifest,
+    manifestPath,
+    proof: { ...proof, controllerProcess: { pid: 101, startTime: 10 } },
+    buildIdentity: controllerBuild,
+    probeProcess: () => 'alive'
+  }), /CODEX_SANDBOX_CONTROLLER_PROOF_INVALID/);
 });
 
 test('TypeScript control entries retain explicit strip-types startup', () => {
@@ -844,7 +846,12 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
   );
   const branchManifest = { ...manifest, mode: 'branch-only' as const, taskId: null };
   assert.throws(() => validateSandboxControlRequest({
-    ...request,
+    version: request.version,
+    id: request.id,
+    token: request.token,
+    generation: request.generation,
+    issuedAt: request.issuedAt,
+    expiresAt: request.expiresAt,
     family: 'agent-client',
     agentClient: 'codex',
     operation: 'controller.open',
