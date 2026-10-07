@@ -35,9 +35,8 @@ function fixture() {
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }));
   for (const file of [
     'bin/internal-cli.ts',
-    'lib/internal/codex-lifecycle.ts',
     'lib/agent-clients/adapters/codex-lifecycle/cli.ts',
-    'lib/internal/codex-sandbox-controller.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/sandbox-controller-cli.ts',
     'lib/internal/task-orchestration.ts',
     'lib/agent-clients/adapters/codex-orchestration.ts',
     'lib/task/delegation-receipts.ts',

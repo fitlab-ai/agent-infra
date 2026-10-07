@@ -1,9 +1,8 @@
 {
   "executableFiles": [
     "bin/internal-cli.ts",
-    "lib/internal/codex-lifecycle.ts",
     "lib/agent-clients/adapters/codex-lifecycle/cli.ts",
-    "lib/internal/codex-sandbox-controller.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/sandbox-controller-cli.ts",
     "lib/internal/sandbox-control.ts",
     "lib/internal/task-orchestration.ts",
     "lib/agent-clients/adapters/codex-orchestration.ts",
