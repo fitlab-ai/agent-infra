@@ -362,8 +362,6 @@ async function attestCapabilityReference(payload: unknown): Promise<boolean> {
     }
     const result = requestCodexCapabilityAttestation({
       controllerProof: controllerProofFromContext(context),
-      taskId: context.taskId,
-      attestationPrivateKey: context.attestationPrivateKey,
       attestation: [capabilityRef, sessionId, turnId, toolUseId, hookHash]
     });
     output({ status: result.status, changed: result.changed, evidence: result.evidence, diagnostics: [], error: null });

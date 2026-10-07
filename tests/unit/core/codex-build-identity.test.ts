@@ -116,7 +116,6 @@ test('lifecycle build identity reads one validated manifest file list', () => {
     'lib/sandbox/control/client.ts',
     'lib/sandbox/control/executor.ts',
     'lib/sandbox/control/controller-registration.ts',
-    'lib/sandbox/control/codex-hook-attestation.ts',
     'lib/agent-clients/adapters/codex-lifecycle/controller-context.ts',
     'lib/server/process-state.ts',
     'lib/sandbox/shell.ts'

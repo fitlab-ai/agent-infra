@@ -8,29 +8,17 @@ import * as toml from 'smol-toml';
 
 import {
   requestCodexControllerClose,
+  requestCodexControllerOpen,
   requestCodexControllerVerify
 } from '../../../sandbox/control/client.ts';
-import {
-  bindCodexControllerAttestationKey,
-  acquireCodexControllerRegistrationLock,
-  openCodexControllerRegistration,
-  type CodexControllerOpened
-} from '../../../sandbox/control/controller-registration.ts';
-import {
-  assertSandboxControlRootAvailableForController,
-  readSandboxControlManifest
-} from '../../../sandbox/control/lifecycle.ts';
-import type { SandboxControlManifest } from '../../../sandbox/control/protocol.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
-import { resolveTaskContext } from '../../../task/resolve-ref.ts';
-import { resolveTaskRuntimeRoot } from '../../../task/runtime-paths.ts';
-import { computeLifecycleBuildIdentity, LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
+import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
   contextFromControllerLease,
   controllerProofFromContext,
   verifyCodexSandboxControllerContextWithWarnings as verifyContextFileWithWarnings,
   writeCodexSandboxControllerContext,
-  type CodexSandboxControllerContextV3
+  type CodexSandboxControllerContextV2
 } from './controller-context.ts';
 
 type ControllerControl = Readonly<{
@@ -57,8 +45,7 @@ type ControllerOptions = Readonly<{
   now?: () => number;
   codexVersion?: () => string;
   verifyController?: typeof requestCodexControllerVerify;
-  bindControllerAttestationKey?: typeof bindCodexControllerAttestationKey;
-  initializeControllerRegistration?: (params: Readonly<{ controllerProcess: ProcessIdentity }>) => CodexControllerOpened;
+  openController?: typeof requestCodexControllerOpen;
   closeController?: typeof requestCodexControllerClose;
   environment?: NodeJS.ProcessEnv;
 }>;
@@ -69,7 +56,7 @@ type PreparedCodexSandboxController = Readonly<{
   env: NodeJS.ProcessEnv;
   home: string;
   contextPath: string;
-  context: CodexSandboxControllerContextV3;
+  context: CodexSandboxControllerContextV2;
   cleanup: () => void;
 }>;
 
@@ -82,18 +69,6 @@ type VerifyContextOptions = Readonly<{
   requestControllerVerify?: typeof requestCodexControllerVerify;
 }>;
 
-function bindControllerAttestationKey(
-  options: ControllerOptions,
-  params: Parameters<typeof bindCodexControllerAttestationKey>[0]
-): void {
-  const bind = options.bindControllerAttestationKey;
-  if (bind) {
-    bind(params);
-    return;
-  }
-  bindCodexControllerAttestationKey(params);
-}
-
 function copyRegular(source: string, destination: string, mode: number): void {
   const stat = fs.lstatSync(source);
   if (!stat.isFile() || stat.isSymbolicLink()) {
@@ -102,38 +77,6 @@ function copyRegular(source: string, destination: string, mode: number): void {
   fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
   fs.copyFileSync(source, destination);
   fs.chmodSync(destination, mode);
-}
-
-function resolveCodexSandboxControllerHostBinding(repoRoot: string): Readonly<{
-  control: ControllerControl;
-  manifestPath: string;
-  taskId: string;
-  manifest: SandboxControlManifest;
-}> {
-  const task = resolveTaskContext(undefined, { repoRoot });
-  if (!task.ok || task.state !== 'active') {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_CONTEXT_INVALID');
-  }
-  const runtimeRoot = resolveTaskRuntimeRoot(task.taskId, { repoRoot });
-  const manifestPath = path.join(runtimeRoot, 'sandbox-control', 'manifest.json');
-  const manifest = readSandboxControlManifest(manifestPath);
-  if (manifest.mode !== 'task-bound' || manifest.taskId !== task.taskId
-    || path.resolve(manifest.worktreeRoot) !== repoRoot) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
-  }
-  return {
-    control: {
-      token: manifest.token,
-      generation: manifest.generation,
-      rootId: manifest.controlRootId,
-      channelDir: manifest.channelDir,
-      statusDir: manifest.publicStatusDir,
-      runtimeDir: manifest.runtimeDir
-    },
-    manifestPath,
-    taskId: task.taskId,
-    manifest
-  };
 }
 
 function controlFromEnvironment(): ControllerControl {
@@ -147,29 +90,6 @@ function controlFromEnvironment(): ControllerControl {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTROL_MISSING');
   }
   return { token, generation, rootId, channelDir, statusDir, runtimeDir };
-}
-
-function controllerStartup(repoRoot: string, controlOverride?: ControllerControl): Readonly<{
-  control: ControllerControl;
-  manifestPath: string;
-  taskId: string | null;
-  manifest: SandboxControlManifest | null;
-}> {
-  if (controlOverride) {
-    return {
-      control: controlOverride,
-      manifestPath: path.join(path.dirname(controlOverride.statusDir), 'manifest.json'),
-      taskId: null,
-      manifest: null
-    };
-  }
-  return resolveCodexSandboxControllerHostBinding(repoRoot);
-}
-
-function assertControllerTaskBinding(expectedTaskId: string | null, actualTaskId: string): void {
-  if (expectedTaskId && expectedTaskId !== actualTaskId) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
-  }
 }
 
 function verifyRuntime(runtimeDir: string): void {
@@ -196,7 +116,7 @@ function verifyRuntime(runtimeDir: string): void {
 }
 
 function verifyControllerBinding(
-  context: CodexSandboxControllerContextV3,
+  context: CodexSandboxControllerContextV2,
   control: ControllerControl,
   requestControllerVerify: typeof requestCodexControllerVerify
 ): void {
@@ -216,7 +136,7 @@ function verifyControllerBinding(
 function verifyCodexSandboxControllerContextWithWarnings(
   contextPath: string,
   options: VerifyContextOptions = {}
-): Readonly<{ context: CodexSandboxControllerContextV3; warnings: readonly LifecycleIdentityWarning[] }> {
+): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
   const control = options.control ?? controlFromEnvironment();
   const fileVerification = verifyContextFileWithWarnings(contextPath, {
     repoRoot: options.repoRoot,
@@ -314,7 +234,6 @@ function isolatedEnvironment(
     HOME: home,
     CODEX_HOME: home,
     PATH: `${shimDir}${path.delimiter}${sourceEnvironment.PATH ?? ''}`,
-    AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: taskId,
     AGENT_INFRA_CONTROL_TOKEN: control.token,
     AGENT_INFRA_CONTROL_GENERATION: control.generation,
@@ -332,28 +251,29 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-type ControllerHome = Readonly<{
-  home: string;
-  runtimeRoot: string;
-  parentStartTime: number;
-  cleanup: () => void;
-  setContext: (context: CodexSandboxControllerContextV3) => void;
-}>;
-
-function createControllerHome(control: ControllerControl, options: ControllerOptions): ControllerHome {
+function prepareCodexSandboxController(
+  input: ControllerInput,
+  options: ControllerOptions = {}
+): PreparedCodexSandboxController {
+  const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
+  const sourceHome = path.resolve(options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'));
+  const control = options.control ?? controlFromEnvironment();
   const version = (options.codexVersion ?? detectedCodexVersion)();
   if (!semver.gte(version, '0.147.0')) throw new Error('CODEX_SANDBOX_CONTROLLER_CODEX_UNSUPPORTED');
+
   const runtimeRoot = path.resolve(options.temporaryRoot
     ?? path.join(os.tmpdir(), 'agent-infra-codex-controllers'));
   fs.mkdirSync(runtimeRoot, { recursive: true, mode: 0o700 });
   fs.chmodSync(runtimeRoot, 0o700);
+  const key = crypto.createHash('sha256')
+    .update(`${process.pid}\0${control.generation}`)
+    .digest('hex');
   const parentStartTime = getProcessStartTime(process.pid);
   if (!parentStartTime) throw new Error('CODEX_SANDBOX_CONTROLLER_PROCESS_IDENTITY_INVALID');
-  const key = crypto.createHash('sha256').update(`${process.pid}\0${control.generation}`).digest('hex');
   const home = fs.mkdtempSync(path.join(runtimeRoot, `${key}-`));
   fs.chmodSync(home, 0o700);
-  let context: CodexSandboxControllerContextV3 | null = null;
   let cleaned = false;
+  let context: CodexSandboxControllerContextV2 | null = null;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
@@ -370,148 +290,95 @@ function createControllerHome(control: ControllerControl, options: ControllerOpt
       }
     }
     const relative = path.relative(runtimeRoot, home);
-    if (!relative.startsWith('..') && !path.isAbsolute(relative)) fs.rmSync(home, { recursive: true, force: true });
+    if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   };
-  return { home, runtimeRoot, parentStartTime, cleanup, setContext: (value) => { context = value; } };
-}
 
-function copyControllerInputs(repoRoot: string, sourceHome: string, home: string): Readonly<{
-  hooks: string;
-  providerEnvironment: readonly string[];
-}> {
-  const auth = path.join(sourceHome, 'auth.json');
-  if (fs.existsSync(auth)) copyRegular(auth, path.join(home, 'auth.json'), 0o600);
-  const providerEnvironment = sanitizedConfig(
-    path.join(sourceHome, 'config.toml'), path.join(home, 'config.toml'), sourceHome, home
-  );
-  const hooks = path.join(repoRoot, '.codex', 'hooks.json');
-  const executor = path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml');
-  const reviewer = path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml');
-  copyRegular(hooks, path.join(home, 'hooks.json'), 0o600);
-  copyRegular(executor, path.join(home, 'agents', path.basename(executor)), 0o600);
-  copyRegular(reviewer, path.join(home, 'agents', path.basename(reviewer)), 0o600);
-  return { hooks, providerEnvironment };
-}
+  try {
+    const auth = path.join(sourceHome, 'auth.json');
+    if (fs.existsSync(auth)) copyRegular(auth, path.join(home, 'auth.json'), 0o600);
+    const providerEnvironment = sanitizedConfig(
+      path.join(sourceHome, 'config.toml'),
+      path.join(home, 'config.toml'),
+      sourceHome,
+      home
+    );
 
-function registerControllerContext(
-  startup: ReturnType<typeof controllerStartup>,
-  hooks: string,
-  parentStartTime: number,
-  options: ControllerOptions,
-  setContext: (context: CodexSandboxControllerContextV3) => void
-): CodexSandboxControllerContextV3 {
-  const control = startup.control;
-  const initialize = (): CodexSandboxControllerContextV3 => {
-    const keys = crypto.generateKeyPairSync('ed25519');
-    const attestationPrivateKey = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-    const attestationPublicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-    const controllerProcess = { pid: process.pid, startTime: parentStartTime };
-    const opened = options.initializeControllerRegistration
-      ? options.initializeControllerRegistration({ controllerProcess })
-      : openCodexControllerRegistration({
-          manifest: startup.manifest ?? readSandboxControlManifest(startup.manifestPath),
-          manifestPath: startup.manifestPath,
-          controllerProcess,
-          buildIdentity: computeLifecycleBuildIdentity(startup.manifest?.repoRoot ?? options.repoRoot ?? process.cwd())
-        });
+    const hooks = path.join(repoRoot, '.codex', 'hooks.json');
+    const executor = path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml');
+    const reviewer = path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml');
+    copyRegular(hooks, path.join(home, 'hooks.json'), 0o600);
+    copyRegular(executor, path.join(home, 'agents', path.basename(executor)), 0o600);
+    copyRegular(reviewer, path.join(home, 'agents', path.basename(reviewer)), 0o600);
+
+    const opened = (options.openController ?? requestCodexControllerOpen)({
+      controllerProcess: { pid: process.pid, startTime: parentStartTime },
+      ...control,
+      timeoutMs: 30_000
+    });
     const taskId = opened.lease.taskId;
-    assertControllerTaskBinding(startup.taskId, taskId);
     if (opened.lease.buildIdentity.protocolVersion !== LIFECYCLE_PROTOCOL_VERSION) {
       throw new Error('CODEX_LIFECYCLE_PROTOCOL_MISMATCH: Codex lifecycle protocol version does not match');
     }
+    context = contextFromControllerLease(opened.lease, {
+      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
+    });
     if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid
       || opened.lease.controllerProcess.startTime !== parentStartTime) {
       throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
     }
-    const context = contextFromControllerLease(opened.lease, {
-      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
-      attestationPrivateKey
-    });
-    setContext(context);
-    bindControllerAttestationKey(options, {
-      manifestPath: startup.manifestPath, taskId, controlGeneration: opened.lease.controlGeneration,
-      proof: controllerProofFromContext(context), publicKey: attestationPublicKey
-    });
-    return context;
-  };
-  let context: CodexSandboxControllerContextV3;
-  if (startup.manifest) {
-    const lock = acquireCodexControllerRegistrationLock(startup.manifest);
-    try {
-      const root = path.dirname(startup.manifestPath);
-      assertSandboxControlRootAvailableForController(root);
-      const current = resolveCodexSandboxControllerHostBinding(startup.manifest.repoRoot);
-      if (current.taskId !== startup.taskId
-        || path.resolve(current.manifestPath) !== path.resolve(startup.manifestPath)
-        || JSON.stringify(current.manifest) !== JSON.stringify(startup.manifest)) {
-        throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
-      }
-      context = initialize();
-    } finally {
-      lock.release();
-    }
-  } else context = initialize();
-  verifyControllerBinding(context, control, options.verifyController ?? requestCodexControllerVerify);
-  return context;
-}
+    verifyControllerBinding(context, control, options.verifyController ?? requestCodexControllerVerify);
+    const contextPath = path.join(home, 'controller-context.json');
+    writeCodexSandboxControllerContext(contextPath, context);
 
-function buildControllerLaunch(
-  input: ControllerInput,
-  repoRoot: string,
-  home: string,
-  context: CodexSandboxControllerContextV3,
-  control: ControllerControl,
-  providerEnvironment: readonly string[],
-  sourceEnvironment: NodeJS.ProcessEnv
-): Omit<PreparedCodexSandboxController, 'cleanup'> {
-  const contextPath = path.join(home, 'controller-context.json');
-  writeCodexSandboxControllerContext(contextPath, context);
-  const shimDir = path.join(home, 'bin');
-  fs.mkdirSync(shimDir, { mode: 0o700 });
-  const internalCli = path.resolve(process.argv[1] ?? path.join(repoRoot, 'bin', 'internal-cli.ts'));
-  const launcherPrefix = ['#!/bin/sh', 'set -eu', 'unset NODE_OPTIONS NODE_PATH'].join('\n') + '\n';
-  const source = internalCli.endsWith('.ts')
-    ? `${launcherPrefix}exec ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(internalCli)} "$@"\n`
-    : `${launcherPrefix}exec ${shellQuote(process.execPath)} ${shellQuote(internalCli)} "$@"\n`;
-  fs.writeFileSync(path.join(shimDir, 'agent-infra-internal'), source, { mode: 0o700 });
-  const policy = [
-    input.executorModel ? `--executor-model ${input.executorModel}` : '',
-    input.executorReasoningEffort ? `--executor-reasoning-effort ${input.executorReasoningEffort}` : '',
-    input.reviewerModel ? `--reviewer-model ${input.reviewerModel}` : '',
-    input.reviewerReasoningEffort ? `--reviewer-reasoning-effort ${input.reviewerReasoningEffort}` : ''
-  ].filter(Boolean).join(' ');
-  const prompt = `$run-task ${context.taskId}${policy ? ` ${policy}` : ''}`;
-  const args = Object.freeze([
-    'exec', '--enable', 'hooks', '--enable', 'multi_agent', '--dangerously-bypass-hook-trust',
-    '--dangerously-bypass-approvals-and-sandbox', '--json', '-C', repoRoot, prompt
-  ]);
-  const env = isolatedEnvironment(
-    home, shimDir, contextPath, context.taskId, control, providerEnvironment, sourceEnvironment
-  );
-  return Object.freeze({ command: 'codex' as const, args, env, home, contextPath, context });
-}
+    const shimDir = path.join(home, 'bin');
+    fs.mkdirSync(shimDir, { mode: 0o700 });
+    const internalCli = path.resolve(process.argv[1] ?? path.join(repoRoot, 'bin', 'internal-cli.ts'));
+    const launcherPrefix = ['#!/bin/sh', 'set -eu', 'unset NODE_OPTIONS NODE_PATH'].join('\n') + '\n';
+    const source = internalCli.endsWith('.ts')
+      ? `${launcherPrefix}exec ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(internalCli)} "$@"\n`
+      : `${launcherPrefix}exec ${shellQuote(process.execPath)} ${shellQuote(internalCli)} "$@"\n`;
+    fs.writeFileSync(path.join(shimDir, 'agent-infra-internal'), source, { mode: 0o700 });
 
-function prepareCodexSandboxController(
-  input: ControllerInput,
-  options: ControllerOptions = {}
-): PreparedCodexSandboxController {
-  const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
-  const sourceHome = path.resolve(options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'));
-  const startup = controllerStartup(repoRoot, options.control);
-  const home = createControllerHome(startup.control, options);
-  try {
-    const controllerInputs = copyControllerInputs(repoRoot, sourceHome, home.home);
-    const context = registerControllerContext(
-      startup, controllerInputs.hooks, home.parentStartTime, options, home.setContext
-    );
-    const launch = buildControllerLaunch(
-      input, repoRoot, home.home, context, startup.control, controllerInputs.providerEnvironment,
+    const policy = [
+      input.executorModel ? `--executor-model ${input.executorModel}` : '',
+      input.executorReasoningEffort ? `--executor-reasoning-effort ${input.executorReasoningEffort}` : '',
+      input.reviewerModel ? `--reviewer-model ${input.reviewerModel}` : '',
+      input.reviewerReasoningEffort ? `--reviewer-reasoning-effort ${input.reviewerReasoningEffort}` : ''
+    ].filter(Boolean).join(' ');
+    const prompt = `$run-task ${taskId}${policy ? ` ${policy}` : ''}`;
+    const args = Object.freeze([
+      'exec',
+      '--enable', 'hooks',
+      '--enable', 'multi_agent',
+      '--dangerously-bypass-hook-trust',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--json',
+      '-C', repoRoot,
+      prompt
+    ]);
+    const env = isolatedEnvironment(
+      home,
+      shimDir,
+      contextPath,
+      taskId,
+      control,
+      providerEnvironment,
       options.environment ?? process.env
     );
-    return Object.freeze({ ...launch, cleanup: home.cleanup });
+    return Object.freeze({
+      command: 'codex' as const,
+      args,
+      env,
+      home,
+      contextPath,
+      context,
+      cleanup
+    });
   } catch (error) {
-    home.cleanup();
+    cleanup();
     throw error;
   }
 }
@@ -561,11 +428,10 @@ export {
   prepareCodexSandboxController,
   runCodexSandboxController,
   verifyCodexSandboxControllerContextWithWarnings,
-  controllerProofFromContext,
-  resolveCodexSandboxControllerHostBinding
+  controllerProofFromContext
 };
 export type {
-  CodexSandboxControllerContextV3 as CodexSandboxControllerContext,
+  CodexSandboxControllerContextV2 as CodexSandboxControllerContext,
   ControllerControl,
   ControllerInput,
   ControllerOptions,

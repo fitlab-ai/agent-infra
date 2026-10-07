@@ -369,6 +369,18 @@ function controllerDomainEvidence(
   try {
     const registration = readCodexControllerRegistration(manifestPath);
     if (request.family !== 'codex-controller') return { consistent: false };
+    if (request.command === 'open') {
+      const lease = output.lease && typeof output.lease === 'object' && !Array.isArray(output.lease)
+        ? output.lease as Record<string, unknown> : null;
+      return {
+        consistent: output.status === 'opened' && output.changed === true
+          && lease?.taskId === registration.taskId
+          && lease.controlGeneration === registration.controlGeneration
+          && lease.controllerInstanceDigest === registration.controllerInstanceDigest
+          && registration.taskId === manifest.taskId
+          && registration.controlGeneration === manifest.generation
+      };
+    }
     if (request.command === 'verify') {
       const binding = output.binding && typeof output.binding === 'object' && !Array.isArray(output.binding)
         ? output.binding as Record<string, unknown> : null;

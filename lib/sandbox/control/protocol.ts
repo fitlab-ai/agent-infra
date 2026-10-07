@@ -72,7 +72,7 @@ export type SandboxTaskCreateRequest = RequestBase & Readonly<{
 }>;
 export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   family: 'codex-controller';
-  command: 'close' | 'verify' | 'attest-capability';
+  command: 'open' | 'close' | 'verify' | 'attest-capability';
   args: string[];
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
@@ -226,20 +226,17 @@ export function isSandboxControlFamily(value: string): value is SandboxControlFa
 function validControllerArgs(command: unknown, args: unknown): args is string[] {
   if (!Array.isArray(args)) return false;
   if (command !== 'attest-capability') return args.length === 0;
-  const fields = args.slice(0, 5);
-  const signature = args[5];
-  return args.length === 6
-    && fields.every((arg) => typeof arg === 'string' && arg.length > 0 && arg.length <= 4096)
-    && typeof signature === 'string' && /^[A-Za-z0-9_-]{86}$/u.test(signature);
+  return args.length === 5 && args.every((arg) => typeof arg === 'string' && arg.length > 0 && arg.length <= 4096);
 }
 
 function validateCodexControllerRequest(request: Record<string, unknown>, manifest: SandboxControlManifest): SandboxCodexControllerRequest {
   const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !validControllerArgs(request.command, request.args)
-    || !['close', 'verify', 'attest-capability'].includes(request.command as string)
+    || !['open', 'close', 'verify', 'attest-capability'].includes(request.command as string)
     || !validControllerProcess(request.controllerProcess)
-    || !validControllerProof(request.controllerProof)
+    || (request.command === 'open' && request.controllerProof !== null)
+    || (request.command !== 'open' && !validControllerProof(request.controllerProof))
     || (request.command === 'verify'
       && JSON.stringify(request.controllerProcess) !== JSON.stringify((request.controllerProof as CodexControllerLeaseProofV1).controllerProcess))) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller request schema is invalid');

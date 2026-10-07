@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,45 +58,14 @@ function fixture() {
   return { root, codexHome, runtimeDir };
 }
 
-function controlFor(f: ReturnType<typeof fixture>) {
-  const channelDir = path.join(f.runtimeDir, 'channel');
-  const statusDir = path.join(f.runtimeDir, 'public');
-  fs.mkdirSync(channelDir, { recursive: true });
-  fs.mkdirSync(statusDir, { recursive: true });
-  return {
-    token: 'control-token',
-    generation: 'generation',
-    rootId: 'control-root-id',
-    channelDir,
-    statusDir,
-    runtimeDir: f.runtimeDir
-  };
-}
-
-function controllerBroker(root: string, manifestPath: string, taskId = 'TASK-20260101-000001', generation = 'generation') {
+function controllerBroker(root: string, taskId = 'TASK-20260101-000001', generation = 'generation') {
   let active = false;
   const leaseId = 'c'.repeat(64);
   const leaseSecret = 'd'.repeat(64);
   return {
-    initializeControllerRegistration: ((params: { controllerProcess: { pid: number; startTime: number } }) => {
+    openController: ((params: { controllerProcess: { pid: number; startTime: number } }) => {
       if (active) throw new Error('CODEX_SANDBOX_CONTROLLER_BUSY');
       active = true;
-      const issuedAt = Date.now();
-      const buildIdentity = computeLifecycleBuildIdentity(root);
-      fs.writeFileSync(path.join(path.dirname(manifestPath), 'codex-controller.json'), `${JSON.stringify({
-        version: 1,
-        taskId,
-        controlGeneration: generation,
-        containerId: 'container-id',
-        leaseId,
-        leaseSecretHash: crypto.createHash('sha256').update('agent-infra/codex-controller-lease/v1\0').update(leaseSecret).digest('hex'),
-        attestationPublicKey: null,
-        controllerInstanceDigest: 'e'.repeat(64),
-        controllerProcess: params.controllerProcess,
-        buildIdentity,
-        issuedAt,
-        expiresAt: issuedAt + 60_000
-      })}\n`, { mode: 0o600 });
       return {
         version: 1 as const,
         status: 'opened' as const,
@@ -110,9 +78,9 @@ function controllerBroker(root: string, manifestPath: string, taskId = 'TASK-202
           controlGeneration: generation,
           controllerInstanceDigest: 'e'.repeat(64),
           controllerProcess: params.controllerProcess,
-          buildIdentity,
-          issuedAt,
-          expiresAt: issuedAt + 60_000
+          buildIdentity: computeLifecycleBuildIdentity(root),
+          issuedAt: Date.now(),
+          expiresAt: Date.now() + 60_000
         },
         error: null
       };
@@ -120,7 +88,6 @@ function controllerBroker(root: string, manifestPath: string, taskId = 'TASK-202
     closeController: (() => {
       const changed = active;
       active = false;
-      fs.rmSync(path.join(path.dirname(manifestPath), 'codex-controller.json'), { force: true });
       return { version: 1 as const, status: 'closed' as const, changed, lease: null, error: null };
     }) as never,
     verifyController: (() => ({
@@ -140,14 +107,19 @@ function controllerBroker(root: string, manifestPath: string, taskId = 'TASK-202
 
 test('sandbox controller prepares an isolated allowlisted home and fixed launch flags', () => {
   const f = fixture();
-  const control = controlFor(f);
-  const manifestPath = path.join(f.runtimeDir, 'manifest.json');
-  const broker = controllerBroker(f.root, manifestPath);
+  const broker = controllerBroker(f.root);
   const prepared = prepareCodexSandboxController({}, {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
-    control,
+    control: {
+      token: 'control-token',
+      generation: 'generation',
+      rootId: 'control-root-id',
+      channelDir: '/control',
+      statusDir: '/status',
+      runtimeDir: f.runtimeDir
+    },
     ...broker,
     codexVersion: () => '0.147.0',
     environment: { ...process.env, UNRELATED_CONTROLLER_SECRET: 'must-not-leak' }
@@ -192,9 +164,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
 
 test('sandbox controller rejects symlinked credentials before launch', () => {
   const f = fixture();
-  const control = controlFor(f);
-  const manifestPath = path.join(f.runtimeDir, 'manifest.json');
-  const broker = controllerBroker(f.root, manifestPath);
+  const broker = controllerBroker(f.root);
   fs.unlinkSync(path.join(f.codexHome, 'auth.json'));
   fs.symlinkSync(path.join(f.root, 'package.json'), path.join(f.codexHome, 'auth.json'));
   assert.throws(() => prepareCodexSandboxController({}, {
@@ -210,21 +180,19 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
 test('sandbox controller enforces a task lease and controller context binding', () => {
   const f = fixture();
   const temporaryRoot = trackedTemporaryRoot('codex-controller-runtime-');
-  const control = controlFor(f);
-  const manifestPath = path.join(f.runtimeDir, 'manifest.json');
-  const broker = controllerBroker(f.root, manifestPath);
+  const broker = controllerBroker(f.root);
   const options = {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot,
-    control,
+    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
     codexVersion: () => '0.147.0'
   } as const;
   const prepared = prepareCodexSandboxController({}, options);
   const contextRaw = fs.readFileSync(prepared.contextPath, 'utf8');
   const contextValue = JSON.parse(contextRaw) as Record<string, unknown>;
-  assert.equal(contextValue.version, 3);
+  assert.equal(contextValue.version, 2);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, extra: true })}\n`, { mode: 0o600 });
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
@@ -251,14 +219,12 @@ test('sandbox controller enforces a task lease and controller context binding', 
 
 test('sandbox controller closes a broker lease when the opened binding is invalid', () => {
   const f = fixture();
-  const control = controlFor(f);
-  const manifestPath = path.join(f.runtimeDir, 'manifest.json');
-  const broker = controllerBroker(f.root, manifestPath);
+  const broker = controllerBroker(f.root);
   const options = {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-invalid-binding-'),
-    control,
+    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
     verifyController: (() => ({
       version: 1 as const,

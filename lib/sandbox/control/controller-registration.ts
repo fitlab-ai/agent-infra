@@ -3,18 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import {
-  acquireSandboxControlRootLock,
-  acquireSandboxResourceLock,
-  type SandboxResourceLock
-} from './native-file-lock.ts';
-import { getProcessIdentityState, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
+import { parseLinuxProcessStat, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
+import { commandForEngine, runProbe } from '../shell.ts';
 import type { SandboxControlManifest } from './protocol.ts';
 
 const CONTROLLER_TTL_MS = 4 * 60 * 60 * 1_000;
 const HEX_256 = /^[a-f0-9]{64}$/u;
 const REGISTRATION_KEYS = [
-  'attestationPublicKey', 'buildIdentity', 'containerId', 'controlGeneration', 'controllerInstanceDigest',
+  'buildIdentity', 'containerId', 'controlGeneration', 'controllerInstanceDigest',
   'controllerProcess', 'expiresAt', 'issuedAt', 'leaseId', 'leaseSecretHash',
   'taskId', 'version'
 ].sort().join(',');
@@ -33,7 +29,6 @@ export type CodexControllerRegistrationV1 = Readonly<{
   containerId: string;
   leaseId: string;
   leaseSecretHash: string;
-  attestationPublicKey: string | null;
   controllerInstanceDigest: string;
   controllerProcess: ProcessIdentity;
   buildIdentity: LifecycleBuildIdentity;
@@ -78,33 +73,6 @@ export class CodexControllerRegistrationError extends Error {
   }
 }
 
-export function acquireCodexControllerRegistrationLock(manifest: SandboxControlManifest): SandboxResourceLock {
-  if (manifest.mode !== 'task-bound' || !manifest.taskId) {
-    fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot lock a Codex controller registration');
-  }
-  // Keep the established carrier lock, then take the stable root lock. Lifecycle removal uses this order too.
-  const carrierLock = acquireSandboxResourceLock(`${manifest.engine}:${manifest.containerIdentity.id}`, {
-    lockDomain: manifest.authorityEvidence.lockDomain
-  });
-  try {
-    const rootLock = acquireSandboxControlRootLock(path.dirname(manifest.channelDir));
-    return {
-      path: rootLock.path,
-      lockDomain: rootLock.lockDomain,
-      release(): void {
-        try {
-          rootLock.release();
-        } finally {
-          carrierLock.release();
-        }
-      }
-    };
-  } catch (error) {
-    carrierLock.release();
-    throw error;
-  }
-}
-
 function fail(code: string, message: string): never {
   throw new CodexControllerRegistrationError(code, message);
 }
@@ -133,41 +101,6 @@ function validBuild(value: unknown): value is LifecycleBuildIdentity {
     && typeof build.lifecycleContractHash === 'string' && HEX_256.test(build.lifecycleContractHash);
 }
 
-function validAttestationPublicKey(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 512) return false;
-  try {
-    return crypto.createPublicKey(value).asymmetricKeyType === 'ed25519';
-  } catch {
-    return false;
-  }
-}
-
-function validRegistrationIdentity(registration: Record<string, unknown>): boolean {
-  return Object.keys(registration).sort().join(',') === REGISTRATION_KEYS
-    && registration.version === 1
-    && typeof registration.taskId === 'string'
-    && typeof registration.controlGeneration === 'string'
-    && typeof registration.containerId === 'string'
-    && typeof registration.controllerInstanceDigest === 'string'
-    && HEX_256.test(registration.controllerInstanceDigest)
-    && validProcess(registration.controllerProcess)
-    && validBuild(registration.buildIdentity);
-}
-
-function validRegistrationLease(registration: Record<string, unknown>): boolean {
-  return typeof registration.leaseId === 'string'
-    && HEX_256.test(registration.leaseId)
-    && typeof registration.leaseSecretHash === 'string'
-    && HEX_256.test(registration.leaseSecretHash)
-    && (registration.attestationPublicKey === null || validAttestationPublicKey(registration.attestationPublicKey));
-}
-
-function validRegistrationTimes(registration: Record<string, unknown>): boolean {
-  return Number.isSafeInteger(registration.issuedAt)
-    && Number.isSafeInteger(registration.expiresAt)
-    && (registration.expiresAt as number) > (registration.issuedAt as number);
-}
-
 function parseRegistration(raw: string): CodexControllerRegistrationV1 {
   let value: unknown;
   try {
@@ -179,24 +112,22 @@ function parseRegistration(raw: string): CodexControllerRegistrationV1 {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration is invalid');
   }
   const registration = value as Record<string, unknown>;
-  if (!validRegistrationIdentity(registration)
-    || !validRegistrationLease(registration)
-    || !validRegistrationTimes(registration)) {
+  if (Object.keys(registration).sort().join(',') !== REGISTRATION_KEYS
+    || registration.version !== 1
+    || typeof registration.taskId !== 'string'
+    || typeof registration.controlGeneration !== 'string'
+    || typeof registration.containerId !== 'string'
+    || typeof registration.leaseId !== 'string' || !HEX_256.test(registration.leaseId)
+    || typeof registration.leaseSecretHash !== 'string' || !HEX_256.test(registration.leaseSecretHash)
+    || typeof registration.controllerInstanceDigest !== 'string' || !HEX_256.test(registration.controllerInstanceDigest)
+    || !validProcess(registration.controllerProcess)
+    || !validBuild(registration.buildIdentity)
+    || !Number.isSafeInteger(registration.issuedAt)
+    || !Number.isSafeInteger(registration.expiresAt)
+    || (registration.expiresAt as number) <= (registration.issuedAt as number)) {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration schema is invalid');
   }
   return registration as CodexControllerRegistrationV1;
-}
-
-function matchesAttestationLease(
-  registration: CodexControllerRegistrationV1,
-  params: Readonly<{ taskId: string; controlGeneration: string; proof: CodexControllerLeaseProofV1 }>
-): boolean {
-  return registration.taskId === params.taskId
-    && registration.controlGeneration === params.controlGeneration
-    && params.proof.version === 1
-    && registration.leaseId === params.proof.leaseId
-    && safeEqual(registration.leaseSecretHash, secretHash(params.proof.leaseSecret))
-    && JSON.stringify(registration.controllerProcess) === JSON.stringify(params.proof.controllerProcess);
 }
 
 function registrationPath(manifestPath: string): string {
@@ -234,8 +165,20 @@ function safeEqual(left: string, right: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
 }
 
-function defaultProbe(_manifest: SandboxControlManifest, identity: ProcessIdentity): ProcessIdentityState {
-  return getProcessIdentityState(identity);
+function defaultProbe(manifest: SandboxControlManifest, identity: ProcessIdentity): ProcessIdentityState {
+  const command = commandForEngine(manifest.engine, 'docker', [
+    'exec', manifest.containerIdentity.id, 'cat', `/proc/${identity.pid}/stat`
+  ]);
+  const result = runProbe(command.cmd, command.args, { timeout: 2_000 });
+  if (result.status !== 0) {
+    const stderr = typeof result.stderr === 'string' ? result.stderr : result.stderr?.toString('utf8') ?? '';
+    return /no such (?:file|container)|not found|does not exist/iu.test(stderr) ? 'dead' : 'unknown';
+  }
+  const stdout = typeof result.stdout === 'string' ? result.stdout : result.stdout?.toString('utf8') ?? '';
+  const stat = parseLinuxProcessStat(stdout);
+  if (!stat) return 'unknown';
+  if (stat.state === 'Z' || stat.startTime !== identity.startTime) return 'dead';
+  return 'alive';
 }
 
 function assertRegistrationBinding(
@@ -250,67 +193,6 @@ function assertRegistrationBinding(
   }
   if (registration.buildIdentity.protocolVersion !== buildIdentity.protocolVersion) {
     fail('CODEX_LIFECYCLE_PROTOCOL_MISMATCH', 'Codex lifecycle protocol version does not match');
-  }
-}
-
-function assertProcessState(
-  state: ProcessIdentityState,
-  inactiveMessage: string | null
-): void {
-  if (state === 'dead' && inactiveMessage) {
-    fail('CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE', inactiveMessage);
-  }
-  if (state === 'unknown') {
-    fail('CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN', 'controller process state is unknown');
-  }
-}
-
-function assertExistingRegistrationAvailable(
-  initial: { raw: string; stat: fs.Stats },
-  manifest: SandboxControlManifest,
-  buildIdentity: LifecycleBuildIdentity,
-  now: number,
-  options: RegistrationOptions
-): void {
-  const existing = parseRegistration(initial.raw);
-  assertRegistrationBinding(existing, manifest, buildIdentity);
-  if (existing.expiresAt <= now) return;
-  const probe = options.probeProcess ?? ((identity) => defaultProbe(manifest, identity));
-  const state = probe(existing.controllerProcess);
-  if (state === 'alive') fail('CODEX_SANDBOX_CONTROLLER_BUSY', 'an active controller registration already exists');
-  assertProcessState(state, null);
-}
-
-function assertRequestedProcessAvailable(
-  manifest: SandboxControlManifest,
-  identity: ProcessIdentity,
-  options: RegistrationOptions
-): void {
-  const probe = options.probeProcess ?? ((processIdentity) => defaultProbe(manifest, processIdentity));
-  assertProcessState(probe(identity), 'requested controller process is not alive');
-}
-
-function createLeaseCredentials(randomHex: () => string): Readonly<{
-  leaseId: string;
-  leaseSecret: string;
-  controllerInstanceDigest: string;
-}> {
-  const leaseId = randomHex();
-  const leaseSecret = randomHex();
-  const controllerInstanceDigest = randomHex();
-  if (![leaseId, leaseSecret, controllerInstanceDigest].every((value) => HEX_256.test(value))) {
-    fail('CODEX_SANDBOX_CONTROLLER_CREDENTIAL_INVALID', 'generated controller credential is invalid');
-  }
-  return { leaseId, leaseSecret, controllerInstanceDigest };
-}
-
-function assertRegistrationUnchanged(
-  initial: { raw: string; stat: fs.Stats } | null,
-  current: { raw: string; stat: fs.Stats } | null
-): void {
-  if ((!initial && current)
-    || (initial && (!current || current.raw !== initial.raw || !sameFile(current.stat, initial.stat)))) {
-    fail('CODEX_SANDBOX_CONTROLLER_OWNERSHIP_LOST', 'controller registration changed before commit');
   }
 }
 
@@ -347,12 +229,25 @@ export function openCodexControllerRegistration(params: Readonly<{
   const now = (options.now ?? Date.now)();
   const initial = readRaw(file);
   if (initial) {
-    assertExistingRegistrationAvailable(initial, params.manifest, params.buildIdentity, now, options);
+    const existing = parseRegistration(initial.raw);
+    assertRegistrationBinding(existing, params.manifest, params.buildIdentity);
+    if (existing.expiresAt > now) {
+      const oldState = (options.probeProcess ?? ((identity) => defaultProbe(params.manifest, identity)))(existing.controllerProcess);
+      if (oldState === 'alive') fail('CODEX_SANDBOX_CONTROLLER_BUSY', 'an active controller registration already exists');
+      if (oldState === 'unknown') fail('CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN', 'existing controller process state is unknown');
+    }
   }
-  assertRequestedProcessAvailable(params.manifest, params.controllerProcess, options);
+  const requestedState = (options.probeProcess ?? ((identity) => defaultProbe(params.manifest, identity)))(params.controllerProcess);
+  if (requestedState === 'dead') fail('CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE', 'requested controller process is not alive');
+  if (requestedState === 'unknown') fail('CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN', 'requested controller process state is unknown');
 
-  const credentials = createLeaseCredentials(options.randomHex ?? (() => crypto.randomBytes(32).toString('hex')));
-  const { leaseId, leaseSecret, controllerInstanceDigest } = credentials;
+  const randomHex = options.randomHex ?? (() => crypto.randomBytes(32).toString('hex'));
+  const leaseId = randomHex();
+  const leaseSecret = randomHex();
+  const controllerInstanceDigest = randomHex();
+  if (![leaseId, leaseSecret, controllerInstanceDigest].every((value) => HEX_256.test(value))) {
+    fail('CODEX_SANDBOX_CONTROLLER_CREDENTIAL_INVALID', 'generated controller credential is invalid');
+  }
   const registration: CodexControllerRegistrationV1 = Object.freeze({
     version: 1,
     taskId: params.manifest.taskId!,
@@ -360,7 +255,6 @@ export function openCodexControllerRegistration(params: Readonly<{
     containerId: params.manifest.containerIdentity.id,
     leaseId,
     leaseSecretHash: secretHash(leaseSecret),
-    attestationPublicKey: null,
     controllerInstanceDigest,
     controllerProcess: params.controllerProcess,
     buildIdentity: params.buildIdentity,
@@ -369,7 +263,10 @@ export function openCodexControllerRegistration(params: Readonly<{
   });
   options.beforeCommit?.();
   const current = readRaw(file);
-  assertRegistrationUnchanged(initial, current);
+  if ((!initial && current)
+    || (initial && (!current || current.raw !== initial.raw || !sameFile(current.stat, initial.stat)))) {
+    fail('CODEX_SANDBOX_CONTROLLER_OWNERSHIP_LOST', 'controller registration changed before commit');
+  }
   atomicWrite(file, registration);
   return Object.freeze({
     version: 1,
@@ -420,34 +317,6 @@ export function closeCodexControllerRegistration(params: Readonly<{
   return Object.freeze({ version: 1, status: 'closed', changed: true, lease: null, error: null });
 }
 
-export function bindCodexControllerAttestationKey(params: Readonly<{
-  manifestPath: string;
-  taskId: string;
-  controlGeneration: string;
-  proof: CodexControllerLeaseProofV1;
-  publicKey: string;
-}>): void {
-  if (!validAttestationPublicKey(params.publicKey)) {
-    fail('CODEX_SANDBOX_CONTROLLER_ATTESTATION_KEY_INVALID', 'hook attestation public key is invalid');
-  }
-  const file = registrationPath(params.manifestPath);
-  const initial = readRaw(file);
-  if (!initial) fail('SANDBOX_CONTROL_CONTROLLER_REGISTRATION_MISSING', 'controller registration is missing');
-  const registration = parseRegistration(initial.raw);
-  if (!matchesAttestationLease(registration, params)) {
-    fail('CODEX_SANDBOX_CONTROLLER_PROOF_INVALID', 'controller attestation binding proof is invalid');
-  }
-  if (registration.attestationPublicKey !== null) {
-    if (registration.attestationPublicKey === params.publicKey) return;
-    fail('CODEX_SANDBOX_CONTROLLER_ATTESTATION_KEY_CONFLICT', 'controller hook attestation key is already bound');
-  }
-  const current = readRaw(file);
-  if (!current || current.raw !== initial.raw || !sameFile(current.stat, initial.stat)) {
-    fail('CODEX_SANDBOX_CONTROLLER_OWNERSHIP_LOST', 'controller registration changed before attestation key binding');
-  }
-  atomicWrite(file, Object.freeze({ ...registration, attestationPublicKey: params.publicKey }));
-}
-
 export function resolveCodexControllerBinding(params: Readonly<{
   manifest: SandboxControlManifest;
   manifestPath: string;
@@ -458,7 +327,6 @@ export function resolveCodexControllerBinding(params: Readonly<{
 }>): Readonly<{
   instanceDigest: string;
   controlGeneration: string;
-  attestationPublicKey: string | null;
 }> {
   if (params.manifest.mode !== 'task-bound' || !params.manifest.taskId) {
     fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot resolve a Codex controller registration');
@@ -479,7 +347,6 @@ export function resolveCodexControllerBinding(params: Readonly<{
   if (state === 'unknown') fail('CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN', 'controller process state is unknown');
   return Object.freeze({
     instanceDigest: registration.controllerInstanceDigest,
-    controlGeneration: registration.controlGeneration,
-    attestationPublicKey: registration.attestationPublicKey
+    controlGeneration: registration.controlGeneration
   });
 }
