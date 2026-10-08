@@ -11,9 +11,13 @@ import {
   beginOrResumeOrchestration as beginOrResumeOrchestrationRaw,
   completeOrchestrationStage,
   dispatchOrchestrationDelegation,
+  hasActivatableOrchestrationDelegation,
+  hasSealableOrchestrationDelegation,
   OrchestrationStateError,
   pauseOrchestration,
+  pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation as prepareOrchestrationDelegationRaw,
+  reconcileMatchingOrchestrationDelegation,
   readRun,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
@@ -826,7 +830,7 @@ test('prepare does not create a separate commit delegation after review', () => 
   assert.equal(prepared.run?.pendingDelegation, null);
 });
 
-test('native start binds the unique prepared delegation without task identity', () => {
+test('native start binds the prepared delegation in its task', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -839,12 +843,141 @@ test('native start binds the unique prepared delegation without task identity', 
   const started = activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-native',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
-  }, { repoRoot: f.root });
+  }, { repoRoot: f.root, taskId: 'TASK-20260101-000001' });
 
   assert.equal(started.status, 'running');
   assert.equal(started.run?.pendingDelegation?.taskId, 'TASK-20260101-000001');
   assert.equal(started.run?.pendingDelegation?.parentId, 'parent-session');
   assert.equal(started.run?.pendingDelegation?.childId, 'child-native');
+});
+
+test('matching result APIs reject missing and invalid task identity before reading task state', () => {
+  const f = fixture('requirement-analysis');
+  const startEvent = {
+    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child',
+    parentId: 'parent', spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
+  };
+  const stopEvent = { nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child' };
+  const operations = [
+    ['activate', (options: { repoRoot: string; taskId?: string; diagnosticLog?: (event: string) => void }) =>
+      activateMatchingOrchestrationDelegation('claude-code', startEvent, options)],
+    ['seal', (options: { repoRoot: string; taskId?: string; diagnosticLog?: (event: string) => void }) =>
+      sealMatchingOrchestrationDelegation('claude-code', stopEvent, options)],
+    ['pause', (options: { repoRoot: string; taskId?: string; diagnosticLog?: (event: string) => void }) =>
+      pauseMatchingOrchestrationDelegation('claude-code', 'HOOK_FAILED', 'hook failed', options)],
+    ['reconcile', (options: { repoRoot: string; taskId?: string; diagnosticLog?: (event: string) => void }) =>
+      reconcileMatchingOrchestrationDelegation('claude-code', 'child', options)]
+  ] as const;
+
+  for (const [name, operation] of operations) {
+    for (const [taskId, expectedCode] of [
+      [undefined, 'ORCHESTRATION_TASK_ID_REQUIRED'],
+      ['TASK-20260101-000001/../../TASK-20260101-000002', 'ORCHESTRATION_TASK_ID_INVALID']
+    ] as const) {
+      const diagnostics: string[] = [];
+      const result = operation({ repoRoot: f.root, taskId, diagnosticLog: (event) => diagnostics.push(event) });
+      assert.equal(result.status, 'failed', `${name} should fail for ${String(taskId)}`);
+      assert.equal(result.error?.code, expectedCode, `${name} should report ${expectedCode}`);
+      assert.deepEqual(diagnostics, [], `${name} must validate task identity before reading state`);
+    }
+  }
+
+  for (const probe of [hasActivatableOrchestrationDelegation, hasSealableOrchestrationDelegation]) {
+    for (const taskId of [undefined, 'not-a-task'] as const) {
+      const diagnostics: string[] = [];
+      assert.equal(probe('claude-code', 'child', {
+        repoRoot: f.root, taskId, diagnosticLog: (event) => diagnostics.push(event)
+      }), false);
+      assert.deepEqual(diagnostics, []);
+    }
+  }
+});
+
+test('matching APIs do not select another task when the scoped task has no receipt', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
+
+  const startEvent = {
+    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-other-task',
+    parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
+  };
+  const stopEvent = { nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-other-task' };
+  const results = [
+    activateMatchingOrchestrationDelegation('claude-code', startEvent, { repoRoot: f.root, taskId: 'TASK-20260101-000002' }),
+    sealMatchingOrchestrationDelegation('claude-code', stopEvent, { repoRoot: f.root, taskId: 'TASK-20260101-000002' }),
+    pauseMatchingOrchestrationDelegation('claude-code', 'HOOK_FAILED', 'hook failed', { repoRoot: f.root, taskId: 'TASK-20260101-000002' }),
+    reconcileMatchingOrchestrationDelegation('claude-code', 'child-other-task', { repoRoot: f.root, taskId: 'TASK-20260101-000002' })
+  ];
+
+  for (const result of results) {
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'ORCHESTRATION_DELEGATION_MISSING');
+  }
+  assert.equal(hasActivatableOrchestrationDelegation('claude-code', 'child-other-task', {
+    repoRoot: f.root, taskId: 'TASK-20260101-000002'
+  }), false);
+  assert.equal(hasSealableOrchestrationDelegation('claude-code', 'child-other-task', {
+    repoRoot: f.root, taskId: 'TASK-20260101-000002'
+  }), false);
+  assert.equal(readRun(f.taskDir)?.pendingDelegation?.status, 'prepared');
+});
+
+test('same-client native starts and stops are isolated by task identity', () => {
+  const f = fixture('requirement-analysis-review');
+  const taskA = 'TASK-20260101-000001';
+  const taskB = 'TASK-20260101-000002';
+  const taskBDir = path.join(f.root, '.agents', 'workspace', 'active', taskB);
+  fs.mkdirSync(path.join(taskBDir, '.runtime'), { recursive: true });
+  fs.writeFileSync(path.join(taskBDir, 'task.md'), `---\nid: ${taskB}\nstatus: active\ncurrent_step: requirement-analysis-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  for (const taskDir of [f.taskDir, taskBDir]) {
+    fs.writeFileSync(path.join(taskDir, 'analysis.md'), FULL_ANALYSIS);
+    seedCompletionEvidence(taskDir);
+  }
+  for (const taskId of [taskA, taskB]) {
+    beginOrResumeOrchestration(taskId, { repoRoot: f.root });
+    prepareOrchestrationDelegation(taskId, {
+      client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
+    }, { repoRoot: f.root, captureWorkspace: snapshot, id: () => `receipt-${taskId}` });
+    dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
+  }
+
+  for (const [taskId, childId] of [[taskA, 'child-a'], [taskB, 'child-b']] as const) {
+    const started = activateMatchingOrchestrationDelegation('claude-code', {
+      nativeAgent: 'agent-infra-lifecycle-reviewer', childId,
+      parentId: `parent-${taskId}`, spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
+    }, { repoRoot: f.root, taskId });
+    assert.equal(started.status, 'running');
+    assert.equal(started.run?.pendingDelegation?.taskId, taskId);
+    assert.equal(started.run?.pendingDelegation?.childId, childId);
+    const completed = completeOrchestrationStage(taskId, {
+      stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
+    }, { repoRoot: f.root });
+    assert.equal(completed.status, 'running');
+    assert.equal(completed.error, null);
+  }
+
+  for (const [taskId, taskDir, childId] of [[taskA, f.taskDir, 'child-a'], [taskB, taskBDir, 'child-b']] as const) {
+    const stopped = sealMatchingOrchestrationDelegation('claude-code', {
+      nativeAgent: 'agent-infra-lifecycle-reviewer', childId
+    }, {
+      repoRoot: f.root,
+      taskId,
+      captureWorkspace: () => 'after-tree',
+      diffWorkspace: () => [
+        `.agents/workspace/active/${taskId}/review-analysis.md`,
+        `.agents/workspace/active/${taskId}/task.md`,
+        `.agents/workspace/active/${taskId}/.runtime/orchestration.json`
+      ]
+    });
+    assert.equal(stopped.status, 'running');
+    assert.equal(stopped.run?.pendingDelegation?.status, 'sealed');
+    assert.equal(stopped.run?.pendingDelegation?.taskId, taskId);
+    assert.equal(stopped.run?.pendingDelegation?.childId, childId);
+    assert.equal(readRun(taskDir)?.pendingDelegation?.childId, childId);
+  }
 });
 
 test('managed native hook mismatches persist a recoverable pause', () => {
@@ -860,13 +993,13 @@ test('managed native hook mismatches persist a recoverable pause', () => {
   const started = activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'wrong-role',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
-  }, { repoRoot: f.root });
+  }, { repoRoot: f.root, taskId: 'TASK-20260101-000001' });
 
   assert.equal(started.status, 'paused');
   assert.equal(started.run?.pause?.code, 'DELEGATION_ROLE_MISMATCH');
 });
 
-test('repository pending guard ignores paused runs that retain audit evidence', () => {
+test('task-local pending guard ignores paused runs that retain audit evidence', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -946,7 +1079,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
   activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
-  }, { repoRoot: f.root });
+  }, { repoRoot: f.root, taskId: 'TASK-20260101-000001' });
   completeOrchestrationStage('TASK-20260101-000001', {
     stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
   }, { repoRoot: f.root });
@@ -955,6 +1088,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop'
   }, {
     repoRoot: f.root,
+    taskId: 'TASK-20260101-000001',
     captureWorkspace,
     diffWorkspace: () => [
       '.agents/workspace/active/TASK-20260101-000001/review-analysis.md',
@@ -992,7 +1126,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
   assert.throws(() => activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-invalid',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
-  }, { repoRoot: f.root }), { name: 'OrchestrationStateError' });
+  }, { repoRoot: f.root, taskId: 'TASK-20260101-000001' }), { name: 'OrchestrationStateError' });
   assert.deepEqual(capturedScopes, ['TASK-20260101-000001']);
 });
 
@@ -1011,11 +1145,15 @@ test('replaying a start event with blank actual model/effort is idempotent, not 
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-replay',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: '   ', actualReasoningEffort: '  '
   };
-  const activated = activateMatchingOrchestrationDelegation('claude-code', startEvent, { repoRoot: f.root });
+  const activated = activateMatchingOrchestrationDelegation('claude-code', startEvent, {
+    repoRoot: f.root, taskId: 'TASK-20260101-000001'
+  });
   assert.equal(activated.status, 'running');
   assert.equal(activated.changed, true);
 
-  const replayed = activateMatchingOrchestrationDelegation('claude-code', startEvent, { repoRoot: f.root });
+  const replayed = activateMatchingOrchestrationDelegation('claude-code', startEvent, {
+    repoRoot: f.root, taskId: 'TASK-20260101-000001'
+  });
   assert.equal(replayed.status, 'running');
   assert.equal(replayed.changed, false);
   assert.equal(replayed.error, null);
@@ -1035,7 +1173,7 @@ test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () 
   activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-rollback',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
-  }, { repoRoot: f.root });
+  }, { repoRoot: f.root, taskId: 'TASK-20260101-000001' });
   completeOrchestrationStage('TASK-20260101-000001', {
     stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
   }, { repoRoot: f.root });
@@ -1044,6 +1182,7 @@ test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () 
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-rollback'
   }, {
     repoRoot: f.root,
+    taskId: 'TASK-20260101-000001',
     captureWorkspace: () => 'legacy-after-tree',
     diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000002/analysis.md']
   });

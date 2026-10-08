@@ -8,7 +8,7 @@ import { validateCurrentTaskContract } from './current-contract.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerDocument } from './ledger.ts';
-import { resolveTaskRef } from './resolve-ref.ts';
+import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import {
   activateDelegation,
   abortActivatedDelegation,
@@ -1087,56 +1087,28 @@ function dispatchOrchestrationDelegation(
   }
 }
 
+type MatchingDelegationsResult =
+  | Readonly<{ ok: true; matches: readonly { taskId: string; run: OrchestrationRun }[] }>
+  | Readonly<{ ok: false; error: OrchestrationResult }>;
+
 function matchingDelegations(
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
-): Array<{ taskId: string; run: OrchestrationRun }> {
-  const repoRoot = options.repoRoot ?? process.cwd();
-  if (options.taskId) {
-    const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', options.taskId);
-    const run = readRun(taskDir, options);
-    return run && run.status === 'running' && run.pendingDelegation && predicate(run.pendingDelegation)
-      ? [{ taskId: options.taskId, run }]
-      : [];
+): MatchingDelegationsResult {
+  const taskId: unknown = options.taskId;
+  if (taskId === undefined || taskId === '') {
+    return { ok: false, error: failed('ORCHESTRATION_TASK_ID_REQUIRED', 'taskId is required for lifecycle matching') };
   }
-  const activeRoot = path.join(repoRoot, '.agents', 'workspace', 'active');
-  if (!fs.existsSync(activeRoot)) return [];
-  emitDiagnostic(options, 'orchestration-active-scan-start', {
-    activeRoot
-  });
-  const matches = fs.readdirSync(activeRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const candidateTaskId = entry.name;
-      const candidateTaskDir = path.join(activeRoot, candidateTaskId);
-      emitDiagnostic(options, 'orchestration-active-scan-candidate', {
-        candidateTaskId,
-        candidateTaskDir,
-        orchestrationPath: orchestrationPath(candidateTaskDir)
-      });
-      let run: OrchestrationRun | null;
-      try {
-        run = readRun(candidateTaskDir, options);
-      } catch (error) {
-        emitDiagnostic(options, 'orchestration-active-scan-candidate-failed', {
-          candidateTaskId,
-          candidateTaskDir,
-          errorType: error instanceof Error ? error.name : typeof error,
-          reasonCodes: error instanceof OrchestrationStateError ? error.reasonCodes.join(',') : null
-        });
-        throw error;
-      }
-      if (!run || run.status !== 'running' || !run.pendingDelegation) return [];
-      const receipt = run.pendingDelegation;
-      return predicate(receipt)
-        ? [{ taskId: candidateTaskId, run }]
-        : [];
-    });
-  emitDiagnostic(options, 'orchestration-active-scan-finished', {
-    activeRoot,
-    matchingDelegations: matches.length
-  });
-  return matches;
+  if (typeof taskId !== 'string' || !TASK_ID_RE.test(taskId)) {
+    return { ok: false, error: failed('ORCHESTRATION_TASK_ID_INVALID', 'taskId must be a canonical TASK-id') };
+  }
+  const repoRoot = options.repoRoot ?? process.cwd();
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const run = readRun(taskDir, options);
+  const matches = run && run.status === 'running' && run.pendingDelegation && predicate(run.pendingDelegation)
+    ? [{ taskId, run }]
+    : [];
+  return { ok: true, matches };
 }
 
 function uniqueMatchingDelegation(
@@ -1144,12 +1116,13 @@ function uniqueMatchingDelegation(
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
 ): { taskId: string; run: OrchestrationRun } | OrchestrationResult {
-  const matches = matchingDelegations(
+  const lookup = matchingDelegations(
     (receipt) => receipt.client === client && predicate(receipt),
     options
   );
+  if (!lookup.ok) return lookup.error;
+  const matches = lookup.matches;
   if (matches.length === 0) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no matching lifecycle delegation exists');
-  if (matches.length > 1) return failed('ORCHESTRATION_DELEGATION_AMBIGUOUS', 'multiple lifecycle delegations match the native hook event');
   return matches[0]!;
 }
 
@@ -1158,13 +1131,14 @@ function hasActivatableOrchestrationDelegation(
   childId: string,
   options: OrchestrationOptions = {}
 ): boolean {
-  return matchingDelegations(
+  const lookup = matchingDelegations(
     (receipt) => receipt.client === client && (
       receipt.status === 'prepared'
       || (receipt.childId === childId && ['activated', 'stage-completed'].includes(receipt.status))
     ),
     options
-  ).length > 0;
+  );
+  return lookup.ok && lookup.matches.length > 0;
 }
 
 function hasSealableOrchestrationDelegation(
@@ -1172,12 +1146,13 @@ function hasSealableOrchestrationDelegation(
   childId: string,
   options: OrchestrationOptions = {}
 ): boolean {
-  return matchingDelegations(
+  const lookup = matchingDelegations(
     (receipt) => receipt.client === client
       && receipt.childId === childId
       && ['stage-completed', 'sealed'].includes(receipt.status),
     options
-  ).length > 0;
+  );
+  return lookup.ok && lookup.matches.length > 0;
 }
 
 function activateMatchingOrchestrationDelegation(
