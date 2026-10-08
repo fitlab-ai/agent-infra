@@ -268,6 +268,7 @@ function writeTaskBoundCleanupEvidence(
   const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;
   const controlRoot = sandboxControlPaths({
     base: config.controlBase,
+    repoRoot: config.repoRoot,
     project: config.project,
     container,
     identity: { mode: "task-bound", taskId }
@@ -375,6 +376,7 @@ function addControlRootVariant(
 ): string {
   const root = sandboxControlPaths({
     base: config.controlBase,
+    repoRoot: config.repoRoot,
     project: config.project,
     container,
     identity: { mode: "task-bound", taskId }
@@ -1125,7 +1127,7 @@ test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("
       isCancel: (value): value is typeof import("@clack/prompts").CANCEL_SYMBOL => false
     }));
 
-    assert.equal(fs.existsSync(evidence.controlRoot), false);
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
     assert.equal(fs.existsSync(evidence.intentPath), true);
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
   } finally {

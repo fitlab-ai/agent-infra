@@ -43,6 +43,7 @@ import { manualValidationFinalSummaryProjectionMatches } from "./manual-validati
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
 import { sha256File } from "./artifact-receipts.ts";
 import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
+import { getAgentClientAdapter } from "../agent-clients/registry.ts";
 import { parseArtifactName } from "./artifact-name.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
 import { taskIssueIdentity } from "../platform/task-identities.ts";
@@ -147,7 +148,7 @@ async function runCheck(type: any, context: any, shared: any): Promise<any> {
 }
 
 function checkOrchestrationState({ taskDir }: any): any {
-  const file = path.join(taskDir, 'orchestration.json');
+  const file = path.join(taskDir, '.runtime', 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-state', 'orchestration.json is missing');
   let run: OrchestrationRun | null;
@@ -160,6 +161,8 @@ function checkOrchestrationState({ taskDir }: any): any {
   if (!run || !['paused', 'completed'].includes(run.status)) {
     return failResult('orchestration-state', `Expected paused or completed run, received '${run?.status ?? 'missing'}'`);
   }
+  const adapterEvidenceError = validateAdapterReceiptEvidence(run);
+  if (adapterEvidenceError) return failResult('orchestration-state', adapterEvidenceError);
   if (run.status === 'paused' && (!run.pause?.code || !run.pause?.message)) {
     return failResult('orchestration-state', 'Paused run requires a stable pause code and message');
   }
@@ -215,8 +218,19 @@ function validateCleanCompletionEvidence(run: OrchestrationRun): string | null {
   return null;
 }
 
+function validateAdapterReceiptEvidence(run: OrchestrationRun): string | null {
+  const receipts = [...run.receipts, ...(run.pendingDelegation ? [run.pendingDelegation] : [])];
+  for (const receipt of receipts) {
+    const validate = getAgentClientAdapter(receipt.client).orchestrationAdapter?.validateReceiptEvidence;
+    if (validate && !validate(receipt)) {
+      return `Receipt '${receipt.id}' has invalid evidence from its agent adapter`;
+    }
+  }
+  return null;
+}
+
 function checkOrchestrationEvidence({ taskDir }: any): any {
-  const file = path.join(taskDir, 'orchestration.json');
+  const file = path.join(taskDir, '.runtime', 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-evidence', 'orchestration.json is missing');
   let run: OrchestrationRun | null;
@@ -227,6 +241,8 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
     return failResult('orchestration-evidence', `Invalid orchestration.json: ${message}`);
   }
   if (!run) return failResult('orchestration-evidence', 'orchestration.json is missing');
+  const adapterEvidenceError = validateAdapterReceiptEvidence(run);
+  if (adapterEvidenceError) return failResult('orchestration-evidence', adapterEvidenceError);
   // readRun validates the persisted schema, receipt identities and client provenance.
   const policy = run.modelPolicy;
   if (run.completionEvidence != null) {
@@ -249,20 +265,22 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
     }
     const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
     if (activated) {
-      const isClaudeCode = receipt.client === 'claude-code';
-      if (!isClaudeCode) {
+      const evidencePolicy = getAgentClientAdapter(receipt.client).delegationEvidence;
+      if (evidencePolicy.actualModelRequired !== false) {
         if (!exactText(receipt.actualModel)) {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual model`);
         }
+      }
+      if (evidencePolicy.actualReasoningEffortRequired !== false) {
         if (!exactText(receipt.actualReasoningEffort)) {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual reasoning effort`);
         }
       }
-      if (!isClaudeCode && receipt.spawnMode !== 'fresh') {
+      if (evidencePolicy.spawnModeRequired !== false && receipt.spawnMode !== 'fresh') {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
       }
       if (receipt.actualModel != null && receipt.actualModel !== receipt.requestedModel) {
-        if (!isClaudeCode && !exactText(receipt.modelFallbackReason)) {
+        if (evidencePolicy.fallbackReasonRequired !== false && !exactText(receipt.modelFallbackReason)) {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' model fallback is not justified`);
         }
       }
@@ -273,7 +291,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated model fallback reason`);
       }
       if (receipt.actualReasoningEffort != null && receipt.actualReasoningEffort !== receipt.requestedReasoningEffort) {
-        if (!isClaudeCode && !exactText(receipt.reasoningEffortFallbackReason)) {
+        if (evidencePolicy.fallbackReasonRequired !== false && !exactText(receipt.reasoningEffortFallbackReason)) {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' reasoning-effort fallback is not justified`);
         }
       }

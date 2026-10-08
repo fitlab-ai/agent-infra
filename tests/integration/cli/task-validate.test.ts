@@ -161,6 +161,7 @@ function inplaceFixture({ includeContainer = true }: { includeContainer?: boolea
   const generation = 'inplace-fixture-generation';
   const control = sandboxControlPaths({
     base: path.join(tmpDir, '.agent-infra', 'sandbox-control'),
+    repoRoot: repoDir,
     project, container: containerName,
     identity: { mode: 'task-bound', taskId, shortId }
   });

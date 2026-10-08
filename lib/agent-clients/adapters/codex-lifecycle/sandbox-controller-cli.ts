@@ -1,8 +1,8 @@
 import {
   runCodexSandboxController,
   verifyCodexSandboxControllerContextWithWarnings
-} from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
-import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+} from './sandbox-controller.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from '../../../internal/cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-sandbox-controller <run|verify-context> [options]\n';
 

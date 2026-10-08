@@ -72,7 +72,7 @@ import {
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
-import { readCodexControllerRegistration } from './controller-registration.ts';
+import { recoverAgentClientOperation, validateAgentClientOperation } from './agent-operation.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
@@ -130,7 +130,7 @@ function appendBrokerAudit(
 function operationKey(request: SandboxControlRequest): string | null {
   if (request.family === 'task-finalization') return request.operation;
   if (request.family === 'task-create') return 'create';
-  if (request.family === 'codex-controller') return request.command;
+  if (request.family === 'agent-client') return request.operation;
   if (request.family !== 'task-lifecycle') return null;
   try {
     const operation = parseTaskControlOperation(request.family, request.args);
@@ -318,46 +318,6 @@ function taskCreateDomainEvidence(
   }
 }
 
-function controllerDomainEvidence(
-  manifest: SandboxControlManifest,
-  manifestPath: string,
-  request: SandboxControlRequest,
-  output: Record<string, unknown> | null
-): Readonly<Record<string, unknown>> {
-  if (!output || output.error !== null || typeof output.status !== 'string') return { consistent: false };
-  try {
-    const registration = readCodexControllerRegistration(manifestPath);
-    if (request.family !== 'codex-controller') return { consistent: false };
-    if (request.command === 'open') {
-      const lease = output.lease && typeof output.lease === 'object' && !Array.isArray(output.lease)
-        ? output.lease as Record<string, unknown> : null;
-      return {
-        consistent: output.status === 'opened' && output.changed === true
-          && lease?.taskId === registration.taskId
-          && lease.controlGeneration === registration.controlGeneration
-          && lease.controllerInstanceDigest === registration.controllerInstanceDigest
-          && registration.taskId === manifest.taskId
-          && registration.controlGeneration === manifest.generation
-      };
-    }
-    if (request.command === 'verify') {
-      const binding = output.binding && typeof output.binding === 'object' && !Array.isArray(output.binding)
-        ? output.binding as Record<string, unknown> : null;
-      return {
-        consistent: output.status === 'verified' && output.changed === false
-          && binding?.taskId === registration.taskId
-          && binding.controlGeneration === registration.controlGeneration
-          && binding.controllerInstanceDigest === registration.controllerInstanceDigest
-      };
-    }
-    return { consistent: false };
-  } catch (error) {
-    return { consistent: request.family === 'codex-controller' && request.command === 'close'
-      && (error as { code?: string }).code === 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_MISSING'
-      && output?.status === 'closed' && typeof output.changed === 'boolean' };
-  }
-}
-
 async function readRecoveryDomain(
   manifest: SandboxControlManifest,
   manifestPath: string,
@@ -371,7 +331,7 @@ async function readRecoveryDomain(
     ? manifest.taskId
     : 'args' in request ? request.args[0] ?? null : manifest.taskId;
   const output = parseControlOutput(payloadOutput);
-  if (!taskRef && operation.family !== 'task-create' && operation.family !== 'codex-controller') {
+  if (!taskRef && operation.family !== 'task-create' && operation.family !== 'agent-client') {
     return { domain: null };
   }
 
@@ -399,8 +359,13 @@ async function readRecoveryDomain(
   if (operation.family === 'task-create') {
     return { domain: taskCreateDomainEvidence(manifest, output) };
   }
-  if (operation.family === 'codex-controller') {
-    return { domain: controllerDomainEvidence(manifest, manifestPath, request, output) };
+  if (operation.family === 'agent-client' && request.family === 'agent-client') {
+    return { domain: recoverAgentClientOperation({
+      request,
+      manifest,
+      manifestPath,
+      stdout: payloadOutput
+    }) };
   }
   return { domain: null };
 }
@@ -638,6 +603,7 @@ async function recoverProcessing(manifest: SandboxControlManifest, manifestPath:
         request = validateSandboxControlRequest(rawRequest, manifest, {
           now: typeof rawRequest.issuedAt === 'number' ? rawRequest.issuedAt : undefined
         });
+        if (request.family === 'agent-client') validateAgentClientOperation(request, manifest);
       } catch {
         // Missing or malformed request evidence remains fail-closed below.
       }
@@ -1070,6 +1036,7 @@ export async function serveSandboxControl(
           if (reasonCode) throw new Error(reasonCode);
           if (active) throw new Error('SANDBOX_CONTROL_BUSY');
           const request = validateSandboxControlRequest(JSON.parse(fs.readFileSync(claimed, 'utf8')), manifest);
+          if (request.family === 'agent-client') validateAgentClientOperation(request, manifest);
           validatedRequest = request;
           criticalRequestPhase(manifest, request, 'validated', 'in-progress');
           appendBrokerAudit(manifest, 'request-validated', {
@@ -1156,12 +1123,6 @@ export async function serveSandboxControl(
               });
             }
           );
-          if (!brokerOwns()) {
-            prepared.terminate(false);
-            active = null;
-            retiring = true;
-            continue;
-          }
           if (!brokerOwns()) {
             prepared.terminate(false);
             active = null;

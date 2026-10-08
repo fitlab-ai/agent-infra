@@ -19,9 +19,30 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     workspaceViewRoot: '/views/current',
     controlDir: '/control/current',
     controlStatusDir: '/control/status',
+    runtimeDir: '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime',
     taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
     taskId: 'TASK-20260809-010203'
   });
+  const controllerHome = '/tmp/agent-infra-codex-controllers/controller-home';
+  const controllerContext = path.join(controllerHome, 'controller-context.json');
+  assert.deepEqual(mounts.flatMap((mount) => mount.hostPaths), [
+    '/repo/.git',
+    '/worktree',
+    '/control/current/workspace.git',
+    path.join('/views/current', 'active', '.short-ids.json'),
+    path.join('/views/current', 'completed'),
+    path.join('/views/current', 'blocked'),
+    path.join('/views/current', 'archive'),
+    '/repo/.agents/workspace/active/TASK-20260809-010203',
+    '/share/common',
+    '/share/branches/feature',
+    '/shell/feature',
+    '/control/status',
+    '/control/current',
+    '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'
+  ]);
+  assert.equal(mounts.some((mount) => mount.hostPaths.some((hostPath) =>
+    controllerContext === hostPath || controllerContext.startsWith(`${hostPath}/`))), false);
   assert.deepEqual(mounts.slice(0, 3), [
     { hostPaths: ['/repo/.git'], containerPath: '/run/agent-infra/git', readOnly: false },
     { hostPaths: ['/worktree'], containerPath: '/workspace', readOnly: false },
@@ -53,15 +74,21 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
       hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
       containerPath: '/workspace/.agents/workspace/active/TASK-20260809-010203',
       readOnly: false
-    }
+    },
   ]);
   assert.equal(mounts.some((mount) => mount.hostPaths.includes('/repo/.agents/workspace')), false);
-  assert.deepEqual(mounts.at(-2), {
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/runtime'), {
+    hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'],
+    containerPath: '/run/agent-infra/runtime',
+    readOnly: false
+  });
+  assert.equal(mounts.some((mount) => mount.hostPaths.some((hostPath) => hostPath.includes('private-capabilities'))), false);
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control-status'), {
     hostPaths: ['/control/status'],
     containerPath: '/run/agent-infra/control-status',
     readOnly: true
   });
-  assert.deepEqual(mounts.at(-1), {
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control'), {
     hostPaths: ['/control/current'],
     containerPath: '/run/agent-infra/control',
     readOnly: false

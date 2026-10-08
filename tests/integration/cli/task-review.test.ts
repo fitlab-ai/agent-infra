@@ -21,6 +21,7 @@ function fixture(scenario: (typeof scenarios)[number], line: string) {
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(dir, scenario.input), '# Input\n');
   fs.writeFileSync(path.join(dir, 'task.md'), `---
 id: ${TASK_ID}
@@ -66,27 +67,14 @@ current_step: ${scenario.step}
 
 function reviewReceipt(artifact: string, overrides: Record<string, unknown> = {}) {
   const status = typeof overrides.status === 'string' ? overrides.status : 'activated';
-  const lifecycleProvenance = {
-    protocolVersion: 3, packageVersion: '0.9.9-alpha.0',
-    internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
-    hookDefinitionHash: 'hook-hash', hookSource: 'project',
-    hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-    capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
-    capabilityToolUseId: 'capability-tool', controllerInstanceDigest: null,
-    controlGeneration: null
-  } as const;
-  const hostEvidence = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(status)
-    ? {
-        kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4,
-        stopRevision: null, consumer: null, consumedAt: null, protocolVersion: 3,
-        packageVersion: '0.9.9-alpha.0', internalExecutableBuildHash: 'a'.repeat(64),
-        lifecycleContractHash: 'b'.repeat(64), hookSource: 'project',
-        hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-        capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
-        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
-        controllerInstanceDigest: null, controlGeneration: null
-      }
-    : null;
+  const adapterEvidence = ['activated', 'stage-completed', 'sealed', 'consumed', 'aborted'].includes(status)
+    ? { codex: {
+        activationEvidence: { kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4, capabilitySessionId: 'parent-1' },
+        records: ['sealed', 'consumed', 'aborted'].includes(status)
+          ? { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } }
+          : {}
+      } }
+    : {};
   return {
     id: 'receipt-1', taskId: TASK_ID, runId: 'run-1', role: 'reviewer',
     stage: 'review-analysis', round: 1, artifact, client: 'codex',
@@ -94,8 +82,8 @@ function reviewReceipt(artifact: string, overrides: Record<string, unknown> = {}
     actualModel: 'reviewer-model', actualReasoningEffort: 'high',
     modelFallbackReason: null, reasoningEffortFallbackReason: null,
     parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: null,
-    status, workspaceSnapshotScope: 'task', lifecycleProvenance,
-    hostEvidence, beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
+    status, workspaceSnapshotScope: 'task', adapterEvidence,
+    beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
     createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
     spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
     spawnDispatchedAt: '2026-01-01T00:00:00.000Z',
@@ -172,7 +160,7 @@ test('orchestrated finalization dry-run reports a mismatch without pausing the r
     scenario,
     '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
   );
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     pendingDelegation: reviewReceipt(f.artifact, {
       status: 'prepared', parentId: null, childId: null, spawnMode: null,
@@ -202,7 +190,7 @@ test('standalone finalization ignores a current run without a pending delegation
     scenario,
     '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
   );
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     status: 'completed', nextStage: null,
     commitAuthorization: { issuedAt: null, consumedAt: '2026-01-01T00:00:01.000Z' }
@@ -224,7 +212,7 @@ test('orchestrated finalization accepts one matching activated delegation withou
     scenario,
     '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
   );
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     pendingDelegation: reviewReceipt(f.artifact)
   }), null, 2)}\n`);

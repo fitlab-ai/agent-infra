@@ -261,7 +261,7 @@ function writeSandboxEngineFixture(
       "    const digest = crypto.createHash('sha256').update(taskId ? `task-bound:${taskId}` : 'branch-only').digest('hex').slice(0, 16);",
       "    const container = `${project}-dev-${branchDir}`;",
       "    const view = path.join(home, '.agent-infra', 'workspace-views', project, container, digest);",
-      "    const controlRoot = path.join(home, '.agent-infra', 'sandbox-control', project, container, digest);",
+      "    const controlRoot = mode === 'task-bound' ? path.join(repoDir, '.agents', 'workspace', 'active', taskId, '.runtime', 'sandbox-control') : path.join(home, '.agent-infra', 'sandbox-control', project, container, digest);",
       "    const control = path.join(controlRoot, 'channel');",
       "    const workspaceMounts = mode === 'task-bound'",
       "      ? [",

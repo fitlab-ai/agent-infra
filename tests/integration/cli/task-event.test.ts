@@ -116,6 +116,7 @@ function fixture(step = 'requirement-analysis-review') {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\ndelivery_remote: origin\ndelivery_base_ref: main\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), FULL_ANALYSIS);
   if (['technical-design-review', 'code', 'code-review', 'commit'].includes(step)) {
@@ -181,35 +182,22 @@ function fixture(step = 'requirement-analysis-review') {
 
 function orchestrationReceipt(taskId: string, overrides: Record<string, unknown> = {}) {
   const status = typeof overrides.status === 'string' ? overrides.status : 'activated';
-  const lifecycleProvenance = {
-    protocolVersion: 3, packageVersion: '0.9.9-alpha.0',
-    internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
-    hookDefinitionHash: 'hook-hash', hookSource: 'project',
-    hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-    capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
-    capabilityToolUseId: 'capability-tool', controllerInstanceDigest: null,
-    controlGeneration: null
-  } as const;
-  const hostEvidence = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(status)
-    ? {
-        kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4,
-        stopRevision: null, consumer: null, consumedAt: null, protocolVersion: 3,
-        packageVersion: '0.9.9-alpha.0', internalExecutableBuildHash: 'a'.repeat(64),
-        lifecycleContractHash: 'b'.repeat(64), hookSource: 'project',
-        hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-        capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
-        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
-        controllerInstanceDigest: null, controlGeneration: null
-      }
-    : null;
+  const adapterEvidence = ['activated', 'stage-completed', 'sealed', 'consumed', 'aborted'].includes(status)
+    ? { codex: {
+        activationEvidence: { kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4, capabilitySessionId: 'parent-1' },
+        records: ['sealed', 'consumed', 'aborted'].includes(status)
+          ? { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } }
+          : {}
+      } }
+    : {};
   return {
     id: 'receipt-1', taskId, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
     artifact: 'plan.md', client: 'codex', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh',
     modelFallbackReason: null, reasoningEffortFallbackReason: null,
     parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: null,
-    status, workspaceSnapshotScope: 'task', lifecycleProvenance,
-    hostEvidence, beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
+    status, workspaceSnapshotScope: 'task', adapterEvidence,
+    beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
     createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
     spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
     spawnDispatchedAt: '2026-01-01T00:00:00.000Z',
@@ -1008,11 +996,11 @@ test('standalone completion ignores a current orchestration run without a pendin
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  fs.writeFileSync(path.join(f.dir, 'orchestration.json'), `${JSON.stringify(currentRun(f.id, {
+  fs.writeFileSync(path.join(f.dir, '.runtime', 'orchestration.json'), `${JSON.stringify(currentRun(f.id, {
     status: 'paused', nextStage: null,
     pause: { code: 'ORCHESTRATION_RETRYABLE', message: 'retry later', recoverable: true }
   }), null, 2)}\n`);
-  const runBefore = fs.readFileSync(path.join(f.dir, 'orchestration.json'));
+  const runBefore = fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json'));
 
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
@@ -1020,14 +1008,14 @@ test('standalone completion ignores a current orchestration run without a pendin
 
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
   assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.deepEqual(fs.readFileSync(path.join(f.dir, 'orchestration.json')), runBefore);
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json')), runBefore);
 });
 
 test('standalone completion ignores a legacy delegation receipt without a current child attempt', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id, {
       status: 'prepared', parentId: null, childId: null, spawnMode: null,
@@ -1051,7 +1039,7 @@ test('orchestrated completion advances one matching activated delegation', () =>
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id)
   }), null, 2)}\n`);
@@ -1072,7 +1060,7 @@ test('orchestrated completion reports a distinct partial-write error when the ru
     '--request-id', `test:${f.id}:plan`, '--reason-code', 'user-request'
   ]).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id)
   }), null, 2)}\n`);
@@ -1151,7 +1139,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, 'orchestration.json');
+  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id, {
       status: 'prepared', parentId: null, childId: null, spawnMode: null,
@@ -2147,6 +2135,21 @@ test('code-r7 completion accepts a directly repaired report', () => {
   const started = run(f.root, [f.id, 'code.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   assert.equal(JSON.parse(started.stdout).artifact, 'code-r7.md');
+  const staleStart = fs.readFileSync(f.file, 'utf8').replace(
+    'Code Task (Round 7, fix for review-code-r6.md) [started]',
+    'Code Task (Round 7) [started]'
+  );
+  fs.writeFileSync(f.file, staleStart);
+  const resumed = run(f.root, [
+    f.id, 'code.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', `${f.id}:code-resume-fix`, '--reason-code', 'review-finding',
+    '--fix-for', 'review-code-r6.md'
+  ]);
+  assert.equal(resumed.status, 0, resumed.stdout || resumed.stderr);
+  assert.equal(JSON.parse(resumed.stdout).status, 'applied');
+  const resumedContent = fs.readFileSync(f.file, 'utf8');
+  assert.match(resumedContent, /Code Task \(Round 7\) \[aborted\].*superseded by Code Task \(Round 7, fix for review-code-r6\.md\)/);
+  assert.match(resumedContent, /Code Task \(Round 7, fix for review-code-r6\.md\) \[started\]/);
   const beforeRecovery = fs.readFileSync(f.file);
   const artifactPath = path.join(f.dir, 'code-r7.md');
   const malformed = codeReport().replace(/## 实现输入[\s\S]*?(?=## 变更文件)/, '');

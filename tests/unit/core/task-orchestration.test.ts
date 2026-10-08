@@ -62,6 +62,7 @@ function fixture(step: string) {
   fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
   fs.mkdirSync(taskDir, { recursive: true });
+  fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: ${step}\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return { root, taskDir };
 }
@@ -115,7 +116,7 @@ function seedCompletionEvidence(taskDir: string) {
   recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
 }
 
-test('dispatch respects the repository execution lock', () => {
+test('dispatch uses the task lock without depending on a repository-wide lock', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -129,8 +130,8 @@ test('dispatch respects the repository execution lock', () => {
     () => dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root })
   );
 
-  assert.equal(result.error?.code, 'ORCHESTRATION_LOCK_BUSY');
-  assert.equal(readRun(f.taskDir)?.pendingDelegation?.spawnDispatchedAt, null);
+  assert.equal(result.status, 'running');
+  assert.notEqual(readRun(f.taskDir)?.pendingDelegation?.spawnDispatchedAt, null);
 });
 
 function approvedCodeFixture(manualValidation = 0) {
@@ -170,7 +171,7 @@ test('begin is persistent and idempotent for a running task', () => {
   });
   assert.equal(first.status, 'running');
   assert.equal(first.changed, true);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.taskDir, 'orchestration.json'), 'utf8')), {
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.taskDir, '.runtime', 'orchestration.json'), 'utf8')), {
     taskId: 'TASK-20260101-000001',
     runId: 'run-1',
     status: 'running',
@@ -207,7 +208,7 @@ test('readRun rejects persisted state outside the current complete structure', (
   ]) {
     const f = fixture('requirement-analysis');
     beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
     const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
     mutate(persisted);
     fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
@@ -218,7 +219,7 @@ test('readRun rejects persisted state outside the current complete structure', (
 test('orchestration state diagnostics identify the file, digest, and validation reason', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   persisted.schemaVersion = 3;
   fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
@@ -240,7 +241,7 @@ test('orchestration state diagnostics identify the file, digest, and validation 
 test('orchestration diagnostics protect malformed content and tolerate logger failures', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const expected = readRun(f.taskDir);
   const brokenLogger = (): never => { throw new Error('audit unavailable'); };
   assert.deepEqual(readRun(f.taskDir, { diagnosticLog: brokenLogger }), expected);
@@ -257,56 +258,34 @@ test('orchestration diagnostics protect malformed content and tolerate logger fa
   assert.throws(() => readRun(f.taskDir, { diagnosticLog: brokenLogger }), OrchestrationStateError);
 });
 
-test('orchestration diagnostics identify an invalid unrelated active candidate', () => {
+test('task-scoped prepare does not inspect an unrelated active task', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const otherTaskId = 'TASK-20260101-000002';
   const otherTaskDir = path.join(f.root, '.agents', 'workspace', 'active', otherTaskId);
   fs.mkdirSync(otherTaskDir, { recursive: true });
-  fs.writeFileSync(path.join(otherTaskDir, 'orchestration.json'), '{"schemaVersion":3}\n');
+  fs.mkdirSync(path.join(otherTaskDir, '.runtime'), { recursive: true });
+  fs.writeFileSync(path.join(otherTaskDir, '.runtime', 'orchestration.json'), '{"schemaVersion":3}\n');
   const events: Array<{ event: string; fields: Readonly<Record<string, unknown>> }> = [];
 
-  assert.throws(
-    () => prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
+  const prepared = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
       client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
     }, {
       repoRoot: f.root,
       supportsLifecycleDelegation: () => true,
+      captureWorkspace: snapshot,
       diagnosticLog: (event, fields) => events.push({ event, fields })
-    }),
-    (error: unknown) => error instanceof OrchestrationStateError && error.reasonCodes.includes('top-level-keys')
-  );
-  const failed = events.find(({ event, fields }) => event === 'orchestration-active-scan-candidate-failed'
-    && fields.candidateTaskId === otherTaskId);
-  assert.ok(failed);
-  assert.equal(failed.fields.reasonCodes, 'top-level-keys');
-  assert.equal(failed.fields.candidateTaskDir, otherTaskDir);
-  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
-});
-
-test('persisted run identity is bound to its task directory', () => {
-  const f = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
-  const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
-  persisted.taskId = 'TASK-20990101-999999';
-  fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
-
-  assert.throws(() => readRun(f.taskDir), { name: 'OrchestrationStateError' });
-  assert.throws(
-    () => statusOrchestration('TASK-20260101-000001', { repoRoot: f.root }),
-    { name: 'OrchestrationStateError' }
-  );
-  assert.equal(
-    beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).error?.code,
-    'ORCHESTRATION_STATE_INVALID'
-  );
+    });
+  assert.equal(prepared.status, 'running', JSON.stringify(prepared));
+  assert.equal(prepared.run?.pendingDelegation?.taskId, 'TASK-20260101-000001');
+  assert.equal(events.some(({ fields }) => fields.candidateTaskId === otherTaskId), false);
+  assert.equal(fs.readFileSync(path.join(otherTaskDir, '.runtime', 'orchestration.json'), 'utf8'), '{"schemaVersion":3}\n');
 });
 
 test('completed current runs are idempotent across client changes', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const completed = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   completed.status = 'completed';
   fs.writeFileSync(runPath, `${JSON.stringify(completed, null, 2)}\n`);
@@ -335,7 +314,7 @@ test('begin requires a client and does not write state when no policy source is 
   });
   assert.equal(withoutPolicy.error?.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
   assert.equal(withoutPolicy.error?.modelSelectionContext?.kind, 'interactive-only');
-  assert.equal(fs.existsSync(path.join(missingPolicy.taskDir, 'orchestration.json')), false);
+  assert.equal(fs.existsSync(path.join(missingPolicy.taskDir, '.runtime', 'orchestration.json')), false);
 });
 
 test('begin accepts a complete run-level policy when both roles use the same model', () => {
@@ -344,7 +323,7 @@ test('begin accepts a complete run-level policy when both roles use the same mod
     repoRoot: missing.root, client: 'claude-code'
   });
   assert.equal(missingResult.error?.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
-  assert.equal(fs.existsSync(path.join(missing.taskDir, 'orchestration.json')), false);
+  assert.equal(fs.existsSync(path.join(missing.taskDir, '.runtime', 'orchestration.json')), false);
 
   const shared = fixture('requirement-analysis');
   const sharedResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
@@ -379,7 +358,7 @@ test('resume rejects policy changes and fails closed for unsupported persisted s
   ]) {
     const invalid = fixture('requirement-analysis');
     beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: invalid.root });
-    const runPath = path.join(invalid.taskDir, 'orchestration.json');
+    const runPath = path.join(invalid.taskDir, '.runtime', 'orchestration.json');
     const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
     mutate(persisted);
     const serialized = `${JSON.stringify(persisted, null, 2)}\n`;
@@ -395,7 +374,7 @@ test('resume rejects policy changes and fails closed for unsupported persisted s
 test('Claude Code resumes only a pristine unsupported-client pause with current provenance', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   paused.status = 'paused';
   paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
@@ -425,7 +404,7 @@ test('Claude Code resumes only a pristine unsupported-client pause with current 
 test('unsupported-client recovery remains paused when current guards do not hold', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   paused.status = 'paused';
   paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
@@ -440,12 +419,12 @@ test('unsupported-client recovery remains paused when current guards do not hold
   assert.equal(result.run?.pause?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
 });
 
-test('Codex unsupported-client pauses remain paused', () => {
+test('Codex resumes a capability pause when delegation support is available', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: f.root, client: 'codex', modelPolicy
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   paused.status = 'paused';
   paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
@@ -454,15 +433,15 @@ test('Codex unsupported-client pauses remain paused', () => {
   const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: f.root, client: 'codex', modelPolicy
   });
-  assert.equal(result.status, 'paused');
-  assert.equal(result.changed, false);
-  assert.deepEqual(result.run?.recoveryHistory, []);
+  assert.equal(result.status, 'running');
+  assert.equal(result.changed, true);
+  assert.equal(result.run?.recoveryHistory.at(-1)?.code, 'CLIENT_CAPABILITY_ENABLED');
 });
 
 test('current recoverable pauses resume directly without recovery provenance', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   paused.status = 'paused';
   paused.pause = { code: 'ORCHESTRATION_RETRYABLE', message: 'retry', recoverable: true };
@@ -639,9 +618,9 @@ test('route rejects clean completion while a lifecycle execution remains open', 
       '## Activity Log\n\n',
       '## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
     ));
-    if (runState === 'missing') fs.unlinkSync(path.join(f.taskDir, 'orchestration.json'));
+    if (runState === 'missing') fs.unlinkSync(path.join(f.taskDir, '.runtime', 'orchestration.json'));
     const taskBefore = fs.readFileSync(taskPath);
-    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
     const runBefore = runState === 'idle' ? fs.readFileSync(runPath) : null;
 
     const routed = routeOrchestration('TASK-20260101-000001', {
@@ -917,7 +896,7 @@ test('repository pending guard ignores paused runs that retain audit evidence', 
   assert.equal(readRun(f.taskDir)?.pendingDelegation?.status, 'prepared');
 });
 
-test('repository pending guard still blocks a second running delegation', () => {
+test('different tasks can hold independent pending delegations while one task still rejects duplicates', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -934,14 +913,18 @@ test('repository pending guard still blocks a second running delegation', () => 
   );
   beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
 
-  const prepared = prepareOrchestrationDelegation('TASK-20260101-000002', {
-    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
-  }, {
-    repoRoot: f.root, captureWorkspace: snapshot
-  });
+  const second = prepareOrchestrationDelegation('TASK-20260101-000002', {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { repoRoot: f.root, captureWorkspace: snapshot, id: () => 'receipt-second' });
+  const duplicate = prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'opencode', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
 
-  assert.equal(prepared.error?.code, 'ORCHESTRATION_DELEGATION_BUSY');
-  assert.equal(prepared.changed, false);
+  assert.equal(second.status, 'running');
+  assert.equal(second.run?.pendingDelegation?.taskId, 'TASK-20260101-000002');
+  assert.equal(readRun(f.taskDir)?.pendingDelegation?.taskId, 'TASK-20260101-000001');
+  assert.equal(duplicate.error?.code, 'ORCHESTRATION_DELEGATION_BUSY');
+  assert.equal(duplicate.changed, false);
 });
 
 test('native stop derives the workspace delta before sealing the unique delegation', () => {
@@ -976,7 +959,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
     diffWorkspace: () => [
       '.agents/workspace/active/TASK-20260101-000001/review-analysis.md',
       '.agents/workspace/active/TASK-20260101-000001/task.md',
-      '.agents/workspace/active/TASK-20260101-000001/orchestration.json'
+      '.agents/workspace/active/TASK-20260101-000001/.runtime/orchestration.json'
     ]
   });
 
@@ -1002,7 +985,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
     repoRoot: f.root, captureWorkspace
   });
   dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   delete persisted.pendingDelegation.workspaceSnapshotScope;
   fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);

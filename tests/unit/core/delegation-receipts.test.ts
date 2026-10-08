@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  activateDelegation,
+  activateDelegation as activateDelegationCore,
   abortActivatedDelegation,
   completeDelegationStage,
   consumeDelegation,
@@ -11,7 +11,7 @@ import {
   prepareDelegation,
   sealDelegation
 } from '../../../lib/task/delegation-receipts.ts';
-import { listAgentClientAdapters } from '../../../lib/agent-clients/registry.ts';
+import { getAgentClientDelegationEvidence, listAgentClientAdapters } from '../../../lib/agent-clients/registry.ts';
 import { normalizeAgentToken } from '../../../lib/agent-clients/tokens.ts';
 
 const input = {
@@ -26,6 +26,17 @@ const input = {
   requestedReasoningEffort: 'high',
   beforeFingerprint: 'before'
 };
+
+function activateDelegation(
+  receipt: Parameters<typeof activateDelegationCore>[0],
+  event: Parameters<typeof activateDelegationCore>[1],
+  options: Parameters<typeof activateDelegationCore>[2] = {}
+) {
+  return activateDelegationCore(receipt, event, {
+    ...options,
+    evidencePolicy: getAgentClientDelegationEvidence(receipt.client)
+  });
+}
 
 function dispatched(receipt: ReturnType<typeof prepareDelegation>) {
   const result = dispatchDelegation(receipt, {
@@ -47,8 +58,7 @@ const codexProvenance = {
 test('persisted delegation receipts require the complete current structure', () => {
   const current = prepareDelegation({
     ...input,
-    workspaceSnapshotScope: 'task',
-    lifecycleProvenance: null
+    workspaceSnapshotScope: 'task'
   }, {
     id: () => 'delegation-current',
     now: () => '2026-01-01T00:00:00.000Z',
@@ -65,8 +75,7 @@ test('persisted delegation receipts require the complete current structure', () 
 test('persisted delegation receipts bind lifecycle fields to their status', () => {
   const prepared = prepareDelegation({
     ...input,
-    workspaceSnapshotScope: 'task',
-    lifecycleProvenance: null
+    workspaceSnapshotScope: 'task'
   }, {
     id: () => 'delegation-status-current',
     now: () => '2026-01-01T00:00:00.000Z',
@@ -131,12 +140,11 @@ test('persisted delegation receipts bind lifecycle fields to their status', () =
   }
 });
 
-test('persisted Codex receipts require observed start and terminal evidence', () => {
+test('persisted Codex receipts retain adapter evidence without core interpretation', () => {
   const prepared = dispatched(prepareDelegation({
     ...input,
     client: 'codex',
-    workspaceSnapshotScope: 'task',
-    lifecycleProvenance: codexProvenance
+    workspaceSnapshotScope: 'task'
   }, {
     id: () => 'delegation-codex-current',
     now: () => '2099-01-01T00:00:00.000Z',
@@ -151,18 +159,17 @@ test('persisted Codex receipts require observed start and terminal evidence', ()
     spawnMode: 'fresh',
     actualModel: 'review-model',
     actualReasoningEffort: 'high',
-    hostEvidence: {
+    clientEvidence: { activationEvidence: {
       kind: 'codex-lifecycle-v2',
       startRevision: 4,
       ...codexProvenance,
       spawnToolUseId: 'spawn-tool',
       spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
+    } }
   }, { now: () => '2099-01-01T00:00:01.000Z', monotonicNow: () => 2 });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
   assert.equal(isDelegationReceipt(activated.receipt), true);
-  assert.equal(isDelegationReceipt({ ...activated.receipt, hostEvidence: null }), false);
 
   const completed = completeDelegationStage(activated.receipt, {
     stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'codex'
@@ -171,11 +178,11 @@ test('persisted Codex receipts require observed start and terminal evidence', ()
   if (!completed.ok) return;
   const sealed = sealDelegation(completed.receipt, {
     childId: 'child-codex-current', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
-    hostEvidence: {
+    clientEvidence: { activationEvidence: {
       stopRevision: 7,
       consumer: 'delegation-codex-current',
       consumedAt: '2099-01-01T00:00:02.000Z'
-    }
+    } }
   });
   assert.equal(sealed.ok, true);
   if (!sealed.ok) return;
@@ -191,8 +198,7 @@ test('activated Codex receipts support only controller-bound recovery aborts', (
   const prepared = dispatched(prepareDelegation({
     ...input,
     client: 'codex',
-    workspaceSnapshotScope: 'task',
-    lifecycleProvenance: provenance
+    workspaceSnapshotScope: 'task'
   }, { id: () => 'delegation-recovery' }));
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer',
@@ -201,34 +207,25 @@ test('activated Codex receipts support only controller-bound recovery aborts', (
     spawnMode: 'fresh',
     actualModel: 'review-model',
     actualReasoningEffort: 'high',
-    hostEvidence: {
+    clientEvidence: { activationEvidence: {
       kind: 'codex-lifecycle-v2',
       startRevision: 4,
       ...provenance,
       spawnToolUseId: 'spawn-tool',
       spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
+    } }
   }, { now: () => '2099-01-01T00:00:01.000Z', monotonicNow: () => 2 });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
   const aborted = abortActivatedDelegation(activated.receipt, {
-    childId: 'child-recovery',
-    stopRevision: 7,
-    consumer: 'delegation-recovery',
-    consumedAt: '2099-01-01T00:00:02.000Z'
+    childId: 'child-recovery'
   });
   assert.equal(aborted.ok, true);
   if (!aborted.ok) return;
   assert.equal(aborted.receipt.status, 'aborted');
   assert.equal(aborted.receipt.agent, null);
   assert.equal(isDelegationReceipt(aborted.receipt), true);
-  assert.equal(isDelegationReceipt({
-    ...aborted.receipt,
-    hostEvidence: { ...aborted.receipt.hostEvidence!, consumer: 'other-receipt' }
-  }), false);
-  assert.equal(abortActivatedDelegation(activated.receipt, {
-    childId: 'child-recovery', stopRevision: 7, consumer: 'ordinary-consumer', consumedAt: '2099-01-01T00:00:02.000Z'
-  }).ok, false);
+  assert.equal(abortActivatedDelegation(activated.receipt, { childId: 'different-child' }).ok, false);
 });
 
 test('delegation dispatch allows a sixty-second default activation window', () => {
@@ -246,7 +243,6 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
     id: () => 'delegation-1', now: () => '2026-01-01T00:00:00.000Z'
   }));
   assert.equal(prepared.workspaceSnapshotScope, 'task');
-  assert.equal(prepared.hostEvidence, null);
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-1', parentId: 'parent-1',
     spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
@@ -272,28 +268,26 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
   });
 });
 
-test('Codex receipts bind lifecycle evidence revisions through activation and seal', () => {
+test('delegation receipts keep adapter evidence inside the adapter namespace', () => {
   const prepared = dispatched(prepareDelegation({
     ...input, client: 'codex', role: 'executor', stage: 'analysis', artifact: 'analysis.md',
-    lifecycleProvenance: codexProvenance
   }, {
     id: () => 'delegation-codex', now: () => '2026-08-14T00:00:00.000Z'
   }));
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-codex', parentId: 'parent-codex',
     spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high',
-    hostEvidence: {
+    clientEvidence: { activationEvidence: {
       kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
       spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
+    } }
   }, { now: () => '2099-01-01T00:00:01.000Z' });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
-  assert.deepEqual(activated.receipt.hostEvidence, {
+  assert.deepEqual(activated.receipt.adapterEvidence?.codex, { activationEvidence: {
     kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
-    spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z',
-    stopRevision: null, consumer: null, consumedAt: null
-  });
+    spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z'
+  } });
 
   const completed = completeDelegationStage(activated.receipt, {
     stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
@@ -302,38 +296,33 @@ test('Codex receipts bind lifecycle evidence revisions through activation and se
   if (!completed.ok) return;
   const sealed = sealDelegation(completed.receipt, {
     childId: 'child-codex', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
-    hostEvidence: { stopRevision: 7, consumer: 'delegation-codex', consumedAt: '2026-08-14T00:00:02.000Z' }
+    clientEvidence: { activationEvidence: {
+      kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
+      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z', stopRevision: 7,
+      consumer: 'delegation-codex', consumedAt: '2026-08-14T00:00:02.000Z'
+    } }
   }, { now: () => '2026-08-14T00:00:03.000Z' });
   assert.equal(sealed.ok, true);
   if (!sealed.ok) return;
-  assert.deepEqual(sealed.receipt.hostEvidence, {
+  assert.deepEqual(sealed.receipt.adapterEvidence?.codex, { activationEvidence: {
     kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
     spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z',
     stopRevision: 7, consumer: 'delegation-codex', consumedAt: '2026-08-14T00:00:02.000Z'
-  });
+  } });
 });
 
-test('Codex activation validates observed host and parent identity', () => {
+test('core accepts opaque client evidence after common delegation identity checks', () => {
   const prepared = dispatched(prepareDelegation({
     ...input,
-    client: 'codex',
-    lifecycleProvenance: codexProvenance
+    client: 'codex'
   }, { id: () => 'delegation-codex-negative' }));
   const base = {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-codex-negative',
     parentId: 'parent-codex', spawnMode: 'fresh', actualModel: 'review-model',
     actualReasoningEffort: 'high'
   };
-  assert.equal(activateDelegation(prepared, base).code, 'DELEGATION_HOST_EVIDENCE_REQUIRED');
-  assert.equal(activateDelegation(prepared, {
-    ...base,
-    hostEvidence: { kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 1 }
-  }).code, 'DELEGATION_HOST_EVIDENCE_REQUIRED');
-  assert.equal(activateDelegation(prepared, {
-    ...base,
-    parentId: 'stolen-session',
-    hostEvidence: { kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance }
-  }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
+  assert.equal(activateDelegation(prepared, { ...base, clientEvidence: { source: 'codex' } }).ok, true);
+  assert.equal(activateDelegation(prepared, { ...base, childId: 'parent-codex' }).code, 'DELEGATION_IDENTITY_INVALID');
 });
 
 test('legacy prepared receipts fail closed before activation and can be dispatched safely', () => {
@@ -531,9 +520,7 @@ test('claude-code receipt accepts the normalized short agent claude', () => {
 test('stage completion accepts the normalized activity token for every registered client', () => {
   for (const adapter of listAgentClientAdapters()) {
     const prepared = dispatched(prepareDelegation(
-      { ...input, client: adapter.id, ...(adapter.id === 'codex' ? { lifecycleProvenance: {
-        ...codexProvenance, capabilitySessionId: 'parent-1'
-      } } : {}) },
+      { ...input, client: adapter.id },
       { id: () => `delegation-${adapter.id}` }
     ));
     const activated = activateDelegation(prepared, {
@@ -543,11 +530,11 @@ test('stage completion accepts the normalized activity token for every registere
       spawnMode: 'fresh',
       actualModel: 'review-model',
       actualReasoningEffort: 'high',
-      ...(adapter.id === 'codex' ? { hostEvidence: {
-        kind: 'codex-lifecycle-v2' as const, startRevision: 1,
+      ...(adapter.id === 'codex' ? { clientEvidence: { activationEvidence: {
+        kind: 'codex-lifecycle-v2', startRevision: 1,
         ...codexProvenance, capabilitySessionId: 'parent-1', spawnToolUseId: 'spawn-tool',
         spawnObservedAt: '2099-01-01T00:00:00.500Z'
-      } } : {})
+      } } } : {})
     });
     assert.equal(activated.ok, true, adapter.id);
     if (!activated.ok) continue;

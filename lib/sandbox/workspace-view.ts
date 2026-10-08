@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import { resolveTaskWorkspace } from './task-resolver.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
+import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 import {
   createSandboxControlIdentitySentinel,
   writeSandboxControlIdentitySentinel
@@ -63,15 +64,17 @@ export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 
 
 export function sandboxControlPaths(params: Readonly<{
   base: string;
+  repoRoot?: string;
   project: string;
   container: string;
   identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
 }>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; runtimeDir: string; manifestPath: string }> {
-  const identityKey = params.identity.mode === 'task-bound'
-    ? `task-bound:${params.identity.taskId}`
-    : 'branch-only';
-  const digest = createHash('sha256').update(identityKey).digest('hex').slice(0, 16);
-  const root = path.resolve(params.base, params.project, params.container, digest);
+  const root = params.identity.mode === 'task-bound'
+    ? path.join(resolveTaskRuntimeRoot(params.identity.taskId, { repoRoot: params.repoRoot }), 'sandbox-control')
+    : (() => {
+      const digest = createHash('sha256').update('branch-only').digest('hex').slice(0, 16);
+      return path.resolve(params.base, params.project, params.container, digest);
+    })();
   return {
     root,
     channelDir: path.join(root, 'channel'),
@@ -221,7 +224,7 @@ export function materializeSandboxControl(params: Readonly<{
   }>;
 }>): SandboxControlSetup {
   const { root, channelDir, statusDir, processingDir, runtimeDir, manifestPath } = sandboxControlPaths(params);
-  assertSafeDirectory(root, path.resolve(params.base));
+  assertSafeDirectory(root, params.identity.mode === 'task-bound' ? path.dirname(root) : path.resolve(params.base));
   if (fs.existsSync(root)) {
     if (!params.replacementLease || path.resolve(params.replacementLease.root) !== root) {
       throw new Error('SANDBOX_CONTROL_REPLACEMENT_REQUIRED');
@@ -234,17 +237,7 @@ export function materializeSandboxControl(params: Readonly<{
   fs.mkdirSync(consumedDir, { recursive: true, mode: 0o700 });
   for (const directory of [statusDir, processingDir, runtimeDir]) {
     assertSafeDirectory(directory, root);
-    if (directory === runtimeDir) fs.rmSync(directory, { recursive: true, force: true });
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  }
-  for (const directory of [
-    path.join(runtimeDir, 'clients'),
-    path.join(runtimeDir, 'clients', 'codex', 'capabilities'),
-    path.join(runtimeDir, 'clients', 'codex', 'lifecycle')
-  ]) {
-    assertSafeDirectory(directory, runtimeDir);
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    fs.chmodSync(directory, 0o700);
   }
   for (const queue of ['requests', 'responses']) {
     const directory = path.join(channelDir, queue);

@@ -273,6 +273,7 @@ test('collectRuntime reads the latest managed tmux run through docker exec', () 
 test('collectOrchestration projects persisted pause and pending delegation state', () => {
   const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-orchestration-'));
   const taskId = path.basename(taskDir);
+  fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   const pending = prepareDelegation({
     taskId,
     runId: 'run-1',
@@ -282,12 +283,11 @@ test('collectOrchestration projects persisted pause and pending delegation state
     artifact: 'code.md',
     client: 'claude-code',
     workspaceSnapshotScope: 'task',
-    lifecycleProvenance: null,
     beforeFingerprint: 'before',
     requestedModel: 'executor-model',
     requestedReasoningEffort: 'high'
   }, { id: () => 'receipt-1', now: () => '2026-07-02T20:00:00.000Z', monotonicNow: () => 1 });
-  fs.writeFileSync(path.join(taskDir, 'orchestration.json'), `${JSON.stringify({
+  fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), `${JSON.stringify({
     taskId,
     runId: 'run-1',
     status: 'paused',
@@ -325,7 +325,8 @@ test('collectOrchestration projects persisted pause and pending delegation state
 test('collectOrchestration distinguishes absent state from invalid persisted state', () => {
   const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-orchestration-'));
   assert.equal(collectOrchestration(taskDir).status, 'absent');
-  fs.writeFileSync(path.join(taskDir, 'orchestration.json'), '{"status":"paused"}\n');
+  fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
+  fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), '{"status":"paused"}\n');
   assert.throws(() => collectOrchestration(taskDir), { name: 'OrchestrationStateError' });
 });
 
@@ -349,7 +350,8 @@ test('persisted running and completed orchestration states override stale workfl
       '',
       '## 完成检查清单'
     ].join('\n'));
-    fs.writeFileSync(path.join(taskDir, 'orchestration.json'), `${JSON.stringify({
+    fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
+    fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), `${JSON.stringify({
       taskId,
       runId: `run-${status}`,
       status,

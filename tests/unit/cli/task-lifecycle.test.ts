@@ -56,6 +56,62 @@ test('block moves the task, updates one metadata pair, logs a pair, and releases
   assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
 });
 
+test('task move refuses a task-bound sandbox control consumer without changing task or runtime bytes', () => {
+  const f = fixture();
+  const taskFile = path.join(f.taskDir, 'task.md');
+  const registryFile = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const controlDir = path.join(f.taskDir, '.runtime', 'sandbox-control');
+  fs.mkdirSync(controlDir, { recursive: true });
+  const manifest = path.join(controlDir, 'manifest.json');
+  fs.writeFileSync(manifest, '{"taskId":"fixture"}\n');
+  const before = [fs.readFileSync(taskFile), fs.readFileSync(registryFile), fs.readFileSync(manifest)];
+
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Stop sandbox' },
+    { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+  );
+  assert.equal(result.error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
+  assert.deepEqual([fs.readFileSync(taskFile), fs.readFileSync(registryFile), fs.readFileSync(manifest)], before);
+  assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID)), false);
+});
+
+test('task move refuses active or unreadable orchestration state and preserves all bytes', () => {
+  for (const content of ['{"status":"running","pendingDelegation":{"id":"receipt"}}\n', '{invalid\n']) {
+    const f = fixture();
+    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
+    fs.mkdirSync(path.dirname(runPath), { recursive: true });
+    fs.writeFileSync(runPath, content);
+    const taskFile = path.join(f.taskDir, 'task.md');
+    const taskBefore = fs.readFileSync(taskFile);
+    const runBefore = fs.readFileSync(runPath);
+
+    const result = applyTaskLifecycle(
+      { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Settle run' },
+      { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+    );
+    assert.equal(result.error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
+    assert.deepEqual(fs.readFileSync(taskFile), taskBefore);
+    assert.deepEqual(fs.readFileSync(runPath), runBefore);
+    assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
+  }
+});
+
+test('safe task move carries task-owned runtime bytes to the new state intact', () => {
+  const f = fixture();
+  const runtimeFile = path.join(f.taskDir, '.runtime', 'receipt', 'state.json');
+  fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+  fs.writeFileSync(runtimeFile, '{"stable":true}\n');
+  const before = fs.readFileSync(runtimeFile);
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Retry later' },
+    { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+  );
+  assert.equal(result.status, 'applied');
+  assert.deepEqual(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID, '.runtime', 'receipt', 'state.json')), before);
+  assert.equal(fs.existsSync(f.taskDir), false);
+});
+
 test('dry-run plans the same transition without changing bytes, mtime, directories, or registry', () => {
   const f = fixture();
   const taskFile = path.join(f.taskDir, 'task.md');
@@ -397,7 +453,7 @@ test('recovery proof rejects a directory-moved journal that remains in active', 
   );
 });
 
-test('cross-device lifecycle move copies and verifies before removing the source', () => {
+test('cross-device task move retains the source and refuses copy-delete fallback', () => {
   const f = fixture();
   const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
   const result = applyTaskLifecycle(request, {
@@ -409,12 +465,13 @@ test('cross-device lifecycle move copies and verifies before removing the source
       throw error;
     }
   });
-  assert.equal(result.status, 'applied');
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'LIFECYCLE_DIRECTORY_RENAME_FAILED');
   const target = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-  assert.equal(fs.existsSync(f.taskDir), false);
-  assert.equal(fs.existsSync(path.join(target, 'task.md')), true);
-  assert.equal(fs.existsSync(path.join(target, '.task-lifecycle.json')), false);
-  assert.equal((fs.readFileSync(path.join(target, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+  assert.equal(fs.existsSync(f.taskDir), true);
+  assert.equal(fs.existsSync(path.join(target, 'task.md')), false);
+  assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), true);
+  assert.equal((fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
 });
 
 test('journal step write failure after directory move is reconstructed on retry', () => {

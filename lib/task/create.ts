@@ -11,8 +11,8 @@ import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
 import { enumerateAllTaskDirs } from './resolve-ref.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
+import { AGENT_TOKEN_VALUES, type AgentToken } from '../agent-clients/tokens.ts';
 
-const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
 const PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'] as const;
 const EFFORTS = ['High', 'Medium', 'Low'] as const;
@@ -21,7 +21,7 @@ const TASK_INPUT_KEYS = [
   'acceptanceCriteria', 'openQuestions'
 ] as const;
 
-type TaskAgent = typeof AGENTS[number];
+type TaskAgent = AgentToken;
 type TaskType = typeof TYPES[number];
 type TaskPriority = typeof PRIORITIES[number];
 type TaskEffort = typeof EFFORTS[number];
@@ -122,7 +122,7 @@ function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
   return {
     version: 1,
     idempotencyKey,
-    agent: enumValue(candidate.agent, AGENTS, 'agent'),
+    agent: enumValue(candidate.agent, AGENT_TOKEN_VALUES, 'agent'),
     title,
     type: enumValue(candidate.type, TYPES, 'type'),
     branchSlug,

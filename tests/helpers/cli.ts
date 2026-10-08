@@ -34,6 +34,7 @@ function envWithPrependedPath(env: NodeJS.ProcessEnv, binDir: string): NodeJS.Pr
  */
 function sandboxControlSafeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const safe = withoutSandboxControlAuthority(env);
+  delete safe.AGENT_INFRA_SANDBOX;
   const isolation = `--require=${filePath("scripts/test-status-mount-isolation.cjs")}`;
   const nodeOptions = [safe.NODE_OPTIONS, isolation].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index).join(" ");
   return { ...safe, NODE_OPTIONS: nodeOptions };

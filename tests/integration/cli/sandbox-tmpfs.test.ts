@@ -288,8 +288,10 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
 }
 
 function legacyTaskBoundMounts(fixture: { mounts: Array<Record<string, unknown>> }): Array<Record<string, unknown>> {
+  const runtimeMask = fixture.mounts.find((mount) => String(mount.Destination).endsWith('/.runtime'));
   const stateDestinations = new Set([
     "/workspace/.agents/workspace/active/.short-ids.json",
+    ...(runtimeMask ? [runtimeMask.Destination] : []),
     "/workspace/.agents/workspace/completed",
     "/workspace/.agents/workspace/blocked",
     "/workspace/.agents/workspace/archive"
@@ -521,7 +523,7 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   }
 });
 
-test("completed task-bound recovery accepts the moved task source and historical active mount", () => {
+test("completed task-bound recovery rejects a stale control mount after the task directory moved", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-task-source-"));
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223554";
@@ -551,7 +553,7 @@ test("completed task-bound recovery accepts the moved task source and historical
     assert.equal(snapshot.identityOk, true);
     assert.equal(taskMount?.sourceMatches, true);
     assert.equal(taskMount?.sourceAccessible, true);
-    assert.deepEqual(classifySandboxRecovery(snapshot), []);
+    assert.ok(classifySandboxRecovery(snapshot).some((finding) => finding.repairKind === "hard-failure"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

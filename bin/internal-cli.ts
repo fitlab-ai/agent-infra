@@ -122,12 +122,12 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
     break;
   }
   case 'codex-lifecycle': {
-    const { codexLifecycle } = await import('../lib/internal/codex-lifecycle.ts');
+    const { codexLifecycle } = await import('../lib/agent-clients/adapters/codex-lifecycle/cli.ts');
     await codexLifecycle(process.argv.slice(3));
     break;
   }
   case 'codex-sandbox-controller': {
-    const { codexSandboxController } = await import('../lib/internal/codex-sandbox-controller.ts');
+    const { codexSandboxController } = await import('../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller-cli.ts');
     await codexSandboxController(process.argv.slice(3));
     break;
   }

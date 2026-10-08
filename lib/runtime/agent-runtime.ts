@@ -1,16 +1,5 @@
 import path from 'node:path';
-
-export type AgentRuntimeStore = 'capabilities' | 'lifecycle';
-
-type RuntimeResolutionOptions = Readonly<{
-  repoRoot?: string;
-  env?: NodeJS.ProcessEnv;
-  explicitRoot?: string;
-  client?: string;
-  store?: AgentRuntimeStore;
-}>;
-
-const CLIENT_NAMESPACE = /^[a-z][a-z0-9-]{0,31}$/u;
+import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 
 function runtimeError(code: string, message: string): Error {
   const error = new Error(`${code}: ${message}`);
@@ -22,16 +11,8 @@ function boundControlContext(env: NodeJS.ProcessEnv): boolean {
   return [
     'AGENT_INFRA_CONTROL_TOKEN',
     'AGENT_INFRA_CONTROL_GENERATION',
-    'AGENT_INFRA_EXECUTOR_MANIFEST',
-    'AGENT_INFRA_CODEX_CONTROLLER_CONTEXT'
+    'AGENT_INFRA_EXECUTOR_MANIFEST'
   ].some((key) => typeof env[key] === 'string' && env[key]!.length > 0);
-}
-
-function clientNamespace(client: string): string {
-  if (!CLIENT_NAMESPACE.test(client)) {
-    throw runtimeError('AGENT_INFRA_RUNTIME_CLIENT_INVALID', `invalid runtime client namespace '${client}'`);
-  }
-  return client;
 }
 
 export function resolveAgentRuntimeRoot(options: Readonly<{
@@ -46,6 +27,10 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
     }
     return path.resolve(configured);
   }
+  const taskId = env.AGENT_INFRA_TASK_ID;
+  if (taskId) {
+    return resolveTaskRuntimeRoot(taskId, { repoRoot: options.repoRoot });
+  }
   if (boundControlContext(env)) {
     throw runtimeError(
       'AGENT_INFRA_RUNTIME_DIR_REQUIRED',
@@ -53,24 +38,4 @@ export function resolveAgentRuntimeRoot(options: Readonly<{
     );
   }
   return path.join(path.resolve(options.repoRoot ?? process.cwd()), '.agents', 'workspace', '.runtime');
-}
-
-export function resolveAgentRuntimeStoreRoot(options: RuntimeResolutionOptions = {}): string {
-  const client = clientNamespace(options.client ?? 'codex');
-  if (options.explicitRoot) return path.resolve(options.explicitRoot);
-  const env = options.env ?? process.env;
-  const runtimeRoot = resolveAgentRuntimeRoot({ repoRoot: options.repoRoot, env });
-  if (env.AGENT_INFRA_RUNTIME_DIR) {
-    if (!options.store) {
-      throw runtimeError('AGENT_INFRA_RUNTIME_STORE_INVALID', 'store kind is required for task-bound runtime');
-    }
-    return path.join(runtimeRoot, 'clients', client, options.store);
-  }
-  if (client === 'codex' && options.store) {
-    return path.join(runtimeRoot, `codex-${options.store}`);
-  }
-  if (!options.store) {
-    throw runtimeError('AGENT_INFRA_RUNTIME_STORE_INVALID', 'store kind is required');
-  }
-  return path.join(runtimeRoot, 'clients', client, options.store);
 }

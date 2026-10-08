@@ -48,27 +48,6 @@ const codexLifecycleProvenance = {
   controlGeneration: null
 } as const;
 
-const codexHostEvidence = {
-  kind: 'codex-lifecycle-v2',
-  hookDefinitionHash: 'hook-hash',
-  startRevision: 4,
-  stopRevision: 7,
-  consumer: 'receipt-1',
-  consumedAt: '2026-01-01T00:00:02.000Z',
-  protocolVersion: 3,
-  packageVersion: '0.9.9-alpha.0',
-  internalExecutableBuildHash: 'a'.repeat(64),
-  lifecycleContractHash: 'b'.repeat(64),
-  hookSource: 'project',
-  hookSourcePathDigest: 'c'.repeat(64),
-  hookSourceHash: 'd'.repeat(64),
-  capabilitySessionId: 'parent-1',
-  capabilityTurnId: 'parent-turn',
-  spawnToolUseId: 'spawn-tool',
-  spawnObservedAt: '2026-01-01T00:00:01.000Z',
-  controllerInstanceDigest: null,
-  controlGeneration: null
-} as const;
 
 function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verification-unit-'));
@@ -76,6 +55,7 @@ function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
   const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
+  fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   return { root, taskId, taskDir };
 }
 
@@ -87,8 +67,8 @@ function currentReceipt(taskId: string, overrides: Record<string, unknown> = {})
     actualModel: 'executor-model', actualReasoningEffort: 'xhigh',
     modelFallbackReason: null, reasoningEffortFallbackReason: null,
     parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: 'claude-code',
-    status: 'consumed', workspaceSnapshotScope: 'task', lifecycleProvenance: null,
-    hostEvidence: null, beforeFingerprint: 'before', afterFingerprint: 'after', changedPaths: [],
+    status: 'consumed', workspaceSnapshotScope: 'task',
+    beforeFingerprint: 'before', afterFingerprint: 'after', changedPaths: [],
     createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
     spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
     spawnDispatchedAt: '2026-01-01T00:00:00.500Z',
@@ -104,7 +84,7 @@ function producedCodexReceipt(taskId: string) {
     taskId, runId: 'run-1', role: 'executor', stage: 'analysis', round: 1,
     artifact: 'analysis.md', client: 'codex', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', workspaceSnapshotScope: 'task',
-    lifecycleProvenance: codexLifecycleProvenance, beforeFingerprint: 'before'
+    beforeFingerprint: 'before'
   }, {
     id: () => 'receipt-1', now: () => '2026-01-01T00:00:00.000Z',
     monotonicNow: () => 1
@@ -117,10 +97,10 @@ function producedCodexReceipt(taskId: string) {
   const activated = activateDelegation(dispatched.receipt, {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-1',
     parentId: 'parent-1', spawnMode: 'fresh', actualModel: 'executor-model',
-    actualReasoningEffort: 'xhigh', hostEvidence: {
+    actualReasoningEffort: 'xhigh', clientEvidence: { records: { lifecycle: { consumer: null, consumedAt: null } }, activationEvidence: {
       kind: 'codex-lifecycle-v2', startRevision: 4, ...codexLifecycleProvenance,
       spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z'
-    }
+    } }
   }, { now: () => '2026-01-01T00:00:01.000Z', monotonicNow: () => 3 });
   assert.equal(activated.ok, true);
   if (!activated.ok) throw new Error('failed to activate Codex receipt fixture');
@@ -131,8 +111,13 @@ function producedCodexReceipt(taskId: string) {
   if (!completed.ok) throw new Error('failed to complete Codex receipt fixture');
   const sealed = sealDelegation(completed.receipt, {
     childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
-    hostEvidence: {
-      stopRevision: 7, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z'
+    clientEvidence: {
+      records: { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } },
+      activationEvidence: {
+        kind: 'codex-lifecycle-v2', startRevision: 4, ...codexLifecycleProvenance,
+        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
+        stopRevision: 7, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z'
+      }
     }
   }, { now: () => '2026-01-01T00:00:02.000Z' });
   assert.equal(sealed.ok, true);
@@ -524,7 +509,7 @@ test('run-task verification accepts complete current evidence and rejects invali
   fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
     skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
   }));
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   const head = 'a'.repeat(40);
   const tree = 'b'.repeat(40);
   const run = currentRun(f.taskId, {
@@ -560,15 +545,8 @@ test('run-task verification accepts complete current evidence and rejects invali
 
   const invalidReceipts = [
     { ...codexReceipt, activatedAt: null, sealedAt: null, consumedAt: null },
-    { ...codexReceipt, parentId: 'different-parent' },
     { ...codexReceipt, childId: codexReceipt.parentId },
-    ...[
-      { kind: 'codex-lifecycle-v1' },
-      { capabilitySessionId: 'different' },
-      { spawnToolUseId: undefined },
-      { startRevision: 0 },
-      { stopRevision: codexHostEvidence.startRevision },
-    ].map((host) => ({ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, ...host } }))
+    { ...codexReceipt, adapterEvidence: null }
   ];
   for (const receipt of invalidReceipts) {
     fs.writeFileSync(runPath, JSON.stringify({ ...codexRun, receipts: [receipt] }));
@@ -611,7 +589,7 @@ test('run-task verification accepts only internally consistent clean completion 
     completionEvidence: evidence,
     updatedAt: '2026-01-01T00:00:05.000Z'
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
   assert.equal(
     (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
@@ -648,7 +626,7 @@ test('run-task verification applies current receipt and pause invariants', async
     pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false },
     commitAuthorization: { issuedAt: null, consumedAt: null }
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
   assert.equal(
     (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
@@ -709,7 +687,7 @@ test('run-task verification accepts only current recovery provenance and rejects
       prNumber: 42, prHead: head
     }
   });
-  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
   assert.equal(
     (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,

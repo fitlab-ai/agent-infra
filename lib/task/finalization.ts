@@ -14,6 +14,7 @@ import { parseTaskFrontmatter } from './frontmatter.ts';
 import { recoverPlatformOperations } from './platform-operation-recovery.ts';
 import {
   applyTaskLifecycle,
+  applyTaskLifecycleWithinTaskLock,
   inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
   type TaskLifecycleRequest,
@@ -865,7 +866,9 @@ async function prepareUnderLock(
   options: TaskFinalizationOptions
 ): Promise<TaskFinalizationResult> {
   const repoRoot = path.resolve(options.repoRoot);
-  const lifecycle = options.lifecycle ?? applyTaskLifecycle;
+  const lifecycle = options.lifecycle ?? ((lifecycleRequest, lifecycleOptions) => (
+    applyTaskLifecycleWithinTaskLock(lifecycleRequest, lifecycleOptions ?? { repoRoot }, taskId)
+  ));
   const backfill = options.backfill ?? backfillCompletionComments;
   const commentSync = options.commentSync ?? syncPlatformComment;
   const issueSync = options.issueSync ?? syncPlatformIssue;
@@ -1202,11 +1205,11 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         retryable: false
       });
       receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
-      const lifecycle = options.lifecycle ?? applyTaskLifecycle;
-      const result = lifecycle(
-        { taskRef: resolved.taskId, intent: 'complete', agent: request.agent },
-        { repoRoot, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) }
-      );
+      const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
+      const lifecycleOptions = { repoRoot, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) };
+      const result = options.lifecycle
+        ? options.lifecycle(lifecycleRequest, lifecycleOptions)
+        : applyTaskLifecycleWithinTaskLock(lifecycleRequest, lifecycleOptions, resolved.taskId);
       const step = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });

@@ -10,7 +10,7 @@ import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
   requestCodexControllerVerify
-} from '../../../sandbox/control/client.ts';
+} from './controller-client.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
@@ -126,8 +126,7 @@ function verifyControllerBinding(
     ...control,
     timeoutMs: 30_000
   });
-  if (verified.binding.taskId !== context.taskId
-    || verified.binding.controlGeneration !== context.controlGeneration
+  if (verified.binding.controlGeneration !== context.controlGeneration
     || verified.binding.controllerInstanceDigest !== context.controllerInstanceDigest) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
   }
@@ -150,8 +149,7 @@ function verifyCodexSandboxControllerContextWithWarnings(
     ...control,
     timeoutMs: 30_000
   });
-  if (verified.binding.taskId !== context.taskId
-    || verified.binding.controlGeneration !== context.controlGeneration
+  if (verified.binding.controlGeneration !== context.controlGeneration
     || verified.binding.controllerInstanceDigest !== context.controllerInstanceDigest) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }

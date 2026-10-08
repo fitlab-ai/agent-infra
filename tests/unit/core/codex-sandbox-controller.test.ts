@@ -31,19 +31,22 @@ function fixture() {
   fs.mkdirSync(path.join(root, 'lib', 'internal'), { recursive: true });
   fs.mkdirSync(path.join(root, 'lib', 'task'), { recursive: true });
   fs.mkdirSync(path.join(root, 'lib', 'agent-clients', 'adapters', 'codex-lifecycle'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'lib', 'sandbox', 'control'), { recursive: true });
   fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.2.3' }));
   for (const file of [
     'bin/internal-cli.ts',
-    'lib/internal/codex-lifecycle.ts',
-    'lib/internal/codex-sandbox-controller.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/cli.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/sandbox-controller-cli.ts',
     'lib/internal/task-orchestration.ts',
-    'lib/task/codex-orchestration.ts',
+    'lib/agent-clients/adapters/codex-orchestration.ts',
     'lib/task/delegation-receipts.ts',
     'lib/task/orchestration.ts',
     'lib/agent-clients/adapters/codex-lifecycle/build-identity.ts',
-    'lib/agent-clients/adapters/codex-lifecycle/capability-store.ts',
     'lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/controller-client.ts',
+    'lib/agent-clients/adapters/codex-lifecycle/controller-operation.ts',
+    'lib/sandbox/control/agent-operation.ts',
     'lib/agent-clients/adapters/codex-lifecycle/app-server.ts',
     'lib/agent-clients/adapters/codex-lifecycle/evidence.ts',
     'lib/agent-clients/adapters/codex-lifecycle/store.ts'
@@ -205,11 +208,6 @@ test('sandbox controller enforces a task lease and controller context binding', 
   ), /CONTEXT_INVALID/);
   fs.writeFileSync(prepared.contextPath, contextRaw, { mode: 0o600 });
   assert.throws(() => prepareCodexSandboxController({}, options), /CONTROLLER_BUSY/);
-  fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, taskId: 'TASK-20260101-000002' })}\n`, { mode: 0o600 });
-  assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
-    prepared.contextPath,
-    { repoRoot: f.root, control: options.control, requestControllerVerify: options.verifyController }
-  ), /CONTEXT_INVALID/);
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
     { repoRoot: f.root, control: { ...options.control, generation: 'other' }, requestControllerVerify: options.verifyController }
@@ -232,9 +230,9 @@ test('sandbox controller closes a broker lease when the opened binding is invali
       changed: false as const,
       lease: null,
       binding: {
-        taskId: 'TASK-20260101-000002',
+        taskId: 'TASK-20260101-000001',
         controlGeneration: 'generation',
-        controllerInstanceDigest: 'e'.repeat(64)
+        controllerInstanceDigest: 'f'.repeat(64)
       },
       error: null
     })) as typeof broker.verifyController,

@@ -715,7 +715,6 @@ test('orchestrated commit is rejected because lifecycle commit delegation was re
       requestedModel: 'executor-model',
       requestedReasoningEffort: 'xhigh',
       workspaceSnapshotScope: 'task',
-      lifecycleProvenance: null,
       beforeFingerprint: 'before'
     }, { id: () => 'receipt-1' });
     const dispatched = dispatchDelegation(prepared);
@@ -729,7 +728,7 @@ test('orchestrated commit is rejected because lifecycle commit delegation was re
       actualReasoningEffort: 'xhigh'
     });
     assert.equal(activated.ok, true);
-    fs.writeFileSync(path.join(taskDir, 'orchestration.json'), JSON.stringify({
+    fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), JSON.stringify({
       ...begun.run,
       nextStage: 'commit',
       pendingDelegation: activated.ok ? activated.receipt : null,

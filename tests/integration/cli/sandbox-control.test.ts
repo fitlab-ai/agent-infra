@@ -6,9 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import {
-  requestCodexControllerClose,
-  requestCodexControllerOpen,
-  requestCodexControllerVerify,
   recoverSandboxControl,
   recoverSandboxControlFromChannel,
   recoverAcceptedTaskFinalization,
@@ -16,6 +13,11 @@ import {
   SandboxControlClientError,
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
+import {
+  requestCodexControllerClose,
+  requestCodexControllerOpen,
+  requestCodexControllerVerify
+} from '../../../lib/agent-clients/adapters/codex-lifecycle/controller-client.ts';
 import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
@@ -2104,7 +2106,6 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
       version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt, expiresAt: issuedAt + 2_000, family: 'task-lifecycle', args: ['08', 'complete', '--agent', 'codex'],
-      controllerProcess: null, controllerProof: null
     });
     await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     const processingDir = path.join(manifest.processingDir, requestId);
@@ -2804,6 +2805,10 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   const branch = initializeRepository(root);
   const packageVersion = (JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as { version: string }).version;
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: packageVersion }));
+  const taskId = 'TASK-20260809-010203';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n# Fixture\n`);
   for (const relative of [
     '.codex/hooks.json',
     '.codex/agents/agent-infra-lifecycle-executor.toml',
@@ -2844,7 +2849,7 @@ exit 1
     authorityEvidence,
     branch,
     mode: 'task-bound',
-    taskId: 'TASK-20260809-010203',
+    taskId,
     token: 'controller-secret',
     generation: 'controller-generation',
     controlRootId: 'a'.repeat(96),
@@ -2899,7 +2904,7 @@ exit 1
       timeoutMs: 5_000
     }));
     assert.deepEqual(verified.binding, {
-      taskId: 'TASK-20260809-010203',
+      taskId,
       controlGeneration: 'controller-generation',
       controllerInstanceDigest: opened.lease.controllerInstanceDigest
     });
@@ -2959,8 +2964,8 @@ test('broker recovery accepts a controller close after the registration was dura
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
       version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
-      family: 'codex-controller', command: 'close', args: [],
-      controllerProcess: proof.controllerProcess, controllerProof: proof
+      family: 'agent-client', agentClient: 'codex', operation: 'controller.close',
+      payload: { proof }
     })}\n`);
     fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'controller-close-recovery',
@@ -2970,7 +2975,7 @@ test('broker recovery accepts a controller close after the registration was dura
     const output = `${JSON.stringify({ version: 1, status: 'closed', changed: true, lease: null, error: null })}\n`;
     writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: output, stderr: '' });
     writeSandboxControlPayload(manifest, requestId, { stdout: output, stderr: '' });
-    writeSandboxControlTerminalResult(manifest, { id: requestId, family: 'codex-controller', operation: 'close' }, output);
+    writeSandboxControlTerminalResult(manifest, { id: requestId, family: 'agent-client', operation: 'controller.close' }, output);
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
       version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
     })}\n`);
@@ -3020,7 +3025,6 @@ test('broker recovery terminates a live started executor before retaining unknow
       version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
       family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
-      controllerProcess: null, controllerProof: null
     })}\n`);
     fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'orphan-executor-recovery',
@@ -3191,7 +3195,6 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({
     version: 4, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
     expiresAt: Date.now() + 1_000, family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
-    controllerProcess: null, controllerProof: null
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'execution.json'), `${JSON.stringify({
     version: 2, generation, requestId: recoverableId, nonce: 'recoverable-nonce',
@@ -3265,7 +3268,6 @@ test('broker recovery returns inspectable task-create output when the payload is
     fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
       version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
-      controllerProcess: null, controllerProof: null
     })}\n`);
     fs.writeFileSync(path.join(processingDirectory, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'task-create-recovery-nonce',
@@ -3353,7 +3355,6 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
     fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
       version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
-      controllerProcess: null, controllerProof: null
     })}\n`);
     fs.writeFileSync(path.join(processingDirectory, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'task-create-terminal-nonce',
@@ -3435,7 +3436,6 @@ test('broker recovery accepts a task-create no-op for a non-active task', async 
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
       version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000, family: 'task-create', candidate,
-      controllerProcess: null, controllerProof: null
     })}\n`);
     fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'task-create-non-active-recovery',

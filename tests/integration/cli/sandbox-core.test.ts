@@ -319,6 +319,7 @@ function writeTaskBoundControlEvidence(
 ): string {
   const controlRoot = sandboxControlPaths({
     base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+    repoRoot: repoDir,
     project,
     container,
     identity: { mode: "task-bound", taskId }
@@ -477,7 +478,7 @@ test("sandbox rm --unbound validates every target before deleting the first one"
   }
 });
 
-test("sandbox rm resolves a missing task record from a unique task-bound container", () => {
+test("sandbox rm refuses a missing task record without removing its task-bound container", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-task-record-"));
   const taskId = "TASK-20260101-000105";
   const branch = "feature/missing-task-record";
@@ -490,8 +491,9 @@ test("sandbox rm resolves a missing task record from a unique task-bound contain
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", taskId]);
 
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), true);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /TASK_NOT_FOUND/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1003,13 +1005,7 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
   const taskId = "TASK-20260301-000001";
   const siblingTaskId = "TASK-20260301-000002";
   const branch = "registry-branch";
-  const controlRoot = sandboxControlPaths({
-    base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
-    project: "demo",
-    container: `demo-dev-${branch}`,
-    identity: { mode: "task-bound", taskId, shortId: "1" }
-  }).root;
-
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
@@ -1028,6 +1024,13 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
     writeShortIdRegistry(fixture.repoDir, { "1": taskId, "2": siblingTaskId });
     writeActiveTaskBranch(fixture.repoDir, taskId, branch);
     writeActiveTaskBranch(fixture.repoDir, siblingTaskId, "sibling-branch");
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      repoRoot: fixture.repoDir,
+      project: "demo",
+      container: `demo-dev-${branch}`,
+      identity: { mode: "task-bound", taskId, shortId: "1" }
+    }).root;
 
     const result = spawnSandboxCli(fixture, tmpDir, ["create", taskId, "--no-refresh"], {
       AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json")
@@ -2099,6 +2102,7 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
       path.join(active, taskId, "task.md"),
       `---\nid: ${taskId}\nbranch: registry-branch\n---\n`
     );
+    fs.mkdirSync(path.join(active, taskId, ".runtime"), { recursive: true });
     fs.writeFileSync(
       path.join(active, ".short-ids.json"),
       JSON.stringify({ version: 1, ids: { "1": taskId } })

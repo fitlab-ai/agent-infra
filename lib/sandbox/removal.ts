@@ -829,7 +829,7 @@ function resolveRmTarget(
     ? matchedContainers
     : [...new Set([...containerNameCandidates(config, effectiveBranch), ...matchedContainers])];
   const controlRoots = containers.flatMap((container) => identities.map((identity) => sandboxControlPaths({
-    base: config.controlBase, project: config.project, container, identity
+    base: config.controlBase, repoRoot: config.repoRoot, project: config.project, container, identity
   }).root));
   const workspaceViewRoots = containers.flatMap((container) => identities.map((identity) => sandboxWorkspaceViewPaths({
     base: config.workspaceViewBase, project: config.project, container, identity
@@ -1007,7 +1007,9 @@ async function removeUncheckedSandbox(
   }
   for (const root of controlRoots) {
     fs.rmSync(root, { recursive: true, force: true });
-    removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
+    if (target.workspace.mode !== 'task-bound') {
+      removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
+    }
   }
   for (const root of workspaceViewRoots) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1027,12 +1029,17 @@ async function removeUncheckedSandbox(
     assertBranchRemovalIdentity(config, effectiveBranch, worktreePermits);
     runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
   }
-  if (target.workspace.mode === 'task-bound') {
-    releaseStaleShortIdRegistry(config.repoRoot, target.workspace.taskId);
-  }
+  releaseTaskBoundSandboxIdentity(config.repoRoot, target.workspace);
 
   if (!options.quiet) p.outro('Sandbox removed');
   return null;
+}
+
+function releaseTaskBoundSandboxIdentity(
+  repoRoot: string,
+  workspace: SandboxWorkspaceKey
+): void {
+  if (workspace.mode === 'task-bound') releaseStaleShortIdRegistry(repoRoot, workspace.taskId);
 }
 
 async function rmOneCore(

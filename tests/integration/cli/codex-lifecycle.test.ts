@@ -16,12 +16,14 @@ import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/c
 import {
   activateCodexOrchestrationDelegation,
   prepareCodexOrchestrationDelegation
-} from '../../../lib/task/codex-orchestration.ts';
+} from '../../../lib/agent-clients/adapters/codex-orchestration.ts';
 import {
   beginOrResumeOrchestration,
   completeOrchestrationStage,
   dispatchOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
+import { appendCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
+import { resolveTaskRuntimeRoot } from '../../../lib/task/runtime-paths.ts';
 const fixtureRoots = new Set<string>();
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
@@ -30,6 +32,8 @@ after(() => {
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-cli-'));
   fixtureRoots.add(root);
+  assert.equal(spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['branch', '-M', 'agent-infra-feature-test'], { cwd: root, encoding: 'utf8' }).status, 0);
   const bin = path.join(root, 'bin');
   const codex = path.join(root, 'codex.mjs');
   const rollout = path.join(root, 'rollout-child.jsonl');
@@ -41,6 +45,7 @@ function fixture() {
     JSON.stringify({ type: 'turn_context', payload: { model: 'model', effort: 'high' } })
   ].join('\n'));
   fs.writeFileSync(codex, `
+    import fs from 'node:fs';
     import readline from 'node:readline';
     if (process.argv[2] === '--version') {
       process.stdout.write('codex-cli 0.147.0\\n');
@@ -49,11 +54,19 @@ function fixture() {
       rl.on('line', line => {
         const message = JSON.parse(line);
         if (!message.id) return;
+        if (message.method === 'thread/read' && process.env.REPLACE_PENDING_RECEIPT) {
+          const runPath = process.env.REPLACE_PENDING_RECEIPT;
+          const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+          run.pendingDelegation.id = 'receipt-replaced';
+          fs.writeFileSync(runPath, JSON.stringify(run, null, 2) + '\\n');
+          process.env.REPLACE_PENDING_RECEIPT = '';
+        }
+        const parentThreadId = process.env.CHILD_PARENT || 'parent';
         const result = message.method === 'thread/read' ? {
           thread: {
-            id: 'child', parentThreadId: 'parent', forkedFromId: null,
+            id: 'child', parentThreadId, forkedFromId: null,
             path: ${JSON.stringify(rollout)},
-            source: { subAgent: { thread_spawn: { parent_thread_id: 'parent' } } },
+            source: { subAgent: { thread_spawn: { parent_thread_id: parentThreadId } } },
             turns: message.params.includeTurns ? [{ id: 'child-turn', status: process.env.TURN_STATUS || 'completed' }] : []
           }
         } : message.method === 'thread/unsubscribe' ? { status: 'unsubscribed' } : {};
@@ -91,12 +104,6 @@ function fixture() {
   };
 }
 
-function writeCapabilityTask(root: string, taskId: string) {
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.12-alpha.0\n---\n\n# Task\n`);
-}
-
 function copyCompiledPackage(root: string) {
   fs.copyFileSync(path.join(process.cwd(), 'package.json'), path.join(root, 'package.json'));
   fs.cpSync(path.join(process.cwd(), 'dist'), path.join(root, 'dist'), { recursive: true });
@@ -112,6 +119,52 @@ function rewriteCompiledLauncher(root: string) {
     Buffer.from('#!/opt/homebrew/opt/node/bin/node\n'),
     content.subarray(lineEnd + 1)
   ]));
+}
+
+async function prepareLifecycleTask(root: string, hookDefinitionHash: string) {
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\nbranch: agent-infra-feature-test\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  beginOrResumeOrchestration(taskId, {
+    repoRoot: root,
+    client: 'codex',
+    modelPolicy: {
+      executor: { model: 'model', reasoningEffort: 'high' },
+      reviewer: { model: 'review-model', reasoningEffort: 'high' }
+    },
+    id: () => 'run-1'
+  });
+  const prepared = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'model', requestedReasoningEffort: 'high'
+  }, {
+    repoRoot: root,
+    buildIdentity: {
+      protocolVersion: 3,
+      packageVersion: '0.9.9-alpha.0',
+      internalExecutableBuildHash: 'a'.repeat(64),
+      lifecycleContractHash: 'b'.repeat(64)
+    },
+    preflight: async () => ({
+      cliVersion: '0.147.0', hookDefinitionHash, staticReady: true as const,
+      discoveredHooks: [], runtimeLiveness: false, diagnostics: [],
+      hookProvenance: {
+        hookSource: 'project' as const,
+        hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64)
+      }
+    }),
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  assert.equal(prepared.status, 'running', JSON.stringify(prepared));
+  assert.ok(prepared.adapterContext);
+  const taskName = `analysis_executor_r1${prepared.adapterContext}`;
+  assert.match(taskName, /^[a-z0-9_]+$/u);
+  return {
+    taskId,
+    taskDir,
+    bindingMarker: taskName,
+    storeRoot: resolveTaskRuntimeRoot(taskId, { repoRoot: root })
+  };
 }
 
 function run(root: string, env: NodeJS.ProcessEnv, args: string[], input = '', cliPath = INTERNAL_CLI_PATH) {
@@ -145,41 +198,6 @@ function runBuildFixture(launcherShebang: Record<string, unknown>, executableFil
   return { root, result };
 }
 
-test('compiled codex-lifecycle CLI rechecks its generated executable identity', () => {
-  const { root, env } = fixture();
-  const taskId = 'TASK-20260101-000001';
-  writeCapabilityTask(root, taskId);
-
-  const result = run(root, env, ['capability-arm', '--task-id', taskId]);
-  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.status, 'armed');
-  assert.equal(payload.error, null);
-  assert.equal(payload.buildIdentity.protocolVersion, 3);
-  assert.match(payload.buildIdentity.internalExecutableBuildHash, /^[0-9a-f]{64}$/u);
-});
-
-test('compiled codex-lifecycle CLI accepts a Homebrew-rewritten launcher in an isolated package', () => {
-  const { root, env } = fixture();
-  const taskId = 'TASK-20260101-000001';
-  writeCapabilityTask(root, taskId);
-  copyCompiledPackage(root);
-  rewriteCompiledLauncher(root);
-
-  const result = run(
-    root,
-    env,
-    ['capability-arm', '--task-id', taskId],
-    '',
-    path.join(root, 'dist', 'bin', 'internal-cli.js')
-  );
-  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.status, 'armed');
-  assert.equal(payload.error, null);
-  assert.equal(payload.buildIdentity.protocolVersion, 3);
-});
-
 test('build rejects malformed launcher policies before creating a lifecycle manifest', () => {
   for (const [launcherShebang, executableFiles] of [
     [{
@@ -201,14 +219,15 @@ test('build rejects malformed launcher policies before creating a lifecycle mani
   }
 });
 
-test('codex-lifecycle CLI records normalized hook identity across invocations', () => {
+test('codex-lifecycle CLI records normalized hook identity across invocations', async () => {
   const { root, env } = fixture();
+  const task = await prepareLifecycleTask(root, 'hash');
   const spawn = run(root, env, ['hook-event', '--event', 'pre-tool'], JSON.stringify({
     sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
-    requestedReasoningEffort: 'high', hookDefinitionHash: 'hash'
+    requestedReasoningEffort: 'high', hookDefinitionHash: 'hash', taskName: task.bindingMarker
   }));
-  assert.equal(spawn.status, 0, spawn.stderr);
+  assert.equal(spawn.status, 0, `${spawn.stderr}\n${spawn.stdout}`);
   assert.equal(JSON.parse(spawn.stdout).status, 'observed-spawn');
 
   const child = run(root, env, ['hook-event', '--event', 'subagent-start'], JSON.stringify({
@@ -220,58 +239,282 @@ test('codex-lifecycle CLI records normalized hook identity across invocations', 
   assert.equal(childState.status, 'observed-child');
   assert.equal(childState.evidence.child.sessionId, 'parent');
   assert.equal(childState.evidence.child.parentThreadId, 'parent');
+  assert.equal(fs.existsSync(task.storeRoot), true);
 });
 
-test('codex-lifecycle bridge ignores managed hooks without a running delegation', () => {
+test('codex-lifecycle bridge rejects an unbound managed spawn before creating lifecycle state', () => {
   const { root, env, hookDefinitionHash } = fixture();
   const spawn = run(root, env, ['hook-event', '--event', 'pre-tool', '--bridge', 'true'], JSON.stringify({
     sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
     requestedReasoningEffort: 'high', hookDefinitionHash
   }));
-  assert.equal(spawn.status, 0, `${spawn.stderr}\n${spawn.stdout}`);
-  assert.equal(JSON.parse(spawn.stdout).status, 'observed-spawn');
+  assert.equal(spawn.status, 1, `${spawn.stderr}\n${spawn.stdout}`);
+  assert.equal(JSON.parse(spawn.stdout).error.code, 'CODEX_LIFECYCLE_FAILED');
+  assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.runtime')), false);
+});
 
-  const events = [
-    ['subagent-start', {
-      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
-      nativeAgent: 'agent-infra-lifecycle-executor'
-    }],
-    ['post-tool', {
-      sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
-      nativeAgent: 'agent-infra-lifecycle-executor'
-    }],
-    ['subagent-stop', {
-      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
-      nativeAgent: 'agent-infra-lifecycle-executor'
-    }]
-  ] as const;
+test('codex-lifecycle rejects a wrong receipt without lifecycle writes', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const originalRun = fs.readFileSync(runPath);
+  const event = (taskName: string) => run(root, env, ['hook-event', '--event', 'pre-tool'], JSON.stringify({
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
+    requestedReasoningEffort: 'high', hookDefinitionHash, taskName
+  }));
 
-  for (const [event, payload] of events) {
-    const result = run(root, env, ['hook-event', '--event', event, '--bridge', 'true'], JSON.stringify(payload));
-    assert.equal(result.status, 0, `${event}: ${result.stderr}\n${result.stdout}`);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null
+  const wrongReceiptName = appendCodexLifecycleBinding('analysis_executor_r1', {
+    taskId: task.taskId, runId: 'run-1', receiptId: 'wrong-receipt'
+  });
+  const wrongReceipt = event(wrongReceiptName);
+  assert.equal(wrongReceipt.status, 1, `${wrongReceipt.stderr}\n${wrongReceipt.stdout}`);
+  assert.deepEqual(fs.readFileSync(runPath), originalRun);
+  assert.deepEqual(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.adapterEvidence, {});
+});
+
+test('codex-lifecycle rejects a stop from an old receipt without changing evidence or the current run', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = run(root, env, ['hook-event', '--event', 'subagent-stop'], JSON.stringify({
+    sessionId: 'parent', turnId: 'old-child-turn', childThreadId: 'old-child',
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: task.bindingMarker
+  }));
+
+  assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
+test('codex-lifecycle rejects an ambiguous child event without writing evidence or consuming either spawn', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const store = createCodexLifecycleStore({
+    repoRoot: root,
+    taskId: task.taskId,
+    cliVersion: '0.147.0'
+  });
+  const binding = { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' };
+  for (const [turnId, toolUseId] of [['parent-turn-1', 'spawn-tool-1'], ['parent-turn-2', 'spawn-tool-2']] as const) {
+    store.apply({
+      type: 'hook-spawn', sessionId: 'parent', turnId, toolUseId,
+      nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
+      requestedReasoningEffort: 'high', hookDefinitionHash, taskBinding: binding
     });
   }
+
+  const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = run(root, env, ['hook-event', '--event', 'subagent-start'], JSON.stringify({
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: task.bindingMarker
+  }));
+
+  assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.deepEqual(fs.readdirSync(task.storeRoot).sort(), evidenceFiles);
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
+test('codex-lifecycle bridge rejects an old receipt child before changing evidence or the current run', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  }));
+  assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.deepEqual(fs.readdirSync(task.storeRoot).sort(), evidenceFiles);
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
+});
+
+test('codex-lifecycle bridge rejects a mismatched resolved parent without changing evidence or the current run', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const store = createCodexLifecycleStore({ repoRoot: root, taskId: task.taskId, cliVersion: '0.147.0' });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
+    taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
+  });
+  const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = run(root, { ...env, CHILD_PARENT: 'other-parent' }, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  }));
+  assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.deepEqual(fs.readdirSync(task.storeRoot).sort(), evidenceFiles);
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
+});
+
+test('codex-lifecycle bridge rechecks the current receipt after async resolution before writing child evidence', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const store = createCodexLifecycleStore({ repoRoot: root, taskId: task.taskId, cliVersion: '0.147.0' });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
+    taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
+  });
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const evidenceFiles = fs.readdirSync(task.storeRoot).filter((name) => name !== path.basename(runPath)).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
+  const result = run(root, { ...env, REPLACE_PENDING_RECEIPT: runPath }, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  }));
+  assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.deepEqual(
+    fs.readdirSync(task.storeRoot).filter((name) => name !== path.basename(runPath)).sort(),
+    evidenceFiles
+  );
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.id, 'receipt-replaced');
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
+});
+
+test('codex-lifecycle bridge rejects multiple matching spawn records before writing child evidence', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const store = createCodexLifecycleStore({ repoRoot: root, taskId: task.taskId, cliVersion: '0.147.0' });
+  for (const [index, turnId, toolUseId] of [[1, 'parent-turn-1', 'spawn-tool-1'], [2, 'parent-turn-2', 'spawn-tool-2']] as const) {
+    store.apply({
+      type: 'hook-spawn', sessionId: 'parent', turnId, toolUseId,
+      nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
+      taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
+    });
+    if (index === 1) store.apply({
+      type: 'hook-child', sessionId: 'parent', turnId: 'other-child-turn', childThreadId: 'other-child',
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    });
+  }
+  const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  }));
+  assert.notEqual(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.deepEqual(fs.readdirSync(task.storeRoot).sort(), evidenceFiles);
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
+});
+
+test('codex-lifecycle bridge rejects a same-source child replay with a conflicting turn without changing state in source and compiled CLIs', async () => {
+  const invocations: Array<Readonly<Record<string, unknown>>> = [];
+  const compiledCli = path.resolve('dist/bin/internal-cli.js');
+  for (const [label, cliPath] of [['compiled', compiledCli], ['source', INTERNAL_CLI_PATH]] as const) {
+    const { root, env, hookDefinitionHash } = fixture();
+    const task = await prepareLifecycleTask(root, hookDefinitionHash);
+    const store = createCodexLifecycleStore({ repoRoot: root, taskId: task.taskId, cliVersion: '0.147.0' });
+    store.apply({
+      type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+      nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
+      taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
+    });
+    store.apply({
+      type: 'hook-child', sessionId: 'parent', turnId: 'original-child-turn', childThreadId: 'child',
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+    });
+    const namesBefore = fs.readdirSync(task.storeRoot).sort();
+    const evidenceBefore = new Map(namesBefore.map((name) => [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(task.storeRoot, name))).digest('hex')]));
+    const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+    const runBefore = fs.readFileSync(runPath);
+
+    const result = run(root, env, ['hook-event', '--event', 'subagent-start', '--bridge', 'true'], JSON.stringify({
+      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+      nativeAgent: 'agent-infra-lifecycle-executor'
+    }), cliPath);
+
+    const record = store.read('child');
+    const changedNames = fs.readdirSync(task.storeRoot).sort().filter((name) =>
+      crypto.createHash('sha256').update(fs.readFileSync(path.join(task.storeRoot, name))).digest('hex') !== evidenceBefore.get(name)
+    );
+    const runAfter = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+    invocations.push({
+      cli: label,
+      exitCode: result.status,
+      result: result.stdout.trim(),
+      evidenceNamesBefore: namesBefore,
+      evidenceNamesAfter: fs.readdirSync(task.storeRoot).sort(),
+      changedEvidenceFiles: changedNames,
+      recordBefore: { revision: 2, status: 'observed-child', turnId: 'original-child-turn' },
+      recordAfter: { revision: record.revision, status: record.state.status, turnId: record.state.child?.turnId },
+      consumer: record.consumer,
+      runBytesUnchanged: fs.readFileSync(runPath).equals(runBefore),
+      runStatus: runAfter.status,
+      pause: runAfter.pause
+    });
+  }
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations.map((item) => item.exitCode), [1, 1], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.evidenceNamesAfter), invocations.map((item) => item.evidenceNamesBefore), JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.changedEvidenceFiles), [[], []], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.recordAfter), invocations.map((item) => item.recordBefore), JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.consumer), [null, null], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => item.runBytesUnchanged), [true, true], JSON.stringify(invocations));
+  assert.deepEqual(invocations.map((item) => [item.runStatus, item.pause]), [['running', null], ['running', null]], JSON.stringify(invocations));
+});
+
+test('codex-lifecycle bridge parent seal rejects multiple current children without pausing or writing', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const store = createCodexLifecycleStore({ repoRoot: root, taskId: task.taskId, cliVersion: '0.147.0' });
+  for (const [index, childThreadId] of [[1, 'child-1'], [2, 'child-2']] as const) {
+    store.apply({
+      type: 'hook-spawn', sessionId: 'parent', turnId: `parent-turn-${index}`, toolUseId: `spawn-${index}`,
+      nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash,
+      taskBinding: { taskId: task.taskId, runId: 'run-1', receiptId: 'receipt-1' }
+    });
+    store.apply({
+      type: 'hook-child', sessionId: 'parent', turnId: `child-turn-${index}`, childThreadId,
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    });
+    store.apply({
+      type: 'app-thread', childThreadId, parentThreadId: 'parent', forkedFromId: null,
+      sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    });
+    store.apply({ type: 'app-settings', childThreadId, model: 'model', reasoningEffort: 'high' });
+  }
+  const evidenceFiles = fs.readdirSync(task.storeRoot).sort();
+  const evidenceBefore = new Map(evidenceFiles.map((name) => [name, fs.readFileSync(path.join(task.storeRoot, name))]));
+  const runPath = path.join(task.taskDir, '.runtime', 'orchestration.json');
+  const runBefore = fs.readFileSync(runPath);
+  const result = run(root, env, ['hook-event', '--event', 'post-tool', '--bridge', 'true'], JSON.stringify({
+    toolName: 'collaborationwait_agent', sessionId: 'parent'
+  }));
+  assert.equal(result.status, 1, `${result.stderr}\n${result.stdout}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.error.code, 'CODEX_LIFECYCLE_TASK_BINDING_MISMATCH');
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pause, null);
+  assert.deepEqual(fs.readdirSync(task.storeRoot).sort(), evidenceFiles);
+  for (const name of evidenceFiles) assert.deepEqual(fs.readFileSync(path.join(task.storeRoot, name)), evidenceBefore.get(name));
 });
 
 test('Codex SubagentStop bridge records stop before parent reconciliation seals terminal evidence', async () => {
   const { root, env, hookDefinitionHash } = fixture();
-  assert.equal(spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' }).status, 0);
-  const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
-  beginOrResumeOrchestration(taskId, {
-    repoRoot: root,
-    client: 'codex',
-    modelPolicy: {
-      executor: { model: 'model', reasoningEffort: 'high' },
-      reviewer: { model: 'review-model', reasoningEffort: 'high' }
-    },
-    id: () => 'run-1'
-  });
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
+  const taskId = task.taskId;
+  const taskDir = task.taskDir;
   const buildIdentity = {
     protocolVersion: 3,
     packageVersion: '0.9.9-alpha.0',
@@ -286,24 +529,19 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
       hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64)
     }
   });
-  await prepareCodexOrchestrationDelegation(taskId, {
-    client: 'codex', requestedModel: 'model', requestedReasoningEffort: 'high',
-  }, {
-    repoRoot: root,
-    buildIdentity,
-    preflight,
-    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
-  });
   dispatchOrchestrationDelegation(taskId, { repoRoot: root });
   const store = createCodexLifecycleStore({
-    root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
+    repoRoot: root,
+    taskId,
     cliVersion: '0.147.0'
   });
   for (const event of [
     {
       type: 'hook-spawn' as const, sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
       nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
-      requestedReasoningEffort: 'high', hookDefinitionHash
+      requestedReasoningEffort: 'high', hookDefinitionHash, taskBinding: {
+        taskId, runId: 'run-1', receiptId: 'receipt-1'
+      }
     },
     {
       type: 'hook-child' as const, sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -340,12 +578,12 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
     'hook-event', '--event', 'subagent-stop', '--bridge', 'true'
   ], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
-    nativeAgent: 'agent-infra-lifecycle-executor'
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: task.bindingMarker
   }));
   assert.equal(stopped.status, 0, `${stopped.stderr}\n${stopped.stdout}`);
   const payload = JSON.parse(stopped.stdout);
   assert.equal(payload.status, 'start-ready');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(taskDir, 'orchestration.json'), 'utf8')).pendingDelegation.status, 'stage-completed');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), 'utf8')).pendingDelegation.status, 'stage-completed');
   assert.equal(store.read('child').state.terminal, null);
   assert.equal(store.read('child').state.stop?.turnId, 'child-turn');
 });
@@ -363,13 +601,14 @@ test('codex-lifecycle CLI rejects unknown and duplicate options', () => {
   }
 });
 
-test('codex-lifecycle resolve-stop fails until the stop hook makes evidence ready', () => {
+test('codex-lifecycle resolve-stop fails until the stop hook makes evidence ready', async () => {
   const { root, env, hookDefinitionHash } = fixture();
+  const task = await prepareLifecycleTask(root, hookDefinitionHash);
   for (const [event, payload] of [
     ['pre-tool', {
       sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
       nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
-      requestedReasoningEffort: 'high', hookDefinitionHash
+      requestedReasoningEffort: 'high', hookDefinitionHash, taskName: task.bindingMarker
     }],
     ['subagent-start', {
       sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -388,7 +627,7 @@ test('codex-lifecycle resolve-stop fails until the stop hook makes evidence read
 
   const stopHook = run(root, env, ['hook-event', '--event', 'subagent-stop'], JSON.stringify({
     sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
-    nativeAgent: 'agent-infra-lifecycle-executor'
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: task.bindingMarker
   }));
   assert.equal(stopHook.status, 0, stopHook.stderr);
   const ready = run(root, env, ['resolve-stop', '--child-id', 'child']);

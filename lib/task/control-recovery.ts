@@ -13,7 +13,7 @@ export function parseControlOutput(output: string | null): Record<string, unknow
 }
 
 export type ControlRecoveryOperation = Readonly<{
-  family: 'task-lifecycle' | 'task-finalization' | 'task-create' | 'codex-controller';
+  family: 'task-lifecycle' | 'task-finalization' | 'task-create' | 'agent-client';
   intent: string;
   class: string;
 }>;
@@ -56,7 +56,7 @@ export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperat
   ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation' })),
   { family: 'task-finalization', intent: 'complete', class: 'finalization' },
   { family: 'task-create', intent: 'create', class: 'task-create' },
-  ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller' }))
+  ...(['controller.close', 'controller.verify'] as const).map((intent) => ({ family: 'agent-client' as const, intent, class: 'agent-client-operation' }))
 ]);
 
 export function digestControlRecoveryIntent(family: string, intent: string): string {

@@ -27,7 +27,11 @@ const claudeCodeAdapter = defineAgentClientAdapter({
   },
   delegationEvidence: {
     actualModel: 'host-event',
-    actualReasoningEffort: 'spawn-ack'
+    actualReasoningEffort: 'spawn-ack',
+    spawnModeRequired: false,
+    actualModelRequired: false,
+    actualReasoningEffortRequired: false,
+    fallbackReasonRequired: false
   },
   project: {
     ownedPathPrefixes: ['.claude/'],
