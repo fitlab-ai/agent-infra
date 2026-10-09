@@ -111,7 +111,6 @@ test('ai task status uses persisted paused orchestration state and does not requ
     pendingDelegation: null,
     receipts: [],
     pause: { code: 'ORCHESTRATION_PAUSED', message: 'waiting for review', recoverable: true },
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z'

@@ -307,18 +307,23 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     return matches[0]!;
   }
 
-  function consume(
+  function consumeWithLockMode(
     childThreadId: string,
     consumer: string,
-    expectedHookDefinitionHash?: string,
-    expectedTaskBinding?: CodexLifecycleTaskBinding
+    expectedHookDefinitionHash: string | undefined,
+    expectedTaskBinding: CodexLifecycleTaskBinding | undefined,
+    taskLockHeld: boolean
   ): StoredCodexLifecycle {
     if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
     const current = read(childThreadId);
     const binding = expectedTaskBinding ?? current.taskBinding;
     if (!binding) throw new Error('Codex lifecycle task receipt binding is missing');
     const spawn = current.state.spawn;
-    if (!spawn) throw new Error('Codex lifecycle spawn evidence is missing');
+    if (!spawn) {
+      throw new Error(taskLockHeld
+        ? 'Codex lifecycle task receipt binding is missing'
+        : 'Codex lifecycle spawn evidence is missing');
+    }
     const key = recordKey(spawn.sessionId, spawn.turnId, spawn.toolUseId);
     return update(binding, key, (latest) => {
       if (!latest || expectedTaskBinding && JSON.stringify(latest.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
@@ -333,7 +338,16 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       }
       if (latest.consumer) return latest;
       return Object.freeze({ ...latest, revision: latest.revision + 1, consumer, consumedAt: now(), updatedAt: now() });
-    });
+    }, taskLockHeld);
+  }
+
+  function consume(
+    childThreadId: string,
+    consumer: string,
+    expectedHookDefinitionHash?: string,
+    expectedTaskBinding?: CodexLifecycleTaskBinding
+  ): StoredCodexLifecycle {
+    return consumeWithLockMode(childThreadId, consumer, expectedHookDefinitionHash, expectedTaskBinding, false);
   }
 
   function consumeWithinTaskLock(
@@ -342,24 +356,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     expectedHookDefinitionHash?: string,
     expectedTaskBinding?: CodexLifecycleTaskBinding
   ): StoredCodexLifecycle {
-    if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
-    const current = read(childThreadId);
-    const binding = expectedTaskBinding ?? current.taskBinding;
-    if (!binding || !current.state.spawn) throw new Error('Codex lifecycle task receipt binding is missing');
-    const key = recordKey(current.state.spawn.sessionId, current.state.spawn.turnId, current.state.spawn.toolUseId);
-    return update(binding, key, (latest) => {
-      if (!latest || expectedTaskBinding && JSON.stringify(latest.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
-        throw new Error('Codex lifecycle task binding does not match the expected receipt');
-      }
-      if (latest.consumer && latest.consumer !== consumer) {
-        throw new Error(`Codex lifecycle evidence was already consumed by '${latest.consumer}'`);
-      }
-      if (latest.state.status !== 'stop-ready') throw new Error('Codex lifecycle evidence is not stop-ready');
-      if (expectedHookDefinitionHash && latest.state.startEvidence?.hookDefinitionHash !== expectedHookDefinitionHash) {
-        throw new Error('Codex lifecycle hook definition hash is stale');
-      }
-      return latest.consumer ? latest : Object.freeze({ ...latest, revision: latest.revision + 1, consumer, consumedAt: now(), updatedAt: now() });
-    }, true);
+    return consumeWithLockMode(childThreadId, consumer, expectedHookDefinitionHash, expectedTaskBinding, true);
   }
 
   function expireBefore(cutoff: string): number {

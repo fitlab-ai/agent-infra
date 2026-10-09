@@ -8,7 +8,7 @@ import { validateCurrentTaskContract } from './current-contract.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerDocument } from './ledger.ts';
-import { resolveTaskRef } from './resolve-ref.ts';
+import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import {
   activateDelegation,
   abortActivatedDelegation,
@@ -75,7 +75,6 @@ type ClientCapabilityRecovery = Readonly<{
     baselineEmpty: true;
     receiptCount: 0;
     pendingDelegation: false;
-    commitAuthorizationUnused: true;
     completionEvidenceAbsent: true;
   }>;
   resultingStatus: 'running';
@@ -105,7 +104,6 @@ type OrchestrationRun = Readonly<{
   pendingDelegation: DelegationReceipt | null;
   receipts: readonly DelegationReceipt[];
   pause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
-  commitAuthorization: Readonly<{ issuedAt: string | null; consumedAt: string | null }>;
   completionEvidence: CleanCompletionEvidence | null;
   createdAt: string;
   updatedAt: string;
@@ -249,7 +247,7 @@ function isModelPolicy(value: unknown): value is OrchestrationModelPolicy {
 
 const RECOVERY_GUARD_KEYS = [
   'stepCount', 'nextStage', 'baselineEmpty', 'receiptCount', 'pendingDelegation',
-  'commitAuthorizationUnused', 'completionEvidenceAbsent'
+  'completionEvidenceAbsent'
 ] as const;
 
 function isRecovery(value: unknown): value is OrchestrationRecovery {
@@ -269,7 +267,6 @@ function isRecovery(value: unknown): value is OrchestrationRecovery {
     && guards.baselineEmpty === true
     && guards.receiptCount === 0
     && guards.pendingDelegation === false
-    && guards.commitAuthorizationUnused === true
     && guards.completionEvidenceAbsent === true
     && value.resultingStatus === 'running';
 }
@@ -291,7 +288,7 @@ export function isCompletionEvidence(value: unknown): value is CleanCompletionEv
 const ORCHESTRATION_RUN_KEYS = [
   'taskId', 'runId', 'status', 'nextStage', 'stepCount', 'maxSteps', 'modelPolicy',
   'modelPolicySource', 'recoveryHistory', 'baseline', 'pendingDelegation', 'receipts',
-  'pause', 'commitAuthorization', 'completionEvidence', 'createdAt', 'updatedAt'
+  'pause', 'completionEvidence', 'createdAt', 'updatedAt'
 ] as const;
 
 function orchestrationStateReasonCodes(value: unknown): string[] {
@@ -313,12 +310,6 @@ function orchestrationStateReasonCodes(value: unknown): string[] {
   if (!(record.pendingDelegation === null || isDelegationReceipt(record.pendingDelegation))) reasons.push('pendingDelegation');
   if (!Array.isArray(record.receipts) || !record.receipts.every(isDelegationReceipt)) reasons.push('receipts');
   if (!(record.pause === null || isPause(record.pause))) reasons.push('pause');
-  if (!hasExactKeys(record.commitAuthorization, ['issuedAt', 'consumedAt'])) {
-    reasons.push('commitAuthorization');
-  } else {
-    if (!nullableText(record.commitAuthorization.issuedAt)) reasons.push('commitAuthorization.issuedAt');
-    if (!nullableText(record.commitAuthorization.consumedAt)) reasons.push('commitAuthorization.consumedAt');
-  }
   if (!(record.completionEvidence === null || isCompletionEvidence(record.completionEvidence))) reasons.push('completionEvidence');
   if (!exactText(record.createdAt)) reasons.push('createdAt');
   if (!exactText(record.updatedAt)) reasons.push('updatedAt');
@@ -584,8 +575,6 @@ function canRecoverUnsupportedClientPause(run: OrchestrationRun): boolean {
     && run.baseline === ''
     && run.pendingDelegation === null
     && run.receipts.length === 0
-    && run.commitAuthorization?.issuedAt === null
-    && run.commitAuthorization?.consumedAt === null
     && run.completionEvidence == null
     && run.recoveryHistory.length === 0;
 }
@@ -633,7 +622,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
           baselineEmpty: true,
           receiptCount: 0,
           pendingDelegation: false,
-          commitAuthorizationUnused: true,
           completionEvidenceAbsent: true
         },
         resultingStatus: 'running'
@@ -686,7 +674,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     pendingDelegation: null,
     receipts: [],
     pause: null,
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: null,
     createdAt: now,
     updatedAt: now
@@ -1087,56 +1074,28 @@ function dispatchOrchestrationDelegation(
   }
 }
 
+type MatchingDelegationsResult =
+  | Readonly<{ ok: true; matches: readonly { taskId: string; run: OrchestrationRun }[] }>
+  | Readonly<{ ok: false; error: OrchestrationResult }>;
+
 function matchingDelegations(
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
-): Array<{ taskId: string; run: OrchestrationRun }> {
-  const repoRoot = options.repoRoot ?? process.cwd();
-  if (options.taskId) {
-    const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', options.taskId);
-    const run = readRun(taskDir, options);
-    return run && run.status === 'running' && run.pendingDelegation && predicate(run.pendingDelegation)
-      ? [{ taskId: options.taskId, run }]
-      : [];
+): MatchingDelegationsResult {
+  const taskId: unknown = options.taskId;
+  if (taskId === undefined || taskId === '') {
+    return { ok: false, error: failed('ORCHESTRATION_TASK_ID_REQUIRED', 'taskId is required for lifecycle matching') };
   }
-  const activeRoot = path.join(repoRoot, '.agents', 'workspace', 'active');
-  if (!fs.existsSync(activeRoot)) return [];
-  emitDiagnostic(options, 'orchestration-active-scan-start', {
-    activeRoot
-  });
-  const matches = fs.readdirSync(activeRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const candidateTaskId = entry.name;
-      const candidateTaskDir = path.join(activeRoot, candidateTaskId);
-      emitDiagnostic(options, 'orchestration-active-scan-candidate', {
-        candidateTaskId,
-        candidateTaskDir,
-        orchestrationPath: orchestrationPath(candidateTaskDir)
-      });
-      let run: OrchestrationRun | null;
-      try {
-        run = readRun(candidateTaskDir, options);
-      } catch (error) {
-        emitDiagnostic(options, 'orchestration-active-scan-candidate-failed', {
-          candidateTaskId,
-          candidateTaskDir,
-          errorType: error instanceof Error ? error.name : typeof error,
-          reasonCodes: error instanceof OrchestrationStateError ? error.reasonCodes.join(',') : null
-        });
-        throw error;
-      }
-      if (!run || run.status !== 'running' || !run.pendingDelegation) return [];
-      const receipt = run.pendingDelegation;
-      return predicate(receipt)
-        ? [{ taskId: candidateTaskId, run }]
-        : [];
-    });
-  emitDiagnostic(options, 'orchestration-active-scan-finished', {
-    activeRoot,
-    matchingDelegations: matches.length
-  });
-  return matches;
+  if (typeof taskId !== 'string' || !TASK_ID_RE.test(taskId)) {
+    return { ok: false, error: failed('ORCHESTRATION_TASK_ID_INVALID', 'taskId must be a canonical TASK-id') };
+  }
+  const repoRoot = options.repoRoot ?? process.cwd();
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const run = readRun(taskDir, options);
+  const matches = run && run.status === 'running' && run.pendingDelegation && predicate(run.pendingDelegation)
+    ? [{ taskId, run }]
+    : [];
+  return { ok: true, matches };
 }
 
 function uniqueMatchingDelegation(
@@ -1144,12 +1103,13 @@ function uniqueMatchingDelegation(
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
 ): { taskId: string; run: OrchestrationRun } | OrchestrationResult {
-  const matches = matchingDelegations(
+  const lookup = matchingDelegations(
     (receipt) => receipt.client === client && predicate(receipt),
     options
   );
+  if (!lookup.ok) return lookup.error;
+  const matches = lookup.matches;
   if (matches.length === 0) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no matching lifecycle delegation exists');
-  if (matches.length > 1) return failed('ORCHESTRATION_DELEGATION_AMBIGUOUS', 'multiple lifecycle delegations match the native hook event');
   return matches[0]!;
 }
 
@@ -1158,13 +1118,14 @@ function hasActivatableOrchestrationDelegation(
   childId: string,
   options: OrchestrationOptions = {}
 ): boolean {
-  return matchingDelegations(
+  const lookup = matchingDelegations(
     (receipt) => receipt.client === client && (
       receipt.status === 'prepared'
       || (receipt.childId === childId && ['activated', 'stage-completed'].includes(receipt.status))
     ),
     options
-  ).length > 0;
+  );
+  return lookup.ok && lookup.matches.length > 0;
 }
 
 function hasSealableOrchestrationDelegation(
@@ -1172,12 +1133,13 @@ function hasSealableOrchestrationDelegation(
   childId: string,
   options: OrchestrationOptions = {}
 ): boolean {
-  return matchingDelegations(
+  const lookup = matchingDelegations(
     (receipt) => receipt.client === client
       && receipt.childId === childId
       && ['stage-completed', 'sealed'].includes(receipt.status),
     options
-  ).length > 0;
+  );
+  return lookup.ok && lookup.matches.length > 0;
 }
 
 function activateMatchingOrchestrationDelegation(

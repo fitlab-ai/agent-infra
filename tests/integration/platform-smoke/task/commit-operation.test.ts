@@ -731,8 +731,7 @@ test('orchestrated commit is rejected because lifecycle commit delegation was re
     fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), JSON.stringify({
       ...begun.run,
       nextStage: 'commit',
-      pendingDelegation: activated.ok ? activated.receipt : null,
-      commitAuthorization: { issuedAt: '2026-01-01T00:00:00.000Z', consumedAt: null }
+      pendingDelegation: activated.ok ? activated.receipt : null
     }));
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
 
@@ -749,7 +748,6 @@ test('orchestrated commit is rejected because lifecycle commit delegation was re
     assert.equal(git(root, ['log', '-1', '--format=%s']), 'initial');
     assert.doesNotMatch(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /\*\*Commit\*\*/);
     assert.equal(readRun(taskDir)?.pendingDelegation?.status, 'activated');
-    assert.equal(readRun(taskDir)?.commitAuthorization.consumedAt, null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

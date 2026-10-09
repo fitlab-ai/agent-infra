@@ -167,12 +167,8 @@ function checkOrchestrationState({ taskDir }: any): any {
     return failResult('orchestration-state', 'Paused run requires a stable pause code and message');
   }
   if (run.status === 'completed') {
-    if (run.completionEvidence != null) {
-      const evidenceError = validateCleanCompletionEvidence(run);
-      if (evidenceError) return failResult('orchestration-state', evidenceError);
-    } else if (run.pendingDelegation !== null || !run.commitAuthorization?.consumedAt) {
-      return failResult('orchestration-state', 'Completed run must consume commit authorization and clear pending delegation');
-    }
+    const evidenceError = validateCleanCompletionEvidence(run);
+    if (evidenceError) return failResult('orchestration-state', evidenceError);
   } else if (run.completionEvidence != null) {
     return failResult('orchestration-state', 'Clean completion evidence requires a completed run');
   } else if (run.pendingDelegation?.status === 'sealed') {
@@ -209,11 +205,9 @@ function validateCleanCompletionEvidence(run: OrchestrationRun): string | null {
   if (
     run.status !== 'completed'
     || run.pendingDelegation !== null
-    || run.commitAuthorization?.issuedAt !== null
-    || run.commitAuthorization?.consumedAt !== null
     || run.receipts.some((receipt) => receipt.stage === 'commit')
   ) {
-    return 'Clean completion evidence conflicts with commit delegation state';
+    return 'Clean completion evidence conflicts with pending delegation or commit receipt state';
   }
   return null;
 }
