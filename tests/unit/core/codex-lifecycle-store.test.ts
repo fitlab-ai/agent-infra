@@ -12,6 +12,7 @@ import {
   dispatchOrchestrationDelegation,
   prepareOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
+import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
@@ -48,29 +49,35 @@ function preparedTask(now?: () => string) {
   };
 }
 
-test('Codex lifecycle store persists only normalized evidence and consumes once', () => {
-  let now = '2026-08-14T00:00:00.500Z';
-  const f = preparedTask(() => now);
-  const { taskDir, store } = f;
+function stopReadyChild(f: ReturnType<typeof preparedTask>) {
+  const { store } = f;
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
     nativeAgent: 'agent-infra-lifecycle-reviewer', requestedModel: 'model',
     requestedReasoningEffort: 'high', hookDefinitionHash: 'hash'
   });
-  now = '2026-08-14T00:00:01.000Z';
   store.apply({
     type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
-    parentThreadId: 'parent',
-    nativeAgent: 'agent-infra-lifecycle-reviewer'
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
   store.apply({
     type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent',
-    forkedFromId: null, sourceParentThreadId: 'parent',
+    forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-reviewer'
+  });
+  const ready = store.apply({ type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high' });
+  store.apply({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });
+  store.apply({
+    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
-  const record = store.apply({
-    type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high'
-  });
+  return ready;
+}
+
+test('Codex lifecycle store persists only normalized evidence and consumes once', () => {
+  let now = '2026-08-14T00:00:00.500Z';
+  const f = preparedTask(() => now);
+  const { taskDir, store } = f;
+  const record = stopReadyChild(f);
   assert.equal(record.state.status, 'start-ready');
   assert.equal(
     (store.read('child') as ReturnType<typeof store.read> & { spawnObservedAt?: string }).spawnObservedAt,
@@ -85,13 +92,6 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.equal(raw.includes('transcript'), false);
   assert.equal(record.path, path.join(taskDir, '.runtime', 'orchestration.json'));
 
-  store.apply({
-    type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed'
-  });
-  store.apply({
-    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
-    nativeAgent: 'agent-infra-lifecycle-reviewer'
-  });
   assert.throws(() => store.consume('child', 'receipt-1', 'stale-hash'), /hash is stale/);
   const consumed = store.consume('child', 'receipt-1', 'hash');
   assert.equal(consumed.consumer, 'receipt-1');
@@ -101,6 +101,27 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.equal(store.findByParent('parent')[0]?.consumer, 'receipt-1');
   assert.deepEqual(store.consume('child', 'receipt-1', 'hash'), consumed);
   assert.throws(() => store.consume('child', 'receipt-2'), /already consumed/);
+});
+
+test('Codex lock-held consume matches unlocked success and idempotence contract', () => {
+  let now = '2026-08-14T00:00:00.500Z';
+  const f = preparedTask(() => now);
+  stopReadyChild(f);
+  const before = f.store.read('child');
+  now = '2026-08-14T00:00:01.000Z';
+  const locked = withTaskExecutionLock(f.root, f.taskId, 'test.codex-lifecycle.consume', () =>
+    f.store.consumeWithinTaskLock('child', 'receipt-1', 'hash'));
+  assert.equal(locked.consumer, 'receipt-1');
+  assert.equal(locked.revision, before.revision + 1);
+  assert.equal(locked.consumedAt, now);
+  assert.equal(locked.updatedAt, now);
+
+  now = '2026-08-14T00:00:02.000Z';
+  const unlockedRetry = f.store.consume('child', 'receipt-1', 'hash');
+  assert.deepEqual(unlockedRetry, locked);
+  assert.equal(unlockedRetry.revision, locked.revision);
+  assert.equal(unlockedRetry.consumedAt, locked.consumedAt);
+  assert.equal(unlockedRetry.updatedAt, locked.updatedAt);
 });
 
 test('Codex lifecycle store rejects ambiguous parent session and agent correlation', () => {
