@@ -400,9 +400,13 @@ test('inline ESLint comments cannot suppress either gated complexity rule', () =
     ];
     for (const [name, comment, source, ruleId] of cases) {
       writeSource(`lib/${name}.ts`, `${comment}${source}\n`);
-      const result = run();
-      assert.equal(result.status, 1, result.stdout + result.stderr);
-      assert.match(result.stderr, new RegExp(`new: lib/${name}\\.ts ${ruleId} `));
+    }
+    const result = run();
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const diagnostics = result.stderr.trim().split('\n');
+    assert.equal(diagnostics.length, cases.length, result.stderr);
+    for (const [name, , , ruleId] of cases) {
+      assert.ok(diagnostics.some((line) => line.startsWith(`new: lib/${name}.ts ${ruleId} `)), result.stderr);
     }
   });
 });

@@ -163,10 +163,14 @@ function normalizeMetricMessage(ruleId, metric) {
 function parentIndex(parsed) {
   const parents = new WeakMap();
   const nodes = [];
+  const nodesByType = new Map();
   function visit(node, parent = null) {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
     parents.set(node, parent);
     nodes.push(node);
+    const typedNodes = nodesByType.get(node.type) ?? [];
+    typedNodes.push(node);
+    nodesByType.set(node.type, typedNodes);
     for (const key of parsed.visitorKeys[node.type] ?? []) {
       const child = node[key];
       if (Array.isArray(child)) child.forEach((item) => visit(item, node));
@@ -174,7 +178,11 @@ function parentIndex(parsed) {
     }
   }
   visit(parsed.ast);
-  return { parents, nodes };
+  return { parents, nodes, nodesByType };
+}
+
+function nodesOfType(indices, type) {
+  return indices.nodesByType.get(type) ?? [];
 }
 
 function propertyName(node, source) {
@@ -225,7 +233,7 @@ function callCallee(call, source) {
 function callbackRole(target, parent, owner, source, indices) {
   const argumentIndex = parent.arguments.indexOf(target);
   const callee = callCallee(parent, source);
-  const siblingOrdinal = indices.nodes.filter((node) => node.type === 'CallExpression' &&
+  const siblingOrdinal = nodesOfType(indices, 'CallExpression').filter((node) =>
     callCallee(node, source) === callee && node.arguments[argumentIndex] &&
     FUNCTION_TYPES.has(node.arguments[argumentIndex].type) &&
     enclosingOwner(node, indices.parents) === owner).indexOf(parent) + 1;
@@ -245,7 +253,7 @@ function functionExpressionRole(target, parent, owner, source, indices) {
     return callbackRole(target, parent, owner, source, indices);
   }
   const parentType = parent?.type ?? 'Program';
-  const siblingOrdinal = indices.nodes.filter((node) => node.type === 'FunctionExpression' && node.id?.name === target.id?.name &&
+  const siblingOrdinal = nodesOfType(indices, 'FunctionExpression').filter((node) => node.id?.name === target.id?.name &&
     indices.parents.get(node)?.type === parentType && enclosingOwner(node, indices.parents) === owner).indexOf(target) + 1;
   if (!siblingOrdinal) throw new Error(`Cannot establish a stable binding role for named FunctionExpression ${target.id?.name ?? '<unknown>'}`);
   return `parent:${parentType}:sibling:${siblingOrdinal}`;
@@ -262,14 +270,14 @@ function classExpressionRole(owner, parent, outer, source, indices) {
   if (parent?.type === 'CallExpression' && parent.arguments.includes(owner)) {
     const argumentIndex = parent.arguments.indexOf(owner);
     const callee = callCallee(parent, source);
-    const siblingOrdinal = indices.nodes.filter((node) => node.type === 'CallExpression' &&
+    const siblingOrdinal = nodesOfType(indices, 'CallExpression').filter((node) =>
       callCallee(node, source) === callee && node.arguments[argumentIndex]?.type === 'ClassExpression' &&
       enclosingOwner(node, indices.parents) === outer).indexOf(parent) + 1;
     if (!siblingOrdinal) throw new Error(`Cannot establish a lexical role for class expression passed to ${callee}`);
     return `argument:${callee}:${argumentIndex}:sibling:${siblingOrdinal}`;
   }
   const parentType = parent?.type ?? 'Program';
-  const siblingOrdinal = indices.nodes.filter((node) => node.type === 'ClassExpression' &&
+  const siblingOrdinal = nodesOfType(indices, 'ClassExpression').filter((node) =>
     indices.parents.get(node)?.type === parentType && enclosingOwner(node, indices.parents) === outer).indexOf(owner) + 1;
   if (!siblingOrdinal) throw new Error(`Cannot establish a stable lexical owner for anonymous class expression in ${parentType}`);
   return `anonymous:${parentType}:sibling:${siblingOrdinal}`;
@@ -298,7 +306,7 @@ function descriptorForFunction(target, parsed, source, indices, cache, visiting 
   } else if (target.type === 'FunctionExpression' && target.id) {
     const owner = enclosingOwner(target, parents);
     const ownerDescriptor = owner && owner !== parsed.ast ? descriptorForOwner(owner, parsed, source, indices, cache, visiting) : null;
-    const sameNameInOwner = nodes.filter((node) => node.type === 'FunctionExpression' && node.id?.name === target.id.name &&
+    const sameNameInOwner = nodesOfType(indices, 'FunctionExpression').filter((node) => node.id?.name === target.id.name &&
       enclosingOwner(node, parents) === owner);
     if (sameNameInOwner.length > 1) {
       const role = functionExpressionRole(target, parent, owner, source, indices);
@@ -370,7 +378,7 @@ function descriptorForOwner(owner, parsed, source, indices, cache, visiting) {
     if (owner.type === 'ClassDeclaration') {
       classIdentity = `class:${className}`;
     } else if (owner.id?.name) {
-      const sameNameInOwner = indices.nodes.filter((node) => node.type === 'ClassExpression' && node.id?.name === owner.id.name &&
+      const sameNameInOwner = nodesOfType(indices, 'ClassExpression').filter((node) => node.id?.name === owner.id.name &&
         enclosingOwner(node, indices.parents) === outer);
       classIdentity = sameNameInOwner.length > 1 ? `class:${classRole}:name:${owner.id.name}` : `class:${owner.id.name}`;
     } else if (classRole.startsWith('binding:')) {
@@ -405,7 +413,7 @@ function descriptorForOwner(owner, parsed, source, indices, cache, visiting) {
     else if (parent?.type === 'Property') name = propertyName(parent.key, source);
     else if (parent?.type === 'AssignmentExpression') name = `assignment-${sha256(stableJson(canonicalAst(parent.left))).slice(0, 12)}`;
     else {
-      const siblingOrdinal = indices.nodes.filter((node) => node.type === 'ObjectExpression' &&
+      const siblingOrdinal = nodesOfType(indices, 'ObjectExpression').filter((node) =>
         indices.parents.get(node)?.type === parent?.type && enclosingOwner(node, indices.parents) === outer).indexOf(owner) + 1;
       if (!siblingOrdinal) throw new Error('Cannot establish a stable lexical owner for anonymous object methods');
       name = `anonymous-object-${siblingOrdinal}`;
@@ -420,11 +428,42 @@ function descriptorForOwner(owner, parsed, source, indices, cache, visiting) {
   return { identityPath: [], displayName: '' };
 }
 
-function assertNoIdentityCollisions(parsed, source, indices, target, targetDescriptor, filePath, ruleId) {
+function createFileAnalysis(source, filePath) {
+  const parsed = astForSource(source, filePath);
+  return {
+    parsed,
+    source,
+    indices: parentIndex(parsed),
+    descriptors: new Map(),
+    collisionCandidates: null
+  };
+}
+
+function collisionCandidatesFor(analysis, target, targetDescriptor) {
+  if (analysis.collisionCandidates) return analysis.collisionCandidates;
+  const { parsed, source, indices, descriptors } = analysis;
+  const candidates = new Map();
+  const add = (node, descriptor) => {
+    const identity = stableJson(descriptor.identityPath);
+    const group = candidates.get(identity) ?? [];
+    group.push({ node, descriptor });
+    candidates.set(identity, group);
+  };
+  add(target, targetDescriptor);
   for (const node of indices.nodes) {
     if (!FUNCTION_TYPES.has(node.type) || node === target) continue;
-    const descriptor = descriptorForFunction(node, parsed, source, indices, new Map());
-    if (stableJson(descriptor.identityPath) !== stableJson(targetDescriptor.identityPath)) continue;
+    add(node, descriptorForFunction(node, parsed, source, indices, descriptors));
+  }
+  analysis.collisionCandidates = candidates;
+  return candidates;
+}
+
+function assertNoIdentityCollisions(analysis, target, targetDescriptor, filePath, ruleId) {
+  const { indices } = analysis;
+  const candidates = collisionCandidatesFor(analysis, target, targetDescriptor)
+    .get(stableJson(targetDescriptor.identityPath)) ?? [];
+  for (const { node } of candidates) {
+    if (node === target) continue;
     const parent = indices.parents.get(node);
     const targetParent = indices.parents.get(target);
     const overloadPair = parent?.type === 'MethodDefinition' && targetParent?.type === 'MethodDefinition' &&
@@ -434,17 +473,15 @@ function assertNoIdentityCollisions(parsed, source, indices, target, targetDescr
   }
 }
 
-export function violationEntry({ filePath, message, source }) {
+function violationEntryWithAnalysis({ filePath, message, source }, analysis) {
   const relativePath = path.relative(ROOT_DIR, filePath).split(path.sep).join('/');
-  const parsed = astForSource(source, filePath);
+  const { parsed, indices, descriptors } = analysis;
   const anchor = findAnchor(parsed, source, message.line, message.column);
   const { metric, normalizedMessage } = parseMetric(message.ruleId, message.message);
-  const indices = parentIndex(parsed);
-  const cache = new Map();
   let descriptor;
   try {
-    descriptor = descriptorForFunction(anchor, parsed, source, indices, cache);
-    assertNoIdentityCollisions(parsed, source, indices, anchor, descriptor, relativePath, message.ruleId);
+    descriptor = descriptorForFunction(anchor, parsed, source, indices, descriptors);
+    assertNoIdentityCollisions(analysis, anchor, descriptor, relativePath, message.ruleId);
   } catch (error) {
     throw new Error(`${relativePath} ${message.ruleId}: ${error.message}`, { cause: error });
   }
@@ -459,13 +496,20 @@ export function violationEntry({ filePath, message, source }) {
   };
 }
 
+export function violationEntry(input) {
+  return violationEntryWithAnalysis(input, createFileAnalysis(input.source, input.filePath));
+}
+
 export function collectEntries(results) {
   const entries = new Map();
   for (const result of results) {
     if (result.fatalErrorCount > 0) continue;
+    let analysis;
     for (const message of result.messages) {
       if (!Object.hasOwn(RULES, message.ruleId)) continue;
-      const entry = violationEntry({ filePath: result.filePath, message, source: result.source ?? '' });
+      const source = result.source ?? '';
+      analysis ??= createFileAnalysis(source, result.filePath);
+      const entry = violationEntryWithAnalysis({ filePath: result.filePath, message, source }, analysis);
       const key = stableJson({ file: entry.file, ruleId: entry.ruleId, stableId: entry.stableId });
       const previous = entries.get(key);
       entries.set(key, {
