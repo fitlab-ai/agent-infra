@@ -49,7 +49,7 @@ export function metadata() {
     typescript: packageVersion('typescript')
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     toolchain,
     configDigest: sha256(stableJson({
       eslintConfig: sha256(readFileSync(path.join(TOOL_DIR, 'eslint.config.mjs'))),
@@ -89,28 +89,47 @@ function astForSource(source, filePath) {
 
 function findAnchor(parsed, source, line, column) {
   const offset = lineColumnToOffset(source, line, column);
-  const pathToNode = [];
+  const functions = [];
+  const propertyValues = [];
+  const unsupportedPropertyHeaders = [];
+  const statements = [];
   const { ast, visitorKeys } = parsed;
 
-  function find(node, ancestors) {
-    if (!node || typeof node !== 'object' || !Array.isArray(node.range)) return false;
-    if (node.range[0] > offset || node.range[1] < offset) return false;
-    pathToNode.length = 0;
-    pathToNode.push(...ancestors, node);
+  function visit(node) {
+    if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
+    const containsOffset = Array.isArray(node.range) && node.range[0] <= offset && node.range[1] >= offset;
+    if (containsOffset && FUNCTION_TYPES.has(node.type)) functions.push(node);
+    if (containsOffset && node.type === 'MethodDefinition' && FUNCTION_TYPES.has(node.value?.type)) functions.push(node.value);
+    if (containsOffset && ['Property', 'PropertyDefinition'].includes(node.type)
+      && node.range[0] <= offset && offset < (node.value?.range?.[0] ?? node.range[1])) {
+      if (FUNCTION_TYPES.has(node.value?.type)) propertyValues.push({ property: node, value: node.value });
+      else unsupportedPropertyHeaders.push(node);
+    }
+    if (containsOffset && node.type.endsWith('Statement')) statements.push(node);
     for (const key of visitorKeys[node.type] ?? []) {
       const children = node[key];
-      if (Array.isArray(children)) {
-        for (const child of children) if (find(child, [...ancestors, node])) return true;
-      } else if (find(children, [...ancestors, node])) return true;
+      if (Array.isArray(children)) children.forEach(visit);
+      else visit(children);
     }
-    return true;
   }
 
-  find(ast, []);
-  const functionNode = [...pathToNode].reverse().find((node) => FUNCTION_TYPES.has(node.type));
-  if (functionNode) return functionNode;
-  const statementNode = [...pathToNode].reverse().find((node) => node.type.endsWith('Statement'));
-  return statementNode ?? ast;
+  visit(ast);
+  functions.sort((left, right) => (left.range[1] - left.range[0]) - (right.range[1] - right.range[0]));
+  const headerFunctions = functions.filter((fn) => propertyValues.some(({ property, value }) =>
+    fn !== value && fn.range[0] >= property.range[0] && fn.range[1] <= value.range[0]));
+  if (headerFunctions[0]) return headerFunctions[0];
+  if (propertyValues.length > 0) {
+    propertyValues.sort((left, right) =>
+      (left.property.range[1] - left.property.range[0]) - (right.property.range[1] - right.property.range[0]));
+    return propertyValues[0].value;
+  }
+  if (functions[0]) return functions[0];
+  if (unsupportedPropertyHeaders.length > 0) {
+    const property = unsupportedPropertyHeaders[0];
+    throw new Error(`Cannot associate diagnostic at ${property.type} header with a function value`);
+  }
+  statements.sort((left, right) => (left.range[1] - left.range[0]) - (right.range[1] - right.range[0]));
+  return statements[0] ?? ast;
 }
 
 function canonicalAst(value) {
@@ -123,30 +142,320 @@ function canonicalAst(value) {
   return result;
 }
 
-function metricMessage(ruleId, message) {
+function parseMetric(ruleId, message) {
   if (ruleId === 'complexity') {
     const match = /complexity of (\d+)/i.exec(message);
-    if (match) return `complexity=${match[1]}`;
+    if (match) return { metric: Number(match[1]), normalizedMessage: `complexity=${match[1]}` };
   }
   if (ruleId === 'max-depth') {
     const match = /nested too deeply \((\d+)\)/i.exec(message);
-    if (match) return `depth=${match[1]}`;
+    if (match) return { metric: Number(match[1]), normalizedMessage: `depth=${match[1]}` };
   }
   throw new Error(`Unrecognized ${ruleId} diagnostic: ${message}`);
+}
+
+function normalizeMetricMessage(ruleId, metric) {
+  if (ruleId === 'complexity') return `complexity=${metric}`;
+  if (ruleId === 'max-depth') return `depth=${metric}`;
+  throw new Error(`Unrecognized metric rule: ${ruleId}`);
+}
+
+function parentIndex(parsed) {
+  const parents = new WeakMap();
+  const nodes = [];
+  function visit(node, parent = null) {
+    if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
+    parents.set(node, parent);
+    nodes.push(node);
+    for (const key of parsed.visitorKeys[node.type] ?? []) {
+      const child = node[key];
+      if (Array.isArray(child)) child.forEach((item) => visit(item, node));
+      else visit(child, node);
+    }
+  }
+  visit(parsed.ast);
+  return { parents, nodes };
+}
+
+function propertyName(node, source) {
+  if (!node) return '<unknown>';
+  if (!node.computed && node.type === 'Identifier') return node.name;
+  if (node.type === 'PrivateIdentifier') return `#${node.name}`;
+  if (node.type === 'Literal') return String(node.value);
+  return `[${sha256(stableJson(canonicalAst(node))).slice(0, 12)}:${source.slice(node.range[0], node.range[1]).replace(/\s+/g, ' ').trim()}]`;
+}
+
+function propertyFunctionRole(parent, source) {
+  const name = propertyName(parent.key, source);
+  if (parent.type === 'PropertyDefinition') return `property:${parent.static ? 'static' : 'instance'}:${name}`;
+  const role = parent.kind === 'get' || parent.kind === 'set'
+    ? parent.kind
+    : parent.method ? 'method' : 'value';
+  return `property:${role}:${name}`;
+}
+
+function canonicalCalleeAst(value) {
+  if (Array.isArray(value)) return value.map(canonicalCalleeAst);
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  for (const key of Object.keys(value).sort()) {
+    if (REMOVED_AST_KEYS.has(key) || (FUNCTION_TYPES.has(value.type) && key === 'body')) continue;
+    result[key] = canonicalCalleeAst(value[key]);
+  }
+  return result;
+}
+
+function enclosingOwner(node, parents) {
+  for (let current = parents.get(node); current; current = parents.get(current)) {
+    if (FUNCTION_TYPES.has(current.type) || current.type === 'ClassDeclaration' || current.type === 'ClassExpression' ||
+      current.type === 'ObjectExpression' || current.type === 'TSModuleDeclaration' || current.type === 'Program') return current;
+  }
+  return null;
+}
+
+function callCallee(call, source) {
+  const callee = call.callee;
+  if (callee.type === 'Identifier') return callee.name;
+  if (callee.type === 'MemberExpression' && !callee.computed) {
+    return `${callCallee({ callee: callee.object }, source)}.${propertyName(callee.property, source)}`;
+  }
+  return `${callee.type}:${sha256(stableJson(canonicalCalleeAst(callee))).slice(0, 12)}`;
+}
+
+function callbackRole(target, parent, owner, source, indices) {
+  const argumentIndex = parent.arguments.indexOf(target);
+  const callee = callCallee(parent, source);
+  const siblingOrdinal = indices.nodes.filter((node) => node.type === 'CallExpression' &&
+    callCallee(node, source) === callee && node.arguments[argumentIndex] &&
+    FUNCTION_TYPES.has(node.arguments[argumentIndex].type) &&
+    enclosingOwner(node, indices.parents) === owner).indexOf(parent) + 1;
+  if (!siblingOrdinal) throw new Error(`Cannot establish a sibling ordinal for anonymous callback ${callee}[${argumentIndex}]`);
+  return `callback:${callee}:argument:${argumentIndex}:sibling:${siblingOrdinal}`;
+}
+
+function functionExpressionRole(target, parent, owner, source, indices) {
+  if (parent?.type === 'VariableDeclarator' && parent.init === target) return `binding:${propertyName(parent.id, source)}`;
+  if ((parent?.type === 'PropertyDefinition' || parent?.type === 'Property') && parent.value === target) {
+    return propertyFunctionRole(parent, source);
+  }
+  if (parent?.type === 'AssignmentExpression' && parent.right === target) {
+    return `assignment:${sha256(stableJson(canonicalAst(parent.left))).slice(0, 16)}`;
+  }
+  if (parent?.type === 'CallExpression' && parent.arguments.includes(target)) {
+    return callbackRole(target, parent, owner, source, indices);
+  }
+  const parentType = parent?.type ?? 'Program';
+  const siblingOrdinal = indices.nodes.filter((node) => node.type === 'FunctionExpression' && node.id?.name === target.id?.name &&
+    indices.parents.get(node)?.type === parentType && enclosingOwner(node, indices.parents) === owner).indexOf(target) + 1;
+  if (!siblingOrdinal) throw new Error(`Cannot establish a stable binding role for named FunctionExpression ${target.id?.name ?? '<unknown>'}`);
+  return `parent:${parentType}:sibling:${siblingOrdinal}`;
+}
+
+function classExpressionRole(owner, parent, outer, source, indices) {
+  if (parent?.type === 'VariableDeclarator' && parent.init === owner) return `binding:${propertyName(parent.id, source)}`;
+  if ((parent?.type === 'PropertyDefinition' || parent?.type === 'Property') && parent.value === owner) {
+    return `property:${propertyName(parent.key, source)}`;
+  }
+  if (parent?.type === 'AssignmentExpression' && parent.right === owner) {
+    return `assignment:${sha256(stableJson(canonicalAst(parent.left))).slice(0, 16)}`;
+  }
+  if (parent?.type === 'CallExpression' && parent.arguments.includes(owner)) {
+    const argumentIndex = parent.arguments.indexOf(owner);
+    const callee = callCallee(parent, source);
+    const siblingOrdinal = indices.nodes.filter((node) => node.type === 'CallExpression' &&
+      callCallee(node, source) === callee && node.arguments[argumentIndex]?.type === 'ClassExpression' &&
+      enclosingOwner(node, indices.parents) === outer).indexOf(parent) + 1;
+    if (!siblingOrdinal) throw new Error(`Cannot establish a lexical role for class expression passed to ${callee}`);
+    return `argument:${callee}:${argumentIndex}:sibling:${siblingOrdinal}`;
+  }
+  const parentType = parent?.type ?? 'Program';
+  const siblingOrdinal = indices.nodes.filter((node) => node.type === 'ClassExpression' &&
+    indices.parents.get(node)?.type === parentType && enclosingOwner(node, indices.parents) === outer).indexOf(owner) + 1;
+  if (!siblingOrdinal) throw new Error(`Cannot establish a stable lexical owner for anonymous class expression in ${parentType}`);
+  return `anonymous:${parentType}:sibling:${siblingOrdinal}`;
+}
+
+function descriptorForFunction(target, parsed, source, indices, cache, visiting = new Set()) {
+  if (cache.has(target)) return cache.get(target);
+  if (visiting.has(target)) throw new Error('Cannot establish a non-cyclic stable method identity');
+  visiting.add(target);
+  const { parents, nodes } = indices;
+  const parent = parents.get(target);
+  let segment;
+  let display;
+
+  if (parent?.type === 'MethodDefinition' && parent.value === target) {
+    const name = propertyName(parent.key, source);
+    const owner = enclosingOwner(parent, parents);
+    const ownerDescriptor = owner && owner !== parsed.ast ? descriptorForOwner(owner, parsed, source, indices, cache, visiting) : 'module';
+    segment = `method:${target.type}:${parent.kind}:${parent.static ? 'static:' : ''}${name}`;
+    display = `${ownerDescriptor.displayName}.${name}`;
+  } else if (target.type === 'FunctionDeclaration' && target.id) {
+    segment = `function:${target.type}:${target.id.name}`;
+    const owner = enclosingOwner(target, parents);
+    const ownerDescriptor = owner && owner !== parsed.ast ? descriptorForOwner(owner, parsed, source, indices, cache, visiting) : null;
+    display = ownerDescriptor ? `${ownerDescriptor.displayName}.${target.id.name}` : target.id.name;
+  } else if (target.type === 'FunctionExpression' && target.id) {
+    const owner = enclosingOwner(target, parents);
+    const ownerDescriptor = owner && owner !== parsed.ast ? descriptorForOwner(owner, parsed, source, indices, cache, visiting) : null;
+    const sameNameInOwner = nodes.filter((node) => node.type === 'FunctionExpression' && node.id?.name === target.id.name &&
+      enclosingOwner(node, parents) === owner);
+    if (sameNameInOwner.length > 1) {
+      const role = functionExpressionRole(target, parent, owner, source, indices);
+      segment = `named-expression:${target.type}:${role}:name:${target.id.name}`;
+      const roleDisplay = role.startsWith('binding:') || role.startsWith('property:') ? role.slice(role.indexOf(':') + 1) : target.id.name;
+      display = `${ownerDescriptor?.displayName ? `${ownerDescriptor.displayName}.` : ''}${roleDisplay}${roleDisplay === target.id.name ? '' : ` (${target.id.name})`}`;
+    } else {
+      segment = `named-expression:${target.type}:${target.id.name}`;
+      display = ownerDescriptor ? `${ownerDescriptor.displayName}.${target.id.name}` : target.id.name;
+    }
+  } else {
+    let binding;
+    let context = parent;
+    if (parent?.type === 'VariableDeclarator' && parent.init === target) {
+      binding = `binding:${propertyName(parent.id, source)}`;
+      context = parent;
+    } else if ((parent?.type === 'PropertyDefinition' || parent?.type === 'Property') && parent.value === target) {
+      binding = propertyFunctionRole(parent, source);
+      context = parent;
+    } else if (parent?.type === 'AssignmentExpression' && parent.right === target) {
+      binding = `assignment:${sha256(stableJson(canonicalAst(parent.left))).slice(0, 16)}`;
+      context = parent;
+    }
+    const owner = enclosingOwner(context ?? target, parents);
+    const ownerDescriptor = owner && owner !== parsed.ast ? descriptorForOwner(owner, parsed, source, indices, cache, visiting) : null;
+    if (binding) {
+      segment = binding;
+      display = `${ownerDescriptor ? `${ownerDescriptor.displayName}.` : ''}${binding.slice(binding.indexOf(':') + 1)}`;
+    } else if (parent?.type === 'CallExpression' && parent.arguments.includes(target)) {
+      segment = callbackRole(target, parent, owner, source, indices);
+      const argumentIndex = parent.arguments.indexOf(target);
+      const callee = callCallee(parent, source);
+      const siblingOrdinal = segment.slice(segment.lastIndexOf(':') + 1);
+      display = `${ownerDescriptor ? `${ownerDescriptor.displayName}.` : ''}${callee} callback[${argumentIndex}]#${siblingOrdinal}`;
+    } else {
+      const parentType = parent?.type ?? 'Program';
+      const siblings = nodes.filter((node) => FUNCTION_TYPES.has(node.type) &&
+        parents.get(node)?.type === parentType && node.type === target.type &&
+        enclosingOwner(node, parents) === owner);
+      const siblingOrdinal = siblings.indexOf(target) + 1;
+      if (!siblingOrdinal) throw new Error(`Cannot establish a stable identity for anonymous ${target.type}`);
+      segment = `anonymous:${target.type}:${parentType}:sibling:${siblingOrdinal}`;
+      display = `${ownerDescriptor ? `${ownerDescriptor.displayName}.` : ''}<anonymous ${target.type}#${siblingOrdinal}>`;
+    }
+  }
+
+  const owner = enclosingOwner(target, parents);
+  let identityPath = [];
+  if (owner && owner !== parsed.ast) identityPath = descriptorForOwner(owner, parsed, source, indices, cache, visiting).identityPath;
+  const descriptor = { identityPath: [...identityPath, segment], displayName: display };
+  cache.set(target, descriptor);
+  visiting.delete(target);
+  return descriptor;
+}
+
+function descriptorForOwner(owner, parsed, source, indices, cache, visiting) {
+  if (owner.type === 'Program') return { identityPath: [], displayName: '' };
+  if (FUNCTION_TYPES.has(owner.type)) return descriptorForFunction(owner, parsed, source, indices, cache, visiting);
+  if (owner.type === 'ClassDeclaration' || owner.type === 'ClassExpression') {
+    const parent = indices.parents.get(owner);
+    const outer = enclosingOwner(owner, indices.parents);
+    const outerDescriptor = outer && outer !== parsed.ast ? descriptorForOwner(outer, parsed, source, indices, cache, visiting) : { identityPath: [], displayName: '' };
+    const classRole = owner.type === 'ClassDeclaration'
+      ? `declaration:${owner.id?.name ?? '<anonymous-class>'}`
+      : classExpressionRole(owner, parent, outer, source, indices);
+    const bindingName = classRole.startsWith('binding:') ? classRole.slice('binding:'.length) : null;
+    const className = owner.id?.name ?? bindingName ?? `<anonymous-class ${classRole}>`;
+    let classIdentity;
+    if (owner.type === 'ClassDeclaration') {
+      classIdentity = `class:${className}`;
+    } else if (owner.id?.name) {
+      const sameNameInOwner = indices.nodes.filter((node) => node.type === 'ClassExpression' && node.id?.name === owner.id.name &&
+        enclosingOwner(node, indices.parents) === outer);
+      classIdentity = sameNameInOwner.length > 1 ? `class:${classRole}:name:${owner.id.name}` : `class:${owner.id.name}`;
+    } else if (classRole.startsWith('binding:')) {
+      classIdentity = `class:${bindingName}`;
+    } else {
+      classIdentity = `class:${classRole}`;
+    }
+    const descriptor = {
+      identityPath: [...outerDescriptor.identityPath, classIdentity],
+      displayName: `${outerDescriptor.displayName ? `${outerDescriptor.displayName}.` : ''}${className}`
+    };
+    cache.set(owner, descriptor);
+    return descriptor;
+  }
+  if (owner.type === 'TSModuleDeclaration') {
+    const outer = enclosingOwner(owner, indices.parents);
+    const outerDescriptor = outer && outer !== parsed.ast ? descriptorForOwner(outer, parsed, source, indices, cache, visiting) : { identityPath: [], displayName: '' };
+    const name = propertyName(owner.id, source);
+    const descriptor = {
+      identityPath: [...outerDescriptor.identityPath, `module:${name}`],
+      displayName: `${outerDescriptor.displayName ? `${outerDescriptor.displayName}.` : ''}${name}`
+    };
+    cache.set(owner, descriptor);
+    return descriptor;
+  }
+  if (owner.type === 'ObjectExpression') {
+    const parent = indices.parents.get(owner);
+    const outer = enclosingOwner(owner, indices.parents);
+    const outerDescriptor = outer && outer !== parsed.ast ? descriptorForOwner(outer, parsed, source, indices, cache, visiting) : { identityPath: [], displayName: '' };
+    let name;
+    if (parent?.type === 'VariableDeclarator') name = propertyName(parent.id, source);
+    else if (parent?.type === 'Property') name = propertyName(parent.key, source);
+    else if (parent?.type === 'AssignmentExpression') name = `assignment-${sha256(stableJson(canonicalAst(parent.left))).slice(0, 12)}`;
+    else {
+      const siblingOrdinal = indices.nodes.filter((node) => node.type === 'ObjectExpression' &&
+        indices.parents.get(node)?.type === parent?.type && enclosingOwner(node, indices.parents) === outer).indexOf(owner) + 1;
+      if (!siblingOrdinal) throw new Error('Cannot establish a stable lexical owner for anonymous object methods');
+      name = `anonymous-object-${siblingOrdinal}`;
+    }
+    const descriptor = {
+      identityPath: [...outerDescriptor.identityPath, `object:${name}`],
+      displayName: `${outerDescriptor.displayName ? `${outerDescriptor.displayName}.` : ''}${name}`
+    };
+    cache.set(owner, descriptor);
+    return descriptor;
+  }
+  return { identityPath: [], displayName: '' };
+}
+
+function assertNoIdentityCollisions(parsed, source, indices, target, targetDescriptor, filePath, ruleId) {
+  for (const node of indices.nodes) {
+    if (!FUNCTION_TYPES.has(node.type) || node === target) continue;
+    const descriptor = descriptorForFunction(node, parsed, source, indices, new Map());
+    if (stableJson(descriptor.identityPath) !== stableJson(targetDescriptor.identityPath)) continue;
+    const parent = indices.parents.get(node);
+    const targetParent = indices.parents.get(target);
+    const overloadPair = parent?.type === 'MethodDefinition' && targetParent?.type === 'MethodDefinition' &&
+      parent.key.name === targetParent.key.name &&
+      (node.body == null || target.body == null);
+    if (!overloadPair) throw new Error(`Stable method identity collision: ${filePath} ${ruleId} ${targetDescriptor.displayName}`);
+  }
 }
 
 export function violationEntry({ filePath, message, source }) {
   const relativePath = path.relative(ROOT_DIR, filePath).split(path.sep).join('/');
   const parsed = astForSource(source, filePath);
   const anchor = findAnchor(parsed, source, message.line, message.column);
-  const normalizedMessage = metricMessage(message.ruleId, message.message);
-  const anchorSha256 = sha256(stableJson(canonicalAst(anchor)));
+  const { metric, normalizedMessage } = parseMetric(message.ruleId, message.message);
+  const indices = parentIndex(parsed);
+  const cache = new Map();
+  let descriptor;
+  try {
+    descriptor = descriptorForFunction(anchor, parsed, source, indices, cache);
+    assertNoIdentityCollisions(parsed, source, indices, anchor, descriptor, relativePath, message.ruleId);
+  } catch (error) {
+    throw new Error(`${relativePath} ${message.ruleId}: ${error.message}`, { cause: error });
+  }
+  const stableId = sha256(stableJson({ file: relativePath, identityPath: descriptor.identityPath }));
   return {
     file: relativePath,
     ruleId: message.ruleId,
-    messageId: message.messageId,
-    normalizedMessage,
-    anchorSha256
+    stableId,
+    displayName: descriptor.displayName,
+    metric,
+    normalizedMessage
   };
 }
 
@@ -157,8 +466,14 @@ export function collectEntries(results) {
     for (const message of result.messages) {
       if (!Object.hasOwn(RULES, message.ruleId)) continue;
       const entry = violationEntry({ filePath: result.filePath, message, source: result.source ?? '' });
-      const key = stableJson(entry);
-      entries.set(key, { ...entry, count: (entries.get(key)?.count ?? 0) + 1 });
+      const key = stableJson({ file: entry.file, ruleId: entry.ruleId, stableId: entry.stableId });
+      const previous = entries.get(key);
+      entries.set(key, {
+        ...entry,
+        metric: Math.max(entry.metric, previous?.metric ?? entry.metric),
+        normalizedMessage: normalizeMetricMessage(entry.ruleId, Math.max(entry.metric, previous?.metric ?? entry.metric)),
+        count: (previous?.count ?? 0) + 1
+      });
     }
   }
   return [...entries.values()].sort(compareBaselineEntries);
@@ -187,8 +502,8 @@ export function validateBaseline(baseline, expected = metadata()) {
   for (const entry of baseline.entries) {
     if (!entry || typeof entry !== 'object' ||
       typeof entry.file !== 'string' || typeof entry.ruleId !== 'string' ||
-      typeof entry.messageId !== 'string' || typeof entry.normalizedMessage !== 'string' ||
-      !/^[a-f0-9]{64}$/.test(entry.anchorSha256) || !Number.isSafeInteger(entry.count) || entry.count < 1) {
+      !/^[a-f0-9]{64}$/.test(entry.stableId) || typeof entry.displayName !== 'string' ||
+      !Number.isSafeInteger(entry.metric) || entry.metric < 1 || !Number.isSafeInteger(entry.count) || entry.count < 1) {
       return 'baseline contains an invalid violation entry';
     }
   }
@@ -196,18 +511,17 @@ export function validateBaseline(baseline, expected = metadata()) {
 }
 
 export function compareEntries(baselineEntries, currentEntries) {
-  const key = ({ count, ...entry }) => stableJson(entry);
-  const baseline = new Map(baselineEntries.map((entry) => [key(entry), entry.count]));
-  const current = new Map(currentEntries.map((entry) => [key(entry), entry.count]));
+  const key = ({ file, ruleId, stableId }) => stableJson({ file, ruleId, stableId });
+  const baseline = new Map(baselineEntries.map((entry) => [key(entry), entry]));
+  const current = new Map(currentEntries.map((entry) => [key(entry), entry]));
   const errors = [];
 
-  for (const [fingerprint, count] of current) {
-    const previous = baseline.get(fingerprint) ?? 0;
-    if (count > previous) errors.push({ kind: previous ? 'worsened' : 'new', entry: currentEntries.find((item) => key(item) === fingerprint), count, previous });
+  for (const [fingerprint, currentEntry] of current) {
+    const previousEntry = baseline.get(fingerprint);
+    if (!previousEntry) errors.push({ kind: 'new', entry: currentEntry, count: currentEntry.count, previous: 0 });
   }
-  for (const [fingerprint, count] of baseline) {
-    const observed = current.get(fingerprint) ?? 0;
-    if (observed < count) errors.push({ kind: 'stale', entry: baselineEntries.find((item) => key(item) === fingerprint), count: observed, previous: count });
+  for (const [fingerprint, baselineEntry] of baseline) {
+    if (!current.has(fingerprint)) errors.push({ kind: 'stale', entry: baselineEntry, count: 0, previous: baselineEntry.count });
   }
   return errors;
 }
@@ -279,7 +593,7 @@ async function main() {
   const errors = compareEntries(baseline.entries, scan.entries);
   for (const item of errors) {
     const entry = item.entry;
-    process.stderr.write(`${item.kind}: ${entry.file} ${entry.ruleId} ${entry.normalizedMessage} (baseline ${item.previous}, current ${item.count})\n`);
+    process.stderr.write(`${item.kind}: ${entry.file} ${entry.ruleId} ${entry.displayName} ${entry.normalizedMessage} (baseline ${item.previous}, current ${item.count})\n`);
   }
   if (errors.length) process.exitCode = 1;
   else process.stdout.write(`ESLint baseline check passed for ${scan.results.length} files (${scan.entries.length} fingerprints).\n`);
