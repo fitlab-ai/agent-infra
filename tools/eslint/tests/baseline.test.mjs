@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
-import { collectEntries, compareEntries, validateBaseline, violationEntry } from '../run-lint.mjs';
+import { collectEntries, compareEntries, createBaseline, metadata as lintMetadata, validateBaseline, violationEntry } from '../run-lint.mjs';
 
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,11 +17,26 @@ async function lintText(source, { cwd, configPath, filePath }) {
 }
 
 function complexityBranches(name, count = 16) {
-  return `function ${name}(value) {\n${Array.from({ length: count }, (_, index) => `  if (value === ${index}) return ${index};`).join('\n')}\n  return -1;\n}`;
+  return `function ${name}(value) {\n${branchChecks('value', count)}\n  return -1;\n}`;
+}
+
+function branchChecks(value, count = 16, indent = '  ') {
+  return Array.from({ length: count }, (_, index) => `${indent}if (${value} === ${index}) return ${index};`).join('\n');
 }
 
 function deepBody(value = 'value') {
   return `if (${value} > 0) { if (${value} > 1) { if (${value} > 2) { if (${value} > 3) { if (${value} > 4) return; } } } }`;
+}
+
+function diagnosticAt(source, line, token, { ruleId = 'complexity', metric = 16, name = 'probe' } = {}) {
+  const column = source.split('\n')[line - 1].indexOf(token) + 1;
+  assert.ok(column > 0, `missing diagnostic anchor ${token} on line ${line}`);
+  const message = ruleId === 'max-depth'
+    ? `Function nested too deeply (${metric}). Maximum allowed is 4.`
+    : name === null
+      ? `Arrow function has a complexity of ${metric}. Maximum allowed is 15.`
+      : `Function '${name}' has a complexity of ${metric}. Maximum allowed is 15.`;
+  return { ruleId, messageId: ruleId === 'max-depth' ? 'maxDepth' : 'complex', message, line, column };
 }
 
 function createLintFixture() {
@@ -47,37 +62,24 @@ function createLintFixture() {
     writeFileSync(filePath, source);
   };
   const baselinePath = path.join(toolDir, 'baseline.json');
+  writeFileSync(baselinePath, `${JSON.stringify(createBaseline([], lintMetadata()), null, 2)}\n`);
   const baselineHash = () => createHash('sha256').update(readFileSync(baselinePath)).digest('hex');
   return { root, toolDir, run, writeSource, baselinePath, baselineHash };
 }
 
-function withLintFixture(callback) {
+async function withLintFixture(callback) {
   const fixture = createLintFixture();
   try {
-    const seed = fixture.run(['--write-baseline']);
-    assert.equal(seed.status, 0, seed.stdout + seed.stderr);
-    return callback(fixture);
+    return await callback(fixture);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 }
 
-const complexitySource = `export function probe(x: number) {
-${Array.from({ length: 16 }, (_, index) => `  if (x === ${index}) return ${index};`).join('\n')}
-  return -1;
-}`;
-const depthSource = `export function probe(x: number) {
-  if (x > 0) {
-    if (x > 1) {
-      if (x > 2) {
-        if (x > 3) {
-          if (x > 4) return x;
-        }
-      }
-    }
-  }
-  return 0;
-}`;
+const complexitySource = `export ${complexityBranches('probe')}`;
+const depthSource = `export function probe(value) { ${deepBody('value')} }`;
+const oldId = 'a'.repeat(64);
+const nextId = 'b'.repeat(64);
 
 const entry = (stableId = 'a'.repeat(64), metric = 16, count = 1, ruleId = 'complexity') => ({
   file: 'lib/example.ts',
@@ -95,56 +97,27 @@ const metadata = {
   scopeDigest: 'scope'
 };
 
-test('new method fails even when another method in the same file and rule disappears', () => {
-  const errors = compareEntries([entry('a'.repeat(64))], [entry('b'.repeat(64))]);
-  assert.deepEqual(errors.map(({ kind }) => kind).sort(), ['new', 'stale']);
-});
-
-test('rule IDs keep separate exemptions for the same stable method', () => {
-  const complexity = entry('a'.repeat(64), 16, 1, 'complexity');
-  const maxDepth = entry('a'.repeat(64), 5, 1, 'max-depth');
+test('comparison scopes exemptions by method and rule, not metric/count', () => {
+  const complexity = entry(oldId);
+  const maxDepth = entry(oldId, 5, 1, 'max-depth');
+  assert.deepEqual(compareEntries([complexity], [entry(nextId)]).map(({ kind }) => kind).sort(), ['new', 'stale']);
+  assert.deepEqual(compareEntries([complexity], [entry(oldId, 24, 3)]), []);
   assert.equal(compareEntries([complexity], [maxDepth])[0]?.kind, 'new');
-  assert.equal(compareEntries([complexity, maxDepth], [maxDepth, complexity]).length, 0);
-});
-
-test('body metrics and diagnostic counts do not change a method exemption identity', () => {
-  const errors = compareEntries([entry('a'.repeat(64), 16, 1)], [entry('a'.repeat(64), 24, 3)]);
-  assert.deepEqual(errors, []);
+  assert.deepEqual(compareEntries([complexity, maxDepth], [maxDepth, complexity]), []);
 });
 
 test('editing a named function body keeps its stable identity while its metric changes', () => {
-  const beforeBody = `function manyBranches(value) {
-  if (value === 0) return 0;
-  if (value === 1) return 1;
-  if (value === 2) return 2;
-  if (value === 3) return 3;
-  if (value === 4) return 4;
-  if (value === 5) return 5;
-  if (value === 6) return 6;
-  if (value === 7) return 7;
-  if (value === 8) return 8;
-  if (value === 9) return 9;
-  if (value === 10) return 10;
-  if (value === 11) return 11;
-  if (value === 12) return 12;
-  if (value === 13) return 13;
-  if (value === 14) return 14;
-  return 15;
-}`;
-  const afterBody = `function manyBranches(value) {
-  if (value < 0) return -1;
-${Array.from({ length: 17 }, (_, index) => `  if (value === ${index}) return ${index};`).join('\n')}
-  return 99;
-}`;
+  const beforeBody = complexityBranches('manyBranches', 15);
+  const afterBody = complexityBranches('manyBranches', 17);
   const filePath = path.resolve('lib/example.ts');
   const before = violationEntry({
     filePath,
-    message: { ruleId: 'complexity', messageId: 'complex', message: "Function 'manyBranches' has a complexity of 16. Maximum allowed is 15.", line: 1, column: 1 },
+    message: diagnosticAt(beforeBody, 1, 'function', { metric: 16, name: 'manyBranches' }),
     source: beforeBody
   });
   const after = violationEntry({
     filePath,
-    message: { ruleId: 'complexity', messageId: 'complex', message: "Function 'manyBranches' has a complexity of 18. Maximum allowed is 15.", line: 1, column: 1 },
+    message: diagnosticAt(afterBody, 1, 'function', { metric: 18, name: 'manyBranches' }),
     source: afterBody
   });
   assert.equal(before.stableId, after.stableId);
@@ -153,19 +126,13 @@ ${Array.from({ length: 17 }, (_, index) => `  if (value === ${index}) return ${i
 });
 
 test('removing an exemption requires baseline update and regression becomes new afterward', () => {
-  assert.equal(compareEntries([entry('a'.repeat(64))], [])[0]?.kind, 'stale');
-  assert.equal(compareEntries([], [entry('a'.repeat(64))])[0]?.kind, 'new');
+  const stableEntry = entry(oldId);
+  assert.equal(compareEntries([stableEntry], [])[0]?.kind, 'stale');
+  assert.equal(compareEntries([], [stableEntry])[0]?.kind, 'new');
 });
 
 test('stable identities distinguish overload implementations, owners, nested names, and anonymous bindings', () => {
   const filePath = path.resolve('lib/example.ts');
-  const message = (line, token, name = 'complexity') => ({
-    ruleId: 'complexity',
-    messageId: 'complex',
-    message: `Function '${name}' has a complexity of 16. Maximum allowed is 15.`,
-    line,
-    column: source.split('\n')[line - 1].indexOf(token) + 1
-  });
   const source = `class First {
   overloaded(value: string): number;
   overloaded(value: number): number;
@@ -177,11 +144,12 @@ class Second {
   same() { function inner() { if (a) {} } }
   anonymous = function () { if (a) {} };
 }`;
-  const overload = violationEntry({ filePath, message: message(4, '(', 'overloaded'), source });
-  const firstInner = violationEntry({ filePath, message: message(5, 'function'), source });
-  const secondInner = violationEntry({ filePath, message: message(9, 'function'), source });
-  const firstAnonymous = violationEntry({ filePath, message: message(6, 'function'), source });
-  const secondAnonymous = violationEntry({ filePath, message: message(10, 'function'), source });
+  const at = (line, token, name) => violationEntry({ filePath, message: diagnosticAt(source, line, token, { name }), source });
+  const overload = at(4, '(', 'overloaded');
+  const firstInner = at(5, 'function');
+  const secondInner = at(9, 'function');
+  const firstAnonymous = at(6, 'function');
+  const secondAnonymous = at(10, 'function');
   assert.equal(overload.displayName, 'First.overloaded');
   assert.notEqual(firstInner.stableId, secondInner.stableId);
   assert.notEqual(firstAnonymous.stableId, secondAnonymous.stableId);
@@ -194,11 +162,7 @@ test('anonymous callbacks in the same owner and call slot receive distinct ident
   items.map(value => { if (value) {} });
   items.map(value => { if (value) {} });
 }`;
-  const make = (line) => violationEntry({
-    filePath,
-    message: { ruleId: 'complexity', messageId: 'complex', message: "Arrow function has a complexity of 16. Maximum allowed is 15.", line, column: source.split('\n')[line - 1].indexOf('=>') + 1 },
-    source
-  });
+  const make = (line) => violationEntry({ filePath, message: diagnosticAt(source, line, '=>', { name: null }), source });
   assert.notEqual(make(2).stableId, make(3).stableId);
 });
 
@@ -206,17 +170,15 @@ test('editing an earlier callback body keeps a later chained callback identity',
   const filePath = path.resolve('lib/example.ts');
   const makeSource = (filterBody) => `function owner(items) {
   return items.filter(value => { ${filterBody} }).map(value => {
-${Array.from({ length: 16 }, (_, index) => `    if (value === ${index}) return value;`).join('\n')}
+${branchChecks('value', 16, '    ')}
     return value;
   });
 }`;
   const makeEntry = (source) => {
-    const offset = source.indexOf('value => {', source.indexOf('.map'));
-    const line = source.slice(0, offset).split('\n').length;
-    const column = offset - source.lastIndexOf('\n', offset - 1);
+    const line = source.slice(0, source.indexOf('.map')).split('\n').length;
     return violationEntry({
       filePath,
-      message: { ruleId: 'complexity', messageId: 'complex', message: "Arrow function has a complexity of 17. Maximum allowed is 15.", line, column },
+      message: diagnosticAt(source, line, 'value =>', { metric: 17, name: null }),
       source
     });
   };
@@ -242,12 +204,7 @@ function owner() {
   const entryAt = (token, displayName) => {
     const offset = source.indexOf(token);
     const line = source.slice(0, offset).split('\n').length;
-    const column = offset - source.lastIndexOf('\n', offset - 1);
-    return violationEntry({
-      filePath,
-      message: { ruleId: 'complexity', messageId: 'complex', message: `Function '${displayName}' has a complexity of 16. Maximum allowed is 15.`, line, column },
-      source
-    });
+    return violationEntry({ filePath, message: diagnosticAt(source, line, token, { name: displayName }), source });
   };
   const getter = entryAt('if (ready)', 'value');
   const setter = entryAt('if (next)', 'value');
@@ -269,14 +226,13 @@ test('ambiguous duplicate named declarations fail with a readable collision diag
 }`;
   assert.throws(() => violationEntry({
     filePath,
-    message: { ruleId: 'complexity', messageId: 'complex', message: "Function 'run' has a complexity of 16. Maximum allowed is 15.", line: 2, column: 9 },
+    message: diagnosticAt(source, 2, 'run', { name: 'run' }),
     source
   }), /Stable method identity collision: .*lib\/example\.ts complexity Duplicate\.run/);
 });
 
 test('real complexity diagnostics for new object methods and function-valued properties fail the baseline gate', async () => {
-  const fixture = createLintFixture();
-  try {
+  await withLintFixture(async (fixture) => {
     const filePath = path.join(fixture.root, 'lib/outer.ts');
     const lint = (source) => lintText(source, {
       cwd: fixture.root,
@@ -290,10 +246,10 @@ test('real complexity diagnostics for new object methods and function-valued pro
     const beforeResults = await lint(outer);
     const baseline = collectEntries(beforeResults.map((result) => ({ ...result, source: outer })));
 
-    const addedMethod = `added(value) {\n${Array.from({ length: 16 }, (_, index) => `  if (value === ${index}) return ${index};`).join('\n')}\n  return -1;\n}`;
-    const getter = `get value() {\n${Array.from({ length: 16 }, (_, index) => `  if (value === ${index}) return ${index};`).join('\n')}\n  return -1;\n}`;
-    const setter = `set value(value) {\n${Array.from({ length: 16 }, (_, index) => `  if (value === ${index}) return;`).join('\n')}\n}`;
-    const field = (prefix = '') => `${prefix}action = (value: number) => {\n${Array.from({ length: 16 }, (_, index) => `  if (value === ${index}) return ${index};`).join('\n')}\n  return -1;\n};`;
+    const addedMethod = `added(value) {\n${branchChecks('value', 16, '    ')}\n    return -1;\n}`;
+    const getter = `get value() {\n${branchChecks('value', 16, '    ')}\n    return -1;\n}`;
+    const setter = `set value(value) {\n${branchChecks('value', 16, '    ')}\n}`;
+    const field = (prefix = '') => `${prefix}action = (value: number) => {\n${branchChecks('value', 16, '    ')}\n    return -1;\n};`;
     const source = `${outer.slice(0, -2)}\n  const object = { ${addedMethod}, ${getter}, ${setter} };\n  class Fields { ${field('static ')} ${field()} }\n  return object;\n}`;
     fixture.writeSource('lib/outer.ts', source);
 
@@ -311,15 +267,17 @@ test('real complexity diagnostics for new object methods and function-valued pro
     const gateLines = `${gated.stdout}${gated.stderr}`.trim().split('\n');
     assert.equal(gateLines.length, 5, JSON.stringify(gateLines));
     assert.ok(gateLines.every((line) => line.startsWith('new: ')), JSON.stringify(gateLines));
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
+  });
 });
 
-test('real max-depth diagnostics distinguish object accessors and static/instance fields', async () => {
-  const fixture = createLintFixture();
-  try {
-    const source = `const object = {
+test('real max-depth identities distinguish roles and fail closed on same-role collisions', async () => {
+  await withLintFixture(async (fixture) => {
+    const lint = (source, file) => lintText(source, {
+      cwd: fixture.root,
+      configPath: path.join(fixture.toolDir, 'eslint.config.mjs'),
+      filePath: path.join(fixture.root, file)
+    });
+    const roles = `const object = {
   get value() { ${deepBody('left')} },
   set value(right) { ${deepBody('right')} }
 };
@@ -329,39 +287,21 @@ class Fields {
   static handler = function same(left: number) { ${deepBody('left')} };
   handler = function same(right: number) { ${deepBody('right')} };
 }`;
-    const filePath = path.join(fixture.root, 'lib/roles.ts');
-    const results = await lintText(source, {
-      cwd: fixture.root,
-      configPath: path.join(fixture.toolDir, 'eslint.config.mjs'),
-      filePath
-    });
+    const results = await lint(roles, 'lib/roles.ts');
     const messages = results.flatMap((result) => result.messages).filter((message) => message.ruleId === 'max-depth');
     assert.equal(messages.length, 6, JSON.stringify(results.flatMap((result) => result.messages)));
-    const entries = collectEntries(results.map((result) => ({ ...result, source })));
+    const entries = collectEntries(results.map((result) => ({ ...result, source: roles })));
     assert.equal(entries.length, 6);
     assert.equal(new Set(entries.map((entry) => entry.stableId)).size, 6);
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
 
-test('real duplicate same-role function fields remain fail-closed on identity collision', async () => {
-  const fixture = createLintFixture();
-  try {
-    const source = `class Duplicate {
+    const duplicate = `class Duplicate {
   static action = (left: number) => { ${deepBody('left')} };
   static action = (right: number) => { ${deepBody('right')} };
 }`;
-    const results = await lintText(source, {
-      cwd: fixture.root,
-      configPath: path.join(fixture.toolDir, 'eslint.config.mjs'),
-      filePath: path.join(fixture.root, 'lib/duplicate.ts')
-    });
-    assert.equal(results.flatMap((result) => result.messages).filter((message) => message.ruleId === 'max-depth').length, 2);
-    assert.throws(() => collectEntries(results.map((result) => ({ ...result, source }))), /Stable method identity collision: .*max-depth/);
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
+    const collisions = await lint(duplicate, 'lib/duplicate.ts');
+    assert.equal(collisions.flatMap((result) => result.messages).filter((message) => message.ruleId === 'max-depth').length, 2);
+    assert.throws(() => collectEntries(collisions.map((result) => ({ ...result, source: duplicate }))), /Stable method identity collision: .*max-depth/);
+  });
 });
 
 test('collectEntries aggregates metric and normalized summary from the same method-rule identity', () => {
@@ -390,8 +330,8 @@ test('configuration, toolchain, and malformed entries fail baseline validation',
   assert.match(validateBaseline({ ...valid, entries: [{ ...entry(), count: 0 }] }, metadata), /invalid violation/);
 });
 
-test('inline ESLint comments cannot suppress either gated complexity rule', () => {
-  withLintFixture(({ run, writeSource }) => {
+test('inline ESLint comments cannot suppress either gated complexity rule', async () => {
+  await withLintFixture(async ({ run, writeSource }) => {
     const cases = [
       ['complexity-disable', '/* eslint-disable complexity */\n', complexitySource, 'complexity'],
       ['complexity-off', '/* eslint complexity: "off" */\n', complexitySource, 'complexity'],
@@ -411,8 +351,8 @@ test('inline ESLint comments cannot suppress either gated complexity rule', () =
   });
 });
 
-test('an actual ESLint configuration change invalidates the stored baseline', () => {
-  withLintFixture(({ run, toolDir, writeSource, baselineHash }) => {
+test('an actual ESLint configuration change invalidates the stored baseline', async () => {
+  await withLintFixture(async ({ run, toolDir, writeSource, baselineHash }) => {
     writeSource('lib/new/probe.ts', `${complexitySource}\n`);
     const configPath = path.join(toolDir, 'eslint.config.mjs');
     const config = readFileSync(configPath, 'utf8');
@@ -425,8 +365,8 @@ test('an actual ESLint configuration change invalidates the stored baseline', ()
   });
 });
 
-test('CI refuses baseline writes without changing the baseline file', () => {
-  withLintFixture(({ run, baselineHash }) => {
+test('CI refuses baseline writes without changing the baseline file', async () => {
+  await withLintFixture(async ({ run, baselineHash }) => {
     const before = baselineHash();
     for (const env of [{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }]) {
       const result = run(['--write-baseline'], env);
