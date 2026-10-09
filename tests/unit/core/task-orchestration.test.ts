@@ -61,29 +61,6 @@ function prepareOrchestrationDelegation(
   });
 }
 
-function assertRunningDelegation(
-  result: ReturnType<typeof activateMatchingOrchestrationDelegation>,
-  taskId: string,
-  childId: string
-) {
-  assert.equal(result.status, 'running');
-  assert.equal(result.run?.pendingDelegation?.taskId, taskId);
-  assert.equal(result.run?.pendingDelegation?.childId, childId);
-}
-
-function assertSealedDelegation(
-  result: ReturnType<typeof sealMatchingOrchestrationDelegation>,
-  taskId: string,
-  taskDir: string,
-  childId: string
-) {
-  assert.equal(result.status, 'running');
-  assert.equal(result.run?.pendingDelegation?.status, 'sealed');
-  assert.equal(result.run?.pendingDelegation?.taskId, taskId);
-  assert.equal(result.run?.pendingDelegation?.childId, childId);
-  assert.equal(readRun(taskDir)?.pendingDelegation?.childId, childId);
-}
-
 function fixture(step: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-'));
   fixtureRoots.add(root);
@@ -214,7 +191,6 @@ test('begin is persistent and idempotent for a running task', () => {
     pendingDelegation: null,
     receipts: [],
     pause: null,
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z'
@@ -230,8 +206,7 @@ test('readRun rejects persisted state outside the current complete structure', (
   for (const mutate of [
     (run: Record<string, unknown>) => { run.schemaVersion = 3; },
     (run: Record<string, unknown>) => { run.unknownField = true; },
-    (run: Record<string, unknown>) => { delete run.modelPolicySource; },
-    (run: Record<string, any>) => { run.commitAuthorization = { issuedAt: null }; }
+    (run: Record<string, unknown>) => { delete run.modelPolicySource; }
   ]) {
     const f = fixture('requirement-analysis');
     beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
@@ -421,8 +396,7 @@ test('Claude Code resumes only a pristine unsupported-client pause with current 
     client: 'claude-code',
     guards: {
       stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
-      pendingDelegation: false, commitAuthorizationUnused: true,
-      completionEvidenceAbsent: true
+      pendingDelegation: false, completionEvidenceAbsent: true
     },
     resultingStatus: 'running'
   });
@@ -697,7 +671,6 @@ test('route completes a reviewed clean head without preparing a commit', () => {
     prNumber: null,
     prHead: null
   });
-  assert.deepEqual(routed.run?.commitAuthorization, { issuedAt: null, consumedAt: null });
   assert.equal(routed.run?.receipts.some((receipt) => receipt.stage === 'commit'), false);
 });
 
@@ -849,7 +822,6 @@ test('prepare does not create a separate commit delegation after review', () => 
   });
   assert.equal(prepared.status, 'completed');
   assert.equal(prepared.next, null);
-  assert.deepEqual(prepared.run?.commitAuthorization, { issuedAt: null, consumedAt: null });
   assert.equal(prepared.run?.pendingDelegation, null);
 });
 
@@ -874,7 +846,7 @@ test('native start binds the prepared delegation in its task', () => {
   assert.equal(started.run?.pendingDelegation?.childId, 'child-native');
 });
 
-test('matching result APIs reject missing and invalid task identity before reading task state', () => {
+test('matching result APIs reject missing and invalid task identities with stable errors', () => {
   const f = fixture('requirement-analysis');
   const startEvent = {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child',
@@ -901,26 +873,33 @@ test('matching result APIs reject missing and invalid task identity before readi
       const result = operation({ repoRoot: f.root, taskId, diagnosticLog: (event) => diagnostics.push(event) });
       assert.equal(result.status, 'failed', `${name} should fail for ${String(taskId)}`);
       assert.equal(result.error?.code, expectedCode, `${name} should report ${expectedCode}`);
-      assert.deepEqual(diagnostics, [], `${name} must validate task identity before reading state`);
+      assert.deepEqual(diagnostics, [], `${name} must not emit diagnostics for invalid task identity`);
     }
   }
 
 });
 
-test('boolean delegation probes fail closed for missing and invalid task identity', () => {
+test('boolean delegation probes fail closed without diagnostics for missing and invalid task identity', () => {
   const f = fixture('requirement-analysis');
-  for (const probe of [hasActivatableOrchestrationDelegation, hasSealableOrchestrationDelegation]) {
-    const missingDiagnostics: string[] = [];
-    assert.equal(probe('claude-code', 'child', {
-      repoRoot: f.root, diagnosticLog: (event) => missingDiagnostics.push(event)
-    }), false);
-    assert.deepEqual(missingDiagnostics, []);
-
-    const invalidDiagnostics: string[] = [];
-    assert.equal(probe('claude-code', 'child', {
-      repoRoot: f.root, taskId: 'not-a-task', diagnosticLog: (event) => invalidDiagnostics.push(event)
-    }), false);
-    assert.deepEqual(invalidDiagnostics, []);
+  const probes = [
+    ['activatable', hasActivatableOrchestrationDelegation],
+    ['sealable', hasSealableOrchestrationDelegation]
+  ] as const;
+  const identityCases = [
+    ['missing', null],
+    ['invalid', 'not-a-task']
+  ] as const;
+  for (const [name, probe] of probes) {
+    for (const [identity, taskId] of identityCases) {
+      const diagnostics: string[] = [];
+      const options = {
+        repoRoot: f.root,
+        ...(taskId ? { taskId } : {}),
+        diagnosticLog: (event: string) => diagnostics.push(event)
+      };
+      assert.equal(probe('claude-code', 'child', options), false, `${name} should fail for ${identity} identity`);
+      assert.deepEqual(diagnostics, [], `${name} should emit no diagnostics for ${identity} identity`);
+    }
   }
 });
 
@@ -980,7 +959,9 @@ test('same-client native starts and stops are isolated by task identity', () => 
       nativeAgent: 'agent-infra-lifecycle-reviewer', childId,
       parentId: `parent-${taskId}`, spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
     }, { repoRoot: f.root, taskId });
-    assertRunningDelegation(started, taskId, childId);
+    assert.equal(started.status, 'running');
+    assert.equal(started.run!.pendingDelegation!.taskId, taskId);
+    assert.equal(started.run!.pendingDelegation!.childId, childId);
     const completed = completeOrchestrationStage(taskId, {
       stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
     }, { repoRoot: f.root });
@@ -1001,7 +982,11 @@ test('same-client native starts and stops are isolated by task identity', () => 
         `.agents/workspace/active/${taskId}/.runtime/orchestration.json`
       ]
     });
-    assertSealedDelegation(stopped, taskId, taskDir, childId);
+    assert.equal(stopped.status, 'running');
+    assert.equal(stopped.run!.pendingDelegation!.status, 'sealed');
+    assert.equal(stopped.run!.pendingDelegation!.taskId, taskId);
+    assert.equal(stopped.run!.pendingDelegation!.childId, childId);
+    assert.equal(readRun(taskDir)!.pendingDelegation!.childId, childId);
   }
 });
 

@@ -142,9 +142,6 @@ function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
     },
     recoveryHistory: [], baseline: '', pendingDelegation: null,
     receipts: [currentReceipt(taskId)], pause: null,
-    commitAuthorization: {
-      issuedAt: '2026-01-01T00:00:00.000Z', consumedAt: '2026-01-01T00:00:03.000Z'
-    },
     completionEvidence: null,
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:03.000Z',
     ...overrides
@@ -514,7 +511,6 @@ test('run-task verification accepts complete current evidence and rejects invali
   const tree = 'b'.repeat(40);
   const run = currentRun(f.taskId, {
     receipts: [],
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: {
       kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
       head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
@@ -532,7 +528,6 @@ test('run-task verification accepts complete current evidence and rejects invali
   const codexRun = currentRun(f.taskId, {
     modelPolicySource: { ...run.modelPolicySource, client: 'codex' },
     receipts: [codexReceipt],
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: run.completionEvidence,
     updatedAt: '2026-01-01T00:00:05.000Z'
   });
@@ -585,7 +580,6 @@ test('run-task verification accepts only internally consistent clean completion 
   };
   const run = currentRun(f.taskId, {
     runId: 'run-clean', stepCount: 0, receipts: [],
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: evidence,
     updatedAt: '2026-01-01T00:00:05.000Z'
   });
@@ -602,7 +596,7 @@ test('run-task verification accepts only internally consistent clean completion 
     { ...run, completionEvidence: { ...evidence, worktreeTree: 'c'.repeat(40) } },
     { ...run, completionEvidence: { ...evidence, headTree: 'not-a-sha' } },
     { ...run, completionEvidence: { ...evidence, prNumber: -1 } },
-    { ...run, commitAuthorization: { issuedAt: '2026-01-01T00:00:04.000Z', consumedAt: null } },
+    { ...run, completionEvidence: null },
     { ...run, status: 'paused' },
     { ...run, completionEvidence: { ...evidence, observedAt: 'invalid' } }
   ]) {
@@ -623,8 +617,7 @@ test('run-task verification applies current receipt and pause invariants', async
   }));
   const paused = currentRun(f.taskId, {
     status: 'paused', stepCount: 0, receipts: [],
-    pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false },
-    commitAuthorization: { issuedAt: null, consumedAt: null }
+    pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false }
   });
   const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
@@ -673,14 +666,12 @@ test('run-task verification accepts only current recovery provenance and rejects
     client: 'claude-code',
     guards: {
       stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
-      pendingDelegation: false, commitAuthorizationUnused: true,
-      completionEvidenceAbsent: true
+      pendingDelegation: false, completionEvidenceAbsent: true
     },
     resultingStatus: 'running'
   };
   const run = currentRun(f.taskId, {
     runId: 'run-recovered', stepCount: 0, receipts: [], recoveryHistory: [recovery],
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: {
       kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
       head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,

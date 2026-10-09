@@ -219,7 +219,7 @@ function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
       kind: 'explicit', client: 'codex', resolvedAt: '2026-01-01T00:00:00.000Z'
     },
     recoveryHistory: [], baseline: '', pendingDelegation: null, receipts: [], pause: null,
-    commitAuthorization: { issuedAt: null, consumedAt: null }, completionEvidence: null,
+    completionEvidence: null,
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides
   };

@@ -297,15 +297,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "689c50b2bfbfcbd7f0fd5debbf56b47cd1d2ed8c2f938ced402656b8ed8122ed",
-      "displayName": "canRecoverUnsupportedClientPause",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/task/capabilities.ts",
       "ruleId": "complexity",
       "stableId": "ef17c7b98d592ec2d11b64e9b83636cef67e10263eb264121226cd4a6c7d2d9c",
@@ -1293,15 +1284,6 @@
       "displayName": "isIntent",
       "metric": 31,
       "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "fd04fed6b6223546829575c7ab326f65694e801569fa2e9a5375364d15ff66e4",
-      "displayName": "isRecovery",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {

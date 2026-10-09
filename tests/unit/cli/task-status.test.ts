@@ -304,7 +304,6 @@ test('collectOrchestration projects persisted pause and pending delegation state
     pendingDelegation: pending,
     receipts: [],
     pause: { code: 'ORCHESTRATION_TEST_PAUSED', message: 'waiting for review', recoverable: true },
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: null,
     createdAt: '2026-07-02T20:00:00.000Z',
     updatedAt: '2026-07-02T20:00:00.000Z'
@@ -368,7 +367,6 @@ test('persisted running and completed orchestration states override stale workfl
       pendingDelegation: null,
       receipts: [],
       pause: null,
-      commitAuthorization: { issuedAt: null, consumedAt: null },
       completionEvidence: null,
       createdAt: '2026-07-02T20:00:00.000Z',
       updatedAt: '2026-07-02T20:00:00.000Z'

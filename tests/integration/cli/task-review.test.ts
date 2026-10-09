@@ -106,7 +106,7 @@ function currentRun(overrides: Record<string, unknown> = {}) {
       kind: 'explicit', client: 'codex', resolvedAt: '2026-01-01T00:00:00.000Z'
     },
     recoveryHistory: [], baseline: '', pendingDelegation: null, receipts: [], pause: null,
-    commitAuthorization: { issuedAt: null, consumedAt: null }, completionEvidence: null,
+    completionEvidence: null,
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides
   };
@@ -192,8 +192,7 @@ test('standalone finalization ignores a current run without a pending delegation
   );
   const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
-    status: 'completed', nextStage: null,
-    commitAuthorization: { issuedAt: null, consumedAt: '2026-01-01T00:00:01.000Z' }
+    status: 'completed', nextStage: null
   }), null, 2)}\n`);
   const runBefore = fs.readFileSync(runPath);
 

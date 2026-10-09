@@ -75,7 +75,6 @@ type ClientCapabilityRecovery = Readonly<{
     baselineEmpty: true;
     receiptCount: 0;
     pendingDelegation: false;
-    commitAuthorizationUnused: true;
     completionEvidenceAbsent: true;
   }>;
   resultingStatus: 'running';
@@ -105,7 +104,6 @@ type OrchestrationRun = Readonly<{
   pendingDelegation: DelegationReceipt | null;
   receipts: readonly DelegationReceipt[];
   pause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
-  commitAuthorization: Readonly<{ issuedAt: string | null; consumedAt: string | null }>;
   completionEvidence: CleanCompletionEvidence | null;
   createdAt: string;
   updatedAt: string;
@@ -249,7 +247,7 @@ function isModelPolicy(value: unknown): value is OrchestrationModelPolicy {
 
 const RECOVERY_GUARD_KEYS = [
   'stepCount', 'nextStage', 'baselineEmpty', 'receiptCount', 'pendingDelegation',
-  'commitAuthorizationUnused', 'completionEvidenceAbsent'
+  'completionEvidenceAbsent'
 ] as const;
 
 function isRecovery(value: unknown): value is OrchestrationRecovery {
@@ -269,7 +267,6 @@ function isRecovery(value: unknown): value is OrchestrationRecovery {
     && guards.baselineEmpty === true
     && guards.receiptCount === 0
     && guards.pendingDelegation === false
-    && guards.commitAuthorizationUnused === true
     && guards.completionEvidenceAbsent === true
     && value.resultingStatus === 'running';
 }
@@ -291,7 +288,7 @@ export function isCompletionEvidence(value: unknown): value is CleanCompletionEv
 const ORCHESTRATION_RUN_KEYS = [
   'taskId', 'runId', 'status', 'nextStage', 'stepCount', 'maxSteps', 'modelPolicy',
   'modelPolicySource', 'recoveryHistory', 'baseline', 'pendingDelegation', 'receipts',
-  'pause', 'commitAuthorization', 'completionEvidence', 'createdAt', 'updatedAt'
+  'pause', 'completionEvidence', 'createdAt', 'updatedAt'
 ] as const;
 
 function orchestrationStateReasonCodes(value: unknown): string[] {
@@ -313,12 +310,6 @@ function orchestrationStateReasonCodes(value: unknown): string[] {
   if (!(record.pendingDelegation === null || isDelegationReceipt(record.pendingDelegation))) reasons.push('pendingDelegation');
   if (!Array.isArray(record.receipts) || !record.receipts.every(isDelegationReceipt)) reasons.push('receipts');
   if (!(record.pause === null || isPause(record.pause))) reasons.push('pause');
-  if (!hasExactKeys(record.commitAuthorization, ['issuedAt', 'consumedAt'])) {
-    reasons.push('commitAuthorization');
-  } else {
-    if (!nullableText(record.commitAuthorization.issuedAt)) reasons.push('commitAuthorization.issuedAt');
-    if (!nullableText(record.commitAuthorization.consumedAt)) reasons.push('commitAuthorization.consumedAt');
-  }
   if (!(record.completionEvidence === null || isCompletionEvidence(record.completionEvidence))) reasons.push('completionEvidence');
   if (!exactText(record.createdAt)) reasons.push('createdAt');
   if (!exactText(record.updatedAt)) reasons.push('updatedAt');
@@ -584,8 +575,6 @@ function canRecoverUnsupportedClientPause(run: OrchestrationRun): boolean {
     && run.baseline === ''
     && run.pendingDelegation === null
     && run.receipts.length === 0
-    && run.commitAuthorization?.issuedAt === null
-    && run.commitAuthorization?.consumedAt === null
     && run.completionEvidence == null
     && run.recoveryHistory.length === 0;
 }
@@ -633,7 +622,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
           baselineEmpty: true,
           receiptCount: 0,
           pendingDelegation: false,
-          commitAuthorizationUnused: true,
           completionEvidenceAbsent: true
         },
         resultingStatus: 'running'
@@ -686,7 +674,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     pendingDelegation: null,
     receipts: [],
     pause: null,
-    commitAuthorization: { issuedAt: null, consumedAt: null },
     completionEvidence: null,
     createdAt: now,
     updatedAt: now
