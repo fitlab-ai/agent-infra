@@ -28,8 +28,11 @@ function deepBody(value = 'value') {
   return `if (${value} > 0) { if (${value} > 1) { if (${value} > 2) { if (${value} > 3) { if (${value} > 4) return; } } } }`;
 }
 
-function diagnosticAt(source, line, token, { ruleId = 'complexity', metric = 16, name = 'probe' } = {}) {
-  const column = source.split('\n')[line - 1].indexOf(token) + 1;
+function diagnosticAt(source, line, token, { ruleId = 'complexity', metric = 16, name = 'probe', afterToken } = {}) {
+  const lineSource = source.split('\n')[line - 1];
+  const afterIndex = afterToken === undefined ? -1 : lineSource.indexOf(afterToken);
+  assert.ok(afterToken === undefined || afterIndex >= 0, `missing search anchor ${afterToken} on line ${line}`);
+  const column = lineSource.indexOf(token, afterToken === undefined ? 0 : afterIndex + afterToken.length) + 1;
   assert.ok(column > 0, `missing diagnostic anchor ${token} on line ${line}`);
   const message = ruleId === 'max-depth'
     ? `Function nested too deeply (${metric}). Maximum allowed is 4.`
@@ -178,12 +181,14 @@ ${branchChecks('value', 16, '    ')}
     const line = source.slice(0, source.indexOf('.map')).split('\n').length;
     return violationEntry({
       filePath,
-      message: diagnosticAt(source, line, 'value =>', { metric: 17, name: null }),
+      message: diagnosticAt(source, line, 'value =>', { metric: 17, name: null, afterToken: '.map' }),
       source
     });
   };
   const before = makeEntry(makeSource('if (value) return true; return false;'));
   const after = makeEntry(makeSource('if (value) { if (enabled) return true; } return false;'));
+  assert.match(before.displayName, /\.map callback\[0\]#1$/);
+  assert.equal(after.displayName, before.displayName);
   assert.equal(before.stableId, after.stableId);
 });
 
