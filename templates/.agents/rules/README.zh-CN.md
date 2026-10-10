@@ -16,6 +16,7 @@
 - [`validation-output.md`](validation-output.md) — 面向用户的校验状态摘要、失败诊断、软警告及消费边界。
 - [`sync-content-generation.md`](sync-content-generation.md) — 同步到 Issue 的任务和生命周期 Markdown 生成约束。
 - [`decision-qualification.md`](decision-qualification.md) — 约束、候选、人工确认和六类 artifact 资格审计契约。
+- [`strategy-pattern.md`](strategy-pattern.md) — 识别共用流程和不同行为，通过接口与策略模式隔离实现差异。
 
 ## Issue / PR
 

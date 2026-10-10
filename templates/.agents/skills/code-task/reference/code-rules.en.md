@@ -19,6 +19,10 @@ Follow the `code` step in `.agents/workflows/feature-development.yaml`.
 3. **Keep testing continuously**: run the **fast smoke subset** continuously as work progresses (see the `test` skill)
 4. **Keep it simple**: do not add unplanned features
 
+## Strategy Pattern
+
+Read `.agents/rules/strategy-pattern.md` before implementation. When behavior differs by platform, client, protocol, workflow, business rule, or algorithm, follow the interface selected in the plan and make the core flow depend on that interface rather than concrete classes. Add each behavior as a strategy and select or assemble it in one place. If branches identifying implementations are scattered across paths, centralize strategy selection before editing callers. Keep stable behavior direct when it has no meaningful alternatives; do not add interfaces mechanically.
+
 ## Run Test Verification
 
 During implementation:

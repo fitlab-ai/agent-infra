@@ -17,6 +17,7 @@ so you can quickly find "which ones to read" without opening each file.
 - [`validation-output.md`](validation-output.md) — User-facing validation summaries, failure diagnostics, soft warnings, and consumer boundaries.
 - [`sync-content-generation.md`](sync-content-generation.md) — Producer-side Markdown constraints for task and lifecycle content synchronized to Issues.
 - [`decision-qualification.md`](decision-qualification.md) — Constraint, candidate, human-confirmation, and six-artifact qualification-audit contract.
+- [`strategy-pattern.md`](strategy-pattern.md) — Identify shared flows and different behaviors, then use interfaces and the Strategy Pattern to isolate implementation differences.
 
 ## Issue / PR
 
