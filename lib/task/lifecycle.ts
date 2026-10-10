@@ -221,18 +221,16 @@ function sameTaskEntry(source: string, target: string): boolean {
     return sourceStat.isSymbolicLink() && targetStat.isSymbolicLink()
       && fs.readlinkSync(source) === fs.readlinkSync(target);
   }
-  if (sourceStat.isDirectory() && targetStat.isDirectory()) return sameTaskDirectory(source, target, sourceStat, targetStat);
+  if (sourceStat.isDirectory() && targetStat.isDirectory()) {
+    const sourceNames = fs.readdirSync(source).sort();
+    const targetNames = fs.readdirSync(target).sort();
+    return sourceNames.join('\0') === targetNames.join('\0')
+      && sourceNames.every((name) => sameTaskEntry(path.join(source, name), path.join(target, name)))
+      && (sourceStat.mode & 0o777) === (targetStat.mode & 0o777);
+  }
   return sourceStat.isFile() && targetStat.isFile()
     && (sourceStat.mode & 0o777) === (targetStat.mode & 0o777)
     && fs.readFileSync(source).equals(fs.readFileSync(target));
-}
-
-function sameTaskDirectory(source: string, target: string, sourceStat: fs.Stats, targetStat: fs.Stats): boolean {
-  const sourceNames = fs.readdirSync(source).sort();
-  const targetNames = fs.readdirSync(target).sort();
-  return sourceNames.join('\0') === targetNames.join('\0')
-    && sourceNames.every((name) => sameTaskEntry(path.join(source, name), path.join(target, name)))
-    && (sourceStat.mode & 0o777) === (targetStat.mode & 0o777);
 }
 
 function copyTaskEntry(source: string, target: string): void {
@@ -740,7 +738,7 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
     if (request.intent === 'complete') {
       try {
         if (!fs.existsSync(targetPath)) fs.mkdirSync(targetPath, { recursive: false, mode: 0o700 });
-        if (!targetContainsTask(targetPath, taskId, request) && fs.readdirSync(targetPath).length > 0) {
+        if (!targetContainsTask(targetPath, taskId, request)) {
           throw new Error('completed target has no matching task identity');
         }
         transferTaskContents(sourcePath, targetPath);

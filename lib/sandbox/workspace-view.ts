@@ -195,15 +195,7 @@ export function prepareSandboxCompletedTaskMountSource(repoRoot: string, taskId:
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     fs.mkdirSync(target, { mode: 0o700 });
   }
-  const canonicalWorkspace = fs.realpathSync.native(workspaceRoot);
-  const canonicalTarget = fs.realpathSync.native(target);
-  const relative = path.relative(canonicalWorkspace, canonicalTarget);
-  const canonicalRepoRoot = fs.realpathSync.native(repoRoot);
-  const workspaceRelative = path.relative(canonicalRepoRoot, canonicalWorkspace);
-  if (workspaceRelative.startsWith('..') || path.isAbsolute(workspaceRelative)
-    || path.dirname(canonicalTarget) !== fs.realpathSync.native(completedRoot)
-    || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
-  return canonicalTarget;
+  return sandboxCompletedTaskMountSource(repoRoot, taskId);
 }
 
 export function sandboxCompletedTaskMountSource(repoRoot: string, taskId: string): string {
