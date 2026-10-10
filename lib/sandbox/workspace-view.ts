@@ -157,13 +157,15 @@ export function assertSandboxTaskSource(repoRoot: string, taskId: string): strin
   return canonical;
 }
 
-export function prepareSandboxWorkspaceMountTargets(worktreeRoot: string): void {
+export function prepareSandboxWorkspaceMountTargets(worktreeRoot: string, taskId?: string): void {
   const resolvedWorktreeRoot = path.resolve(worktreeRoot);
   const canonicalWorktreeRoot = fs.realpathSync.native(resolvedWorktreeRoot);
   const workspaceRoot = path.resolve(resolvedWorktreeRoot, '.agents', 'workspace');
   const statePaths = sandboxWorkspaceViewStatePaths(workspaceRoot);
   const registryTarget = path.join(workspaceRoot, 'active', '.short-ids.json');
-  for (const target of [workspaceRoot, ...statePaths.map(({ hostPath }) => hostPath), registryTarget]) {
+  const completedTaskTarget = taskId ? path.join(workspaceRoot, 'completed', taskId) : null;
+  if (taskId && !/^TASK-\d{8}-\d{6}$/.test(taskId)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  for (const target of [workspaceRoot, ...statePaths.map(({ hostPath }) => hostPath), registryTarget, ...(completedTaskTarget ? [completedTaskTarget] : [])]) {
     assertSafeMountTargetPath(target, resolvedWorktreeRoot, canonicalWorktreeRoot);
   }
   fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
@@ -171,8 +173,53 @@ export function prepareSandboxWorkspaceMountTargets(worktreeRoot: string): void 
     fs.mkdirSync(hostPath, { recursive: true, mode: 0o700 });
     fs.chmodSync(hostPath, 0o700);
   }
+  if (completedTaskTarget) fs.mkdirSync(completedTaskTarget, { recursive: true, mode: 0o700 });
   fs.chmodSync(workspaceRoot, 0o700);
   fs.closeSync(fs.openSync(registryTarget, 'a', 0o600));
+}
+
+export function prepareSandboxCompletedTaskMountSource(repoRoot: string, taskId: string): string {
+  if (!/^TASK-\d{8}-\d{6}$/.test(taskId)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  const workspaceRoot = path.resolve(repoRoot, '.agents', 'workspace');
+  fs.mkdirSync(path.join(workspaceRoot, 'completed'), { recursive: true, mode: 0o700 });
+  const completedRoot = path.join(workspaceRoot, 'completed');
+  const completedStat = fs.lstatSync(completedRoot);
+  if (!completedStat.isDirectory() || completedStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  const target = path.join(completedRoot, taskId);
+  try {
+    const stat = fs.lstatSync(target);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || fs.readdirSync(target).length > 0) {
+      throw new Error(`SANDBOX_COMPLETED_MOUNT_CONFLICT: ${target}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    fs.mkdirSync(target, { mode: 0o700 });
+  }
+  const canonicalWorkspace = fs.realpathSync.native(workspaceRoot);
+  const canonicalTarget = fs.realpathSync.native(target);
+  const relative = path.relative(canonicalWorkspace, canonicalTarget);
+  const canonicalRepoRoot = fs.realpathSync.native(repoRoot);
+  const workspaceRelative = path.relative(canonicalRepoRoot, canonicalWorkspace);
+  if (workspaceRelative.startsWith('..') || path.isAbsolute(workspaceRelative)
+    || path.dirname(canonicalTarget) !== fs.realpathSync.native(completedRoot)
+    || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  return canonicalTarget;
+}
+
+export function sandboxCompletedTaskMountSource(repoRoot: string, taskId: string): string {
+  if (!/^TASK-\d{8}-\d{6}$/.test(taskId)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  const source = path.resolve(repoRoot, '.agents', 'workspace', 'completed', taskId);
+  const stat = fs.lstatSync(source);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  const canonicalWorkspace = fs.realpathSync.native(path.join(repoRoot, '.agents', 'workspace'));
+  const canonicalSource = fs.realpathSync.native(source);
+  const canonicalRepoRoot = fs.realpathSync.native(repoRoot);
+  const workspaceRelative = path.relative(canonicalRepoRoot, canonicalWorkspace);
+  const relative = path.relative(canonicalWorkspace, canonicalSource);
+  if (workspaceRelative.startsWith('..') || path.isAbsolute(workspaceRelative)
+    || path.dirname(canonicalSource) !== fs.realpathSync.native(path.dirname(source))
+    || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+  return canonicalSource;
 }
 
 export function materializeSandboxWorkspaceView(params: Readonly<{

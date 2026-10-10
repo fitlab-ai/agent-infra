@@ -10,11 +10,9 @@ import {
   type SandboxControlRequest,
   type SandboxControlResponse,
   type SandboxAgentClientRequest,
-  type SandboxTaskCreateRequest,
-  type SandboxTaskFinalizationRequest
+  type SandboxTaskCreateRequest
 } from './protocol.ts';
 import { isAgentClientId } from '../../agent-clients/types.ts';
-import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
@@ -25,7 +23,6 @@ import { loadConfig } from '../config.ts';
 import { recoverSandboxControlFromHost } from './host-recovery.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
-const SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS = 5 * 60_000;
 
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
@@ -114,7 +111,6 @@ function preflight(
 
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
   if (request.family === 'task-lifecycle') return 'progress';
-  if (request.family === 'task-finalization') return 'recovery';
   return null;
 }
 
@@ -215,9 +211,6 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
         || requestTask.kind === 'unresolved'
         || (requestTask.kind === 'task' && requestTask.taskId !== identity.taskId))) {
       clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
-    }
-    if (identity.mode === 'branch-only' && request.family === 'task-finalization') {
-      clientError('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks', false);
     }
   }
   const encoded = `${JSON.stringify(request)}\n`;
@@ -421,8 +414,11 @@ export function requestSandboxControl(params: Readonly<{
   token?: string; generation?: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create' || params.family === 'agent-client' || params.family === 'task-finalization') {
+  if (params.family === 'task-create' || params.family === 'agent-client') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
+  }
+  if (params.args[1] === 'complete') {
+    clientError('SANDBOX_CONTROL_COMMAND_DENIED', 'complete must use task-finalization', false);
   }
   const auth = authority(params);
   const issuedAt = Date.now();
@@ -461,75 +457,6 @@ export function requestSandboxAgentOperation(params: Readonly<{
     payload: params.payload
   };
   return exchangeSandboxControl(request, params);
-}
-
-export function requestSandboxTaskFinalization(params: Readonly<{
-  agent: string;
-  channelDir?: string;
-  statusDir?: string;
-  token?: string;
-  generation?: string;
-  timeoutMs?: number;
-  recoveryBudgetMs?: number;
-}>): SandboxControlResponse {
-  const agent = normalizeAgentToken(params.agent);
-  if (!agent) clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization agent is invalid', false);
-  const auth = authority(params);
-  const issuedAt = Date.now();
-  const id = randomUUID();
-  const request: SandboxTaskFinalizationRequest = {
-    version: 4,
-    id,
-    ...auth,
-    issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: 'task-finalization',
-    operation: 'complete',
-    agent,
-    args: []
-  };
-  let response: SandboxControlResponse;
-  try {
-    response = exchangeSandboxControl(request, params);
-  } catch (error) {
-    if (!(error instanceof SandboxControlClientError)
-      || error.detail.code !== 'SANDBOX_CONTROL_RESULT_UNKNOWN'
-      || !error.accepted || !error.requestId) throw error;
-    return recoverAcceptedTaskFinalization(error.requestId, params);
-  }
-  if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') {
-    return recoverAcceptedTaskFinalization(response.id, params);
-  }
-  return response;
-}
-
-export function recoverAcceptedTaskFinalization(
-  requestId: string,
-  params: Readonly<{ recoveryBudgetMs?: number }>,
-  recover: typeof recoverSandboxControl = recoverSandboxControl
-): SandboxControlResponse {
-  const deadline = Date.now() + (params.recoveryBudgetMs ?? SANDBOX_TASK_FINALIZATION_RECOVERY_BUDGET_MS);
-  while (Date.now() < deadline) {
-    const timeoutMs = Math.min(30_000, deadline - Date.now());
-    if (timeoutMs <= 0) break;
-    try {
-      const response = recover(requestId, { timeoutMs });
-      if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') continue;
-      return response;
-    } catch (error) {
-      if (error instanceof SandboxControlClientError
-        && error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN'
-        && error.requestId === requestId) continue;
-      throw error;
-    }
-  }
-  clientError(
-    'SANDBOX_CONTROL_RESULT_UNKNOWN',
-    'accepted finalization request remained unknown after the automatic recovery budget; inspect the receipt and resume by request id',
-    false,
-    true,
-    requestId
-  );
 }
 
 export function requestSandboxTaskCreate(params: Readonly<{

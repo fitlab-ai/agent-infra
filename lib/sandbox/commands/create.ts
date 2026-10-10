@@ -91,6 +91,7 @@ import {
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
   prepareSandboxWorkspaceMountTargets,
+  prepareSandboxCompletedTaskMountSource,
   sandboxControlPaths,
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
@@ -1451,7 +1452,10 @@ export async function create(
             const taskSource = target.workspace.mode === 'task-bound'
               ? assertSandboxTaskSource(effectiveConfig.repoRoot, target.workspace.taskId)
               : null;
-            prepareSandboxWorkspaceMountTargets(worktree);
+            const completedTaskSource = target.workspace.mode === 'task-bound'
+              ? prepareSandboxCompletedTaskMountSource(effectiveConfig.repoRoot, target.workspace.taskId)
+              : null;
+            prepareSandboxWorkspaceMountTargets(worktree, target.workspace.mode === 'task-bound' ? target.workspace.taskId : undefined);
             if (previousCutoverSnapshot) {
               assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
               if (previousManifest) {
@@ -1494,6 +1498,7 @@ export async function create(
               ...(target.workspace.mode === 'task-bound'
                 ? {
                   taskSources: [taskSource!],
+                  completedTaskSource: completedTaskSource!,
                   taskId: target.workspace.taskId
                 }
                 : {})

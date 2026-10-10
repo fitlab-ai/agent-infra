@@ -34,7 +34,8 @@ import {
 } from "../../../lib/sandbox/git-metadata.ts";
 import {
   materializeSandboxControl,
-  materializeSandboxWorkspaceView
+  materializeSandboxWorkspaceView,
+  prepareSandboxCompletedTaskMountSource
 } from "../../../lib/sandbox/workspace-view.ts";
 
 const BRANCH_ONLY_LABELS = {
@@ -230,6 +231,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     `---\nid: ${taskId}\nbranch: feature/demo\n---\n`,
     "utf8"
   );
+  const completedTaskSource = prepareSandboxCompletedTaskMountSource(config.repoRoot, taskId);
   const identity = { mode: "task-bound" as const, taskId, shortId: "7" };
   const view = materializeSandboxWorkspaceView({
     base: config.workspaceViewBase,
@@ -267,6 +269,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
       RW: false
     })),
     { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
+    { Type: "bind", Source: completedTaskSource, Destination: `/workspace/.agents/workspace/completed/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: control.runtimeDir, Destination: "/run/agent-infra/runtime", RW: true },
@@ -313,9 +316,15 @@ function moveTaskToCompleted(config: SandboxConfig, taskId: string, mounts?: Arr
   const completedRoot = path.join(config.repoRoot, '.agents', 'workspace', 'completed');
   fs.mkdirSync(completedRoot, { recursive: true });
   const completedPath = path.join(completedRoot, taskId);
-  fs.renameSync(activePath, completedPath);
+  fs.rmSync(completedPath, { recursive: true, force: true });
+  fs.mkdirSync(completedPath, { mode: 0o700 });
+  for (const name of fs.readdirSync(activePath)) {
+    fs.renameSync(path.join(activePath, name), path.join(completedPath, name));
+  }
   const taskMount = mounts?.find((mount) => mount.Destination === `/workspace/.agents/workspace/active/${taskId}`);
   if (taskMount) taskMount.Source = completedPath;
+  const completedMount = mounts?.find((mount) => mount.Destination === `/workspace/.agents/workspace/completed/${taskId}`);
+  if (completedMount) completedMount.Source = completedPath;
 }
 
 test("recovery classification preserves healthy running seed content drift", () => {
@@ -462,7 +471,8 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   const taskId = "TASK-20260814-223553";
   const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
   fs.mkdirSync(taskSource, { recursive: true });
-  fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\n---\n`, "utf8");
+  fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\nbranch: feature/demo\n---\n`, "utf8");
+  const completedTaskSource = prepareSandboxCompletedTaskMountSource(config.repoRoot, taskId);
   const view = materializeSandboxWorkspaceView({
     base: config.workspaceViewBase,
     project: config.project,
@@ -477,6 +487,11 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
     Type: "bind",
     Source: taskSource,
     Destination: `/workspace/.agents/workspace/active/${taskId}`,
+    RW: true
+  }, {
+    Type: "bind",
+    Source: completedTaskSource,
+    Destination: `/workspace/.agents/workspace/completed/${taskId}`,
     RW: true
   }, {
     Type: "bind",
@@ -694,7 +709,7 @@ test("completed container start restores the historical source only while starti
       }
     });
     assert.equal(startedWithSource, true);
-    assert.equal(fs.existsSync(activePath), false);
+    assert.deepEqual(fs.readdirSync(activePath), []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1280,6 +1295,7 @@ test("task-bound recovery keeps the branch-only code and recommends the full tas
   fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
   fs.writeFileSync(path.join(activeDir, ".short-ids.json"), `${JSON.stringify({ version: 1, ids: { "7": taskId } })}\n`, "utf8");
   fs.writeFileSync(path.join(activeDir, taskId, "task.md"), `---\nid: ${taskId}\nbranch: feature/demo\n---\n`, "utf8");
+  prepareSandboxCompletedTaskMountSource(config.repoRoot, taskId);
 
   try {
     await assert.rejects(

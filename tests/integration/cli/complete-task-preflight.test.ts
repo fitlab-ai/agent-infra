@@ -93,18 +93,19 @@ test('compiled preflight does not require a checks snapshot for a bound historic
   }
 });
 
-test('preflight success permits one archive and releases the short id', () => {
+test('preflight success permits one archive and retains the short id until sandbox cleanup', () => {
   const f = fixture();
   try {
     const preflight = run(f.root, ['task-verify', TASK_ID, 'complete-task.preflight', '--format', 'text']);
     assert.equal(preflight.status, 0, preflight.stderr);
     assert.match(preflight.stdout, /Verification: pass \| Target: complete-task\.preflight \| Skill: complete-task/);
     assert.match(preflight.stdout, /Result: \d+ passed, 0 failed/);
-    const completed = run(f.root, ['task-lifecycle', TASK_ID, 'complete', '--agent', 'codex']);
-    assert.equal(completed.status, 0, completed.stderr);
-    assert.equal(JSON.parse(completed.stdout).status, 'applied');
+    const completed = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(completed.status, 0, JSON.stringify(completed));
+    assert.equal(JSON.parse(completed.stdout).status, 'completed');
     assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
-    assert.equal(run(f.root, ['task-context', 'resolve', '#01']).status, 1);
+    assert.equal(run(f.root, ['task-context', 'resolve', '01']).status, 0);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -135,11 +136,11 @@ test('host finalization CLI completes the terminal sequence and makes replay ide
 test('completed verification resolves the archived task without moving it back to active', () => {
   const f = fixture();
   try {
-    assert.equal(run(f.root, ['task-lifecycle', TASK_ID, 'complete', '--agent', 'codex']).status, 0);
+    assert.equal(run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']).status, 0);
     const verified = run(f.root, ['task-verify', TASK_ID, 'complete-task.completed', '--format', 'text']);
     assert.equal(verified.status, 0, verified.stderr);
     assert.match(verified.stdout, /Verification: pass \| Target: complete-task\.completed \| Skill: complete-task/);
-    assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', TASK_ID)), false);
+    assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), false);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

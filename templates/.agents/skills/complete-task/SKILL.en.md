@@ -158,7 +158,7 @@ The core deduplicates the stable `step/code/target` tuple. Callers must not allo
 
 ### 5. Run the Active Pre-completion Hard Gate
 
-After platform writes succeed and before moving the directory or releasing the short id, run:
+After platform writes succeed and before moving the directory, run:
 
 ```bash
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
@@ -182,32 +182,11 @@ For an active task, finalization first recovers pending platform operations, the
 
 Finalization runs allowed artifact backfill -> lifecycle -> terminal task comment -> core verification -> warning task-comment update -> summary seal in a fixed order. Every backfill that actually runs must reach a successful terminal result before lifecycle starts; an ordinary replay with a complete receipt and no recovery fact does not rerun backfill, comments, verification, or summary. A completed recovery that may write a managed comment first persists a done summary as pending, then seals it only at the end. Summary seal always reads the durable staging record retained in the task directory; the platform entry point validates marker, owner, and digest, performs any required delete/recreate, and reads back final remote order. `result=completed` means the host safely completed the task from structured results and the receipt; if peripheral warnings or pending steps remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state. A sandbox must not run `ls completed` or a local terminal verification against its historical mount to re-decide this result.
 
-### 7. Handle Finalization Retries and Results
+### 7. Handle the Finalization Result
 
-Both Scenario A and Scenario B `finalization-retry` run the same `task-finalization` entry point from the host. The receipt is only a re-entry hint, not canonical truth: every re-entry revalidates allowed artifact backfill, the terminal task comment, and completion verification, then repeats summary seal from the retained durable staging record; only an already `completed` task with its short-id registry entry released may skip the irreversible lifecycle. Do not split the operation into the former lifecycle, comment-sync, or completion-gate commands. If backfill, the task comment, summary seal, or verification is blocked by the network, preserve the receipt, durable staging record, and completed steps, fix the network, and rerun complete-task. If lifecycle has not completed, keep the task active and resume the pending steps from the receipt.
+The sandbox-local entry calls the existing finalization prepare/commit flow directly. Before lifecycle transfer, it stops this task's broker from accepting new requests and waits for accepted work to finish through its existing path. Transfer starts only after the broker owner exits. On success, use the structured result and receipt returned by this command. On failure or blocked status, preserve source data and the receipt, follow the returned error, and do not claim completion or manually rewrite terminal state.
 
-Consume the structured finalization result, receipt, and warning projection directly. Continue only for `completed` or `completed_with_warnings`. Treat `failed` and `blocked` as explicit host failure or blocked outcomes: preserve the receipt, stop the current flow, and follow the returned status and error; call finalization again only when the host state permits it and the cause has been fixed. If an `accepted=true` request is `unknown`, preserve the receipt and original request ID. Never resubmit task-finalization; query only the original request with `sandbox-control recover <same-request-id>`. Create a new request only when the request was rejected before acceptance and its error permits a retry. Do not run `ls completed` or `task-verify complete-task.completed` from a stale sandbox mount, and do not let that local result overrule the host result.
-
-### Recovering an accepted sandbox-control result
-
-When this skill runs in a sandbox and an accepted task-finalization request has
-no terminal result yet, the client automatically recovers under the same
-request ID. The five-minute total budget starts with the first unknown result;
-each recover call is limited to 30 seconds. While a published unknown response
-is present, the client rereads it every 25 ms during that call. When a recover
-call times out with unknown, the client continues immediately without an extra
-wait. The client prints `SANDBOX_CONTROL_REQUEST_ID: <request-id>` on stderr.
-
-If no terminal result arrives within five minutes, preserve the receipt and
-request ID and treat the result as pending/unknown. Do not resubmit
-task-finalization. Once the broker is healthy, continue querying only the
-original request ID:
-
-```bash
-agent-infra-internal sandbox-control recover <request-id>
-```
-
-Do not submit a new request for an accepted task finalization. If the request ID is missing or the receipt cannot be read, keep the result pending and recover the original ID only from stderr, a handoff, or the receipt; do not look it up by task key. The broker's `processing/<request-id>/result.json` is private transport evidence, not a task receipt, and cannot by itself prove completion. The finalization receipt and host completion gate remain authoritative. If recovery with the same ID still has no terminal result, inspect broker and host executor activity. Stop and preserve the original request ID while a request is active, the broker is busy, or status is unknown. Retry with a new request ID only after confirming that the original request never started or its executor has ended; the new request performs the full prepare and commit after broker admission. Only a request rejected before acceptance may be retried directly with a new request ID according to the error's retryability.
+Completion keeps the short-id mapping. Managed sandbox cleanup releases it only after the container is confirmed removed and cleanup succeeds. To clean up, pass the full `{task-id}` to `ai sandbox rm`; do not release the short id separately during completion.
 
 ### 8. Inform User
 

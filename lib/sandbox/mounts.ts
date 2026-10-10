@@ -31,6 +31,7 @@ export function sandboxCoreBindMounts(
     worktreeGitFile?: string;
     runtimeDir?: string;
     taskSources?: string[];
+    completedTaskSource?: string;
     taskId?: string;
   }
 ): SandboxBindMountDeclaration[] {
@@ -77,6 +78,13 @@ export function sandboxCoreBindMounts(
       containerPath: taskMountPath,
       readOnly: false
     });
+    if (overrides.completedTaskSource) {
+      mounts.push({
+        hostPaths: [overrides.completedTaskSource],
+        containerPath: path.posix.join('/workspace/.agents/workspace/completed', overrides.taskId!),
+        readOnly: false
+      });
+    }
   }
   mounts.push(
     {

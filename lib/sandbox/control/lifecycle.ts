@@ -23,6 +23,7 @@ import {
   type SandboxResourceLock
 } from './native-file-lock.ts';
 import { isSandboxAuthorityEvidence } from '../engines/authority.ts';
+import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   parseSandboxControlStatus,
   readExecution,
@@ -636,6 +637,52 @@ function markSandboxControlRootQuiescing(root: string): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     if (!regularFile(markerPath)) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
+  }
+}
+
+function readTaskCompletionManifest(
+  root: string,
+  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; channelDir: string }>
+): SandboxControlManifest {
+  const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: manifest.publicStatusDir,
+    root,
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
+  if (identity.state !== 'valid' || manifest.mode !== 'task-bound'
+    || manifest.taskId !== binding.taskId || manifest.generation !== binding.generation
+    || manifest.controlRootId !== binding.controlRootId
+    || path.resolve(manifest.channelDir) !== path.resolve(binding.channelDir)) {
+    throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
+  }
+  return manifest;
+}
+
+export async function quiesceSandboxControlForTaskCompletion(
+  root: string,
+  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; channelDir: string }>,
+  timeoutMs = DEFAULT_QUIESCE_TIMEOUT_MS
+): Promise<void> {
+  const resolvedRoot = path.resolve(root);
+  const manifest = readTaskCompletionManifest(resolvedRoot, binding);
+  markSandboxControlRootQuiescing(resolvedRoot);
+  const deadline = Date.now() + timeoutMs;
+  const startupPath = path.join(resolvedRoot, BROKER_STARTING_FILE);
+  const brokerPath = path.join(resolvedRoot, 'broker.json');
+  while (true) {
+    const startup = readStartupOwner(startupPath);
+    if (fs.existsSync(startupPath) && !startup) throw new Error('SANDBOX_CONTROL_BROKER_START_TRANSITION');
+    const broker = readBrokerOwner(brokerPath);
+    if (broker && (broker.token !== manifest.token || broker.generation !== manifest.generation)) {
+      throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');
+    }
+    if (!startup && !broker) return;
+    if (Date.now() >= deadline) throw new Error('SANDBOX_CONTROL_BROKER_DRAIN_TIMEOUT');
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 

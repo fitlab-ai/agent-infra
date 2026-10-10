@@ -945,15 +945,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/executor.ts",
-      "ruleId": "complexity",
-      "stableId": "b6fb04b5bf159b92b94eb18b9b9d4837a5b0e17f977a14ec7d590f7636c3150e",
-      "displayName": "executeRequestInner",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/task/short-id.ts",
       "ruleId": "complexity",
       "stableId": "366bf257d8e1bd33c20810b02878c7dfb1e171276f35f3fd520fd347f43040a7",
@@ -2529,15 +2520,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/sandbox-control.ts",
-      "ruleId": "complexity",
-      "stableId": "b8e60067bba0e4f6e01717c137b3760950339c27c1aef38f658aa63a4f4ed154",
-      "displayName": "sandboxFinalizationClient",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/commands/create.ts",
       "ruleId": "complexity",
       "stableId": "72cc88930c0a360180f41221a664efd90c4ba0a70036b39a15896295942353f5",
@@ -2913,15 +2895,6 @@
       "displayName": "test callback[1]#2",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "tests/integration/cli/sandbox-control.test.ts",
-      "ruleId": "max-depth",
-      "stableId": "2798853c8421d471b67569367e87d22362f469a02ca98b5b2f19d1cdbc9c8c6b",
-      "displayName": "test callback[1]#39",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
       "count": 1
     },
     {

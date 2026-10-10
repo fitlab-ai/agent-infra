@@ -141,19 +141,19 @@ test('ai task ls renders "-" for an active task absent from the registry', () =>
   assert.doesNotMatch(out.stdout, /#42/);
 });
 
-test('ai task ls renders "-" short id for archived (completed) tasks', () => {
+test('ai task ls shows the retained short id for completed tasks', () => {
   const { repoRoot, activeDir } = mkFixtureRepo();
   writeTask(
     path.join(repoRoot, '.agents', 'workspace', 'completed'),
     'TASK-20260101-000003',
     { short_id: '#03', branch: 'feature-done' }
   );
-  // A registry under active/ must not leak short ids into archived listings.
+  // Completed tasks retain their registry mapping until sandbox cleanup.
   writeRegistry(activeDir, { '03': 'TASK-20260101-000003' });
   const out = runCli(['task', 'ls', '--completed'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /feature-done/);
-  assert.doesNotMatch(out.stdout, /#03/);
+  assert.match(out.stdout, /\b03\b/);
 });
 
 test('ai task ls prints empty-state message when no tasks present', () => {

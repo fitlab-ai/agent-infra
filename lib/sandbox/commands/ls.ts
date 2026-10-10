@@ -18,11 +18,10 @@ export { containerListFormat, parseLabels } from './list-running.ts';
 const USAGE = `Usage: ai sandbox ls
 
 Lists all containers for the current project. The '#' column is a
-display-only row number; the 'SHORT' column shows the active task short
-id bound to each container's branch (via
-.agents/workspace/active/.short-ids.json), or '-' if no active task is
-bound. Pass the SHORT value to "ai sandbox exec" (e.g. 'ai sandbox exec 11').
-A SHORT value of '-' means this container has no active task short id and may
+display-only row number; the 'SHORT' column shows the task short id bound to
+each task-bound container, or '-' if no short id is registered. Pass the
+SHORT value to "ai sandbox exec" (e.g. 'ai sandbox exec 11').
+A SHORT value of '-' means this container has no task short id and may
 be eligible for "ai sandbox rm --unbound" cleanup. Use a full TASK-id to
 remove a specific task-bound sandbox.
 

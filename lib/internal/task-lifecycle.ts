@@ -10,7 +10,7 @@ import type { TaskLifecycleResult } from '../task/lifecycle.ts';
 import type { AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult } from '../agent-clients/adapter.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nrecover-started: --auto\n`;
+const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.filter((intent) => intent !== 'complete').join(', ')}\nrecover-started: --auto\n`;
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'LIFECYCLE_PAYLOAD_INVALID', message } })}\n`);
