@@ -51,6 +51,33 @@ function boundedFailureDetail(result: RunResult): string {
     : `${diagnostic.slice(0, ERROR_DETAIL_LIMIT)}… [truncated]`;
 }
 
+function requestDiagnostics(args: string[], request: RequestOptions, attempt: number, errorMessage: string): string {
+  if (process.env.AGENT_INFRA_GH_DIAGNOSTICS !== '1' && !/rate.?limit/iu.test(errorMessage)) return '';
+
+  const apiIndex = args.indexOf('api');
+  const endpoint = apiIndex < 0
+    ? args.slice(0, 2).filter((arg) => !arg.startsWith('-')).join(' ')
+    : args.slice(apiIndex + 1).find((arg) => !arg.startsWith('-') && !arg.includes('=')) || 'unknown';
+  const safeEndpoint = endpoint.startsWith('http')
+    ? (() => {
+      try {
+        const url = new URL(endpoint);
+        return `${url.host}${url.pathname}`;
+      } catch {
+        return 'unknown';
+      }
+    })()
+    : endpoint.split('?')[0] || 'unknown';
+  const methodIndex = args.findIndex((arg) => arg === '-X' || arg === '--method');
+  const methodFromArgs = methodIndex >= 0 ? args[methodIndex + 1] : undefined;
+  const method = methodFromArgs || request.method || (safeEndpoint === 'graphql' ? 'POST' : 'GET');
+  const tokenEnvironment = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN']
+    .filter((name) => Boolean(process.env[name]));
+  const configDirOverride = Boolean(process.env.GH_CONFIG_DIR);
+
+  return ` [gh-diagnostic endpoint=${safeEndpoint} method=${method} attempt=${attempt} tokenEnv=${tokenEnvironment.join(',') || 'none'} ghConfigDirOverride=${configDirOverride}]`;
+}
+
 function defaultRunner(args: string[], options: RunOptions): RunResult {
   const command = process.env.AGENT_INFRA_GH_BIN || 'gh';
   let prefix: string[] = [];
@@ -168,13 +195,17 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
       const result = runner(args, request);
       if (result.status === 0) return { ok: true, value: result.stdout };
       const error = classifyGitHubFailure(result);
-      if (!retryableMethod || !error.requestRetryable) return { ok: false, error: clientError(error) };
+      const requestDetail = requestDiagnostics(args, request, attempt + 1, error.message);
+      const contextualError = requestDetail
+        ? { ...error, message: `${error.message}${requestDetail}` }
+        : error;
+      if (!retryableMethod || !error.requestRetryable) return { ok: false, error: clientError(contextualError) };
       if (attempt >= delays.length) {
         return {
           ok: false,
           error: error.code === 'NETWORK_TRANSIENT'
-            ? { ...clientError(error), code: 'NETWORK_RETRY_EXHAUSTED', message: `${error.message} (retry exhausted)` }
-            : clientError(error)
+            ? { ...clientError(contextualError), code: 'NETWORK_RETRY_EXHAUSTED', message: `${contextualError.message} (retry exhausted)` }
+            : clientError(contextualError)
         };
       }
       sleep(delays[attempt]!);
