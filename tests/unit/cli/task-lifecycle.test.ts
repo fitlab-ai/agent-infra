@@ -9,6 +9,7 @@ import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../li
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { supportsPosixModeBits } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {
@@ -137,7 +138,9 @@ test('complete fills the empty completed mount, preserves task data, and retains
   assert.equal(result.shortId.effect, 'unchanged');
   assert.deepEqual(fs.readFileSync(registryPath), registryBefore);
   assert.deepEqual(fs.readFileSync(path.join(targetDir, '.runtime', 'payload.bin')), payload);
-  assert.equal(fs.statSync(path.join(targetDir, '.runtime', 'payload.bin')).mode & 0o111, 0o111);
+  if (supportsPosixModeBits()) {
+    assert.equal(fs.statSync(path.join(targetDir, '.runtime', 'payload.bin')).mode & 0o111, 0o111);
+  }
   assert.equal(fs.readlinkSync(path.join(targetDir, '.runtime', 'payload-link')), 'payload.bin');
   assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), false);
   assert.equal(fs.readdirSync(f.taskDir).length, 0);
