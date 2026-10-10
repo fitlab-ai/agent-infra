@@ -9,6 +9,7 @@ import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../li
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { supportsPosixModeBits } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {
@@ -110,6 +111,39 @@ test('safe task move carries task-owned runtime bytes to the new state intact', 
   assert.equal(result.status, 'applied');
   assert.deepEqual(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID, '.runtime', 'receipt', 'state.json')), before);
   assert.equal(fs.existsSync(f.taskDir), false);
+});
+
+test('complete fills the empty completed mount, preserves task data, and retains its short id', () => {
+  const f = fixture();
+  const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+  fs.mkdirSync(targetDir, { recursive: true });
+  const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registryBefore = fs.readFileSync(registryPath);
+  const payload = Buffer.from([0, 17, 255, 3]);
+  const payloadPath = path.join(f.taskDir, '.runtime', 'payload.bin');
+  fs.mkdirSync(path.dirname(payloadPath), { recursive: true });
+  fs.writeFileSync(payloadPath, payload, { mode: 0o751 });
+  fs.chmodSync(payloadPath, 0o751);
+  const linkPath = path.join(f.taskDir, '.runtime', 'payload-link');
+  fs.symlinkSync('payload.bin', linkPath);
+
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'complete', agent: 'codex' },
+    { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+  );
+
+  assert.equal(result.status, 'applied', JSON.stringify(result));
+  assert.deepEqual(result.completedSteps, ['task-written', 'directory-moved']);
+  assert.equal(result.pendingSteps.length, 0);
+  assert.equal(result.shortId.effect, 'unchanged');
+  assert.deepEqual(fs.readFileSync(registryPath), registryBefore);
+  assert.deepEqual(fs.readFileSync(path.join(targetDir, '.runtime', 'payload.bin')), payload);
+  if (supportsPosixModeBits()) {
+    assert.equal(fs.statSync(path.join(targetDir, '.runtime', 'payload.bin')).mode & 0o111, 0o111);
+  }
+  assert.equal(fs.readlinkSync(path.join(targetDir, '.runtime', 'payload-link')), 'payload.bin');
+  assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), false);
+  assert.equal(fs.readdirSync(f.taskDir).length, 0);
 });
 
 test('dry-run plans the same transition without changing bytes, mtime, directories, or registry', () => {
@@ -296,30 +330,6 @@ test('restore transports task receipts with artifacts without using mtime', () =
   assert.equal(resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot }).status, 'ready');
 });
 
-test('registry failure leaves a recoverable journal and the same request converges after repair', () => {
-  const f = fixture();
-  const registry = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
-  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
-  const failed = applyTaskLifecycle(request, {
-    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-    directoryRenameSync: (source, target) => {
-      fs.renameSync(source, target);
-      fs.writeFileSync(registry, '{broken');
-    }
-  });
-  assert.equal(failed.status, 'failed');
-  assert.equal(failed.completedSteps.includes('directory-moved'), true);
-  const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-  assert.equal(fs.existsSync(path.join(targetDir, '.task-lifecycle.json')), true);
-  fs.writeFileSync(registry, `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
-  const recovered = applyTaskLifecycle(request, { repoRoot: f.repoRoot, metadataProvider: () => ({ timestamp: 'different', agentInfraVersion: 'different' }) });
-  assert.equal(recovered.status, 'applied');
-  assert.equal(fs.existsSync(path.join(targetDir, '.task-lifecycle.json')), false);
-  const content = fs.readFileSync(path.join(targetDir, 'task.md'), 'utf8');
-  assert.equal((content.match(/Complete Task/g) ?? []).length, 2);
-  assert.match(content, /updated_at: 2026-07-18 12:00:00\+00:00/);
-});
-
 test('duplicate hot directories are rejected before either copy changes', () => {
   const f = fixture();
   const duplicate = path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID);
@@ -389,111 +399,19 @@ test('active recovery rejects invalid journal metadata before resuming any lifec
   assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
 });
 
-test('directory rename failure keeps the journal at source and retries without duplicate logs', () => {
+test('complete rejects conflicting completed task content without overwriting either copy', () => {
   const f = fixture();
-  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
-  const failed = applyTaskLifecycle(request, {
-    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-    directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
-  });
-  assert.equal(failed.status, 'failed');
-  assert.equal(failed.error?.code, 'LIFECYCLE_DIRECTORY_RENAME_FAILED');
-  assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), true);
-  const recovered = applyTaskLifecycle(request, { repoRoot: f.repoRoot });
-  assert.equal(recovered.status, 'applied');
-  const content = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
-  assert.equal((content.match(/Complete Task/g) ?? []).length, 2);
-});
-
-test('recovery proof accepts completed lifecycle states before their journal catches up', () => {
-  const f = fixture();
-  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
-  const failed = applyTaskLifecycle(request, {
-    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-    directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
-  });
-  assert.equal(failed.status, 'failed');
-  const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-  fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-  fs.renameSync(f.taskDir, targetDir);
-
-  assert.equal(inspectTaskLifecycleProgress(f.repoRoot, TASK_ID, 'codex'), 'started-recoverable');
-  const journalPath = path.join(targetDir, '.task-lifecycle.json');
-  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
-  journal.completedSteps.push('directory-moved');
-  fs.writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
-  fs.writeFileSync(
-    path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
-    `${JSON.stringify({ version: 1, ids: {} })}\n`
-  );
-
-  assert.equal(inspectTaskLifecycleProgress(f.repoRoot, TASK_ID, 'codex'), 'started-recoverable');
-  assert.equal(applyTaskLifecycle(request, { repoRoot: f.repoRoot }).status, 'applied');
-  assert.equal(fs.existsSync(path.join(targetDir, '.task-lifecycle.json')), false);
-});
-
-test('recovery proof rejects a directory-moved journal that remains in active', () => {
-  const f = fixture();
-  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
-  const failed = applyTaskLifecycle(request, {
-    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-    directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
-  });
-  assert.equal(failed.status, 'failed');
-  const journalPath = path.join(f.taskDir, '.task-lifecycle.json');
-  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
-  journal.completedSteps.push('directory-moved');
-  fs.writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
-
-  assert.equal(inspectTaskLifecycleProgress(f.repoRoot, TASK_ID, 'codex'), 'unknown');
-  assert.equal(fs.existsSync(f.taskDir), true);
-  assert.deepEqual(
-    JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
-    { '01': TASK_ID }
-  );
-});
-
-test('cross-device task move retains the source and refuses copy-delete fallback', () => {
-  const f = fixture();
-  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
-  const result = applyTaskLifecycle(request, {
-    repoRoot: f.repoRoot,
-    metadataProvider: () => METADATA,
-    directoryRenameSync: () => {
-      const error = new Error('cross-device rename') as NodeJS.ErrnoException;
-      error.code = 'EXDEV';
-      throw error;
-    }
-  });
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'LIFECYCLE_DIRECTORY_RENAME_FAILED');
   const target = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-  assert.equal(fs.existsSync(f.taskDir), true);
-  assert.equal(fs.existsSync(path.join(target, 'task.md')), false);
-  assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), true);
-  assert.equal((fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
-});
-
-test('journal step write failure after directory move is reconstructed on retry', () => {
-  const f = fixture();
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'other.txt'), 'existing completed data');
+  const sourceTask = fs.readFileSync(path.join(f.taskDir, 'task.md'));
+  const sourcePayload = Buffer.from('active payload');
+  fs.writeFileSync(path.join(f.taskDir, 'payload.bin'), sourcePayload);
   const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
-  let renames = 0;
-  const failed = applyTaskLifecycle(request, {
-    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-    directoryRenameSync: (source, target) => fs.renameSync(source, target),
-    fileSystem: {
-      renameSync: (source, target) => {
-        renames += 1;
-        if (renames === 3) throw new Error('injected journal step failure');
-        fs.renameSync(source, target);
-      }
-    }
-  });
+  const failed = applyTaskLifecycle(request, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
   assert.equal(failed.status, 'failed');
-  const target = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-  assert.equal(fs.existsSync(path.join(target, '.task-lifecycle.json')), true);
-  const recovered = applyTaskLifecycle(request, { repoRoot: f.repoRoot });
-  assert.equal(recovered.status, 'applied');
-  assert.equal(fs.existsSync(path.join(target, '.task-lifecycle.json')), false);
-  assert.equal((fs.readFileSync(path.join(target, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+  assert.equal(failed.error?.code, 'LIFECYCLE_TARGET_CONFLICT');
+  assert.deepEqual(fs.readFileSync(path.join(f.taskDir, 'task.md')), sourceTask);
+  assert.deepEqual(fs.readFileSync(path.join(f.taskDir, 'payload.bin')), sourcePayload);
+  assert.equal(fs.readFileSync(path.join(target, 'other.txt'), 'utf8'), 'existing completed data');
 });

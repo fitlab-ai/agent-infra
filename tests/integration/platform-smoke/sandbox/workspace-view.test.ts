@@ -8,11 +8,13 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
+  prepareSandboxCompletedTaskMountSource,
   prepareSandboxWorkspaceMountTargets,
   sandboxControlPaths,
   sandboxWorkspaceViewStatePaths
 } from '../../../../lib/sandbox/workspace-view.ts';
 import { acquireSandboxControlReplacement } from '../../../../lib/sandbox/control/lifecycle.ts';
+import { sandboxCoreBindMounts } from '../../../../lib/sandbox/mounts.ts';
 import { assertModeBits, onPlatforms } from '../../../helpers.ts';
 
 test('workspace view state paths use the isolated runtime state allowlist', () => {
@@ -95,6 +97,32 @@ test('workspace mount targets preserve existing runtime content on repeat', () =
 
   assert.equal(fs.readFileSync(registry, 'utf8'), '{"keep":true}\n');
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve\n');
+});
+
+test('task-bound sandboxes bind only their completed task directory writable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-completed-target-'));
+  const repoRoot = path.join(root, 'repo');
+  const worktree = path.join(root, 'worktree');
+  const taskId = 'TASK-20260809-010203';
+  fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace'), { recursive: true });
+  fs.mkdirSync(worktree, { recursive: true });
+  const completedSource = prepareSandboxCompletedTaskMountSource(repoRoot, taskId);
+  prepareSandboxWorkspaceMountTargets(worktree, taskId);
+
+  const mounts = sandboxCoreBindMounts({
+    repoRoot, worktreeBase: path.join(root, 'worktrees'), shareBase: path.join(root, 'shares'),
+    shellConfigBase: path.join(root, 'shell')
+  }, 'feature/task', {
+    worktree, workspaceViewRoot: path.join(root, 'view'), controlDir: path.join(root, 'control', 'channel'),
+    controlStatusDir: path.join(root, 'control', 'public'), taskSources: [path.join(repoRoot, 'active', taskId)],
+    completedTaskSource: completedSource, taskId
+  });
+  const parent = mounts.find((mount) => mount.containerPath === '/workspace/.agents/workspace/completed');
+  const task = mounts.find((mount) => mount.containerPath === `/workspace/.agents/workspace/completed/${taskId}`);
+  assert.equal(parent?.readOnly, true);
+  assert.deepEqual(task, { hostPaths: [completedSource], containerPath: `/workspace/.agents/workspace/completed/${taskId}`, readOnly: false });
+  assert.equal(fs.statSync(path.join(worktree, '.agents', 'workspace', 'completed', taskId)).isDirectory(), true);
+  assert.deepEqual(fs.readdirSync(completedSource), []);
 });
 
 test('workspace mount targets reject symbolic-link destinations', () => {

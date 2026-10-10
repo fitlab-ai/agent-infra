@@ -19,11 +19,12 @@
 |-----------|---------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | alloc     | `create-task`、`import-issue`、`import-codescan`、`import-dependabot`                       | 分配最小可用 `NN`，写入注册表。                                  |
 | resolve   | 生命周期 SKILL（`analyze-task` / `plan-task` / `code-task` / `review-*` / `commit` / …）    | `NN` → 完整 task id 查询，不分配。                              |
-| release   | `complete-task`、`cancel-task`、`block-task`、`close-codescan`、`close-dependabot`          | 从注册表移除。                                                   |
+| release   | sandbox cleanup 成功；以及 `cancel-task`、`block-task`、`close-codescan`、`close-dependabot` | 从注册表移除。                                                   |
 | re-alloc  | `restore-task`                                                                              | 重新分配（可能与历史不同），写入注册表。                         |
 
-短号仅在任务处于 `.agents/workspace/active/` 期间有效；任务移动到
-`completed/` / `blocked/` / `archive/` 后短号立即释放，可被新任务复用。
+complete 保留短号，供 completed task 与仍关联的 sandbox 在 cleanup 前继续解析。
+受管 sandbox cleanup 确认容器已删除且清理成功后，才释放对应 completed task 的短号。
+其他 lifecycle intent 继续按表中时机释放短号。
 
 ## 配置
 
@@ -45,9 +46,12 @@
 | 入口                                                       | 注册表命中            | 注册表未命中                                            |
 |-----------------------------------------------------------|----------------------|--------------------------------------------------------|
 | SKILL 入参解析器（生命周期 SKILL）                          | 解析为完整 task id    | **严格报错** —— 短号不存在 / 格式错误                  |
-| `ai sandbox exec <N>` / `ai sandbox create <N>`           | 解析为完整 task id 后查 task.md 取 `branch` | **严格报错** —— 不再回退到 ls 行号或字面分支名；提示用任务短号 / `TASK-id` / 分支名 |
+| `ai sandbox exec <N>` / `ai sandbox create <N>`           | 解析为 active task id 后查 task.md 取 `branch` | **严格报错** —— 不再回退到 ls 行号或字面分支名；提示用任务短号 / `TASK-id` / 分支名 |
+| `ai sandbox rm <N>`                                       | 解析保留映射，再按完整 task id 读取 active 或 completed 身份 | **严格报错** —— 短号不存在时停止清理 |
 
-`list --verify` 严格只读：报告 active 目录 / 注册表 两者差异，但不修改任何状态。
+`list --verify` 严格只读：active task 必须有映射；注册表映射可指向有效 active task
+或 `completed/{taskId}/task.md` 中身份匹配且状态为 completed 的 task。其他映射作为 orphan
+报告，不修改任何状态。
 
 ## SKILL 入参解析
 
@@ -78,8 +82,9 @@ fi
 - key 是零填充到 `task.shortIdLength` 位的字符串，value 是完整 `TASK-…` task id
 - 自动 git ignore（active 工作区整体 ignore；无需新增 ignore 条目）
 - 首次 `alloc` 时按需自动创建；不存在时按空注册表处理
-- 短号只由显式 `alloc`（`create-task` / `import-*` / `restore-task`）分配；`resolve` / `list` / `release` 不分配，仅在执行时自动清理指向非 active 任务的 stale entry
-- 归档（complete-task / cancel-task / block-task / close-*）后注册表 entry 立即删除，短号可被新任务复用；归档后引用任务一律用完整 `TASK-…` id
+- 短号只由显式 `alloc`（`create-task` / `import-*` / `restore-task`）分配；`resolve` 与 `list` 只读，不做隐式清理
+- alloc 可清理既非 active、也没有有效 completed task 内容的 stale entry；completed mapping 保留至受管 sandbox cleanup 成功
+- task 操作可按 completed mapping 解析后由各自状态门禁拒绝；`ai sandbox create <N>` 仍只接受 active task
 
 `resolve(<N>)` 工作流：① 校验入参匹配 `^[0-9]+$` → ② 去前导零取
 数值 `n`，按 `n` 是否 `== 0`（保留）/ `> 10^shortIdLength - 1`（超容量）/

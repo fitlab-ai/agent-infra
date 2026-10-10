@@ -12,16 +12,15 @@ import {
 const criticalPhases = [...SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES];
 
 test('recovery registry covers the remaining broker families', () => {
-  assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'complete')?.class, 'lifecycle-mutation');
-  assert.equal(findSandboxControlRecoveryOperation('task-finalization', 'complete')?.class, 'finalization');
+  assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'cancel')?.class, 'lifecycle-mutation');
   assert.equal(findSandboxControlRecoveryOperation('task-create', 'create')?.class, 'task-create');
   assert.equal(findSandboxControlRecoveryOperation('agent-client', 'controller.verify')?.class, 'agent-client-operation');
-  assert.equal(digestControlRecoveryIntent('task-lifecycle', 'complete').length, 64);
+  assert.equal(digestControlRecoveryIntent('task-lifecycle', 'cancel').length, 64);
 });
 
 test('recovery keeps started requests without a terminal result unknown and never reconstructs success', () => {
-  const binding = operationRecoveryBinding('a'.repeat(32), 'generation-1', 'TASK-20260904-002407', 'task-lifecycle', 'complete');
-  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'complete')!;
+  const binding = operationRecoveryBinding('a'.repeat(32), 'generation-1', 'TASK-20260904-002407', 'task-lifecycle', 'cancel');
+  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'cancel')!;
   const decision = classifySandboxControlRecovery({ operation, binding, startedCommitted: true });
   assert.deepEqual(decision, {
     outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING'
@@ -72,7 +71,7 @@ test('recover-started response loss stays unknown and is retried through the ide
 });
 
 test('recovery matrix distinguishes explicit failure and journal partial state', () => {
-  const lifecycle = findSandboxControlRecoveryOperation('task-lifecycle', 'complete')!;
+  const lifecycle = findSandboxControlRecoveryOperation('task-lifecycle', 'cancel')!;
   const lifecycleBinding = operationRecoveryBinding('c'.repeat(32), 'generation-3', 'TASK-20260904-002407', lifecycle.family, lifecycle.intent);
   const failed = { requestId: lifecycleBinding.requestId, generation: lifecycleBinding.generation, taskId: lifecycleBinding.taskId, intentDigest: lifecycleBinding.intentDigest, status: 'failed', changed: true };
   assert.equal(classifySandboxControlRecovery({
@@ -100,7 +99,7 @@ test('recovery rejects durable terminal results with conflicting bindings', () =
 });
 
 test('recovery keeps a terminal result unknown when completion audit transitions are incomplete', () => {
-  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'complete')!;
+  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'cancel')!;
   const binding = operationRecoveryBinding('e'.repeat(32), 'generation-6', 'TASK-20260904-002407', operation.family, operation.intent);
   const result = {
     requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,

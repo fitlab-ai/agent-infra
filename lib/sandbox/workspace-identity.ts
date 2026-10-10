@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isRemovedHashShortIdInput } from '../task/short-id.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
 import {
   resolveTaskWorkspace,
   type TaskWorkspaceState
@@ -76,6 +77,14 @@ function taskIdentity(repoRoot: string, taskId: string, registry: Record<string,
   return { mode: 'task-bound', taskId, shortId: shortIds[0]! };
 }
 
+function cleanupTaskId(requestedRef: string, repoRoot: string): string | null {
+  if (TASK_ID_RE.test(requestedRef)) return requestedRef;
+  if (!SHORT_ID_RE.test(requestedRef)) return null;
+  const task = resolveTaskRef(requestedRef, { repoRoot });
+  if (!task.ok) throw new Error(task.message);
+  return task.taskId;
+}
+
 export function resolveSandboxTarget(requestedRef: string, repoRoot: string): SandboxTarget {
   if (isRemovedHashShortIdInput(requestedRef)) {
     throw new Error(`Invalid task short id '${requestedRef}': task short ids must use bare digits`);
@@ -130,23 +139,24 @@ export function resolveSandboxCleanupTarget(
     throw new Error(`Invalid task short id '${requestedRef}': task short ids must use bare digits`);
   }
 
-  if (TASK_ID_RE.test(requestedRef)) {
+  const taskId = cleanupTaskId(requestedRef, repoRoot);
+  if (taskId) {
     let task: ReturnType<typeof resolveTaskWorkspace>;
     try {
-      task = resolveTaskWorkspace(requestedRef, repoRoot);
+      task = resolveTaskWorkspace(taskId, repoRoot);
     } catch (error) {
-      if (!(error instanceof Error && error.message === `Task not found: ${requestedRef}`)) throw error;
-      const branch = options.resolveMissingTask?.(requestedRef);
+      if (!(error instanceof Error && error.message === `Task not found: ${taskId}`)) throw error;
+      const branch = options.resolveMissingTask?.(taskId);
       if (!branch) throw error;
       return {
         requestedRef,
         branch,
-        workspace: { mode: 'task-bound', taskId: requestedRef },
+        workspace: { mode: 'task-bound', taskId },
         taskState: 'unknown'
       };
     }
     if (!options.allowProtected && (task.state === 'blocked' || task.state === 'archive')) {
-      throw new Error(`SANDBOX_CLEANUP_STATE_UNSUPPORTED: task ${requestedRef} is ${task.state}`);
+      throw new Error(`SANDBOX_CLEANUP_STATE_UNSUPPORTED: task ${taskId} is ${task.state}`);
     }
     return {
       requestedRef,

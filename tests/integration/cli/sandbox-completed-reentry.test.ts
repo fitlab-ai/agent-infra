@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { completedReentryView, prepareCompletedReentry, publishCompletedReentry } from '../../../lib/sandbox/control/completed-reentry.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { mergeSandboxTaskView, taskViewAfterFinalization } from '../../../lib/sandbox/control/task-view.ts';
+import { mergeSandboxTaskView, projectSandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
 
 function fixture(t: TestContext) {
@@ -28,7 +28,9 @@ function fixture(t: TestContext) {
   const receiptPath = path.join(source, '.task-finalization.json');
   fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
   fs.writeFileSync(receiptPath, JSON.stringify(receipt));
-  const stale = taskViewAfterFinalization({ taskId, generation, requestId, receipt });
+  const stale = projectSandboxTaskView({
+    mode: 'task-bound', taskId, generation, source: 'active', sourceMatches: false, receipt, requestId
+  });
   fs.writeFileSync(path.join(control, 'public', 'status.json'), JSON.stringify({ version: 3, generation,
     broker: { pid: process.pid, startTime: 1, brokerId: 'fixture-broker' }, state: 'healthy', reasonCode: null,
     activeRequestId: null, updatedAt: Date.now(), taskView: stale }));

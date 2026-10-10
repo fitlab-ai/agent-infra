@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 
 const REGISTRY_NAME = '.short-ids.json';
 const LOCK_NAME = '.short-ids.json.lock';
@@ -159,41 +160,33 @@ function resolveShortIdReadOnly(
   const taskId = ids[key];
   if (!taskId) {
     const message = Object.keys(ids).length === 0
-      ? `short id '${key}' not found; active task registry is empty.`
-      : `short id '${key}' not found in active task registry (it may have been cleaned up after archival; check 'task-short-id.js list').`;
+      ? `short id '${key}' not found; task short-id registry is empty.`
+      : `short id '${key}' not found in task short-id registry.`;
     return shortIdFailure('SHORT_ID_NOT_FOUND', message);
   }
-  const taskMdPath = path.join(
-    repoRoot,
-    '.agents',
-    'workspace',
-    'active',
-    taskId,
-    'task.md'
-  );
-  if (!fs.existsSync(taskMdPath)) {
-    const remainingActiveEntries = Object.values(ids).filter((candidateTaskId) =>
-      fs.existsSync(
-        path.join(
-          repoRoot,
-          '.agents',
-          'workspace',
-          'active',
-          candidateTaskId,
-          'task.md'
-        )
-      )
-    );
-    const message = remainingActiveEntries.length === 0
-      ? `short id '${key}' not found; active task registry is empty.`
-      : `short id '${key}' not found in active task registry (it may have been cleaned up after archival; check 'task-short-id.js list').`;
+  const activeTask = path.join(repoRoot, '.agents', 'workspace', 'active', taskId, 'task.md');
+  const completedTask = path.join(repoRoot, '.agents', 'workspace', 'completed', taskId, 'task.md');
+  let isValidCompletedTask = false;
+  try {
+    const task = parseTypedTaskFrontmatter(fs.readFileSync(completedTask, 'utf8'));
+    isValidCompletedTask = task.id === taskId && task.status === 'completed';
+  } catch { /* a mapping is valid only while its task content is present */ }
+  if (!fs.existsSync(activeTask) && !isValidCompletedTask) {
     return shortIdFailure(
       'SHORT_ID_STALE',
-      message,
+      `short id '${key}' points to no active or completed task content.`,
       taskId
     );
   }
   return { ok: true, taskId };
+}
+
+function hasRetainedCompletedTask(activeDir: string, taskId: string): boolean {
+  try {
+    const taskPath = path.join(path.dirname(activeDir), 'completed', taskId, 'task.md');
+    const task = parseTypedTaskFrontmatter(fs.readFileSync(taskPath, 'utf8'));
+    return task.id === taskId && task.status === 'completed';
+  } catch { return false; }
 }
 
 type RegistrySchema = {
@@ -339,7 +332,8 @@ function mutateShortIdRegistryAt(
     const original = JSON.stringify(registry.ids);
     if (pruneOrphans) {
       for (const [key, candidate] of Object.entries(registry.ids)) {
-        if (candidate !== taskId && !fs.existsSync(path.join(activeDir, candidate, 'task.md'))) delete registry.ids[key];
+        if (candidate !== taskId && !fs.existsSync(path.join(activeDir, candidate, 'task.md'))
+          && !hasRetainedCompletedTask(activeDir, candidate)) delete registry.ids[key];
       }
     }
     const existing = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId);
@@ -406,28 +400,27 @@ function executeShortIdCommand(request: ShortIdCommandRequest): ShortIdCommandRe
       if (normalized.kind !== 'shortId') {
         throw Object.assign(new Error(`invalid short id format '${request.argument}'`), { code: 'SHORT_ID_FORMAT_INVALID' });
       }
-      return withRegistryLock(request.activeDir, () => {
-        const registry = readRegistryStrict(registryPath, request.shortIdLength);
-        let changed = false;
-        for (const [key, taskId] of Object.entries(registry.ids)) {
-          if (!fs.existsSync(path.join(request.activeDir, taskId, 'task.md'))) { delete registry.ids[key]; changed = true; }
-        }
-        if (changed) writeRegistry(registryPath, registry);
-        const taskId = registry.ids[normalized.value];
-        if (!taskId) throw Object.assign(new Error(`short id '${normalized.value}' not found in active task registry`), { code: 'SHORT_ID_NOT_FOUND' });
-        return { status: changed ? 'applied' : 'no-op', changed, output: taskId, error: null };
-      });
+      const registry = readRegistryStrict(registryPath, request.shortIdLength);
+      const taskId = registry.ids[normalized.value];
+      if (!taskId) throw Object.assign(new Error(`short id '${normalized.value}' not found in task short-id registry`), { code: 'SHORT_ID_NOT_FOUND' });
+      if (!fs.existsSync(path.join(request.activeDir, taskId, 'task.md'))
+        && !hasRetainedCompletedTask(request.activeDir, taskId)) {
+        throw Object.assign(new Error(`short id '${normalized.value}' points to a task without active or completed task content`), { code: 'SHORT_ID_STALE' });
+      }
+      return { status: 'no-op', changed: false, output: taskId, error: null };
     }
     const registry = readRegistryStrict(registryPath, request.shortIdLength);
     if (request.verify) {
       const active = fs.existsSync(request.activeDir)
         ? fs.readdirSync(request.activeDir).filter((entry) => /^TASK-\d{8}-\d{6}$/.test(entry) && fs.existsSync(path.join(request.activeDir, entry, 'task.md')))
         : [];
+      const retained = Object.values(registry.ids).filter((taskId) => hasRetainedCompletedTask(request.activeDir, taskId));
+      const validTasks = new Set([...active, ...retained]);
       const registered = new Map<string, string[]>();
       for (const [key, taskId] of Object.entries(registry.ids)) registered.set(taskId, [...(registered.get(taskId) ?? []), key]);
       const diff = {
         missing_in_registry: active.filter((taskId) => !registered.has(taskId)).map((taskId) => ({ taskId })),
-        orphans_in_registry: Object.entries(registry.ids).filter(([, taskId]) => !active.includes(taskId)).map(([key, taskId]) => ({ key, taskId })),
+        orphans_in_registry: Object.entries(registry.ids).filter(([, taskId]) => !validTasks.has(taskId)).map(([key, taskId]) => ({ key, taskId })),
         duplicate_registry_keys: [...registered.entries()].filter(([, keys]) => keys.length > 1).map(([taskId, keys]) => ({ taskId, keys }))
       };
       const clean = Object.values(diff).every((items) => items.length === 0);

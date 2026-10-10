@@ -65,6 +65,10 @@ test('authority parser owns lifecycle and finalization command shapes', () => {
   assert.deepEqual(finalization.request, {
     taskRef: 'TASK-20260809-010203', intent: 'complete', agent: 'codex'
   });
+  assert.throws(
+    () => parseTaskControlOperation('task-lifecycle', ['TASK-20260809-010203', 'complete', '--agent', 'codex']),
+    /complete must use task-finalization/u
+  );
 
   assert.throws(
     () => parseTaskControlOperation('task-lifecycle', [
