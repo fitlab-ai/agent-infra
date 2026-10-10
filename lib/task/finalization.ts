@@ -79,6 +79,7 @@ type TaskFinalizationOptions = Readonly<{
   issueInspect?: typeof inspectPlatformIssue;
   verify?: typeof verifyTaskEvent;
   preflight?: typeof verifyTaskEvent;
+  beforeLifecycle?: (taskId: string) => Promise<void>;
 }>;
 
 type TaskFinalizationReceipt = Readonly<{
@@ -1303,6 +1304,19 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
 async function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   const prepared = await prepareTaskFinalization(request, options);
   if (prepared.status !== 'prepared') return prepared;
+  if (options.beforeLifecycle) {
+    try {
+      await options.beforeLifecycle(prepared.taskId!);
+    } catch (error) {
+      const detail = errorOf(error, 'TASK_FINALIZATION_PRE_LIFECYCLE_FAILED', true);
+      return failed(prepared.taskId, detail, {
+        changed: prepared.changed,
+        completedSteps: prepared.completedSteps,
+        pendingSteps: prepared.pendingSteps,
+        warnings: prepared.warnings
+      });
+    }
+  }
   return commitPreparedTaskFinalization(request, options);
 }
 

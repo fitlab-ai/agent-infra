@@ -53,9 +53,7 @@ import {
   executeRequest,
   nodeEntryArgs
 } from '../../../../lib/sandbox/control/executor.ts';
-import { bindTaskFinalizationReceipt, prepareTaskFinalization } from '../../../../lib/task/finalization.ts';
 import { createTask } from '../../../../lib/task/create-service.ts';
-import { platformResult } from '../../../../lib/platform/types.ts';
 import { SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { parseCodexControllerResult } from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-client.ts';
 import { validateAgentClientOperation } from '../../../../lib/sandbox/control/agent-operation.ts';
@@ -639,7 +637,7 @@ test('TypeScript control entries retain explicit strip-types startup', () => {
   ]);
 });
 
-test('control requests are restricted to allowed families and rebound to the manifest task', () => {
+test('control requests are restricted to allowed lifecycle operations and rebound to the manifest task', () => {
   const request = validateSandboxControlRequest({
     version: 4,
     id: '12345678-1234-1234-1234-123456789abc',
@@ -648,113 +646,21 @@ test('control requests are restricted to allowed families and rebound to the man
     issuedAt: 1_000,
     expiresAt: 3_000,
     family: 'task-lifecycle',
-    args: ['08', 'complete', '--agent', 'codex'],
+    args: ['08', 'cancel', '--agent', 'codex', '--reason', 'test'],
   }, manifest, { now: 2_000 });
   assert.deepEqual(bindSandboxControlTask(request, manifest.taskId!), [
     'TASK-20260809-010203',
-    'complete',
+    'cancel',
     '--agent',
-    'codex'
+    'codex',
+    '--reason',
+    'test'
   ]);
+  assert.throws(() => validateSandboxControlRequest({ ...request, args: ['08', 'complete'] }, manifest, { now: 2_000 }), /COMMAND_DENIED/u);
   assert.throws(
     () => validateSandboxControlRequest({ ...request, family: 'platform-issue' }, manifest),
     /REQUEST_INVALID/
   );
-});
-
-test('task finalization uses a typed task-bound request with manifest authority', () => {
-  const request = validateSandboxControlRequest({
-    version: 4,
-    id: '12345678-1234-1234-1234-123456789abc',
-    token: manifest.token,
-    generation: manifest.generation,
-    issuedAt: 1_000,
-    expiresAt: 3_000,
-    family: 'task-finalization',
-    operation: 'complete',
-    agent: 'codex',
-    args: [],
-  }, manifest, { now: 2_000 });
-  assert.equal(request.family, 'task-finalization');
-  assert.equal(request.operation, 'complete');
-  assert.equal(request.agent, 'codex');
-  assert.deepEqual(request.args, []);
-  assert.throws(() => bindSandboxControlTask(request, manifest.taskId!), /REQUEST_INVALID/);
-  assert.throws(() => validateSandboxControlRequest({ ...request, args: ['TASK-20260809-999999'] }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
-  assert.throws(() => validateSandboxControlRequest({ ...request, operation: 'status' }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
-  assert.throws(() => validateSandboxControlRequest({ ...request, repoRoot: '/untrusted' }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
-  assert.throws(() => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
-});
-
-test('sandbox executor finalizes only the manifest task and returns no control authority', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'finalization-executor-'));
-  const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-  try {
-    fs.mkdirSync(path.join(taskDir), { recursive: true });
-    fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled', task: { shortIdLength: 2 } }));
-    fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': taskId } })}\n`);
-    fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
-      skill: 'complete-task', checks: { 'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null, 'platform-sync-preflight': null, 'required-pr-delivery': null }
-    }));
-    fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', 'updated_at: old', 'agent_infra_version: v0.9.11-alpha.0', 'target_date:', '---',
-      '', '# Task', '', '## Review Disagreement Ledger', '',
-      '| id | stage | round | severity | status | evidence |',
-      '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
-    ].join('\n'));
-    const prepared = await prepareTaskFinalization({ taskRef: taskId, intent: 'complete', agent: 'codex' }, {
-      repoRoot: root,
-      backfill: async () => ({ ...platformResult('no-op'), artifacts: [], warnings: [] }),
-      commentSync: async () => platformResult('no-op'),
-      verify: async () => ({
-        status: 'pass' as const, changed: false, event: 'complete-task.completed', requestRef: taskId,
-        taskId, taskDir, taskState: 'active' as const, skill: 'complete-task', mode: 'gate' as const,
-        artifact: null, invocations: [], error: null
-      })
-    });
-    assert.equal(prepared.status, 'prepared', prepared.error?.message);
-    const requestId = '12345678-1234-1234-1234-123456789abc';
-    const boundManifest = {
-      ...manifest,
-      repoRoot: root,
-      worktreeRoot: root,
-      taskId,
-      channelDir: path.join(root, 'channel'),
-      publicStatusDir: path.join(root, 'public'),
-      processingDir: path.join(root, 'processing'),
-      runtimeDir: path.join(root, 'runtime')
-    };
-    const manifestPath = path.join(root, 'manifest.json');
-    fs.mkdirSync(boundManifest.publicStatusDir);
-    fs.writeFileSync(manifestPath, `${JSON.stringify(boundManifest)}\n`);
-    writeSandboxControlIdentitySentinel(boundManifest.publicStatusDir, {
-      version: 1, mode: 'task-bound', taskId, generation: manifest.generation, controlRootId: manifest.controlRootId
-    });
-    bindTaskFinalizationReceipt(root, taskId, { generation: manifest.generation, requestId });
-    const result = await executeRequest(boundManifest, manifestPath, {
-      version: 4,
-      id: requestId,
-      token: manifest.token,
-      generation: manifest.generation,
-      issuedAt: 1_000,
-      expiresAt: 3_000,
-      family: 'task-finalization',
-      operation: 'complete',
-      agent: 'codex',
-        args: [],
-    });
-    assert.equal(result.exitCode, 0);
-    const payload = JSON.parse(result.stdout);
-    assert.equal(payload.status, 'completed');
-    assert.equal(payload.accepted, true);
-    assert.equal(result.stdout.includes(manifest.token), false);
-    assert.equal(result.stdout.includes(root), false);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test('control protocol rejects request v2 and controller result parser enforces exact wire phases', () => {
@@ -834,7 +740,7 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     issuedAt: 1_000,
     expiresAt: 3_000,
     family: 'task-lifecycle',
-    args: ['08', 'complete'],
+    args: ['08', 'cancel'],
   };
   assert.throws(
     () => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }),

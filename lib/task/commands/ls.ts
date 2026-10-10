@@ -75,9 +75,9 @@ type TaskRow = {
 function collectTasks(repoRoot: string, state: 'active' | 'blocked' | 'completed'): TaskRow[] {
   const dir = path.join(repoRoot, '.agents', 'workspace', state);
   if (!fs.existsSync(dir)) return [];
-  // Short ids live only in the registry and only for active tasks; archived
-  // (blocked/completed) tasks have released their short id and render '-'.
-  const shortIdByTaskId = state === 'active' ? loadShortIdByTaskId(repoRoot) : new Map<string, string>();
+  const shortIdByTaskId = state === 'active' || state === 'completed'
+    ? loadShortIdByTaskId(repoRoot)
+    : new Map<string, string>();
   const rows: TaskRow[] = [];
   for (const entry of fs.readdirSync(dir).sort()) {
     if (!TASK_ID_RE.test(entry)) continue;

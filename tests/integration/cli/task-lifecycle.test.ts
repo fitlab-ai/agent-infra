@@ -31,7 +31,7 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxContr
 test('task-lifecycle CLI stays inside its fixture with sandbox control authority removed', () => {
   const f = fixture();
   const env = sandboxControlSafeEnv({ ...process.env });
-  const result = run(f.root, [TASK_ID, 'complete', '--agent', 'codex'], env);
+  const result = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'test cancellation'], env);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).taskId, TASK_ID);
   assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
@@ -39,11 +39,11 @@ test('task-lifecycle CLI stays inside its fixture with sandbox control authority
 
 test('task-lifecycle CLI prints one JSON result and uses domain exit codes', () => {
   const f = fixture();
-  const dry = run(f.root, [TASK_ID, 'complete', '--agent', 'codex', '--dry-run']);
+  const dry = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'test cancellation', '--dry-run']);
   assert.equal(dry.status, 0, dry.stderr);
   assert.equal(dry.stdout.trim().split('\n').length, 1);
   assert.equal(JSON.parse(dry.stdout).status, 'planned');
-  const applied = run(f.root, [TASK_ID, 'complete', '--agent', 'codex']);
+  const applied = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'test cancellation']);
   assert.equal(applied.status, 0, applied.stderr);
   assert.equal(JSON.parse(applied.stdout).status, 'applied');
   const conflict = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'different']);
@@ -140,11 +140,9 @@ test('task-lifecycle preserves a missing activity-log failure before moving the 
 
 test('task-lifecycle rejects an invalid source state before moving the task', () => {
   const f = fixture();
-  const taskFile = path.join(f.dir, 'task.md');
-  fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\ntarget_date:\n---\n\n# Task\n`);
   fs.mkdirSync(path.join(f.root, '.agents', 'workspace', 'blocked'), { recursive: true });
   fs.renameSync(f.dir, path.join(f.root, '.agents', 'workspace', 'blocked', TASK_ID));
-  const result = run(f.root, [TASK_ID, 'complete', '--agent', 'codex']);
+  const result = run(f.root, [TASK_ID, 'close-codescan', '--agent', 'codex', '--alert-number', '1', '--reason', 'not active']);
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_SOURCE_INVALID');
   assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID)), false);

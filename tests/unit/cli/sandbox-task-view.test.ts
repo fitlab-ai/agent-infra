@@ -6,7 +6,6 @@ import {
   mergeSandboxTaskView,
   parseSandboxTaskView,
   projectSandboxTaskView,
-  taskViewAfterFinalization,
   taskViewFromStatus
 } from '../../../lib/sandbox/control/task-view.ts';
 
@@ -45,16 +44,6 @@ test('task-view projection distinguishes active current from completed current',
   assert.equal(completed.receipt?.requestId, requestId);
 });
 
-test('receipt-backed historical active source becomes finalized-stale', () => {
-  const view = taskViewAfterFinalization({ taskId, generation, requestId, receipt });
-  assert.equal(view.state, 'finalized-stale');
-  assert.equal(view.observedSource, 'active');
-  assert.equal(view.receipt?.revision, 4);
-  assert.equal(accessSandboxTaskView(view, 'diagnostic').allowed, true);
-  assert.equal(accessSandboxTaskView(view, 'cleanup').allowed, true);
-  assert.equal(accessSandboxTaskView(view, 'progress').allowed, false);
-});
-
 test('active source with a valid completion receipt remains finalized-stale after broker restart', () => {
   const view = projectSandboxTaskView({
     mode: 'task-bound', taskId, generation, source: 'active', sourceMatches: false,
@@ -65,7 +54,10 @@ test('active source with a valid completion receipt remains finalized-stale afte
 });
 
 test('broker restart preserves stale or unknown evidence until a new re-entry projection', () => {
-  const stale = taskViewAfterFinalization({ taskId, generation, requestId, receipt });
+  const stale = projectSandboxTaskView({
+    mode: 'task-bound', taskId, generation, source: 'active', sourceMatches: false,
+    receipt, requestId
+  });
   const active = projectSandboxTaskView({
     mode: 'task-bound', taskId, generation, source: 'active', sourceMatches: true
   });

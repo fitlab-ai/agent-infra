@@ -200,7 +200,7 @@ test("sandbox rm help documents task-state and identity boundaries", () => {
     encoding: "utf8"
   });
 
-  assert.match(output, /full TASK-id for a task-bound sandbox/);
+  assert.match(output, /retained short id or full TASK-id for a task-bound sandbox/);
   assert.match(output, /branch for branch-only sandboxes/);
   assert.match(output, /rm --unbound \[--dry-run\] \[--yes\]/);
 });
@@ -210,7 +210,7 @@ test("sandbox ls help explains that a missing SHORT id may be eligible for unbou
     encoding: "utf8"
   });
 
-  assert.match(output, /SHORT value of '-' means this container has no active task short id/);
+  assert.match(output, /SHORT value of '-' means this container has no task short id/);
   assert.match(output, /may\s+be eligible for "ai sandbox rm --unbound" cleanup/);
 });
 
@@ -1056,6 +1056,10 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
     assert.ok(runCall.some((arg) => isWritableMountFor(
       arg,
       `/workspace/.agents/workspace/active/${taskId}`
+    )));
+    assert.ok(runCall.some((arg) => isWritableMountFor(
+      arg,
+      `/workspace/.agents/workspace/completed/${taskId}`
     )));
     assert.equal(runCall.some((arg) => arg.includes(siblingTaskId)), false);
 
@@ -2098,6 +2102,7 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
     const taskId = "TASK-20260301-000001";
     const active = path.join(fixture.repoDir, ".agents", "workspace", "active");
     fs.mkdirSync(path.join(active, taskId), { recursive: true });
+    fs.mkdirSync(path.join(fixture.repoDir, ".agents", "workspace", "completed", taskId), { recursive: true });
     fs.writeFileSync(
       path.join(active, taskId, "task.md"),
       `---\nid: ${taskId}\nbranch: registry-branch\n---\n`

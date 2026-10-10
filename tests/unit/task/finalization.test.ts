@@ -551,11 +551,6 @@ test('host finalization rejects an inconsistent copied-back lifecycle journal wi
   try {
     assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
     bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, binding);
-    const interrupted = applyTaskLifecycle(request, {
-      repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-      directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
-    });
-    assert.equal(interrupted.status, 'failed');
     const journalPath = path.join(f.taskDir, '.task-lifecycle.json');
     const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
     journal.completedSteps.push('directory-moved');
@@ -586,11 +581,6 @@ test('host finalization rejects a journal that claims a retained short id was re
   try {
     assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
     bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, binding);
-    const interrupted = applyTaskLifecycle(request, {
-      repoRoot: f.repoRoot, metadataProvider: () => METADATA,
-      directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
-    });
-    assert.equal(interrupted.status, 'failed');
     const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
     fs.mkdirSync(path.dirname(targetDir), { recursive: true });
     fs.renameSync(f.taskDir, targetDir);

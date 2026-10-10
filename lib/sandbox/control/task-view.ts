@@ -180,25 +180,6 @@ export function projectSandboxTaskView(input: TaskViewProjectionInput): SandboxT
   };
 }
 
-export function taskViewAfterFinalization(params: Readonly<{
-  taskId: string;
-  generation: string;
-  requestId: string;
-  receipt: unknown;
-}>): SandboxTaskView {
-  const receipt = receiptIdentity(params.receipt, params.generation, params.requestId);
-  if (!receipt) {
-    return {
-      state: 'unknown', taskId: params.taskId, observedSource: 'unknown', receipt: null,
-      reasonCode: 'SANDBOX_TASK_VIEW_RECEIPT_INVALID'
-    };
-  }
-  return {
-    state: 'finalized-stale', taskId: params.taskId, observedSource: 'active', receipt,
-    reasonCode: 'SANDBOX_TASK_VIEW_FINALIZED'
-  };
-}
-
 export function mergeSandboxTaskView(
   canonical: SandboxTaskView,
   previous: SandboxTaskView

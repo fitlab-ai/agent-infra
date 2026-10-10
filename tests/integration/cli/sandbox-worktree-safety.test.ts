@@ -9,6 +9,7 @@ import path from "node:path";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { containerNameCandidates } from "../../../lib/sandbox/constants.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
+import { resolveSandboxCleanupTarget } from "../../../lib/sandbox/workspace-identity.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 import {
   clearSandboxRemovalJournalRecord,
@@ -998,14 +999,14 @@ test("sandbox rm releases a stale short id after task-bound cleanup", onPlatform
       "utf8"
     );
 
-    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+    const cleanupTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
+    assert.deepEqual(cleanupTarget, {
+      requestedRef: "07", branch,
+      workspace: { mode: "task-bound", taskId }, taskState: "completed"
+    });
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], cleanupTarget.branch, {
       assumeYes: true,
-      cleanupTarget: {
-        requestedRef: taskId,
-        branch,
-        workspace: { mode: "task-bound", taskId },
-        taskState: "unknown"
-      },
+      cleanupTarget,
       target: evidence.target
     }));
 
@@ -1036,15 +1037,12 @@ test("sandbox rm preserves a stale short id when container removal cannot be con
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
     fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { "07": taskId } })}\n`, "utf8");
 
+    const cleanupTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
+    assert.equal(cleanupTarget.taskState, "completed");
     await assert.rejects(
-      withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      withFixtureDocker(fixture, () => rm.rmOne(config, [], cleanupTarget.branch, {
         assumeYes: true,
-        cleanupTarget: {
-          requestedRef: taskId,
-          branch,
-          workspace: { mode: "task-bound", taskId },
-          taskState: "unknown"
-        },
+        cleanupTarget,
         target: { ...evidence.target, matchedContainers: [container] }
       })),
       /SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT/

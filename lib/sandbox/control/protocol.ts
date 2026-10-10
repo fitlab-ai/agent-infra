@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
-import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { isAgentClientId } from '../../agent-clients/types.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
@@ -15,7 +14,7 @@ export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-finalization', 'task-create', 'agent-client'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-create', 'agent-client'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -62,9 +61,6 @@ type RequestBase = Readonly<{
 export type SandboxTaskCommandRequest = RequestBase & Readonly<{
   family: 'task-lifecycle'; args: string[];
 }>;
-export type SandboxTaskFinalizationRequest = RequestBase & Readonly<{
-  family: 'task-finalization'; operation: 'complete'; agent: string; args: [];
-}>;
 export type SandboxTaskCreateRequest = RequestBase & Readonly<{
   family: 'task-create'; candidate: TaskCreateCandidateV1;
 }>;
@@ -74,7 +70,7 @@ export type SandboxAgentClientRequest = RequestBase & Readonly<{
   operation: string;
   payload: Record<string, unknown>;
 }>;
-export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxAgentClientRequest;
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest | SandboxAgentClientRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
 export type SandboxControlResultEvidence = Readonly<{
   version: 1;
@@ -270,23 +266,13 @@ export function validateSandboxControlRequest(
     }
     return request as SandboxAgentClientRequest;
   }
-  if (request.family === 'task-finalization') {
-    const expected = ['agent', 'args', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'operation', 'token', 'version'];
-    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
-      || request.operation !== 'complete'
-      || !Array.isArray(request.args) || request.args.length !== 0
-      || typeof request.agent !== 'string' || normalizeAgentToken(request.agent) !== request.agent) {
-      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization request schema or authorization is invalid');
-    }
-    if (manifest.mode !== 'task-bound' || !manifest.taskId) {
-      fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks');
-    }
-    return request as SandboxTaskFinalizationRequest;
-  }
   const expected = ['args', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
+  }
+  if (request.args[1] === 'complete') {
+    fail('SANDBOX_CONTROL_COMMAND_DENIED', 'complete must use task-finalization');
   }
   if (manifest.mode !== 'task-bound' || !manifest.taskId) {
     fail(
@@ -298,7 +284,7 @@ export function validateSandboxControlRequest(
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
-  if (request.family === 'task-create' || request.family === 'agent-client' || request.family === 'task-finalization') {
+  if (request.family === 'task-create' || request.family === 'agent-client') {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', `${request.family} requests do not bind a current task`);
   }
   if (request.args.length === 0) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'command arguments are required');

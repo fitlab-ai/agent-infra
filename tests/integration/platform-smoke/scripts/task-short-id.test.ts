@@ -365,6 +365,35 @@ test("stale entries are cleaned automatically (B4)", () => {
   assert.deepEqual(list.ids, { "1": "TASK-20250107-000001" });
 });
 
+test("allocation and verification preserve a completed task short id until cleanup", () => {
+  const tmp = mkTmp();
+  const active = path.join(tmp, "active");
+  const completed = path.join(tmp, "completed");
+  fs.mkdirSync(active, { recursive: true });
+  fs.mkdirSync(completed, { recursive: true });
+  const completedId = "TASK-20250107-000010";
+  const activeId = "TASK-20250107-000011";
+  const completedTask = mkTask(active, completedId);
+  fs.writeFileSync(completedTask, fs.readFileSync(completedTask, "utf8").replace(`id: ${completedId}\n`, `id: ${completedId}\nstatus: completed\n`));
+  fs.renameSync(path.dirname(completedTask), path.join(completed, completedId));
+  mkTask(active, activeId);
+  fs.writeFileSync(path.join(active, ".short-ids.json"), JSON.stringify({ version: 1, ids: { "1": completedId } }));
+
+  const allocated = runW1(["alloc", activeId, "--active-dir", active]);
+  assert.equal(allocated.status, 0, `stderr=${allocated.stderr}`);
+  assert.equal(allocated.stdout.trim(), "2");
+  const resolved = runW1(["resolve", "1", "--active-dir", active]);
+  assert.equal(resolved.status, 0, `stderr=${resolved.stderr}`);
+  assert.equal(resolved.stdout.trim(), completedId);
+  const verified = runW1(["list", "--verify", "--active-dir", active]);
+  assert.equal(verified.status, 0, `stderr=${verified.stderr}`);
+  assert.equal(verified.stdout.trim(), "");
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(active, ".short-ids.json"), "utf8")).ids, {
+    "1": completedId,
+    "2": activeId
+  });
+});
+
 test("alloc rejects a task id not in active without touching state (R5 B-1)", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");

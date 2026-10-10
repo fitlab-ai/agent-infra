@@ -10,8 +10,6 @@ import {
   taskCreateFailure,
   type TaskCreateResult
 } from '../../task/create-service.ts';
-import { applyTaskFinalization } from '../../task/finalization.ts';
-import { serializeTaskFinalizationEnvelope } from '../../task/finalization-envelope.ts';
 import {
   bindSandboxControlTask,
   validateSandboxControlRequest,
@@ -256,22 +254,6 @@ function taskCreateExecutionFailure(requestId: string, code: string, message: st
   }));
 }
 
-function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalization>>): SandboxControlExecutionResult {
-  const payload = {
-    version: 1,
-    status: result.status,
-    changed: result.changed,
-    accepted: true,
-    result,
-    error: result.error
-  };
-  return {
-    exitCode: result.status === 'completed' ? 0 : result.status === 'blocked' ? 2 : 1,
-    stdout: `${JSON.stringify(payload)}\n`,
-    stderr: ''
-  };
-}
-
 type ExecuteRequestOptions = Readonly<{
   createTask?: typeof createTask;
   agentClientOperation?: AgentClientSandboxControlOperation;
@@ -300,26 +282,6 @@ async function executeRequestInner(
   if (request.family === 'agent-client') {
     validateAgentClientOperation(request, manifest);
     return executeAgentClientOperation(request, manifest, manifestPath, options.agentClientOperation);
-  }
-  if (request.family === 'task-finalization') {
-    const parsed = parseTaskControlOperation(
-      'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]
-    );
-    if (parsed.family !== 'task-finalization') throw new Error('SANDBOX_CONTROL_FINALIZATION_OPERATION_INVALID');
-    const operation = parsed;
-    const result = dispatchTaskControlOperation(
-      createSandboxExecutorExecutionContext({
-        repoRoot: manifest.repoRoot,
-        worktreeRoot: manifest.worktreeRoot,
-        runtimeDir: manifest.runtimeDir,
-        taskId: manifest.taskId!,
-        generation: manifest.generation,
-        manifestPath,
-        requestId: request.id
-      }),
-      operation
-    );
-    return finalizationResult(await result);
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
   let operation: TaskControlOperation;
@@ -438,7 +400,7 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
       family: request.family,
       operation: operation && typeof operation === 'object' && 'family' in operation && operation.family === 'task-lifecycle'
         ? operation.request.intent
-        : request.family === 'task-finalization' || request.family === 'agent-client' ? request.operation : null,
+        : request.family === 'agent-client' ? request.operation : null,
       phase: 'started-committed',
       outcome: 'in-progress'
     });
@@ -454,20 +416,7 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
     });
     const detail = error instanceof Error ? error.message : String(error);
     const code = /^([A-Z][A-Z0-9_]+)/u.exec(detail)?.[1] ?? 'SANDBOX_CONTROL_EXECUTOR_FAILED';
-    result = request.family === 'task-finalization'
-      ? {
-        exitCode: 1,
-        stdout: serializeTaskFinalizationEnvelope({
-          status: code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? 'unknown' : 'failed',
-          changed: code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? null : false,
-          accepted: true,
-          requestId: request.id,
-          result: null,
-          error: { code, message: detail, retryable: false }
-        }),
-        stderr: ''
-      }
-      : request.family === 'task-create'
+    result = request.family === 'task-create'
         ? taskCreateExecutionFailure(request.id, code, detail)
         : lifecycleFailure(code, detail);
   }

@@ -1073,11 +1073,25 @@ async function rmPurgeCore(
   const confirm = prompt.confirm ?? p.confirm;
   const isCancel = prompt.isCancel ?? p.isCancel;
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
-
+  const listed = fetchSandboxRows(
+    engine,
+    sandboxLabel(config),
+    sandboxBranchLabel(config),
+    { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
+  );
+  const rows = [...listed.running, ...listed.nonRunning];
   const containers = runEngine(engine, 'docker', [
     'ps', '-a', '--filter', `label=${sandboxLabel(config)}`, '--format', '{{.Names}}'
   ]).split('\n').filter(Boolean);
+  const completedTaskIds = [...new Set(rows
+    .filter((row) => row.workspaceMode === 'task-bound' && row.taskId)
+    .map((row) => row.taskId!))];
   for (const name of containers) runSafeEngine(engine, 'docker', ['rm', '-f', name]);
+  if (!sandboxContainersRemoved(engine, containers)) {
+    throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${containers.join(', ')}`);
+  }
+
+  let cleanupCompleted = true;
 
   const worktrees = fs.existsSync(config.worktreeBase)
     ? fs.readdirSync(config.worktreeBase).map((entry) => path.join(config.worktreeBase, entry))
@@ -1087,20 +1101,25 @@ async function rmPurgeCore(
     if (!isCancel(selected) && selected) {
       for (const worktree of worktrees) fs.rmSync(worktree, { recursive: true, force: true });
       runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
-    }
+    } else cleanupCompleted = false;
   }
 
   for (const dir of projectToolDirs(config, tools)) fs.rmSync(dir, { recursive: true, force: true });
   if (fs.existsSync(config.shellConfigBase)) {
     const selected = await confirm({ message: `Remove all shell config dirs in ${config.shellConfigBase}?`, initialValue: true });
     if (!isCancel(selected) && selected) fs.rmSync(config.shellConfigBase, { recursive: true, force: true });
+    else cleanupCompleted = false;
   }
   if (fs.existsSync(config.shareBase)) {
     const selected = await confirm({ message: `Remove all share dirs for project (${config.shareBase})?`, initialValue: true });
     if (!isCancel(selected) && selected) fs.rmSync(config.shareBase, { recursive: true, force: true });
+    else cleanupCompleted = false;
   }
   for (const base of [config.workspaceViewBase, config.controlBase]) {
     fs.rmSync(path.join(base, config.project), { recursive: true, force: true });
+  }
+  if (cleanupCompleted) {
+    for (const taskId of completedTaskIds) releaseStaleShortIdRegistry(config.repoRoot, taskId);
   }
   const removeImage = await confirm({ message: `Remove image ${config.imageName}?`, initialValue: false });
   if (!isCancel(removeImage) && removeImage) runSafeEngine(engine, 'docker', ['rmi', config.imageName]);

@@ -25,6 +25,7 @@ import { sandboxCoreBindMounts } from './mounts.ts';
 import { resolveSandboxGitMetadata } from './git-metadata.ts';
 import {
   assertSandboxTaskSource,
+  sandboxCompletedTaskMountSource,
   sandboxControlPaths,
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
@@ -673,31 +674,43 @@ export function startCompletedSandboxContainer(params: {
   const activeRoot = path.join(params.config.repoRoot, '.agents', 'workspace', 'active');
   const historicalSource = path.join(activeRoot, params.taskId);
   fs.mkdirSync(activeRoot, { recursive: true });
+  let replacedEmptyRoot = false;
+  let emptyRootMode = 0o700;
   try {
-    fs.lstatSync(historicalSource);
-    throw new Error(
-      `SANDBOX_COMPLETED_SOURCE_CONFLICT: historical task source already exists at ${historicalSource}`
-    );
+    const existing = fs.lstatSync(historicalSource);
+    if (existing.isSymbolicLink() || !existing.isDirectory() || fs.readdirSync(historicalSource).length > 0) {
+      throw new Error(
+        `SANDBOX_COMPLETED_SOURCE_CONFLICT: historical task source already exists at ${historicalSource}`
+      );
+    }
+    emptyRootMode = existing.mode & 0o777;
+    fs.rmdirSync(historicalSource);
+    replacedEmptyRoot = true;
   } catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
   }
 
-  fs.symlinkSync(
-    completedSource,
-    historicalSource,
-    process.platform === 'win32' ? 'junction' : 'dir'
-  );
+  let temporaryLink = false;
   try {
+    fs.symlinkSync(
+      completedSource,
+      historicalSource,
+      process.platform === 'win32' ? 'junction' : 'dir'
+    );
+    temporaryLink = true;
     params.start(params.engine, params.container);
   } finally {
-    const temporarySource = fs.lstatSync(historicalSource);
-    const resolvedSource = fs.realpathSync.native(historicalSource);
-    if (!temporarySource.isSymbolicLink() || resolvedSource !== completedSource) {
-      throw new Error(
-        `SANDBOX_COMPLETED_SOURCE_CHANGED: refusing to remove unexpected path at ${historicalSource}`
-      );
+    if (temporaryLink) {
+      const temporarySource = fs.lstatSync(historicalSource);
+      const resolvedSource = fs.realpathSync.native(historicalSource);
+      if (!temporarySource.isSymbolicLink() || resolvedSource !== completedSource) {
+        throw new Error(
+          `SANDBOX_COMPLETED_SOURCE_CHANGED: refusing to remove unexpected path at ${historicalSource}`
+        );
+      }
+      fs.unlinkSync(historicalSource);
     }
-    fs.unlinkSync(historicalSource);
+    if (replacedEmptyRoot) fs.mkdirSync(historicalSource, { mode: emptyRootMode });
   }
 }
 
@@ -749,6 +762,7 @@ function expectedMounts(params: {
     ? recoveryTaskSources(config.repoRoot, params.workspace.taskId)
     : null;
   const taskId = params.workspace.mode === 'task-bound' ? params.workspace.taskId : null;
+  const completedTaskSource = taskId ? sandboxCompletedTaskMountSource(config.repoRoot, taskId) : null;
   const worktrees = worktreeDirCandidates(config, branch).filter((candidate) =>
     fs.existsSync(path.join(candidate, '.git'))
   );
@@ -770,6 +784,7 @@ function expectedMounts(params: {
       : {
         runtimeDir: control.runtimeDir,
         taskSources: taskSources!.accessiblePaths,
+        completedTaskSource: completedTaskSource!,
         taskId: taskId!
       })
   }).map((mount) => ({
@@ -779,6 +794,10 @@ function expectedMounts(params: {
     ...(taskSources !== null && taskId !== null
       && mount.containerPath === `/workspace/.agents/workspace/active/${taskId}`
       ? { sourceAccessiblePaths: taskSources!.accessiblePaths }
+      : {}),
+    ...(completedTaskSource !== null && taskId !== null
+      && mount.containerPath === `/workspace/.agents/workspace/completed/${taskId}`
+      ? { sourceAccessiblePaths: [completedTaskSource] }
       : {}),
     expectedRW: !mount.readOnly
   }));

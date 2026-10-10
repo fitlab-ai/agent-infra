@@ -477,6 +477,7 @@ export function parseTaskControlOperation(
   const taskRef = args[0]!;
   const intent = args[1]!;
   if (family === 'task-lifecycle') {
+    if (intent === 'complete') operationInvalid('complete must use task-finalization');
     const values = parseValues(args, 2, LIFECYCLE_FLAGS);
     const agent = normalizeAgentToken(value(values, '--agent') ?? '');
     if (!agent) operationInvalid('lifecycle agent is invalid');

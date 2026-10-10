@@ -76,7 +76,6 @@ import { recoverAgentClientOperation, validateAgentClientOperation } from './age
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
-  taskViewAfterFinalization,
   taskViewForManifest,
   type SandboxTaskView
 } from './task-view.ts';
@@ -91,34 +90,6 @@ type ActiveExecution = {
   settled: boolean;
 };
 
-async function taskViewForFinalizationResult(
-  manifest: SandboxControlManifest,
-  request: SandboxControlRequest,
-  result: SandboxControlExecutionResult | null
-): Promise<SandboxTaskView | null> {
-  if (request.family !== 'task-finalization' || result?.exitCode !== 0 || !manifest.taskId) return null;
-  let receipt: unknown = null;
-  for (let attempt = 0; attempt < 100 && !receipt; attempt += 1) {
-    try {
-      receipt = readTaskFinalizationReceipt(manifest.repoRoot, manifest.taskId);
-    } catch {
-      // A missing or temporarily moving task directory is retried before publishing completion.
-    }
-    if (!receipt) await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  const finalized = taskViewAfterFinalization({
-    taskId: manifest.taskId,
-    generation: manifest.generation,
-    requestId: request.id,
-    receipt
-  });
-  if (finalized.state === 'unknown') return finalized;
-  const canonical = taskViewForManifest({ ...manifest, receipt });
-  return canonical.state === 'current' && canonical.observedSource === 'completed'
-    ? canonical
-    : finalized;
-}
-
 function appendBrokerAudit(
   manifest: SandboxControlManifest,
   event: string,
@@ -128,7 +99,6 @@ function appendBrokerAudit(
 }
 
 function operationKey(request: SandboxControlRequest): string | null {
-  if (request.family === 'task-finalization') return request.operation;
   if (request.family === 'task-create') return 'create';
   if (request.family === 'agent-client') return request.operation;
   if (request.family !== 'task-lifecycle') return null;
@@ -327,9 +297,7 @@ async function readRecoveryDomain(
   payloadOutput: string | null
 ): Promise<RecoveryDomainEvidence> {
   if (!operation) return { domain: null };
-  const taskRef = request.family === 'task-finalization'
-    ? manifest.taskId
-    : 'args' in request ? request.args[0] ?? null : manifest.taskId;
+  const taskRef = 'args' in request ? request.args[0] ?? null : manifest.taskId;
   const output = parseControlOutput(payloadOutput);
   if (!taskRef && operation.family !== 'task-create' && operation.family !== 'agent-client') {
     return { domain: null };
@@ -842,6 +810,7 @@ export async function serveSandboxControl(
   let bindingBackoffMs: number = timing.parkedBindingInitialMs;
   try {
     if (!brokerOwns()) return;
+    if (isSandboxControlRootQuiescing(root)) return;
     if (taskView.state === 'current' && taskView.observedSource === 'completed') {
       // Recheck durable re-entry evidence before publishing a trusted startup view.
       const unverified = { ...taskView, state: 'unknown' as const,
@@ -932,11 +901,6 @@ export async function serveSandboxControl(
         settledExecution = active;
         active = null;
       }
-      const finalizationView = settledExecution
-        ? await taskViewForFinalizationResult(manifest, settledExecution.request, settledExecution.result)
-        : null;
-      if (finalizationView) taskView = finalizationView;
-
       let reasonCode: string | null = null;
       try {
         if (!brokerOwns()) break;
@@ -1005,7 +969,9 @@ export async function serveSandboxControl(
       }
 
       let retiring = false;
-      for (const name of fs.readdirSync(requestsDir).sort()) {
+      const quiescing = isSandboxControlRootQuiescing(root);
+      if (quiescing && !active) break;
+      if (!quiescing) for (const name of fs.readdirSync(requestsDir).sort()) {
         if (!/^[a-f0-9-]{16,64}\.json$/.test(name)) continue;
         const id = name.slice(0, -5);
         const source = path.join(requestsDir, name);
@@ -1013,6 +979,10 @@ export async function serveSandboxControl(
         let validatedRequest: SandboxControlRequest | null = null;
         let prepared: PreparedSandboxControlExecution | null = null;
         try {
+          if (isSandboxControlRootQuiescing(root)) {
+            retiring = true;
+            break;
+          }
           if (!brokerOwns()) {
             retiring = true;
             break;
@@ -1230,11 +1200,6 @@ export async function serveSandboxControl(
         }
       }
       if (owned && active.result && active.resultEvidenceWritten) {
-        const finalizationView = await taskViewForFinalizationResult(manifest, active.request, active.result);
-        if (finalizationView) {
-          taskView = finalizationView;
-          writeSandboxControlStatus(manifest, broker, 'healthy', null, null, Date.now(), taskView);
-        }
         if (publishExecutionResult(manifest, active.request, active.result, brokerOwns)) {
           if (brokerOwns()) {
             removeAcceptedResponse(manifest, active.request.id);
