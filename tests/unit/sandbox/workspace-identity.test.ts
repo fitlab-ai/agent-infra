@@ -32,7 +32,7 @@ function addTask(root: string, taskId: string, branch: string, shortId: string):
 function addTaskInState(root: string, state: string, taskId: string, branch: string): void {
   const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: ${branch}\n---\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: ${state}\nbranch: ${branch}\n---\n`);
 }
 
 test('resolveSandboxTarget preserves task identity for TASK-id and short id', () => {
@@ -69,6 +69,21 @@ test('resolveSandboxCleanupTarget keeps completed task identity after short-id r
     branch: 'agent-infra-fix-completed',
     workspace: { mode: 'task-bound', taskId },
     taskState: 'completed'
+  });
+});
+
+test('resolveSandboxCleanupTarget resolves a retained short id to the completed task', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010211';
+  addTaskInState(root, 'completed', taskId, 'agent-infra-fix-completed');
+  fs.writeFileSync(
+    path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+    `${JSON.stringify({ version: 1, ids: { '07': taskId } })}\n`
+  );
+
+  assert.deepEqual(resolveSandboxCleanupTarget('7', root), {
+    requestedRef: '7', branch: 'agent-infra-fix-completed',
+    workspace: { mode: 'task-bound', taskId }, taskState: 'completed'
   });
 });
 

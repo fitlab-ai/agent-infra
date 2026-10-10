@@ -200,7 +200,7 @@ test("sandbox rm help documents task-state and identity boundaries", () => {
     encoding: "utf8"
   });
 
-  assert.match(output, /full TASK-id for a task-bound sandbox/);
+  assert.match(output, /retained short id or full TASK-id for a task-bound sandbox/);
   assert.match(output, /branch for branch-only sandboxes/);
   assert.match(output, /rm --unbound \[--dry-run\] \[--yes\]/);
 });

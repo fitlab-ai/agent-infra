@@ -185,7 +185,7 @@ finalization 按允许的 artifact backfill → lifecycle → task 评论 → co
 
 sandbox-local 入口直接执行已有 finalization prepare/commit。lifecycle 移动前，它先停止本任务 broker 接收新请求，并等待已接收操作按原路径完成；只有 broker owner 退出后才开始迁移 task 目录。成功时消费本次命令返回的结构化结果和 receipt。失败或阻塞时保留源数据与 receipt，按返回的错误处理，不输出完成消息，也不手工改写终态。
 
-complete 保留短号映射。它只会在受管 sandbox 清理确认容器已删除且清理成功后释放。需要清理时用完整 `{task-id}` 调用 `ai sandbox rm`；不要在 complete 中单独释放短号。
+complete 保留短号映射。它只会在受管 sandbox 清理确认容器已删除且清理成功后释放。需要清理时可用保留短号或完整 `{task-id}` 调用 `ai sandbox rm`；不要在 complete 中单独释放短号。
 
 ### 8. 告知用户
 
@@ -208,7 +208,7 @@ complete 保留短号映射。它只会在受管 sandbox 清理确认容器已�
 可选：清理本任务的沙箱
 （任务已完成，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
 
-ai sandbox rm {task-id}
+ai sandbox rm {task-id}  # 或使用本任务仍保留的短号
 
 ```
 

@@ -82,11 +82,11 @@ async function taskFinalization(args: string[] = []): Promise<void> {
   };
   const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
   if (transport.kind === 'sandbox-local') {
-    const controlDir = process.env.AGENT_INFRA_CONTROL_DIR;
+    const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
     const taskId = process.env.AGENT_INFRA_TASK_ID;
     const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
     const controlRootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
-    if (!controlDir || !taskId || !generation || !controlRootId || taskId !== resolved.taskId) {
+    if (!statusDir || !taskId || !generation || !controlRootId || taskId !== resolved.taskId) {
       const detail = { code: 'TASK_CONTROL_TRANSPORT_INVALID', message: 'sandbox task control identity is incomplete', retryable: false };
       process.stdout.write(envelope('failed', false, true, null, detail));
       process.exitCode = 1;
@@ -98,7 +98,7 @@ async function taskFinalization(args: string[] = []): Promise<void> {
         if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
         await quiesceSandboxControlForTaskCompletion(
           path.join(resolveTaskRuntimeRoot(taskId, { repoRoot }), 'sandbox-control'),
-          { taskId, generation, controlRootId, channelDir: controlDir }
+          { taskId, generation, controlRootId, statusDir }
         );
       },
       preflight: (request, options) => verifyTaskEvent(

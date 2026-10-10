@@ -969,8 +969,9 @@ export async function serveSandboxControl(
       }
 
       let retiring = false;
-      if (isSandboxControlRootQuiescing(root)) break;
-      for (const name of fs.readdirSync(requestsDir).sort()) {
+      const quiescing = isSandboxControlRootQuiescing(root);
+      if (quiescing && !active) break;
+      if (!quiescing) for (const name of fs.readdirSync(requestsDir).sort()) {
         if (!/^[a-f0-9-]{16,64}\.json$/.test(name)) continue;
         const id = name.slice(0, -5);
         const source = path.join(requestsDir, name);

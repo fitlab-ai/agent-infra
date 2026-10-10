@@ -13,7 +13,7 @@ import { fetchSandboxRows } from './list-running.ts';
 import { rmOne, rmPurge, rmUnbound } from '../removal.ts';
 
 const USAGE = `Usage:
-  ai sandbox rm <branch | TASK-id | short id> Remove one sandbox; use a full TASK-id for a task-bound sandbox and a branch for branch-only sandboxes
+  ai sandbox rm <branch | TASK-id | short id> Remove one sandbox; use a retained short id or full TASK-id for a task-bound sandbox and a branch for branch-only sandboxes
   ai sandbox rm --unbound [--dry-run] [--yes] Remove sandboxes not bound to an active task short id
   ai sandbox rm --purge                     Tear down ALL sandboxes for the project (containers, worktrees, image, VM)`;
 

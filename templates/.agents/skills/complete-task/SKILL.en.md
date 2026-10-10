@@ -186,7 +186,7 @@ Finalization runs allowed artifact backfill -> lifecycle -> terminal task commen
 
 The sandbox-local entry calls the existing finalization prepare/commit flow directly. Before lifecycle transfer, it stops this task's broker from accepting new requests and waits for accepted work to finish through its existing path. Transfer starts only after the broker owner exits. On success, use the structured result and receipt returned by this command. On failure or blocked status, preserve source data and the receipt, follow the returned error, and do not claim completion or manually rewrite terminal state.
 
-Completion keeps the short-id mapping. Managed sandbox cleanup releases it only after the container is confirmed removed and cleanup succeeds. To clean up, pass the full `{task-id}` to `ai sandbox rm`; do not release the short id separately during completion.
+Completion keeps the short-id mapping. Managed sandbox cleanup releases it only after the container is confirmed removed and cleanup succeeds. To clean up, pass the retained short id or full `{task-id}` to `ai sandbox rm`; do not release the short id separately during completion.
 
 ### 8. Inform User
 
@@ -209,7 +209,7 @@ Deliverables:
 Optional: clean up this task's sandbox
 (The task is completed; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
 
-ai sandbox rm {task-id}
+ai sandbox rm {task-id}  # or use the task's retained short id
 
 ```
 

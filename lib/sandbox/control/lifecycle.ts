@@ -642,11 +642,11 @@ function markSandboxControlRootQuiescing(root: string): void {
 
 function readTaskCompletionManifest(
   root: string,
-  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; channelDir: string }>
+  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; statusDir: string }>
 ): SandboxControlManifest {
   const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
   const identity = validateSandboxControlIdentity({
-    publicStatusDir: manifest.publicStatusDir,
+    publicStatusDir: binding.statusDir,
     root,
     mode: manifest.mode,
     taskId: manifest.taskId,
@@ -655,8 +655,7 @@ function readTaskCompletionManifest(
   });
   if (identity.state !== 'valid' || manifest.mode !== 'task-bound'
     || manifest.taskId !== binding.taskId || manifest.generation !== binding.generation
-    || manifest.controlRootId !== binding.controlRootId
-    || path.resolve(manifest.channelDir) !== path.resolve(binding.channelDir)) {
+    || manifest.controlRootId !== binding.controlRootId) {
     throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
   }
   return manifest;
@@ -664,7 +663,7 @@ function readTaskCompletionManifest(
 
 export async function quiesceSandboxControlForTaskCompletion(
   root: string,
-  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; channelDir: string }>,
+  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; statusDir: string }>,
   timeoutMs = DEFAULT_QUIESCE_TIMEOUT_MS
 ): Promise<void> {
   const resolvedRoot = path.resolve(root);

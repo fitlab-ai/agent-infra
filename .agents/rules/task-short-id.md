@@ -46,7 +46,8 @@ complete 保留短号，供 completed task 与仍关联的 sandbox 在 cleanup �
 | 入口                                                       | 注册表命中            | 注册表未命中                                            |
 |-----------------------------------------------------------|----------------------|--------------------------------------------------------|
 | SKILL 入参解析器（生命周期 SKILL）                          | 解析为完整 task id    | **严格报错** —— 短号不存在 / 格式错误                  |
-| `ai sandbox exec <N>` / `ai sandbox create <N>`           | 解析为完整 task id 后查 task.md 取 `branch` | **严格报错** —— 不再回退到 ls 行号或字面分支名；提示用任务短号 / `TASK-id` / 分支名 |
+| `ai sandbox exec <N>` / `ai sandbox create <N>`           | 解析为 active task id 后查 task.md 取 `branch` | **严格报错** —— 不再回退到 ls 行号或字面分支名；提示用任务短号 / `TASK-id` / 分支名 |
+| `ai sandbox rm <N>`                                       | 解析保留映射，再按完整 task id 读取 active 或 completed 身份 | **严格报错** —— 短号不存在时停止清理 |
 
 `list --verify` 严格只读：active task 必须有映射；注册表映射可指向有效 active task
 或 `completed/{taskId}/task.md` 中身份匹配且状态为 completed 的 task。其他映射作为 orphan

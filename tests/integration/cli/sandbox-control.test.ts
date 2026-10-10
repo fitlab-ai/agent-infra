@@ -26,11 +26,12 @@ import {
   readSandboxRemovalJournal,
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
-  removeSandboxControlRoot
+  removeSandboxControlRoot,
+  quiesceSandboxControlForTaskCompletion
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
+import { prepareSandboxControlExecution, type PreparedSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
 import {
   atomicWriteJson,
   createSandboxControlTerminalResult,
@@ -348,7 +349,12 @@ function runRecoverSandboxControl(params: {
   }));
 }
 
-function runDirectTaskFinalizationAsync(root: string, manifest: ReturnType<typeof readSandboxControlManifest>, taskId: string): CollectedChild {
+function runDirectTaskFinalizationAsync(
+  root: string,
+  manifest: ReturnType<typeof readSandboxControlManifest>,
+  taskId: string,
+  paths: Readonly<{ controlDir?: string; statusDir?: string }> = {}
+): CollectedChild {
   return collectChild(spawn(process.execPath, [
     '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
     'task-finalization', taskId, 'complete', '--agent', 'codex'
@@ -361,8 +367,8 @@ function runDirectTaskFinalizationAsync(root: string, manifest: ReturnType<typeo
       AGENT_INFRA_CONTROL_TOKEN: manifest.token,
       AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
       AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
-      AGENT_INFRA_CONTROL_DIR: manifest.channelDir,
-      AGENT_INFRA_CONTROL_STATUS_DIR: manifest.publicStatusDir,
+      AGENT_INFRA_CONTROL_DIR: paths.controlDir ?? manifest.channelDir,
+      AGENT_INFRA_CONTROL_STATUS_DIR: paths.statusDir ?? manifest.publicStatusDir,
       AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
       AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined,
       AGENT_INFRA_EXECUTOR_MANIFEST: undefined
@@ -474,6 +480,33 @@ test('sandbox control lifecycle fails closed when a manifest has no owner eviden
       /SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING/
     );
     assert.equal(fs.existsSync(root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox-local completion validates identity through the mounted status namespace', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-complete-status-namespace-'));
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch);
+    const manifest = readSandboxControlManifest(manifestPath);
+    const containerStatusDir = path.join(root, 'container', 'control-status');
+    fs.mkdirSync(containerStatusDir, { recursive: true });
+    writeSandboxControlIdentitySentinel(containerStatusDir, {
+      version: 1, mode: 'task-bound', taskId: manifest.taskId,
+      generation: manifest.generation, controlRootId: manifest.controlRootId
+    });
+    writeSandboxControlIdentitySentinel(manifest.publicStatusDir, {
+      version: 1, mode: 'task-bound', taskId: manifest.taskId,
+      generation: 'host-only-stale-generation', controlRootId: manifest.controlRootId
+    });
+
+    await quiesceSandboxControlForTaskCompletion(path.dirname(manifestPath), {
+      taskId: manifest.taskId!, generation: manifest.generation,
+      controlRootId: manifest.controlRootId, statusDir: containerStatusDir
+    });
+    assert.equal(fs.existsSync(path.join(path.dirname(manifestPath), 'quiescing.json')), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1753,26 +1786,94 @@ test('broker recovery cleans up a normally published large-output terminal', asy
   }
 });
 
-test('sandbox-local complete drains the broker before moving the task without a request round trip', async () => {
+test('sandbox-local complete drains an accepted request before moving the task without a request round trip', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-direct-complete-'));
   const taskId = 'TASK-20260809-010203';
   const controller = new AbortController();
   let server: Promise<void> | undefined;
   let local: CollectedChild | null = null;
+  let releaseAccepted!: (result: { exitCode: number; stdout: string; stderr: string }) => void;
+  let preparedCount = 0;
+  let terminateCount = 0;
   try {
     const branch = initializeRepository(root);
     writeFinalizationTaskFixture(root, taskId);
     const controlRoot = path.join(root, '.agents', 'workspace', 'active', taskId, '.runtime', 'sandbox-control');
     const manifestPath = writeControlManifest(root, branch, 'finalization-direct-generation', controlRoot);
     const manifest = readSandboxControlManifest(manifestPath);
+    const containerControlDir = path.join(root, 'container', 'control');
+    const containerStatusDir = path.join(root, 'container', 'control-status');
+    fs.mkdirSync(containerControlDir, { recursive: true });
+    fs.mkdirSync(containerStatusDir, { recursive: true });
+    writeSandboxControlIdentitySentinel(containerStatusDir, {
+      version: 1, mode: 'task-bound', taskId,
+      generation: manifest.generation, controlRootId: manifest.controlRootId
+    });
     server = serveSandboxControl(manifestPath, controller.signal, {
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: path.resolve('bin/internal-cli.ts')
+      internalCliPath: path.resolve('bin/internal-cli.ts'),
+      prepareExecution: async ({ manifest: current, request }) => {
+        preparedCount += 1;
+        let finish!: (result: { exitCode: number; stdout: string; stderr: string }) => void;
+        const completion = new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => {
+          finish = resolve;
+        });
+        releaseAccepted = finish;
+        const startTime = getProcessStartTime(process.pid);
+        assert.ok(startTime);
+        const prepared: PreparedSandboxControlExecution = {
+          execution: {
+            version: 2, generation: current.generation, requestId: request.id,
+            nonce: 'accepted-drain-test', phase: 'prepared', updatedAt: Date.now(),
+            child: { pid: process.pid, startTime, processGroupId: null }
+          },
+          start: () => undefined,
+          completion,
+          terminate: () => { terminateCount += 1; return true; }
+        };
+        return prepared;
+      }
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
-    local = runDirectTaskFinalizationAsync(root, manifest, taskId);
+    const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const requestIssuedAt = Date.now();
+    atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
+      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
+      issuedAt: requestIssuedAt, expiresAt: requestIssuedAt + 1_500,
+      family: 'task-lifecycle', args: ['08', 'cancel', '--agent', 'codex', '--reason', 'drain-test']
+    });
+    const responsesDir = path.join(manifest.channelDir, 'responses');
+    const acceptedPath = path.join(responsesDir, `${requestId}.accepted.json`);
+    const acceptedDeadline = Date.now() + SANDBOX_CONTROL_TEST_TIMEOUT_MS;
+    while (!fs.existsSync(acceptedPath) && Date.now() < acceptedDeadline) {
+      const responsePath = path.join(responsesDir, `${requestId}.json`);
+      if (fs.existsSync(responsePath)) {
+        throw new Error(`request was rejected before acceptance: ${fs.readFileSync(responsePath, 'utf8')}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(fs.existsSync(acceptedPath), true, `request was not accepted; status=${fs.readFileSync(path.join(manifest.publicStatusDir, 'status.json'), 'utf8')}`);
+    assert.equal(preparedCount, 1);
+    local = runDirectTaskFinalizationAsync(root, manifest, taskId, {
+      controlDir: containerControlDir, statusDir: containerStatusDir
+    });
+    await waitForFile(path.join(controlRoot, 'quiescing.json'), SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(fs.existsSync(path.join(controlRoot, 'broker.json')), true);
+    assert.equal(terminateCount, 0);
+    const queuedId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    fs.writeFileSync(path.join(manifest.channelDir, 'requests', `${queuedId}.json`), `${JSON.stringify({
+      version: 4, id: queuedId, token: manifest.token, generation: manifest.generation,
+      issuedAt: Date.now(), expiresAt: Date.now() + 1_000,
+      family: 'task-lifecycle', args: ['08', 'cancel', '--agent', 'codex', '--reason', 'must-not-claim']
+    })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'requests', `${queuedId}.json`)), true);
+    assert.equal(preparedCount, 1);
+    assert.equal(terminateCount, 0);
+    releaseAccepted({ exitCode: 0, stdout: 'accepted operation finished\n', stderr: '' });
     const result = await local.result;
     assert.equal(result.exitCode, 0, `${result.stderr}\n${result.stdout}`);
     assert.equal(JSON.parse(result.stdout).status, 'completed', result.stdout);
@@ -1783,8 +1884,23 @@ test('sandbox-local complete drains the broker before moving the task without a 
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md')), false);
     assert.equal(fs.existsSync(path.join(completedControlRoot, 'quiescing.json')), true);
     assert.equal(fs.existsSync(path.join(completedControlRoot, 'broker.json')), false);
-    assert.equal(fs.readdirSync(path.join(completedControlRoot, 'channel', 'requests')).length, 0);
+    assert.deepEqual(fs.readdirSync(path.join(completedControlRoot, 'channel', 'requests')), [`${queuedId}.json`]);
+    assert.equal(fs.existsSync(path.join(completedControlRoot, 'channel', 'requests', `${queuedId}.json`)), true);
+    assert.equal(fs.existsSync(path.join(completedControlRoot, 'processing', requestId)), false);
+    assert.equal(fs.existsSync(path.join(completedControlRoot, 'channel', 'responses', `${requestId}.accepted.json`)), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(completedControlRoot, 'channel', 'responses', `${requestId}.json`), 'utf8')).phase, 'completed');
+    assert.equal(terminateCount, 0);
+    const auditLines = fs.readFileSync(path.join(completedControlRoot, 'audit.ndjson'), 'utf8').trim().split('\n');
+    const publishedIndex = auditLines.findIndex((line) => {
+      const event = JSON.parse(line) as { event?: string; requestId?: string };
+      return event.event === 'executor-result-published' && event.requestId === requestId;
+    });
+    const brokerStopIndex = auditLines.findIndex((line) => (JSON.parse(line) as { event?: string }).event === 'broker-stop');
+    assert.ok(publishedIndex >= 0);
+    assert.ok(brokerStopIndex > publishedIndex);
+    assert.equal(auditLines.some((line) => (JSON.parse(line) as { requestId?: string }).requestId === queuedId), false);
   } finally {
+    releaseAccepted?.({ exitCode: 0, stdout: 'accepted operation finished\n', stderr: '' });
     controller.abort();
     await server?.catch(() => undefined);
     await stopCollectedChild(local);
