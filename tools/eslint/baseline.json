@@ -3267,15 +3267,6 @@
       "count": 1
     },
     {
-      "file": "tests/integration/cli/sandbox-control.test.ts",
-      "ruleId": "complexity",
-      "stableId": "58dedd8831fc76bb95d0402ee986d664323ec0ef3b38cadcecadc4dbcc896350",
-      "displayName": "withSandboxControlEnvironment",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/task/task-execution-lock.ts",
       "ruleId": "complexity",
       "stableId": "e2543b1983c41a9c2b4a7efa7d07d2e16c480ebc01996ddb1f5a51b14d8d139a",
