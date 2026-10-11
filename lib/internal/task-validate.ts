@@ -2,27 +2,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { loadConfig } from '../sandbox/config.ts';
-import { detectEngine } from '../sandbox/engine.ts';
-import { runEngine } from '../sandbox/shell.ts';
-import { sandboxBranchLabel, sandboxLabel } from '../sandbox/constants.ts';
-import { fetchSandboxRows, selectSandboxContainer } from '../sandbox/commands/list-running.ts';
-import { containerNameCandidates } from '../sandbox/constants.ts';
 import { resolveSandboxTarget } from '../sandbox/workspace-identity.ts';
-import { sandboxControlPaths } from '../sandbox/workspace-view.ts';
-import {
-  appendSandboxControlAudit,
-  readActiveLease,
-  readSandboxControlStatus
-} from '../sandbox/control/state.ts';
-import type { SandboxControlLease } from '../sandbox/control/protocol.ts';
-import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
-import {
-  SANDBOX_CONTROL_FUTURE_SKEW_MS,
-  SANDBOX_CONTROL_STATUS_STALE_MS
-} from '../sandbox/control/protocol.ts';
-import { getProcessStartTime } from '../server/process-state.ts';
+import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
 import { createManualValidationEvidence, manualValidationEvidenceSummary } from '../task/manual-validation-evidence.ts';
 import type { ManualValidationCleanup } from '../task/manual-validation-evidence.ts';
@@ -31,7 +13,6 @@ import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-in
 
 const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] [--evidence-file <path>] -- <command> [args...]`;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
-const RECOVERY_GRACE_MS = 30_000;
 
 type ValidateOptions = {
   target: string;
@@ -108,20 +89,6 @@ function git(root: string, args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-function waitForState(statusDir: string, predicate: (state: ReturnType<typeof readSandboxControlStatus>) => boolean, timeoutMs = 5_000): void {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const status = readSandboxControlStatus(statusDir);
-      if (predicate(status)) return;
-    } catch {
-      // Atomic status publication may be between renames.
-    }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-  }
-  throw new Error('SANDBOX_VALIDATION_BROKER_STATE_TIMEOUT');
-}
-
 function snapshotValidation(repoRoot: string, commit: string, options: ValidateOptions) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-validation-'));
   const worktree = path.join(tempRoot, 'worktree');
@@ -150,109 +117,28 @@ function snapshotValidation(repoRoot: string, commit: string, options: ValidateO
 }
 
 function inplaceValidation(config: ReturnType<typeof loadConfig>, target: ReturnType<typeof resolveSandboxTarget>, options: ValidateOptions) {
-  const engine = detectEngine(config);
-  const { running, nonRunning } = fetchSandboxRows(engine, sandboxLabel(config), sandboxBranchLabel(config));
-  const row = selectSandboxContainer([...running, ...nonRunning], containerNameCandidates(config, target.branch));
-  if (!row) throw new Error('SANDBOX_VALIDATION_CONTAINER_NOT_FOUND');
-  const control = sandboxControlPaths({
-    base: config.controlBase, repoRoot: config.repoRoot, project: config.project,
-    container: row.name, identity: target.workspace
-  });
-  const manifest = readSandboxControlManifest(control.manifestPath);
-  const initial = readSandboxControlStatus(control.statusDir);
-  const now = Date.now();
-  if (initial.generation !== manifest.generation
-    || now - initial.updatedAt > SANDBOX_CONTROL_STATUS_STALE_MS
-    || initial.updatedAt > now + SANDBOX_CONTROL_FUTURE_SKEW_MS) {
-    throw new Error('SANDBOX_VALIDATION_BROKER_STATUS_STALE');
-  }
-  if (initial.state !== 'healthy' || initial.activeRequestId !== null) {
-    throw new Error('SANDBOX_VALIDATION_BROKER_NOT_IDLE');
-  }
-  const startTime = getProcessStartTime(process.pid);
-  if (!startTime) throw new Error('SANDBOX_VALIDATION_OWNER_IDENTITY_UNAVAILABLE');
-  const leasePath = path.join(control.root, 'lease.json');
-  const nonce = randomUUID();
-  const issuedAt = Date.now();
-  const lease: SandboxControlLease = {
-    version: 2, generation: manifest.generation, nonce,
-    owner: { pid: process.pid, startTime }, issuedAt,
-    expiresAt: issuedAt + Math.min(options.timeoutMs + RECOVERY_GRACE_MS, MAX_TIMEOUT_MS + RECOVERY_GRACE_MS),
-    taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,
-    branch: target.branch, reason: 'manual-validation'
-  };
-  const originalBranch = git(manifest.worktreeRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  const originalHead = git(manifest.worktreeRoot, ['rev-parse', 'HEAD']);
-  fs.writeFileSync(leasePath, `${JSON.stringify(lease)}\n`, { flag: 'wx', mode: 0o600 });
-  let stopped = false;
+  const targetRoot = resolveBranchWorktree(config.repoRoot, target.branch);
+  if (!targetRoot) throw new Error(`TASK_VALIDATION_WORKTREE_NOT_FOUND: ${target.branch}`);
+  const worktree = assertGitWorktreeBinding(config.repoRoot, targetRoot, target.branch);
+  const originalBranch = git(worktree.worktreeRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  const originalHead = git(worktree.worktreeRoot, ['rev-parse', 'HEAD']);
   let restored = false;
   try {
-    appendSandboxControlAudit(manifest, 'lease-acquire', { ownerPid: process.pid });
-    waitForState(control.statusDir, (status) => status.state === 'parked' && status.reasonCode === 'SANDBOX_CONTROL_HANDOFF_ACTIVE');
-    if (row.running) {
-      runEngine(engine, 'docker', ['stop', row.name]);
-      stopped = true;
-    }
-    const refreshedRows = fetchSandboxRows(engine, sandboxLabel(config), sandboxBranchLabel(config));
-    const refreshed = selectSandboxContainer(
-      [...refreshedRows.running, ...refreshedRows.nonRunning],
-      containerNameCandidates(config, target.branch)
-    );
-    if (!refreshed || refreshed.running) throw new Error('SANDBOX_VALIDATION_CONTAINER_STILL_RUNNING');
-    const activeLease = readActiveLease(manifest);
-    if (!activeLease || activeLease.nonce !== nonce) throw new Error('SANDBOX_VALIDATION_LEASE_OWNERSHIP_LOST');
-    assertGitWorktreeBinding(config.repoRoot, manifest.worktreeRoot, target.branch);
-    const result = runValidationCommand(options.command, manifest.worktreeRoot, 'inplace', options.timeoutMs, options.format === 'json');
+    const result = runValidationCommand(options.command, worktree.worktreeRoot, 'inplace', options.timeoutMs, options.format === 'json');
     return { ...result, cleanup: () => restored ? 'completed' : 'pending' };
   } finally {
-    const recoveryErrors: string[] = [];
     try {
-      const currentBranch = git(manifest.worktreeRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-      if (currentBranch !== originalBranch) git(manifest.worktreeRoot, ['switch', originalBranch]);
+      const currentBranch = git(worktree.worktreeRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+      if (currentBranch !== originalBranch) git(worktree.worktreeRoot, ['switch', originalBranch]);
     } catch {
       try {
-        git(manifest.worktreeRoot, ['checkout', '--detach', originalHead]);
-        git(manifest.worktreeRoot, ['switch', originalBranch]);
-      } catch (fallbackError) {
-        recoveryErrors.push(`git binding restore failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
-      }
-    }
-    if (stopped) {
-      try {
-        runEngine(engine, 'docker', ['start', row.name]);
+        git(worktree.worktreeRoot, ['checkout', '--detach', originalHead]);
+        git(worktree.worktreeRoot, ['switch', originalBranch]);
       } catch (error) {
-        recoveryErrors.push(`container start failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`TASK_VALIDATION_WORKTREE_RESTORE_FAILED: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    try {
-      const currentLease = JSON.parse(fs.readFileSync(leasePath, 'utf8')) as { nonce?: unknown };
-      if (currentLease.nonce !== nonce) throw new Error('SANDBOX_VALIDATION_LEASE_OWNERSHIP_LOST');
-    } catch (error) {
-      recoveryErrors.push(error instanceof Error ? error.message : String(error));
-    }
-    if (recoveryErrors.length === 0) {
-      try {
-        fs.unlinkSync(leasePath);
-        appendSandboxControlAudit(manifest, 'lease-release', { ownerPid: process.pid });
-        waitForState(control.statusDir, (status) => status.state === 'healthy');
-        restored = true;
-      } catch (error) {
-        try {
-          if (!fs.existsSync(leasePath)) {
-            fs.writeFileSync(leasePath, `${JSON.stringify(lease)}\n`, { flag: 'wx', mode: 0o600 });
-          }
-          appendSandboxControlAudit(manifest, 'lease-release-failed', { ownerPid: process.pid });
-        } catch (leaseError) {
-          recoveryErrors.push(`lease preservation failed: ${leaseError instanceof Error ? leaseError.message : String(leaseError)}`);
-        }
-        recoveryErrors.push(error instanceof Error ? error.message : String(error));
-      }
-    }
-    if (recoveryErrors.length > 0) {
-      throw new Error(
-        `SANDBOX_VALIDATION_RECOVERY_INCOMPLETE: ${recoveryErrors.join('; ')}; run 'ai sandbox start ${target.branch}'`
-      );
-    }
+    restored = true;
   }
 }
 
