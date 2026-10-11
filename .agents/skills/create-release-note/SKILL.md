@@ -63,6 +63,8 @@ agent-infra-internal platform-release-notes context \
 
 使用步骤 3 返回的 `pullRequests` 与 `commits`。每个 commit 的 `authors` 只包含该 commit 的平台作者；`pullRequestNumbers` 表示平台记录的 PR 关联。技能不读取平台原始字段或邮箱规则。PR 的 `closingIssues` 是该 PR 实际关闭的 Issue，不按 PR/Issue 编号推断关联。
 
+发布说明记录标签间实际交付的变更。对于没有关联 PR 的 commit，依据 typed context 中的 `oid` 检查实际 diff，判断它记录的是版本交付还是发布流程本身。仅包含版本元数据更新、生成发布产物或其他版本准备/发布机械操作的 commit 不属于本版本变更，也不计入贡献者；同一 commit 若还包含独立的产品、文档或维护改动，则保留这些改动及其作者。diff 无法说明提交用途时，保留该 commit，并根据实际改动描述。步骤 6 的变更分类和步骤 7 的贡献者统计使用同一筛选结果。
+
 ### 5. 收集关联 Issue
 
 使用步骤 3 中每个 PR 的 `closingIssues`，不在通用技能中解析平台专有引用语法。
@@ -112,7 +114,7 @@ agent-infra-internal platform-release-notes context \
 5. **贡献者搜集**：
    - **数据源**：
      - PR author：来自 `.agents/rules/release-commands.md` 中已合并 PR 查询规则
-     - Commit co-authors：来自步骤 3 typed context 的 commit `authors`
+     - Commit co-authors：来自步骤 3 typed context 中按步骤 4 纳入版本变更的 commit `authors`
      - Issue reporters：来自步骤 3 typed context 的 `closingIssues[].author`
    - **贡献数定义**：`该人的 PR 数 + 该人作为 co-author 的 commit 数`（同一身份跨来源合并计数）
    - **`@login` 映射**：遵循 `.agents/rules/release-commands.md` 的身份安全边界

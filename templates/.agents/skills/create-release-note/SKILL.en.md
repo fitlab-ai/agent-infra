@@ -63,6 +63,8 @@ agent-infra-internal platform-release-notes context \
 
 Use `pullRequests` and `commits` from Step 3. Each commit's `authors` contains only that commit's platform authors; `pullRequestNumbers` records the platform's PR associations. The skill does not interpret raw platform fields or email rules. A PR's `closingIssues` contains its actual closing Issues; never infer a relationship from matching PR and Issue numbers.
 
+Release notes describe changes actually delivered between the tags. For commits without an associated PR, inspect the actual diff using the `oid` from the typed context to determine whether it records a delivered change or release workflow mechanics. A commit made up only of version metadata updates, generated release artifacts, or other mechanical release preparation/publication work is outside the release's change set and contributor counts. When a commit also contains an independent product, documentation, or maintenance change, retain that change and its authors. If the diff does not establish the commit's purpose, keep it and describe the actual change. Use this same filtered commit set for the classification in Step 6 and contributor counts in Step 7.
+
 ### 5. Collect Related Issues
 
 Use each PR's `closingIssues` from Step 3. Do not parse platform-specific reference syntax in this generic skill.
@@ -112,7 +114,7 @@ If no historical release notes exist, use the following default Markdown format:
 5. **Contributor collection**:
    - **Data sources**:
      - PR authors from the typed context
-     - Commit co-authors from the typed context's commit `authors`
+     - Commit co-authors from `authors` of commits retained as release changes in Step 4
      - Issue reporters from typed `closingIssues[].author`
    - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
    - **`@login` mapping**: follow the identity safety boundary in `.agents/rules/release-commands.md`

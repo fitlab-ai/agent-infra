@@ -136,8 +136,8 @@ async function releaseNoteContext(
   options: ReleaseNoteOptions = {}
 ) {
   const historyLimit = input.historyLimit ?? 3;
-  if (!input.fromTag || !input.toTag || !input.branch || !Number.isInteger(historyLimit) || historyLimit < 1 || historyLimit > 20) {
-    return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_INPUT_INVALID', message: 'from-tag, to-tag, branch, and a history limit from 1 to 20 are required', retryable: false } };
+  if (!input.fromTag || !input.toTag || !input.branch || !Number.isInteger(historyLimit) || historyLimit < 1 || historyLimit > 100) {
+    return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_INPUT_INVALID', message: 'from-tag, to-tag, branch, and a history limit from 1 to 100 are required', retryable: false } };
   }
   const cwd = path.resolve(options.cwd || process.cwd());
   const platformType = options.platformType ?? configuredPlatform(cwd);
