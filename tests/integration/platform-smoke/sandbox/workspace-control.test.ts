@@ -58,6 +58,7 @@ import { SandboxControlClientError } from '../../../../lib/sandbox/control/clien
 import { parseCodexControllerResult } from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-client.ts';
 import { validateAgentClientOperation } from '../../../../lib/sandbox/control/agent-operation.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
+import { finalizeSandboxControlManifest } from '../../../../lib/sandbox/workspace-view.ts';
 import {
   closeCodexControllerRegistration,
   openCodexControllerRegistration,
@@ -965,8 +966,8 @@ test('control broker ownership is acquired exclusively', onPlatforms('linux', 'd
   fs.mkdirSync(processingDir);
   const controlRootId = manifest.controlRootId;
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    ...manifest, repoRoot: root, worktreeRoot: root, branch, channelDir, publicStatusDir, processingDir,
-    runtimeDir: path.join(root, 'runtime')
+    ...manifest, repoRoot: root, worktreeRoot: root, branch,
+    channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(publicStatusDir, {
     version: 1, mode: manifest.mode, taskId: manifest.taskId, generation: manifest.generation, controlRootId
@@ -998,6 +999,84 @@ test('control broker rejects manifests missing required fields', async () => {
   }
 });
 
+test('manifest writer persists control directory names and reader resolves them from each manifest root', () => {
+  const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-manifest-root-a-'));
+  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-manifest-root-b-'));
+  const directoryNames = {
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
+  } as const;
+  const directoryFields = Object.keys(directoryNames) as Array<keyof typeof directoryNames>;
+  const makeSetup = (root: string) => {
+    const paths = Object.fromEntries(Object.entries(directoryNames).map(([field, name]) => [field, path.join(root, name)])) as Record<keyof typeof directoryNames, string>;
+    for (const directory of Object.values(paths)) fs.mkdirSync(directory, { recursive: true });
+    const manifestPath = path.join(root, 'manifest.json');
+    const manifestDraft = { ...manifest, repoRoot: root, worktreeRoot: root, ...paths };
+    return {
+      root,
+      ...paths,
+      statusDir: paths.publicStatusDir,
+      manifestPath,
+      manifestDraft,
+      token: manifest.token,
+      generation: manifest.generation,
+      controlRootId: manifest.controlRootId
+    };
+  };
+  try {
+    const firstSetup = makeSetup(firstRoot);
+    finalizeSandboxControlManifest(firstSetup, {
+      engine: manifest.engine,
+      id: manifest.containerIdentity.id,
+      labels: manifest.containerIdentity.labels,
+      authorityEvidence: manifest.authorityEvidence
+    });
+    const persisted = fs.readFileSync(firstSetup.manifestPath, 'utf8');
+    const persistedValue = JSON.parse(persisted) as Record<string, unknown>;
+    for (const field of directoryFields) assert.equal(persistedValue[field], directoryNames[field]);
+    const firstResolved = readSandboxControlManifest(firstSetup.manifestPath);
+    for (const field of directoryFields) assert.equal(firstResolved[field], path.join(firstRoot, directoryNames[field]));
+
+    const secondSetup = makeSetup(secondRoot);
+    fs.writeFileSync(secondSetup.manifestPath, persisted);
+    const secondResolved = readSandboxControlManifest(secondSetup.manifestPath);
+    for (const field of directoryFields) assert.equal(secondResolved[field], path.join(secondRoot, directoryNames[field]));
+  } finally {
+    fs.rmSync(firstRoot, { recursive: true, force: true });
+    fs.rmSync(secondRoot, { recursive: true, force: true });
+  }
+});
+
+test('manifest reader rejects absolute, traversing, and symbolic-link control paths for every field', onPlatforms('linux', 'darwin'), () => {
+  const fields = ['channelDir', 'publicStatusDir', 'processingDir', 'runtimeDir'] as const;
+  const names = { channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime' } as const;
+  for (const field of fields) {
+    for (const invalidPath of ['absolute', 'traversal', 'symlink'] as const) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-control-manifest-${field}-${invalidPath}-`));
+      const outside = path.join(root, 'outside');
+      fs.mkdirSync(outside);
+      const values: Record<string, string> = { ...names };
+      for (const candidate of fields) {
+        if (candidate !== field) fs.mkdirSync(path.join(root, names[candidate]));
+      }
+      if (invalidPath === 'absolute') values[field] = path.join(root, names[field]);
+      else if (invalidPath === 'traversal') values[field] = `../${path.basename(outside)}`;
+      else {
+        fs.symlinkSync(outside, path.join(root, names[field]), 'dir');
+      }
+      const manifestPath = path.join(root, 'manifest.json');
+      fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, ...values })}\n`);
+      try {
+        assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_INVALID/);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
 test('manifest reader rejects fields outside the current structure', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-extra-field-'));
   const manifestPath = path.join(root, 'manifest.json');
@@ -1005,14 +1084,14 @@ test('manifest reader rejects fields outside the current structure', () => {
     ...manifest,
     repoRoot: root,
     worktreeRoot: root,
-    channelDir: path.join(root, 'channel'),
-    publicStatusDir: path.join(root, 'public'),
-    processingDir: path.join(root, 'processing'),
-    runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   };
-  fs.mkdirSync(stored.channelDir, { recursive: true });
-  fs.mkdirSync(stored.publicStatusDir);
-  fs.mkdirSync(stored.processingDir);
+  fs.mkdirSync(path.join(root, stored.channelDir), { recursive: true });
+  fs.mkdirSync(path.join(root, stored.publicStatusDir));
+  fs.mkdirSync(path.join(root, stored.processingDir));
   try {
     fs.writeFileSync(manifestPath, `${JSON.stringify({ ...stored, unexpected: true })}\n`);
     assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_INVALID/);
@@ -1047,13 +1126,13 @@ test('replacement cutover restores the previous root after materialization failu
     ...manifest,
     repoRoot: root,
     worktreeRoot: root,
-    channelDir: path.join(root, 'channel'),
-    publicStatusDir: path.join(root, 'public'),
-    processingDir: path.join(root, 'processing'),
-    runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   };
-  for (const directory of [oldManifest.channelDir, oldManifest.publicStatusDir, oldManifest.processingDir, oldManifest.runtimeDir]) {
-    fs.mkdirSync(directory, { recursive: true });
+  for (const directory of ['channel', 'public', 'processing', 'runtime']) {
+    fs.mkdirSync(path.join(root, directory), { recursive: true });
   }
   fs.writeFileSync(manifestPath, `${JSON.stringify(oldManifest)}\n`);
   const lease = acquireSandboxControlReplacement(root);
@@ -1077,13 +1156,13 @@ test('replacement recovery restores a root that disappeared after the snapshot w
     ...manifest,
     repoRoot: root,
     worktreeRoot: root,
-    channelDir: path.join(root, 'channel'),
-    publicStatusDir: path.join(root, 'public'),
-    processingDir: path.join(root, 'processing'),
-    runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   };
-  for (const directory of [oldManifest.channelDir, oldManifest.publicStatusDir, oldManifest.processingDir, oldManifest.runtimeDir]) {
-    fs.mkdirSync(directory, { recursive: true });
+  for (const directory of ['channel', 'public', 'processing', 'runtime']) {
+    fs.mkdirSync(path.join(root, directory), { recursive: true });
   }
   fs.writeFileSync(manifestPath, `${JSON.stringify(oldManifest)}\n`);
   const firstLease = acquireSandboxControlReplacement(root);
@@ -1106,13 +1185,13 @@ test('control quiesce fails closed when broker identity is unknown', async () =>
     ...manifest,
     repoRoot: root,
     worktreeRoot: root,
-    channelDir: path.join(root, 'channel'),
-    publicStatusDir: path.join(root, 'public'),
-    processingDir: path.join(root, 'processing'),
-    runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   };
-  for (const directory of [controlManifest.channelDir, controlManifest.publicStatusDir, controlManifest.processingDir, controlManifest.runtimeDir]) {
-    fs.mkdirSync(directory, { recursive: true });
+  for (const directory of ['channel', 'public', 'processing', 'runtime']) {
+    fs.mkdirSync(path.join(root, directory), { recursive: true });
   }
   fs.writeFileSync(path.join(root, 'manifest.json'), `${JSON.stringify(controlManifest)}\n`);
   fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({

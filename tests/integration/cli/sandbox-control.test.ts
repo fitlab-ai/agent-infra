@@ -448,7 +448,7 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
-    controlRootId: 'a'.repeat(96), channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, 'runtime')
+    controlRootId: 'a'.repeat(96), channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(publicStatusDir, {
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
@@ -1383,7 +1383,7 @@ test('sandbox broker startup resolves only after matching status is published', 
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
     controlRootId: 'a'.repeat(96),
-    channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'readiness-generation', controlRootId: 'a'.repeat(96)
@@ -1419,7 +1419,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
     controlRootId: 'a'.repeat(96),
-    channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'owner-generation', controlRootId: 'a'.repeat(96)
@@ -1444,7 +1444,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
       containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
       controlRootId: 'b'.repeat(96),
-      channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
+      channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
     })}\n`);
     writeSandboxControlIdentitySentinel(statusDir, {
       version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'rotated-generation', controlRootId: 'b'.repeat(96)
@@ -1961,10 +1961,10 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
     token,
     generation,
     controlRootId: 'a'.repeat(96),
-    channelDir,
-    publicStatusDir: statusDir,
-    processingDir,
-    runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId, generation, controlRootId: 'a'.repeat(96)
@@ -2103,10 +2103,10 @@ exit 1
     token: 'controller-secret',
     generation: 'controller-generation',
     controlRootId: 'a'.repeat(96),
-    channelDir,
-    publicStatusDir: statusDir,
-    processingDir,
-    runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'controller-generation', controlRootId: 'a'.repeat(96)
@@ -2330,9 +2330,9 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
       containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: 'branch-only', taskId: null, token, generation, channelDir,
+    mode: 'branch-only', taskId: null, token, generation, channelDir: 'channel',
     controlRootId: 'a'.repeat(96),
-    publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'control', 'runtime')
+    publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'branch-only', taskId: null, generation, controlRootId: 'a'.repeat(96)
@@ -2428,7 +2428,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96),
-    channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
+    channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)

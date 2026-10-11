@@ -329,9 +329,16 @@ export function finalizeSandboxControlManifest(
     containerIdentity: { id: identity.id, labels: { ...identity.labels } },
     authorityEvidence: identity.authorityEvidence
   };
+  const persistedManifest = {
+    ...manifest,
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
+  };
   const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {
-    fs.writeFileSync(temporary, `${JSON.stringify(manifest)}\n`, { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(temporary, `${JSON.stringify(persistedManifest)}\n`, { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, setup.manifestPath);
   } finally {
     fs.rmSync(temporary, { force: true });

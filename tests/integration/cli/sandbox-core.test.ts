@@ -351,10 +351,10 @@ function writeTaskBoundControlEvidence(
     token: `${taskId}-token`,
     generation: `${taskId}-generation`,
     controlRootId: "a".repeat(96),
-    channelDir,
-    publicStatusDir,
-    processingDir,
-    runtimeDir: path.join(controlRoot, "runtime")
+    channelDir: "channel",
+    publicStatusDir: "public",
+    processingDir: "processing",
+    runtimeDir: "runtime"
   })}\n`, "utf8");
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
     version: 3,
