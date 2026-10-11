@@ -109,20 +109,20 @@ function requestController(params: Readonly<{
   controllerProof: CodexControllerLeaseProofV1 | null;
   channelDir?: string;
   statusDir?: string;
-  token?: string;
   generation?: string;
   timeoutMs?: number;
 }>): ControllerResult {
+  const { generation, ...requestParams } = params;
   const result = parseCodexControllerResult(requestSandboxAgentOperation({
     agentClient: 'codex',
     operation: `controller.${params.command}`,
     payload: params.command === 'open'
       ? { controllerProcess: params.controllerProcess }
       : { proof: params.controllerProof },
-    ...params
+    ...requestParams
   }));
   if (result.status === 'opened'
-    && (result.lease.controlGeneration !== (params.generation ?? process.env.AGENT_INFRA_CONTROL_GENERATION)
+    && (result.lease.controlGeneration !== (generation ?? process.env.AGENT_INFRA_CONTROL_GENERATION)
       || result.lease.controllerProcess.pid !== params.controllerProcess.pid
       || result.lease.controllerProcess.startTime !== params.controllerProcess.startTime)) {
     fail('SANDBOX_CONTROL_RESULT_INVALID', 'controller result does not match the request');
@@ -146,7 +146,6 @@ function requestCodexControllerVerify(params: Readonly<{
   controllerProof: CodexControllerLeaseProofV1;
   channelDir?: string;
   statusDir?: string;
-  token?: string;
   generation?: string;
   timeoutMs?: number;
 }>): ControllerVerified {

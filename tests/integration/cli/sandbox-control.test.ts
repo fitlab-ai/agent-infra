@@ -271,7 +271,7 @@ async function waitForRequestAsync(
 const SANDBOX_CONTROL_TEST_TIMEOUT_MS = 5_000;
 const SANDBOX_CONTROL_ENV_KEYS = [
   'AGENT_INFRA_SANDBOX',
-  'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_ROOT_ID', 'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR',
   'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE'
 ] as const;
@@ -300,7 +300,6 @@ function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDB
     }
     try {
       const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')) as { token?: unknown };
-      if (typeof manifest.token === 'string') process.env.AGENT_INFRA_CONTROL_TOKEN ??= manifest.token;
     } catch { /* A focused test may use only the mounted identity files. */ }
   }
   try {
@@ -371,7 +370,6 @@ function runDirectTaskFinalizationAsync(
       ...process.env,
       AGENT_INFRA_TASK_ID: taskId,
       AGENT_INFRA_SANDBOX: '1',
-      AGENT_INFRA_CONTROL_TOKEN: manifest.token,
       AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
       AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
       AGENT_INFRA_CONTROL_DIR: paths.controlDir ?? manifest.channelDir,
@@ -541,7 +539,7 @@ test('host sandbox-control recovery resolves one accepted request from managed m
       requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
     }));
     appendDiagnosticAudit(manifest, 'executor-result-published', {
-      requestId, requestGeneration: manifest.generation, exitCode: 0,
+      requestId, requestFamily: 'task-lifecycle', sandboxTaskId: manifest.taskId, exitCode: 0,
       outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
@@ -557,13 +555,13 @@ test('host sandbox-control recovery resolves one accepted request from managed m
     assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
 
     appendDiagnosticAudit(manifest, 'executor-result-published', {
-      requestId, requestGeneration: manifest.generation, exitCode: 0,
+      requestId, requestFamily: 'task-lifecycle', sandboxTaskId: manifest.taskId, exitCode: 0,
       outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
     assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
     appendDiagnosticAudit(manifest, 'executor-result-published', {
-      requestId, requestGeneration: manifest.generation, exitCode: 7,
+      requestId, requestFamily: 'task-lifecycle', sandboxTaskId: manifest.taskId, exitCode: 7,
       outputBytes: Buffer.byteLength('conflict\n'), errorBytes: 0,
       outputDigest: createHash('sha256').update('conflict\n').digest('hex'),
       errorDigest: createHash('sha256').update('').digest('hex')
@@ -619,7 +617,7 @@ test('host sandbox-control recovery waits for an accepted response to become ter
       requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
     }));
     appendDiagnosticAudit(manifest, 'executor-result-published', {
-      requestId, requestGeneration: manifest.generation, exitCode: 0,
+      requestId, requestFamily: 'task-lifecycle', sandboxTaskId: manifest.taskId, exitCode: 0,
       outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
@@ -1512,7 +1510,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
         const response = requestSandboxControl({
           family: 'task-lifecycle', args: ['01', 'cancel', '--agent', 'codex', '--reason', 'test'],
           channelDir: ${JSON.stringify(channelDir)}, statusDir: ${JSON.stringify(statusDir)},
-          token: 'response-secret', generation: 'response-generation', timeoutMs: 2_000
+          timeoutMs: 2_000
         });
         process.stdout.write(JSON.stringify({ response }));
       } catch (error) {
@@ -1527,8 +1525,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
       env: {
         ...process.env,
         AGENT_INFRA_TASK_ID: undefined,
-        AGENT_INFRA_CONTROL_TOKEN: undefined,
-        AGENT_INFRA_CONTROL_GENERATION: undefined,
+        AGENT_INFRA_CONTROL_GENERATION: 'stale-client-generation',
         AGENT_INFRA_CONTROL_ROOT_ID: undefined,
         AGENT_INFRA_CONTROL_DIR: undefined,
         AGENT_INFRA_CONTROL_STATUS_DIR: undefined,
@@ -1727,10 +1724,8 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     };
     server = serveSandboxControl(manifestPath, controller.signal, options);
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
-    const issuedAt = Date.now();
     atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-lifecycle', args: ['08', 'cancel', '--agent', 'codex', '--reason', 'test'],
+      version: 5, id: requestId, family: 'task-lifecycle', args: ['08', 'cancel', '--agent', 'codex', '--reason', 'test'],
     });
     await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     const processingDir = path.join(manifest.processingDir, requestId);
@@ -1794,6 +1789,90 @@ test('broker recovery cleans up a normally published large-output terminal', asy
   }
 });
 
+test('host recovery consumes the production publication audit after broker cleanup', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-host-recovery-writer-'));
+  const managedParent = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-managed-control-'));
+  const managedRoot = path.join(managedParent, 'demo');
+  const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
+  const requestId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    writeFinalizationTaskFixture(root, 'TASK-20260809-010203');
+    const manifestPath = writeControlManifest(root, branch, 'writer-recovery-generation', controlRoot);
+    const manifest = readSandboxControlManifest(manifestPath);
+    const startTime = getProcessStartTime(process.pid);
+    assert.ok(startTime);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      prepareExecution: async ({ manifest: current, request }) => ({
+        execution: {
+          version: 2, generation: current.generation, requestId: request.id,
+          nonce: 'production-publication-test', phase: 'prepared', updatedAt: Date.now(),
+          child: { pid: process.pid, startTime, processGroupId: null }
+        },
+        start: () => undefined,
+        completion: Promise.resolve({ exitCode: 7, stdout: 'published by broker\n', stderr: 'warning\n' }),
+        terminate: () => true
+      })
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
+      version: 5, id: requestId, family: 'task-lifecycle',
+      args: ['TASK-20260809-010203', 'cancel', '--agent', 'codex', '--reason', 'writer recovery']
+    });
+    const processingRequest = path.join(manifest.processingDir, requestId);
+    const auditPath = path.join(controlRoot, 'audit.ndjson');
+    const auditDeadline = Date.now() + SANDBOX_CONTROL_TEST_TIMEOUT_MS;
+    let published = false;
+    while (!published && Date.now() < auditDeadline) {
+      try {
+        published = fs.readFileSync(auditPath, 'utf8').split('\n').filter(Boolean)
+          .map((line) => JSON.parse(line) as { event?: string; requestId?: string })
+          .some((record) => record.event === 'executor-result-published' && record.requestId === requestId);
+      } catch {
+        // The broker may be between durable audit appends.
+      }
+      if (!published) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(published, true, `request was not published; status=${fs.readFileSync(path.join(manifest.publicStatusDir, 'status.json'), 'utf8')}`);
+    waitForAbsent(processingRequest, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    controller.abort();
+    await server;
+    const recovered = recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 });
+    assert.equal(recovered.exitCode, 7);
+    assert.equal(recovered.stdout, 'published by broker\n');
+    assert.equal(recovered.stderr, 'warning\n');
+
+    const originalAudit = fs.readFileSync(auditPath, 'utf8');
+    for (const field of ['generation', 'identityDigest'] as const) {
+      const records = originalAudit.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      const publication = records.find((record) => record.event === 'executor-result-published');
+      assert.ok(publication);
+      publication[field] = field === 'generation' ? 'tampered-host-generation' : 'f'.repeat(64);
+      fs.writeFileSync(auditPath, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`);
+      assert.throws(
+        () => recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }),
+        /SANDBOX_CONTROL_AUDIT_IDENTITY_MISMATCH/u
+      );
+      fs.writeFileSync(auditPath, originalAudit);
+    }
+    const publication = JSON.parse(originalAudit.trim().split('\n').find((line) => line.includes('executor-result-published'))!) as Record<string, unknown>;
+    assert.equal(publication.requestFamily, 'task-lifecycle');
+    assert.equal(publication.sandboxTaskId, manifest.taskId);
+    assert.equal(publication.generation, manifest.generation);
+    assert.equal(typeof publication.identityDigest, 'string');
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(managedParent, { recursive: true, force: true });
+  }
+});
+
 test('sandbox-local complete drains an accepted request before moving the task without a request round trip', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-direct-complete-'));
   const taskId = 'TASK-20260809-010203';
@@ -1846,10 +1925,8 @@ test('sandbox-local complete drains an accepted request before moving the task w
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const requestIssuedAt = Date.now();
     atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt: requestIssuedAt, expiresAt: requestIssuedAt + 1_500,
+      version: 5, id: requestId,
       family: 'task-lifecycle', args: ['08', 'cancel', '--agent', 'codex', '--reason', 'drain-test']
     });
     const responsesDir = path.join(manifest.channelDir, 'responses');
@@ -1878,8 +1955,7 @@ test('sandbox-local complete drains an accepted request before moving the task w
     assert.equal(terminateCount, 0);
     const queuedId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     fs.writeFileSync(path.join(manifest.channelDir, 'requests', `${queuedId}.json`), `${JSON.stringify({
-      version: 4, id: queuedId, token: manifest.token, generation: manifest.generation,
-      issuedAt: Date.now(), expiresAt: Date.now() + 1_000,
+      version: 5, id: queuedId,
       family: 'task-lifecycle', args: ['08', 'cancel', '--agent', 'codex', '--reason', 'must-not-claim']
     })}\n`);
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -1995,7 +2071,6 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
           AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
           AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
           AGENT_INFRA_CONTROL_DIR: channelDir,
-          AGENT_INFRA_CONTROL_TOKEN: token,
           AGENT_INFRA_CONTROL_GENERATION: generation,
           AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
         }, () => spawnSync(process.execPath, [
@@ -2028,8 +2103,6 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
       args: [taskId, 'complete'],
       channelDir,
       statusDir,
-      token,
-      generation,
       timeoutMs: 5_000
     })), /SANDBOX_CONTROL_COMMAND_DENIED/u);
     assert.equal(fs.readdirSync(path.join(channelDir, 'requests')).length, 0);
@@ -2130,7 +2203,6 @@ exit 1
       controllerProcess: { pid: process.pid, startTime },
       channelDir,
       statusDir,
-      token: 'controller-secret',
       generation: 'controller-generation',
       timeoutMs: 5_000
     }));
@@ -2150,7 +2222,6 @@ exit 1
       },
       channelDir,
       statusDir,
-      token: 'controller-secret',
       generation: 'controller-generation',
       timeoutMs: 5_000
     }));
@@ -2173,7 +2244,6 @@ exit 1
       },
       channelDir,
       statusDir,
-      token: 'controller-secret',
       generation: 'controller-generation',
       timeoutMs: 5_000
     }));
@@ -2213,8 +2283,7 @@ test('broker recovery accepts a controller close after the registration was dura
       controllerProcess: { pid: process.pid, startTime }
     };
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
+      version: 5, id: requestId,
       family: 'agent-client', agentClient: 'codex', operation: 'controller.close',
       payload: { proof }
     })}\n`);
@@ -2273,8 +2342,7 @@ test('broker recovery terminates a live started executor before retaining unknow
     const startTime = getProcessStartTime(child.pid!);
     assert.ok(startTime);
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
+      version: 5, id: requestId,
       family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
     })}\n`);
     fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
@@ -2370,8 +2438,6 @@ test('branch-only broker persists a typed task-create request on the host', asyn
       candidate,
       channelDir,
       statusDir,
-      token,
-      generation,
       timeoutMs: 5_000
     }));
     assert.equal(response.exitCode, 0, response.stderr || response.stdout);
@@ -2388,8 +2454,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
     assert.ok(requestId);
     assert.deepEqual(result.control, { requestId, accepted: true, recovery: 'none' });
     fs.writeFileSync(path.join(channelDir, 'requests', `${requestId}.json`), `${JSON.stringify({
-      version: 2, id: requestId, token, generation, issuedAt: Date.now(), expiresAt: Date.now() + 2_000,
-      family: 'task-create', candidate
+      version: 5, id: requestId, family: 'task-create', candidate
     })}\n`);
     const replayPath = path.join(channelDir, 'responses', `${requestId}.json`);
     waitForFile(replayPath, 5_000);
@@ -2444,8 +2509,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     phase: 'running', updatedAt: Date.now()
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({
-    version: 4, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
-    expiresAt: Date.now() + 1_000, family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
+    version: 5, id: recoverableId, family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'execution.json'), `${JSON.stringify({
     version: 2, generation, requestId: recoverableId, nonce: 'recoverable-nonce',
@@ -2517,8 +2581,7 @@ test('broker recovery returns inspectable task-create output when the payload is
       }
     };
     fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
+      version: 5, id: requestId, family: 'task-create', candidate,
     })}\n`);
     fs.writeFileSync(path.join(processingDirectory, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'task-create-recovery-nonce',
@@ -2558,7 +2621,6 @@ test('broker recovery returns inspectable task-create output when the payload is
       encoding: 'utf8',
       env: {
         ...process.env,
-        AGENT_INFRA_CONTROL_TOKEN: manifest.token,
         AGENT_INFRA_SANDBOX: '1',
         AGENT_INFRA_CONTROL_ROOT_ID: manifest.controlRootId,
         AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
@@ -2604,8 +2666,7 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
       }
     };
     fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
+      version: 5, id: requestId, family: 'task-create', candidate,
     })}\n`);
     fs.writeFileSync(path.join(processingDirectory, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'task-create-terminal-nonce',
@@ -2685,8 +2746,7 @@ test('broker recovery accepts a task-create no-op for a non-active task', async 
       else writeSandboxControlTransition(manifest, { requestId, phase });
     }
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 4, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000, family: 'task-create', candidate,
+      version: 5, id: requestId, family: 'task-create', candidate,
     })}\n`);
     fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
       version: 2, generation: manifest.generation, requestId, nonce: 'task-create-non-active-recovery',

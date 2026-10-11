@@ -568,9 +568,7 @@ async function recoverProcessing(manifest: SandboxControlManifest, manifestPath:
       let terminalReconciled = false;
       try {
         const rawRequest = JSON.parse(fs.readFileSync(path.join(processingDirectory, 'request.json'), 'utf8')) as Record<string, unknown>;
-        request = validateSandboxControlRequest(rawRequest, manifest, {
-          now: typeof rawRequest.issuedAt === 'number' ? rawRequest.issuedAt : undefined
-        });
+        request = validateSandboxControlRequest(rawRequest, manifest);
         if (request.family === 'agent-client') validateAgentClientOperation(request, manifest);
       } catch {
         // Missing or malformed request evidence remains fail-closed below.

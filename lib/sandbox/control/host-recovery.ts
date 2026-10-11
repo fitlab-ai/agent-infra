@@ -77,12 +77,16 @@ function auditProof(manifest: SandboxControlManifest, requestId: string): AuditR
   return related;
 }
 
-function publishedEvidence(records: AuditRecord[], generation: string): AuditRecord | null {
+function publishedEvidence(records: AuditRecord[], manifest: SandboxControlManifest): AuditRecord | null {
   const publications = records.filter((record) => record.event === 'executor-result-published');
   let selected: AuditRecord | null = null;
   let selectedSummary: string | null = null;
+  const digest = manifestDigest(manifest);
   for (const record of publications) {
-    if (record.version !== 2 || record.requestGeneration !== generation
+    if (record.version !== 2 || record.generation !== manifest.generation || record.identityDigest !== digest
+      || typeof record.requestFamily !== 'string'
+      || !['task-lifecycle', 'task-create', 'agent-client'].includes(record.requestFamily)
+      || (record.sandboxTaskId !== null && typeof record.sandboxTaskId !== 'string')
       || !Number.isSafeInteger(record.exitCode)
       || !Number.isSafeInteger(record.outputBytes) || !Number.isSafeInteger(record.errorBytes)
       || typeof record.outputDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(record.outputDigest)
@@ -90,7 +94,7 @@ function publishedEvidence(records: AuditRecord[], generation: string): AuditRec
       throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
     }
     const summary = JSON.stringify([
-      record.requestFamily ?? null, record.requestGeneration, record.exitCode,
+      record.requestFamily, record.sandboxTaskId, record.generation, record.identityDigest, record.exitCode,
       record.outputBytes, record.errorBytes, record.outputDigest, record.errorDigest
     ]);
     if (selectedSummary !== null && summary !== selectedSummary) {
@@ -98,6 +102,9 @@ function publishedEvidence(records: AuditRecord[], generation: string): AuditRec
     }
     selected ??= record;
     selectedSummary ??= summary;
+  }
+  if (selected && selected.sandboxTaskId !== manifest.taskId) {
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
   }
   return selected;
 }
@@ -118,7 +125,7 @@ function verifiedResponse(manifest: SandboxControlManifest, requestId: string, r
   if (!['completed', 'rejected'].includes(response.phase)) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') return unknown(requestId);
   const evidencePath = path.join(manifest.processingDir, requestId, 'result.json');
-  const published = publishedEvidence(records, manifest.generation);
+  const published = publishedEvidence(records, manifest);
   if (!published) return unknown(requestId);
   let evidence = null;
   if (fs.existsSync(evidencePath)) {

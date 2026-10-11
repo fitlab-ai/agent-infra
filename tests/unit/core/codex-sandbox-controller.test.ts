@@ -116,7 +116,6 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
     control: {
-      token: 'control-token',
       generation: 'generation',
       rootId: 'control-root-id',
       channelDir: '/control',
@@ -140,7 +139,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   assert.equal(prepared.env.CODEX_HOME, prepared.home);
   assert.equal(prepared.env.HOME, prepared.home);
   assert.equal(prepared.env.UNRELATED_CONTROLLER_SECRET, undefined);
-  assert.equal(prepared.env.AGENT_INFRA_CONTROL_TOKEN, 'control-token');
+  assert.equal(prepared.env.AGENT_INFRA_CONTROL_GENERATION, 'generation');
   assert.equal(prepared.env.AGENT_INFRA_CONTROL_ROOT_ID, 'control-root-id');
   assert.equal(prepared.env.PATH?.split(path.delimiter)[0], path.join(prepared.home, 'bin'));
   const shim = fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8');
@@ -174,7 +173,7 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
-    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
+    control: { generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
     codexVersion: () => '0.147.0'
   }), /INPUT_INVALID/);
@@ -188,7 +187,7 @@ test('sandbox controller enforces a task lease and controller context binding', 
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot,
-    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
+    control: { generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
     codexVersion: () => '0.147.0'
   } as const;
@@ -222,7 +221,7 @@ test('sandbox controller closes a broker lease when the opened binding is invali
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-invalid-binding-'),
-    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
+    control: { generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     ...broker,
     verifyController: (() => ({
       version: 1 as const,

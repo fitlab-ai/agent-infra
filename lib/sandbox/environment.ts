@@ -12,14 +12,12 @@ export const SANDBOX_CONTROL_STATUS_MOUNT = '/run/agent-infra/control-status';
 const TASK_MARKER_KEYS = [
   'AGENT_INFRA_SANDBOX',
   'AGENT_INFRA_TASK_ID',
-  'AGENT_INFRA_CONTROL_TOKEN',
   'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_DIR',
   'AGENT_INFRA_CONTROL_STATUS_DIR',
   'AGENT_INFRA_RUNTIME_DIR'
 ] as const;
 const TASK_CONTROL_MARKER_KEYS = [
-  'AGENT_INFRA_CONTROL_TOKEN',
   'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_DIR',
   'AGENT_INFRA_CONTROL_STATUS_DIR'
@@ -133,9 +131,6 @@ export function resolveSandboxControlTransport(
       return { kind: 'fail-closed', reasonCode: message.endsWith('MISSING')
         ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
         : 'SANDBOX_CONTROL_IDENTITY_MALFORMED' };
-    }
-    if (sentinel.generation !== env.AGENT_INFRA_CONTROL_GENERATION) {
-      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_GENERATION_MISMATCH' };
     }
     if (sentinel.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
       return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH' };

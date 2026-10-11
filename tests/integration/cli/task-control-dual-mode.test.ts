@@ -229,7 +229,6 @@ test('direct-host task-control routes complete with a process result', () => {
 test('branch-only control markers keep non-task public commands on the host entry', () => {
   const result = runPublic(['version'], cleanEnv({
     AGENT_INFRA_SANDBOX: '1',
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status'
@@ -243,7 +242,6 @@ test('top-level usage and version aliases remain available in task-bound environ
   const env = cleanEnv({
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: TASK_ID,
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
@@ -261,7 +259,6 @@ test('task orchestration validates the mounted identity before local execution',
   const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: TASK_ID,
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
@@ -273,7 +270,7 @@ test('task orchestration validates the mounted identity before local execution',
 });
 
 test('partial sandbox or executor markers fail closed before task parsing', () => {
-  const partial = run('task-lifecycle', ['--help'], cleanEnv({ AGENT_INFRA_CONTROL_TOKEN: 'token' }));
+  const partial = run('task-lifecycle', ['--help'], cleanEnv({ AGENT_INFRA_CONTROL_GENERATION: 'generation' }));
   assert.equal(partial.status, 1);
   assert.equal(JSON.parse(partial.stdout).error.code, 'TASK_CONTROL_TRANSPORT_INVALID');
 
@@ -288,7 +285,6 @@ test('task-bound marker requires its runtime binding before entering the client'
   const result = run('task-finalization', ['--help'], cleanEnv({
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status'
@@ -309,7 +305,6 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
   const options = { statusMountPath: path.join(root, 'absent') };
   const base = {
     AGENT_INFRA_SANDBOX: '1',
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: generation,
     AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
     AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
@@ -328,7 +323,7 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
     }), options).kind, 'broker-client');
 
     for (const env of [
-      { AGENT_INFRA_CONTROL_TOKEN: 'token' },
+      { AGENT_INFRA_CONTROL_GENERATION: 'generation' },
       { AGENT_INFRA_TASK_ID: TASK_ID },
       { ...base, AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime') },
       { ...base, AGENT_INFRA_TASK_ID: TASK_ID },
@@ -432,7 +427,6 @@ function runSandboxClient(
       AGENT_INFRA_TASK_ID: TASK_ID,
       AGENT_INFRA_CONTROL_DIR: fixture.channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: fixture.statusDir,
-      AGENT_INFRA_CONTROL_TOKEN: fixture.token,
       AGENT_INFRA_CONTROL_GENERATION: fixture.generation,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_RUNTIME_DIR: path.join(fixture.controlRoot, 'runtime')
