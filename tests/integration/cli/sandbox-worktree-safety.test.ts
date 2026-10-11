@@ -295,10 +295,10 @@ function writeTaskBoundCleanupEvidence(
     token: "task-bound-token",
     generation,
     controlRootId: "a".repeat(96),
-    channelDir,
-    publicStatusDir,
-    processingDir,
-    runtimeDir: path.join(controlRoot, "runtime")
+    channelDir: "channel",
+    publicStatusDir: "public",
+    processingDir: "processing",
+    runtimeDir: "runtime"
   })}\n`, "utf8");
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
     version: 3,
@@ -388,7 +388,7 @@ function addControlRootVariant(
   manifest.container = container;
   manifest.containerIdentity = { ...manifest.containerIdentity, id: containerId };
   for (const field of ["channelDir", "publicStatusDir", "processingDir", "runtimeDir"]) {
-    manifest[field] = path.join(root, path.basename(manifest[field]));
+    manifest[field] = path.basename(manifest[field]);
   }
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
   return root;
@@ -448,8 +448,8 @@ test("sandbox rm retries control and workspace cleanup after the container is al
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation", controlRootId: "a".repeat(96),
-      channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
-      runtimeDir: path.join(controlRoot, "runtime")
+      channelDir: "channel", publicStatusDir: "public", processingDir: "processing",
+      runtimeDir: "runtime"
     })}\n`);
     fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
       version: 3,
@@ -521,8 +521,8 @@ test("sandbox rm removes an empty control container parent after control cleanup
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation", controlRootId: "a".repeat(96),
-      channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
-      runtimeDir: path.join(controlRoot, "runtime")
+      channelDir: "channel", publicStatusDir: "public", processingDir: "processing",
+      runtimeDir: "runtime"
     })}\n`);
     fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
       version: 3,

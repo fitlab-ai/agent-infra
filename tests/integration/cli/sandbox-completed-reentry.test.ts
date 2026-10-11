@@ -119,7 +119,14 @@ for (const scenario of ['valid', 'task-id', 'source', 'missing-evidence', 'stale
         stderr: '', pid: 1, output: [] })
     });
     const manifestPath = path.join(path.dirname(f.manifest.processingDir), 'manifest.json');
-    fs.writeFileSync(manifestPath, JSON.stringify({ ...f.manifest, authorityEvidence }));
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      ...f.manifest,
+      authorityEvidence,
+      channelDir: 'channel',
+      publicStatusDir: 'public',
+      processingDir: 'processing',
+      runtimeDir: 'runtime'
+    }));
     const abort = new AbortController();
     const running = serveSandboxControl(manifestPath, abort.signal, { inspectContainer: f.inspect });
     try {

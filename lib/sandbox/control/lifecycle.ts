@@ -1155,30 +1155,32 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     || !isSandboxAuthorityEvidence(candidate.authorityEvidence)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const root = path.dirname(path.resolve(manifestPath));
   const canonicalRoot = fs.realpathSync.native(root);
-  const matchesControlChildPath = (candidatePath: string, name: string): boolean => {
-    const resolved = path.resolve(candidatePath);
-    if (path.basename(resolved) !== name) return false;
+  const resolveControlChildPath = (candidatePath: string, name: string): string | null => {
+    if (path.isAbsolute(candidatePath) || candidatePath !== name) return null;
+    const resolved = path.resolve(root, candidatePath);
     const expected = path.join(canonicalRoot, name);
     try {
-      return fs.realpathSync.native(resolved) === expected;
+      const stat = fs.lstatSync(resolved);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+      return fs.realpathSync.native(resolved) === expected ? expected : null;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       try {
-        return fs.realpathSync.native(path.dirname(resolved)) === canonicalRoot;
+        return fs.realpathSync.native(path.dirname(resolved)) === canonicalRoot ? expected : null;
       } catch (parentError) {
         if ((parentError as NodeJS.ErrnoException).code !== 'ENOENT') throw parentError;
-        return false;
+        return null;
       }
     }
   };
-  if (!matchesControlChildPath(candidate.channelDir, 'channel')
-    || !matchesControlChildPath(candidate.publicStatusDir, 'public')
-    || !matchesControlChildPath(candidate.processingDir, 'processing')) {
+  const channelDir = resolveControlChildPath(candidate.channelDir, 'channel');
+  const publicStatusDir = resolveControlChildPath(candidate.publicStatusDir, 'public');
+  const processingDir = resolveControlChildPath(candidate.processingDir, 'processing');
+  const runtimeDir = resolveControlChildPath(candidate.runtimeDir, 'runtime');
+  if (!channelDir || !publicStatusDir || !processingDir) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  if (!matchesControlChildPath(candidate.runtimeDir, 'runtime')) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  }
+  if (!runtimeDir) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const normalized: SandboxControlManifest = {
     engine: candidate.engine,
     repoRoot: candidate.repoRoot,
@@ -1196,10 +1198,10 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     token: candidate.token,
     generation: candidate.generation,
     controlRootId: candidate.controlRootId,
-    channelDir: candidate.channelDir,
-    publicStatusDir: candidate.publicStatusDir,
-    processingDir: candidate.processingDir,
-    runtimeDir: candidate.runtimeDir,
+    channelDir,
+    publicStatusDir,
+    processingDir,
+    runtimeDir,
   };
   return normalized;
 }

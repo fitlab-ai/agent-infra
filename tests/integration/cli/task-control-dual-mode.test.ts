@@ -406,10 +406,10 @@ function sandboxFixture(): SandboxFixture {
     token,
     generation,
     controlRootId: 'a'.repeat(96),
-    channelDir,
-    publicStatusDir: statusDir,
-    processingDir,
-    runtimeDir: path.join(controlRoot, 'runtime')
+    channelDir: 'channel',
+    publicStatusDir: 'public',
+    processingDir: 'processing',
+    runtimeDir: 'runtime'
   })}\n`);
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'task-bound', taskId: TASK_ID, generation, controlRootId: 'a'.repeat(96)
