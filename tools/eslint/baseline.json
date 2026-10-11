@@ -1125,24 +1125,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-validate.ts",
-      "ruleId": "complexity",
-      "stableId": "7281b0dbf4b9a29daac31375bfb487eb0379eacb8c6a661f1a305b3dc39f9c52",
-      "displayName": "inplaceValidation",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-validate.ts",
-      "ruleId": "max-depth",
-      "stableId": "7281b0dbf4b9a29daac31375bfb487eb0379eacb8c6a661f1a305b3dc39f9c52",
-      "displayName": "inplaceValidation",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
-      "count": 1
-    },
-    {
       "file": "lib/task/artifact-lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "7acd0b09cf63551ea407b82bfbe2ef8101955ee90e6d5681faaee932b1442ec5",
