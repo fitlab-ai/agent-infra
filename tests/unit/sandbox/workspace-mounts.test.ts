@@ -10,7 +10,7 @@ const config = {
   shellConfigBase: '/shell'
 };
 
-test('task-bound mount topology exposes isolated state mounts and one writable task child', () => {
+test('task-bound mount topology leaves completed target visible for its writable task mount', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
     gitCommonDir: '/repo/.git',
     worktreeGitFile: '/control/current/workspace.git',
@@ -21,6 +21,7 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     controlStatusDir: '/control/status',
     runtimeDir: '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime',
     taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
+    completedTaskSource: '/repo/.agents/workspace/completed/TASK-20260809-010203',
     taskId: 'TASK-20260809-010203'
   });
   const controllerHome = '/tmp/agent-infra-codex-controllers/controller-home';
@@ -30,10 +31,10 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     '/worktree',
     '/control/current/workspace.git',
     path.join('/views/current', 'active', '.short-ids.json'),
-    path.join('/views/current', 'completed'),
     path.join('/views/current', 'blocked'),
     path.join('/views/current', 'archive'),
     '/repo/.agents/workspace/active/TASK-20260809-010203',
+    '/repo/.agents/workspace/completed/TASK-20260809-010203',
     '/share/common',
     '/share/branches/feature',
     '/shell/feature',
@@ -56,11 +57,6 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
       readOnly: true
     },
     {
-      hostPaths: [path.join('/views/current', 'completed')],
-      containerPath: '/workspace/.agents/workspace/completed',
-      readOnly: true
-    },
-    {
       hostPaths: [path.join('/views/current', 'blocked')],
       containerPath: '/workspace/.agents/workspace/blocked',
       readOnly: true
@@ -75,8 +71,15 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
       containerPath: '/workspace/.agents/workspace/active/TASK-20260809-010203',
       readOnly: false
     },
+    {
+      hostPaths: ['/repo/.agents/workspace/completed/TASK-20260809-010203'],
+      containerPath: '/workspace/.agents/workspace/completed/TASK-20260809-010203',
+      readOnly: false
+    },
   ]);
   assert.equal(mounts.some((mount) => mount.hostPaths.includes('/repo/.agents/workspace')), false);
+  assert.equal(mounts.some((mount) => mount.containerPath === '/workspace/.agents/workspace/completed'), false);
+  assert.equal(mounts.some((mount) => mount.containerPath === '/workspace/.agents/workspace/completed/TASK-20260809-010203'), true);
   assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/runtime'), {
     hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'],
     containerPath: '/run/agent-infra/runtime',

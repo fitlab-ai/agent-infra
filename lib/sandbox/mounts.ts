@@ -37,8 +37,12 @@ export function sandboxCoreBindMounts(
 ): SandboxBindMountDeclaration[] {
   const taskSources = overrides.taskSources ?? [];
   const taskBound = Boolean(taskSources.length > 0 && overrides.taskId);
-  const workspaceMounts = sandboxWorkspaceViewStatePaths(overrides.workspaceViewRoot).map(
-    ({ state, hostPath }) => taskBound && state === 'active'
+  const workspaceMounts = sandboxWorkspaceViewStatePaths(overrides.workspaceViewRoot)
+    // The writable completed-task mount below is nested under this path. Keep
+    // the worktree target visible so Docker can mount it without creating a
+    // mountpoint inside a read-only parent bind mount.
+    .filter(({ state }) => !(taskBound && state === 'completed'))
+    .map(({ state, hostPath }) => taskBound && state === 'active'
       ? {
           hostPaths: [path.join(hostPath, '.short-ids.json')],
           containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
@@ -49,7 +53,7 @@ export function sandboxCoreBindMounts(
           containerPath: path.posix.join('/workspace/.agents/workspace', state),
           readOnly: true
         }
-  );
+    );
   if (Boolean(overrides.gitCommonDir) !== Boolean(overrides.worktreeGitFile)) {
     throw new Error('SANDBOX_GIT_METADATA_INCOMPLETE');
   }

@@ -119,7 +119,7 @@ test('task-bound sandboxes bind only their completed task directory writable', (
   });
   const parent = mounts.find((mount) => mount.containerPath === '/workspace/.agents/workspace/completed');
   const task = mounts.find((mount) => mount.containerPath === `/workspace/.agents/workspace/completed/${taskId}`);
-  assert.equal(parent?.readOnly, true);
+  assert.equal(parent, undefined);
   assert.deepEqual(task, { hostPaths: [completedSource], containerPath: `/workspace/.agents/workspace/completed/${taskId}`, readOnly: false });
   assert.equal(fs.statSync(path.join(worktree, '.agents', 'workspace', 'completed', taskId)).isDirectory(), true);
   assert.deepEqual(fs.readdirSync(completedSource), []);

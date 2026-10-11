@@ -1047,12 +1047,16 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
       arg,
       "/workspace/.agents/workspace/active/.short-ids.json"
     )));
-    for (const state of ["completed", "blocked", "archive"]) {
+    for (const state of ["blocked", "archive"]) {
       assert.ok(runCall.some((arg) => isReadOnlyMountFor(
         arg,
         `/workspace/.agents/workspace/${state}`
       )));
     }
+    assert.equal(runCall.some((arg) => isReadOnlyMountFor(
+      arg,
+      "/workspace/.agents/workspace/completed"
+    )), false);
     assert.ok(runCall.some((arg) => isWritableMountFor(
       arg,
       `/workspace/.agents/workspace/active/${taskId}`
