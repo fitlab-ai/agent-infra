@@ -151,7 +151,7 @@ test('inplace validation runs in the host worktree and records the validation re
   assert.equal(payload.evidence.scope, 'inplace');
   assert.equal(payload.evidence.exitCode, 17);
   assert.equal(payload.evidence.cleanup, 'completed');
-  assert.equal(fs.readFileSync(cwdFile, 'utf8'), f.root);
+  assert.equal(fs.realpathSync.native(fs.readFileSync(cwdFile, 'utf8')), fs.realpathSync.native(f.root));
   const envelope = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
   assert.equal(envelope.mode, 'task-bound');
   assert.equal(envelope.taskId, f.id);
@@ -179,7 +179,7 @@ test('inplace validation resolves a linked task worktree from the host repositor
   assert.equal(payload.evidence.scope, 'inplace');
   assert.equal(payload.evidence.exitCode, 17);
   assert.equal(payload.evidence.cleanup, 'completed');
-  assert.equal(fs.readFileSync(cwdFile, 'utf8'), f.worktreeRoot);
+  assert.equal(fs.realpathSync.native(fs.readFileSync(cwdFile, 'utf8')), fs.realpathSync.native(f.worktreeRoot));
   const envelope = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
   assert.equal(envelope.mode, 'task-bound');
   assert.equal(envelope.taskId, f.id);
