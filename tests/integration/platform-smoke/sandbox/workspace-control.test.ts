@@ -1037,12 +1037,12 @@ test('manifest writer persists control directory names and reader resolves them 
     const persistedValue = JSON.parse(persisted) as Record<string, unknown>;
     for (const field of directoryFields) assert.equal(persistedValue[field], directoryNames[field]);
     const firstResolved = readSandboxControlManifest(firstSetup.manifestPath);
-    for (const field of directoryFields) assert.equal(firstResolved[field], path.join(firstRoot, directoryNames[field]));
+    for (const field of directoryFields) assert.equal(firstResolved[field], path.join(fs.realpathSync.native(firstRoot), directoryNames[field]));
 
     const secondSetup = makeSetup(secondRoot);
     fs.writeFileSync(secondSetup.manifestPath, persisted);
     const secondResolved = readSandboxControlManifest(secondSetup.manifestPath);
-    for (const field of directoryFields) assert.equal(secondResolved[field], path.join(secondRoot, directoryNames[field]));
+    for (const field of directoryFields) assert.equal(secondResolved[field], path.join(fs.realpathSync.native(secondRoot), directoryNames[field]));
   } finally {
     fs.rmSync(firstRoot, { recursive: true, force: true });
     fs.rmSync(secondRoot, { recursive: true, force: true });
