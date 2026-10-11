@@ -33,8 +33,6 @@ import {
   type TaskControlOperation
 } from '../../task/control-authority.ts';
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
-import { executeAgentClientOperation, validateAgentClientOperation } from './agent-operation.ts';
-import type { AgentClientSandboxControlOperation } from '../../agent-clients/adapter.ts';
 
 export type SandboxControlExecutionResult = {
   exitCode: number;
@@ -256,7 +254,6 @@ function taskCreateExecutionFailure(requestId: string, code: string, message: st
 
 type ExecuteRequestOptions = Readonly<{
   createTask?: typeof createTask;
-  agentClientOperation?: AgentClientSandboxControlOperation;
 }>;
 
 async function executeRequestInner(
@@ -278,10 +275,6 @@ async function executeRequestInner(
       const code = /^([A-Z][A-Z0-9_]+)/u.exec(detail)?.[1] ?? 'TASK_CREATE_EXECUTION_FAILED';
       return taskCreateExecutionFailure(request.id, code, detail);
     }
-  }
-  if (request.family === 'agent-client') {
-    validateAgentClientOperation(request, manifest);
-    return executeAgentClientOperation(request, manifest, manifestPath, options.agentClientOperation);
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
   let operation: TaskControlOperation;
@@ -391,17 +384,17 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   let result: SandboxControlExecutionResult;
   try {
     assertSandboxControlExecutorAuthority(manifest, gateOwner);
-  const operation = request.family === 'task-lifecycle'
+    const operation = request.family === 'task-lifecycle'
       ? (() => {
         try { return parseTaskControlOperation(request.family, request.args); } catch { return null; }
       })()
-      : request.family === 'agent-client' ? request.operation : null;
+      : null;
     const context = createSandboxControlAuditContext(manifest, {
       requestId: request.id,
       family: request.family,
       operation: operation && typeof operation === 'object' && 'family' in operation && operation.family === 'task-lifecycle'
         ? operation.request.intent
-        : request.family === 'agent-client' ? request.operation : null,
+        : null,
       phase: 'started-committed',
       outcome: 'in-progress'
     });

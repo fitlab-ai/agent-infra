@@ -23,28 +23,6 @@ import type {
   SandboxTool,
   SandboxToolContext
 } from '../sandbox/tool-types.ts';
-import type { SandboxControlManifest } from '../sandbox/control/protocol.ts';
-
-type AgentClientSandboxControlOperation = Readonly<{
-  validate: (params: Readonly<{
-    operation: string;
-    payload: Record<string, unknown>;
-    manifest: SandboxControlManifest;
-  }>) => void;
-  execute: (params: Readonly<{
-    operation: string;
-    payload: Record<string, unknown>;
-    manifest: SandboxControlManifest;
-    manifestPath: string;
-  }>) => Promise<Readonly<{ exitCode: number; stdout: string; stderr: string }>>;
-  recover?: (params: Readonly<{
-    operation: string;
-    manifest: SandboxControlManifest;
-    manifestPath: string;
-    stdout: string | null;
-  }>) => Readonly<Record<string, unknown>>;
-}>;
-
 type AgentClientCapabilities = AgentClientCapabilityMap;
 
 type AgentClientModelSelectionContext =
@@ -147,7 +125,6 @@ type AgentClientAdapter = Readonly<{
   modelSelection: AgentClientModelSelectionContext;
   delegationEvidence: AgentClientDelegationEvidence;
   orchestrationAdapter?: AgentClientOrchestrationAdapter;
-  sandboxControlOperation?: AgentClientSandboxControlOperation;
   project: AgentClientProjectDescriptor;
   sandbox: AgentClientSandboxDescriptor;
 }>;
@@ -728,9 +705,6 @@ function defineAgentClientAdapter(
     ...(candidate.orchestrationAdapter === undefined
       ? {}
       : { orchestrationAdapter: Object.freeze({ ...candidate.orchestrationAdapter }) }),
-    ...(candidate.sandboxControlOperation === undefined
-      ? {}
-      : { sandboxControlOperation: Object.freeze({ ...candidate.sandboxControlOperation }) }),
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
       ...projectAssets,
@@ -753,7 +727,6 @@ export type {
   AgentClientCapabilities,
   AgentClientCustomCommandDescriptor,
   AgentClientDelegationEvidence,
-  AgentClientSandboxControlOperation,
   AgentClientLifecycleRecoveryRequest,
   AgentClientLifecycleRecoveryResult,
   AgentClientOrchestrationAdapter,

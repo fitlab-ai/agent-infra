@@ -42,10 +42,7 @@ const codexLifecycleProvenance = {
   hookSourcePathDigest: 'c'.repeat(64),
   hookSourceHash: 'd'.repeat(64),
   capabilitySessionId: 'parent-1',
-  capabilityTurnId: 'parent-turn',
-  capabilityToolUseId: 'capability-tool',
-  controllerInstanceDigest: null,
-  controlGeneration: null
+  capabilityTurnId: 'parent-turn'
 } as const;
 
 

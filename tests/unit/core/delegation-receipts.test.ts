@@ -51,8 +51,7 @@ const codexProvenance = {
   internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
   hookDefinitionHash: 'hook-hash', hookSource: 'project' as const,
   hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-  capabilitySessionId: 'parent-codex', capabilityTurnId: 'parent-turn', capabilityToolUseId: 'capability-tool',
-  controllerInstanceDigest: null, controlGeneration: null
+  capabilitySessionId: 'parent-codex', capabilityTurnId: 'parent-turn'
 };
 
 test('persisted delegation receipts require the complete current structure', () => {
@@ -189,12 +188,8 @@ test('persisted Codex receipts retain adapter evidence without core interpretati
   assert.equal(isDelegationReceipt(sealed.receipt), true);
 });
 
-test('activated Codex receipts support only controller-bound recovery aborts', () => {
-  const provenance = {
-    ...codexProvenance,
-    controllerInstanceDigest: 'e'.repeat(64),
-    controlGeneration: 'generation-1'
-  } as const;
+test('activated Codex receipts support recovery aborts with native lifecycle evidence', () => {
+  const provenance = codexProvenance;
   const prepared = dispatched(prepareDelegation({
     ...input,
     client: 'codex',

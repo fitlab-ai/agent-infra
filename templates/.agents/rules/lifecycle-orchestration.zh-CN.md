@@ -15,7 +15,6 @@
 ## 当前宿主
 
 - 使用当前宿主的原生 spawn、wait 与 App Server 结果；task-bound sandbox 在当前 worktree 本地执行普通任务编排。
-- Codex controller 的 `open`、`verify`、`close` 继续通过受限 broker 执行。`open` 后必须用同一 lease proof 完成 typed `verify`，再接受 task、control generation 和 controller instance 绑定。
 - prepare 校验当前任务、模型策略与宿主 preflight。启动和完成记录关联实际 parent/child 身份，失败不得写成成功。
 - 客户端特有的 preflight、事件来源与停止证据校验由客户端适配器实现；公共总控只调用统一能力。不得在公共流程中新增客户端 ID 分支。
 
@@ -28,9 +27,9 @@
 
 ## Current-only 切换与回滚
 
-- 切换前进入静默窗口：等待在途编排 intent 返回，停止 wrapper/controller，并保留 worktree、task/run/orchestration 状态、receipts、registration 与 audit。结果未知时先用本地 `status`/`route` 判断 domain 是否已提交，再按现有 recover/advance 语义处理；旧 broker request 不重放。
-- CLI、broker、controller adapter 和协议必须作为同一版本单元部署或回退。停止旧 container/broker 后执行 rebuild 与 `ai sandbox start --recreate <task-ref>`，以新 control generation 恢复执行；旧 token、proof 和 request 不得复用。
-- 新版本或回退版本都必须先核对同一任务的 `status`/`route`，再要求 controller typed `open`→`verify` 成功。任一检查失败时继续保持静默并保留证据，不局部混用组件或改写 domain 事实。
+- 切换前进入静默窗口：等待在途编排 intent 返回，并保留 worktree、task/run/orchestration 状态、receipts 与 audit。结果未知时先用本地 `status`/`route` 判断 domain 是否已提交，再按现有 recover/advance 语义处理；不重放旧 broker request。
+- CLI、broker 与协议必须作为同一版本单元部署或回退。停止旧 container/broker 后执行 rebuild 与 `ai sandbox start --recreate <task-ref>`，以新的 control generation 恢复执行；旧 token 和 request 不得复用。
+- 新版本或回滚版本都必须先核对同一任务的 `status`/`route`。任一检查失败时继续保持静默并保留证据，不局部混用组件或改写 domain 事实。
 
 ## 模型策略
 

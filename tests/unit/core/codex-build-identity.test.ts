@@ -115,8 +115,6 @@ test('lifecycle build identity reads one validated manifest file list', () => {
     'lib/sandbox/control/protocol.ts',
     'lib/sandbox/control/client.ts',
     'lib/sandbox/control/executor.ts',
-    'lib/agent-clients/adapters/codex-lifecycle/controller-registration.ts',
-    'lib/agent-clients/adapters/codex-lifecycle/controller-context.ts',
     'lib/server/process-state.ts',
     'lib/sandbox/shell.ts'
   ]) {
@@ -124,8 +122,6 @@ test('lifecycle build identity reads one validated manifest file list', () => {
     assert.equal(fs.lstatSync(path.join(process.cwd(), root)).isFile(), true, root);
   }
   const closure = resolveLifecycleExecutableFiles(process.cwd(), manifest.executableFiles);
-  assert.ok(closure.includes('lib/agent-clients/adapters/codex-lifecycle/controller-registration.ts'));
-  assert.ok(closure.includes('lib/agent-clients/adapters/codex-lifecycle/controller-context.ts'));
   assert.ok(manifest.contractFiles.includes('.agents/skills/run-task/SKILL.md'));
 });
 

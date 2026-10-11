@@ -35,10 +35,7 @@ const PROVENANCE = {
   hookSourcePathDigest: 'c'.repeat(64),
   hookSourceHash: 'd'.repeat(64),
   capabilitySessionId: 'parent',
-  capabilityTurnId: 'parent-turn',
-  capabilityToolUseId: 'capability-tool',
-  controllerInstanceDigest: 'e'.repeat(64),
-  controlGeneration: 'generation-1'
+  capabilityTurnId: 'parent-turn'
 } as const;
 
 function fixture(stopReady = true) {

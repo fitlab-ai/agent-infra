@@ -41,18 +41,12 @@ import { resolveTaskContext, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 
-export type TaskControlControllerBinding = Readonly<{
-  instanceDigest: string;
-  controlGeneration: string;
-}>;
-
 export type TaskControlExecutionContext =
   | Readonly<{
       source: 'direct-host';
       mode: 'direct-host';
       repoRoot: string;
       runtimeDir?: string;
-      controllerBinding?: TaskControlControllerBinding | null;
     }>
   | Readonly<{
       source: 'sandbox-executor';
@@ -64,7 +58,6 @@ export type TaskControlExecutionContext =
       generation: string;
       manifestPath: string;
       requestId: string;
-      controllerBinding?: TaskControlControllerBinding | null;
     }>;
 
 export type TaskControlOrchestrationIntent =
@@ -112,25 +105,15 @@ function absolute(name: string, value: string): string {
   return path.resolve(value);
 }
 
-function binding(value: TaskControlControllerBinding | null | undefined): TaskControlControllerBinding | null | undefined {
-  if (value === null || value === undefined) return value;
-  if (!/^[a-f0-9]{64}$/u.test(value.instanceDigest) || !value.controlGeneration) {
-    invalidContext('controller binding is invalid');
-  }
-  return value;
-}
-
 export function createDirectHostExecutionContext(params: Readonly<{
   repoRoot: string;
   runtimeDir?: string;
-  controllerBinding?: TaskControlControllerBinding | null;
 }>): TaskControlExecutionContext {
   return {
     source: 'direct-host',
     mode: 'direct-host',
     repoRoot: absolute('repoRoot', params.repoRoot),
-    ...(params.runtimeDir === undefined ? {} : { runtimeDir: absolute('runtimeDir', params.runtimeDir) }),
-    ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) }),
+    ...(params.runtimeDir === undefined ? {} : { runtimeDir: absolute('runtimeDir', params.runtimeDir) })
   };
 }
 
@@ -142,7 +125,6 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
   generation: string;
   manifestPath: string;
   requestId: string;
-  controllerBinding?: TaskControlControllerBinding | null;
 }>): TaskControlExecutionContext {
   if (!/^TASK-\d{8}-\d{6}$/u.test(params.taskId) || !params.generation || !params.requestId) {
     invalidContext('sandbox binding is incomplete');
@@ -160,8 +142,7 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
     taskId: params.taskId,
     generation: params.generation,
     manifestPath: absolute('manifestPath', params.manifestPath),
-    requestId: params.requestId,
-    ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) }),
+    requestId: params.requestId
   };
 }
 
@@ -170,7 +151,6 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
     if (context.mode !== 'direct-host') invalidContext('direct-host mode is inconsistent');
     absolute('repoRoot', context.repoRoot);
     if (context.runtimeDir !== undefined) absolute('runtimeDir', context.runtimeDir);
-    binding(context.controllerBinding);
     return;
   }
   if (context.mode !== 'task-bound-sandbox' || !/^TASK-\d{8}-\d{6}$/u.test(context.taskId)
@@ -184,7 +164,6 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
   if (path.resolve(context.runtimeDir) !== path.join(path.dirname(path.resolve(context.manifestPath)), 'runtime')) {
     invalidContext('runtimeDir is not bound to the manifest control root');
   }
-  binding(context.controllerBinding);
 }
 
 function boundTaskRef(context: TaskControlExecutionContext, taskRef: string): string {

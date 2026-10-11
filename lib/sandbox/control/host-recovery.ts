@@ -85,7 +85,7 @@ function publishedEvidence(records: AuditRecord[], manifest: SandboxControlManif
   for (const record of publications) {
     if (record.version !== 2 || record.generation !== manifest.generation || record.identityDigest !== digest
       || typeof record.requestFamily !== 'string'
-      || !['task-lifecycle', 'task-create', 'agent-client'].includes(record.requestFamily)
+      || !['task-lifecycle', 'task-create'].includes(record.requestFamily)
       || (record.sandboxTaskId !== null && typeof record.sandboxTaskId !== 'string')
       || !Number.isSafeInteger(record.exitCode)
       || !Number.isSafeInteger(record.outputBytes) || !Number.isSafeInteger(record.errorBytes)

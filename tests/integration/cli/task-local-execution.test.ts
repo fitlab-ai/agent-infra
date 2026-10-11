@@ -51,7 +51,6 @@ test('sandbox workflow and orchestration commands execute locally without publis
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
       AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),
       AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
-      AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined
     };
     const begin = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-orchestration', TASK_ID,
       'begin-or-resume', '--client', 'claude-code',

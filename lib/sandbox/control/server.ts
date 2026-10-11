@@ -72,7 +72,6 @@ import {
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
-import { recoverAgentClientOperation, validateAgentClientOperation } from './agent-operation.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
@@ -100,8 +99,6 @@ function appendBrokerAudit(
 
 function operationKey(request: SandboxControlRequest): string | null {
   if (request.family === 'task-create') return 'create';
-  if (request.family === 'agent-client') return request.operation;
-  if (request.family !== 'task-lifecycle') return null;
   try {
     const operation = parseTaskControlOperation(request.family, request.args);
     return operation.family === 'task-lifecycle' ? operation.request.intent : null;
@@ -299,7 +296,7 @@ async function readRecoveryDomain(
   if (!operation) return { domain: null };
   const taskRef = 'args' in request ? request.args[0] ?? null : manifest.taskId;
   const output = parseControlOutput(payloadOutput);
-  if (!taskRef && operation.family !== 'task-create' && operation.family !== 'agent-client') {
+  if (!taskRef && operation.family !== 'task-create') {
     return { domain: null };
   }
 
@@ -326,14 +323,6 @@ async function readRecoveryDomain(
 
   if (operation.family === 'task-create') {
     return { domain: taskCreateDomainEvidence(manifest, output) };
-  }
-  if (operation.family === 'agent-client' && request.family === 'agent-client') {
-    return { domain: recoverAgentClientOperation({
-      request,
-      manifest,
-      manifestPath,
-      stdout: payloadOutput
-    }) };
   }
   return { domain: null };
 }
@@ -569,7 +558,6 @@ async function recoverProcessing(manifest: SandboxControlManifest, manifestPath:
       try {
         const rawRequest = JSON.parse(fs.readFileSync(path.join(processingDirectory, 'request.json'), 'utf8')) as Record<string, unknown>;
         request = validateSandboxControlRequest(rawRequest, manifest);
-        if (request.family === 'agent-client') validateAgentClientOperation(request, manifest);
       } catch {
         // Missing or malformed request evidence remains fail-closed below.
       }
@@ -1004,7 +992,6 @@ export async function serveSandboxControl(
           if (reasonCode) throw new Error(reasonCode);
           if (active) throw new Error('SANDBOX_CONTROL_BUSY');
           const request = validateSandboxControlRequest(JSON.parse(fs.readFileSync(claimed, 'utf8')), manifest);
-          if (request.family === 'agent-client') validateAgentClientOperation(request, manifest);
           validatedRequest = request;
           criticalRequestPhase(manifest, request, 'validated', 'in-progress');
           appendBrokerAudit(manifest, 'request-validated', {

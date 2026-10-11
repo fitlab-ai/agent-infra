@@ -9,7 +9,6 @@ import {
   resolveCodexThread
 } from './app-server.ts';
 import { createCodexLifecycleStore } from './store.ts';
-import { verifyCodexSandboxControllerContextWithWarnings } from './sandbox-controller.ts';
 import type { CodexLifecycleEvent } from './evidence.ts';
 import { resolveTaskRef } from '../../../task/resolve-ref.ts';
 import { resolveTaskContext } from '../../../task/resolve-ref.ts';
@@ -103,10 +102,7 @@ function hookDefinitionHash(): string {
 }
 
 function resolveLifecycleTaskContext() {
-  const controllerPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  const taskId = controllerPath
-    ? verifyCodexSandboxControllerContextWithWarnings(controllerPath, { repoRoot: process.cwd() }).context.taskId
-    : process.env.AGENT_INFRA_TASK_ID;
+  const taskId = process.env.AGENT_INFRA_TASK_ID;
   const context = taskId
     ? resolveTaskRef(taskId, { repoRoot: process.cwd() })
     : resolveTaskContext(undefined, { repoRoot: process.cwd() });

@@ -13,11 +13,6 @@ import {
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
 import {
-  requestCodexControllerClose,
-  requestCodexControllerOpen,
-  requestCodexControllerVerify
-} from '../../../lib/agent-clients/adapters/codex-lifecycle/controller-client.ts';
-import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
   clearSandboxRemovalJournal,
@@ -273,7 +268,7 @@ const SANDBOX_CONTROL_ENV_KEYS = [
   'AGENT_INFRA_SANDBOX',
   'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_ROOT_ID', 'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR',
-  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE'
+  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE'
 ] as const;
 
 function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDBOX_CONTROL_ENV_KEYS[number], string>>, callback: () => T): T {
@@ -372,7 +367,6 @@ function runDirectTaskFinalizationAsync(
       AGENT_INFRA_CONTROL_DIR: paths.controlDir ?? manifest.channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: paths.statusDir ?? manifest.publicStatusDir,
       AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
-      AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined,
       AGENT_INFRA_EXECUTOR_MANIFEST: undefined
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -2115,209 +2109,6 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
 
 }
 
-test('sandbox broker opens and closes a host-only Codex controller registration across processes', onPlatforms('linux'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-roundtrip-'));
-  const channelDir = path.join(root, 'channel');
-  const manifestPath = path.join(root, 'manifest.json');
-  const statusDir = path.join(root, 'public');
-  const processingDir = path.join(root, 'processing');
-  const fakeBin = path.join(root, 'bin-fixture');
-  for (const directory of [channelDir, statusDir, processingDir, fakeBin]) fs.mkdirSync(directory, { recursive: true });
-  const branch = initializeRepository(root);
-  const packageVersion = (JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as { version: string }).version;
-  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: packageVersion }));
-  const taskId = 'TASK-20260809-010203';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n# Fixture\n`);
-  for (const relative of [
-    '.codex/hooks.json',
-    '.codex/agents/agent-infra-lifecycle-executor.toml',
-    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
-    '.agents/hooks/lifecycle-delegation.js',
-    '.agents/skills/run-task/SKILL.md',
-    '.agents/rules/lifecycle-orchestration.md'
-  ]) {
-    const target = path.join(root, relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.resolve(relative), target);
-  }
-  const docker = path.join(fakeBin, 'docker');
-  const containerId = 'f'.repeat(64);
-  fs.writeFileSync(docker, `#!/bin/sh
-if [ "$1" = --context ] && [ "$2" = default ]; then shift 2; fi
-if [ "$1" = version ]; then printf '%s\\n' '{"ApiVersion":"1.50"}'; exit 0; fi
-if [ "$1" = info ]; then printf '%s\\n' '"daemon-id"'; exit 0; fi
-if [ "$1" = container ] && [ "$2" = ls ]; then printf '%s\\n' '${containerId}'; exit 0; fi
-if [ "$1" = container ] && [ "$2" = inspect ]; then printf '%s\\n' '{"Id":"${containerId}","State":{"Running":true},"Config":{"Labels":{}}}'; exit 0; fi
-[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"
-exit 1
-`, { mode: 0o700 });
-  const authorityEvidence = captureSandboxAuthority('native', {
-    env: { DOCKER_CONTEXT: 'default' },
-    lockDomain: 'a'.repeat(64),
-    probe: (_cmd, args) => ({
-      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'daemon-id' : { ApiVersion: '1.50' }), stderr: '', pid: 1, output: []
-    })
-  });
-  fs.writeFileSync(manifestPath, `${JSON.stringify({
-    engine: 'native',
-    repoRoot: root,
-    worktreeRoot: root,
-    project: 'demo',
-    container: 'demo-dev-feature',
-    containerIdentity: { id: containerId, labels: {} },
-    authorityEvidence,
-    branch,
-    mode: 'task-bound',
-    taskId,
-    token: 'controller-secret',
-    generation: 'controller-generation',
-    controlRootId: 'a'.repeat(96),
-    channelDir: 'channel',
-    publicStatusDir: 'public',
-    processingDir: 'processing',
-    runtimeDir: 'runtime'
-  })}\n`);
-  writeSandboxControlIdentitySentinel(statusDir, {
-    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'controller-generation', controlRootId: 'a'.repeat(96)
-  });
-  const child = spawn(
-    process.execPath,
-    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
-    { cwd: path.resolve('.'), stdio: 'ignore', env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` } }
-  );
-  try {
-    waitForFile(path.join(root, 'broker.json'), 5_000);
-    waitForHealthyStatus(statusDir, 5_000);
-    const startTime = getProcessStartTime(process.pid);
-    assert.ok(startTime);
-    const opened = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
-      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestCodexControllerOpen({
-      controllerProcess: { pid: process.pid, startTime },
-      channelDir,
-      statusDir,
-      generation: 'controller-generation',
-      timeoutMs: 5_000
-    }));
-    const registration = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
-    assert.equal(registration.includes(opened.lease.leaseSecret), false);
-    assert.equal(fs.lstatSync(path.join(root, 'codex-controller.json')).mode & 0o777, 0o600);
-    const verified = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
-      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestCodexControllerVerify({
-      controllerProof: {
-        version: 1,
-        leaseId: opened.lease.leaseId,
-        leaseSecret: opened.lease.leaseSecret,
-        controllerProcess: opened.lease.controllerProcess
-      },
-      channelDir,
-      statusDir,
-      generation: 'controller-generation',
-      timeoutMs: 5_000
-    }));
-    assert.deepEqual(verified.binding, {
-      taskId,
-      controlGeneration: 'controller-generation',
-      controllerInstanceDigest: opened.lease.controllerInstanceDigest
-    });
-    const closed = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
-      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestCodexControllerClose({
-      controllerProcess: opened.lease.controllerProcess,
-      controllerProof: {
-        version: 1,
-        leaseId: opened.lease.leaseId,
-        leaseSecret: opened.lease.leaseSecret,
-        controllerProcess: opened.lease.controllerProcess
-      },
-      channelDir,
-      statusDir,
-      generation: 'controller-generation',
-      timeoutMs: 5_000
-    }));
-    assert.equal(closed.changed, true);
-    assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
-  } finally {
-    child.kill();
-    await new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) resolve();
-      else child.once('exit', () => resolve());
-    });
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('broker recovery accepts a controller close after the registration was durably removed', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-close-recovery-'));
-  const requestId = '99999999-9999-4999-8999-999999999999';
-  let server: Promise<void> | undefined;
-  let controller: AbortController | undefined;
-  try {
-    const manifestPath = writeControlManifest(root, initializeRepository(root), 'controller-close-recovery-generation');
-    const manifest = readSandboxControlManifest(manifestPath);
-    fs.mkdirSync(path.join(manifest.channelDir, 'responses'), { recursive: true });
-    const processing = path.join(manifest.processingDir, requestId);
-    fs.mkdirSync(path.join(processing, 'transitions'), { recursive: true });
-    fs.writeFileSync(path.join(processing, 'transitions', 'started-committed.json'), '{}\n');
-    writeSandboxControlTransition(manifest, { requestId, phase: 'completed' });
-    writeSandboxControlTransition(manifest, { requestId, phase: 'evidence-written' });
-    writeSandboxControlTransition(manifest, { requestId, phase: 'publish-authorized' });
-    const startTime = getProcessStartTime(process.pid);
-    assert.ok(startTime);
-    const proof = {
-      version: 1 as const,
-      leaseId: 'b'.repeat(64),
-      leaseSecret: 'c'.repeat(64),
-      controllerProcess: { pid: process.pid, startTime }
-    };
-    fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
-      version: 5, id: requestId,
-      family: 'agent-client', agentClient: 'codex', operation: 'controller.close',
-      payload: { proof }
-    })}\n`);
-    fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
-      version: 2, generation: manifest.generation, requestId, nonce: 'controller-close-recovery',
-      child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
-    })}\n`);
-    writeSandboxControlReservation(manifest, requestId, { logicalRecords: 1, bytes: 0 });
-    const output = `${JSON.stringify({ version: 1, status: 'closed', changed: true, lease: null, error: null })}\n`;
-    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: output, stderr: '' });
-    writeSandboxControlPayload(manifest, requestId, { stdout: output, stderr: '' });
-    writeSandboxControlTerminalResult(manifest, { id: requestId, family: 'agent-client', operation: 'controller.close' }, output);
-    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
-      version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
-    })}\n`);
-
-    controller = new AbortController();
-    server = serveSandboxControl(manifestPath, controller.signal, {
-      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
-      bindingCheck: () => null
-    });
-    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', 5_000);
-    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
-    waitForFile(responsePath, 5_000);
-    const response = readJsonFileAfterPublication(responsePath, 5_000);
-    assert.equal(response.phase, 'completed');
-    const payload = readJsonFileAfterPublication(path.join(manifest.channelDir, 'responses', `${requestId}.payload.json`), 5_000);
-    assert.equal((JSON.parse(String(payload.stdout)) as { changed: boolean }).changed, true);
-    assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
-    assert.equal(fs.existsSync(processing), false);
-  } finally {
-    controller?.abort();
-    if (server) await server;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('broker recovery terminates a live started executor before retaining unknown', onPlatforms('linux'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-orphan-executor-recovery-'));
   const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -2625,8 +2416,7 @@ test('broker recovery returns inspectable task-create output when the payload is
         AGENT_INFRA_CONTROL_STATUS_DIR: manifest.publicStatusDir,
         AGENT_INFRA_TASK_ID: manifest.taskId ?? '',
         AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
-        AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined,
-        AGENT_INFRA_EXECUTOR_MANIFEST: undefined
+          AGENT_INFRA_EXECUTOR_MANIFEST: undefined
       }
     });
     assert.equal(recovered.status, 1, recovered.stderr || recovered.stdout);
