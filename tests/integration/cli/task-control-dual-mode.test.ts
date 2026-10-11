@@ -582,13 +582,37 @@ test('direct-host and sandbox client transport preserve lifecycle results', asyn
       TASK_ID, 'block', '--agent', 'codex', '--reason', 'pause for dual-mode verification',
       '--unblock-condition', 'resume after verification'
     ]);
-    assert.equal(sandboxLifecycle.status, 0, sandboxLifecycle.stderr);
+    assert.equal(sandboxLifecycle.status, 0, sandboxLifecycle.stderr || JSON.stringify(sandboxLifecycle.payload));
     assert.deepEqual(comparableLifecycle(directLifecycle), comparableLifecycle(sandboxLifecycle.payload));
     assert.equal(fs.existsSync(path.join(directFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md')), true);
     assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md')), true);
   } finally {
     await stopSandboxFixtureBroker(broker);
     fs.rmSync(directFixture.root, { recursive: true, force: true });
+    fs.rmSync(sandbox.root, { recursive: true, force: true });
+    fs.rmSync(sandbox.controlRoot, { recursive: true, force: true });
+  }
+});
+
+test('sandbox executor accepts a control root alias while preserving lifecycle transport', onPlatforms('linux', 'darwin'), async () => {
+  const sandbox = sandboxFixture();
+  const controlAlias = path.join(sandbox.root, 'control-alias');
+  fs.symlinkSync(sandbox.controlRoot, controlAlias, 'dir');
+  const broker = startSandboxFixtureBroker({
+    ...sandbox,
+    manifestPath: path.join(controlAlias, 'manifest.json')
+  });
+  try {
+    waitForHealthyStatus(sandbox.statusDir, 5_000);
+    const result = runSandboxClient(sandbox, 'task-lifecycle', [
+      TASK_ID, 'block', '--agent', 'codex', '--reason', 'pause through control root alias',
+      '--unblock-condition', 'resume after verification'
+    ]);
+    assert.equal(result.status, 0, result.stderr || JSON.stringify(result.payload));
+    assert.equal(result.payload.status, 'applied');
+    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md')), true);
+  } finally {
+    await stopSandboxFixtureBroker(broker);
     fs.rmSync(sandbox.root, { recursive: true, force: true });
     fs.rmSync(sandbox.controlRoot, { recursive: true, force: true });
   }

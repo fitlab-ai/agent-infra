@@ -859,6 +859,7 @@ test('sandbox control removal resumes from carrier-finalizing without replaying 
 
 test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-removal-journal-'));
+  const canonicalRoot = fs.realpathSync.native(root);
   let manifest: ReturnType<typeof readSandboxControlManifest> | undefined;
   t.after(() => {
     if (manifest) clearSandboxRemovalJournal(manifest);
@@ -881,7 +882,7 @@ test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, 
   assert.equal(prepared.phase, 'carrier-removed');
   assert.equal(prepared.revision, 5);
   assert.equal(prepared.expectedOldJournalRevision, 4);
-  assert.equal(prepared.target.controlRoot, root);
+  assert.equal(prepared.target.controlRoot, canonicalRoot);
   assert.equal(prepared.target.removeBranch, false);
   assert.equal(prepared.target.removeShare, false);
   assert.throws(

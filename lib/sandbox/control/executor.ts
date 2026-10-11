@@ -346,9 +346,10 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   const gate = await waitForGate(nonce);
   const gateOwner = gate.owner;
   process.disconnect?.();
-  const manifestPath = process.env.AGENT_INFRA_EXECUTOR_MANIFEST;
-  if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
-  const manifest = readSandboxControlManifest(manifestPath);
+  const requestedManifestPath = process.env.AGENT_INFRA_EXECUTOR_MANIFEST;
+  if (!requestedManifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
+  const manifest = readSandboxControlManifest(requestedManifestPath);
+  const manifestPath = fs.realpathSync.native(requestedManifestPath);
   const identity = validateSandboxControlIdentity({
     publicStatusDir: manifest.publicStatusDir,
     root: path.dirname(path.resolve(manifestPath)),
