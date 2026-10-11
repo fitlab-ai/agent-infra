@@ -24,14 +24,16 @@ function spawnTaskValidate(cwd: string, env: NodeJS.ProcessEnv, args: string[]) 
   });
 }
 
-function fixture() {
+function fixture(linkedWorktree = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-validate-'));
   initIsolatedGitRepo(root);
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root, env: gitSafeEnv() });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, env: gitSafeEnv() });
   const id = 'TASK-20260101-000001';
   const branch = 'agent-infra-feature-validation-fixture';
-  spawnSync('git', ['switch', '-c', branch], { cwd: root, env: gitSafeEnv() });
+  if (!linkedWorktree) {
+    spawnSync('git', ['switch', '-c', branch], { cwd: root, env: gitSafeEnv() });
+  }
   const taskDir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture', agentClients: CANONICAL_AGENT_CLIENTS }));
@@ -44,7 +46,17 @@ function fixture() {
   spawnSync('git', ['add', '.'], { cwd: root, env: gitSafeEnv() });
   const commit = spawnSync('git', ['commit', '-qm', 'fixture'], { cwd: root, env: gitSafeEnv() });
   assert.equal(commit.status, 0, commit.stderr?.toString());
-  return { root, id, branch };
+  let worktreeRoot = root;
+  if (linkedWorktree) {
+    const createBranch = spawnSync('git', ['branch', branch], { cwd: root, env: gitSafeEnv() });
+    assert.equal(createBranch.status, 0, createBranch.stderr?.toString());
+    worktreeRoot = path.join(root, 'task-worktree');
+    const addWorktree = spawnSync('git', ['worktree', 'add', worktreeRoot, branch], { cwd: root, env: gitSafeEnv() });
+    assert.equal(addWorktree.status, 0, addWorktree.stderr?.toString());
+  }
+  const callerBranch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd: root, encoding: 'utf8', env: gitSafeEnv() });
+  assert.equal(callerBranch.status, 0, callerBranch.stderr);
+  return { root, worktreeRoot, callerBranch: callerBranch.stdout.trim(), id, branch };
 }
 
 test('snapshot validation runs at the task commit and removes its temporary worktree', (t) => {
@@ -146,4 +158,33 @@ test('inplace validation runs in the host worktree and records the validation re
   assert.equal(envelope.result.exitCode, 17);
   const currentBranch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd: f.root, encoding: 'utf8', env: gitSafeEnv() });
   assert.equal(currentBranch.stdout.trim(), f.branch);
+});
+
+test('inplace validation resolves a linked task worktree from the host repository', (t) => {
+  const f = fixture(true);
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const evidenceFile = path.join(f.root, 'inplace-linked-evidence.json');
+  const cwdFile = path.join(f.root, 'inplace-linked-cwd.txt');
+  const result = spawnTaskValidate(f.root, gitSafeEnv(), [
+    f.id, '--scope', 'inplace', '--format', 'json', '--evidence-file', evidenceFile, '--',
+    process.execPath, '-e',
+    "const fs=require('node:fs');fs.writeFileSync(process.argv[1],process.cwd());process.exit(17)",
+    cwdFile
+  ]);
+  assert.equal(result.status, 17, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, 'applied');
+  assert.equal(payload.evidence.taskId, f.id);
+  assert.equal(payload.evidence.branch, f.branch);
+  assert.equal(payload.evidence.scope, 'inplace');
+  assert.equal(payload.evidence.exitCode, 17);
+  assert.equal(payload.evidence.cleanup, 'completed');
+  assert.equal(fs.readFileSync(cwdFile, 'utf8'), f.worktreeRoot);
+  const envelope = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
+  assert.equal(envelope.mode, 'task-bound');
+  assert.equal(envelope.taskId, f.id);
+  assert.equal(envelope.result.exitCode, 17);
+  const callerBranch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd: f.root, encoding: 'utf8', env: gitSafeEnv() });
+  assert.equal(callerBranch.status, 0, callerBranch.stderr);
+  assert.equal(callerBranch.stdout.trim(), f.callerBranch);
 });

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../sandbox/config.ts';
 import { resolveSandboxTarget } from '../sandbox/workspace-identity.ts';
+import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
 import { createManualValidationEvidence, manualValidationEvidenceSummary } from '../task/manual-validation-evidence.ts';
 import type { ManualValidationCleanup } from '../task/manual-validation-evidence.ts';
@@ -116,7 +117,9 @@ function snapshotValidation(repoRoot: string, commit: string, options: ValidateO
 }
 
 function inplaceValidation(config: ReturnType<typeof loadConfig>, target: ReturnType<typeof resolveSandboxTarget>, options: ValidateOptions) {
-  const worktree = assertGitWorktreeBinding(config.repoRoot, config.repoRoot, target.branch);
+  const targetRoot = resolveBranchWorktree(config.repoRoot, target.branch);
+  if (!targetRoot) throw new Error(`TASK_VALIDATION_WORKTREE_NOT_FOUND: ${target.branch}`);
+  const worktree = assertGitWorktreeBinding(config.repoRoot, targetRoot, target.branch);
   const originalBranch = git(worktree.worktreeRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   const originalHead = git(worktree.worktreeRoot, ['rev-parse', 'HEAD']);
   let restored = false;
