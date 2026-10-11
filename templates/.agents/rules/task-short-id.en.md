@@ -24,12 +24,13 @@ Task short ids let mobile-style SKILL invocations replace the full 22-char
 |------------|-----------------------------------------------------------------------|---------------------------------------------------------------|
 | alloc      | `create-task`, `import-issue`, `import-codescan`, `import-dependabot` | Assigns lowest free `NN` in the registry.                    |
 | resolve    | Lifecycle SKILLs (`analyze-task`, `plan-task`, `code-task`, …)        | Looks up `NN` → full task id. Does not allocate.             |
-| release    | `complete-task`, `cancel-task`, `block-task`, `close-codescan`, `close-dependabot` | Removes the registry entry. |
+| release    | Successful sandbox cleanup; also `cancel-task`, `block-task`, `close-codescan`, and `close-dependabot` | Removes the registry entry. |
 | re-alloc   | `restore-task`                                                        | Re-allocates a (possibly new) `NN` in the registry. |
 
-Short ids are valid only while a task lives in `.agents/workspace/active/`.
-Once it is moved to `completed/`, `blocked/`, or `archive/`, the `NN` slot is
-freed and may be reused by a new task.
+Completion retains the short id so a sandbox still associated with the
+completed task can resolve it before cleanup. The id is released only after
+managed sandbox cleanup confirms that the container was deleted successfully.
+Other lifecycle intents release ids at the times listed in the table.
 
 ## Configuration
 
@@ -52,10 +53,13 @@ archiving all active tasks first (the registry key width depends on it).
 | Entrypoint                                                  | Hit                  | Miss                                                 |
 |-------------------------------------------------------------|----------------------|------------------------------------------------------|
 | SKILL parameter resolver (lifecycle SKILLs)                  | resolve to full id   | **strict error** — short id not found / invalid     |
-| `ai sandbox exec <N>` / `ai sandbox create <N>`           | resolve to full id, then read `branch` from task.md | **strict error** — no ls-index fallback, no literal-branch fallback; hint the user to pass a short id / `TASK-id` / branch name |
+| `ai sandbox exec <N>` / `ai sandbox create <N>`           | resolve to an active task id, then read `branch` from task.md | **strict error** — no ls-index fallback, no literal-branch fallback; hint the user to pass a short id / `TASK-id` / branch name |
+| `ai sandbox rm <N>`                                       | resolve the retained mapping, then read active or completed identity by full task id | **strict error** — stop cleanup when the short id is missing |
 
-`list --verify` is strictly read-only: it reports discrepancies between the
-active dir and the registry, but never writes.
+`list --verify` is strictly read-only: every active task must have a mapping;
+registry mappings may point to a valid active task or to a
+`completed/{taskId}/task.md` whose identity matches and whose status is
+`completed`. Other mappings are reported as orphans; no state is modified.
 
 ## SKILL parameter resolver
 
@@ -94,11 +98,13 @@ Short ids are pure local state, persisted only in the registry
 - Created on demand by the first `alloc`; an absent file is treated as an empty
   registry.
 - Short ids are assigned only by an explicit `alloc` (`create-task` /
-  `import-*` / `restore-task`); `resolve` / `list` / `release` never allocate —
-  they only clean up stale entries pointing at non-active tasks.
-- After archive (complete-task / cancel-task / block-task / close-*) the
-  registry entry is deleted immediately and the short id may be reused; archived
-  tasks are referenced by their full `TASK-…` id.
+  `import-*` / `restore-task`); `resolve` and `list` are read-only and do not
+  perform implicit cleanup.
+- `alloc` may clean up stale entries that point neither to an active task nor
+  to valid completed task content. Completed mappings stay until managed
+  sandbox cleanup succeeds.
+- Task operations may resolve a completed mapping and then reject it at their
+  own state gate; `ai sandbox create <N>` still accepts active tasks only.
 
 `resolve(<N>)` workflow: ① validate arg matches `^[0-9]+$` →
 ② strip leading zeros and take the numeric value `n`; classify as reserved
