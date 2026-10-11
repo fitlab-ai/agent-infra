@@ -789,6 +789,18 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
       }
     }
   }
+  const activeTaskPath = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  if (request.intent === 'complete' && fs.existsSync(activeTaskPath)) {
+    try { fs.rmdirSync(activeTaskPath); }
+    catch (error) {
+      return failed(request, { code: 'LIFECYCLE_SOURCE_DIRECTORY_CLEANUP_FAILED', message: String(error) }, {
+        taskId, sourceState, targetState: spec.target, sourcePath: activeTaskPath, targetPath, journalPath,
+        task: { operations: taskOperations }, directory: { effect: 'move', changed: true },
+        changed: true, completedSteps: [...completed], pendingSteps: [],
+        timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
+      });
+    }
+  }
   let shortId: TaskLifecycleResult['shortId'] = { effect: 'unchanged', shortId: request.intent === 'complete' ? registeredKey ?? null : null, changed: false };
   if (requiredSteps.includes('registry-committed') && !completed.has('registry-committed')) {
     try { shortId = mutateShortIdRegistry(repoRoot, taskId, spec.registry); }

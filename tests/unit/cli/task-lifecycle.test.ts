@@ -143,7 +143,7 @@ test('complete fills the empty completed mount, preserves task data, and retains
   }
   assert.equal(fs.readlinkSync(path.join(targetDir, '.runtime', 'payload-link')), 'payload.bin');
   assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), false);
-  assert.equal(fs.readdirSync(f.taskDir).length, 0);
+  assert.equal(fs.existsSync(f.taskDir), false);
 });
 
 test('dry-run plans the same transition without changing bytes, mtime, directories, or registry', () => {
