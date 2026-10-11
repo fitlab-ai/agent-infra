@@ -298,9 +298,6 @@ function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDB
       process.env.AGENT_INFRA_TASK_ID ??= identity.taskId ?? undefined;
       process.env.AGENT_INFRA_RUNTIME_DIR ??= path.join(root, 'runtime');
     }
-    try {
-      const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')) as { token?: unknown };
-    } catch { /* A focused test may use only the mounted identity files. */ }
   }
   try {
     return callback();
