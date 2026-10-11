@@ -218,6 +218,8 @@ function observeResultEvidence(t: TestContext, processingDir: string): Promise<{
 
 type CollectedChild = {
   child: ReturnType<typeof spawn>;
+  readonly stdout: string;
+  readonly stderr: string;
   result: Promise<{ exitCode: number; stdout: string; stderr: string }>;
 };
 
@@ -232,7 +234,12 @@ function collectChild(child: ReturnType<typeof spawn>): CollectedChild {
     child.once('error', reject);
     child.once('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
   });
-  return { child, result };
+  return {
+    child,
+    get stdout() { return stdout; },
+    get stderr() { return stderr; },
+    result
+  };
 }
 
 async function stopCollectedChild(client: CollectedChild | null): Promise<void> {
@@ -1859,7 +1866,12 @@ test('sandbox-local complete drains an accepted request before moving the task w
     local = runDirectTaskFinalizationAsync(root, manifest, taskId, {
       controlDir: containerControlDir, statusDir: containerStatusDir
     });
-    await waitForFile(path.join(controlRoot, 'quiescing.json'), SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const quiescingPath = path.join(controlRoot, 'quiescing.json');
+    const quiescingDeadline = Date.now() + SANDBOX_CONTROL_TEST_TIMEOUT_MS;
+    while (!fs.existsSync(quiescingPath) && Date.now() < quiescingDeadline && local.child.exitCode === null) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(fs.existsSync(quiescingPath), true, `child exited=${local.child.exitCode}, stderr=${local.stderr}, stdout=${local.stdout}`);
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(fs.existsSync(path.join(controlRoot, 'broker.json')), true);
     assert.equal(terminateCount, 0);

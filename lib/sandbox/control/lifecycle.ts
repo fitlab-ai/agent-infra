@@ -1154,12 +1154,29 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     || (candidate.mode === 'branch-only' && candidate.taskId !== null)
     || !isSandboxAuthorityEvidence(candidate.authorityEvidence)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const root = path.dirname(path.resolve(manifestPath));
-  if (path.resolve(candidate.channelDir) !== path.join(root, 'channel')
-    || path.resolve(candidate.publicStatusDir) !== path.join(root, 'public')
-    || path.resolve(candidate.processingDir) !== path.join(root, 'processing')) {
+  const canonicalRoot = fs.realpathSync.native(root);
+  const matchesControlChildPath = (candidatePath: string, name: string): boolean => {
+    const resolved = path.resolve(candidatePath);
+    if (path.basename(resolved) !== name) return false;
+    const expected = path.join(canonicalRoot, name);
+    try {
+      return fs.realpathSync.native(resolved) === expected;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      try {
+        return fs.realpathSync.native(path.dirname(resolved)) === canonicalRoot;
+      } catch (parentError) {
+        if ((parentError as NodeJS.ErrnoException).code !== 'ENOENT') throw parentError;
+        return false;
+      }
+    }
+  };
+  if (!matchesControlChildPath(candidate.channelDir, 'channel')
+    || !matchesControlChildPath(candidate.publicStatusDir, 'public')
+    || !matchesControlChildPath(candidate.processingDir, 'processing')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  if (path.resolve(candidate.runtimeDir) !== path.join(root, 'runtime')) {
+  if (!matchesControlChildPath(candidate.runtimeDir, 'runtime')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
   const normalized: SandboxControlManifest = {
