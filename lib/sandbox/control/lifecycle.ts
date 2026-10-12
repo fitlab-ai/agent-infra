@@ -1257,7 +1257,6 @@ export function assertSandboxLocalControlBinding(binding: SandboxLocalControlBin
   const identity = validateSandboxControlIdentity({
     publicStatusDir: binding.statusDir,
     root: binding.root,
-    manifestRoot: path.dirname(path.join(binding.root, 'manifest.json')),
     mode: manifest.mode,
     taskId: manifest.taskId,
     generation: manifest.generation,
