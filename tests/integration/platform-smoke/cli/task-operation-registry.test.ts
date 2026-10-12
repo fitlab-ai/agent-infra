@@ -177,7 +177,6 @@ test('task-view guard refuses stale progress before a route can import its modul
   const taskEnv = {
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: staleView.taskId!,
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
     AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
@@ -216,7 +215,6 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
   assert.doesNotThrow(() => guardTaskOperation('internal', 'git-workflow', ['commit'], {
     env: {
       AGENT_INFRA_SANDBOX: '1',
-      AGENT_INFRA_CONTROL_TOKEN: 'token',
       AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_DIR: '/control',
@@ -232,7 +230,6 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
       env: {
         AGENT_INFRA_SANDBOX: '1',
         AGENT_INFRA_TASK_ID: staleView.taskId!,
-        AGENT_INFRA_CONTROL_TOKEN: 'token',
         AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
         AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
         AGENT_INFRA_CONTROL_DIR: '/control',
@@ -251,7 +248,6 @@ test('task-bound git input identity is checked before the commit module can load
   const taskEnv = {
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: staleView.taskId!,
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
     AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
@@ -297,7 +293,6 @@ test('mounted sandbox control requires a matching identity sentinel', onPlatform
   fs.mkdirSync(statusDir);
   const baseEnv = {
     AGENT_INFRA_SANDBOX: '1',
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: generation,
     AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
     AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,

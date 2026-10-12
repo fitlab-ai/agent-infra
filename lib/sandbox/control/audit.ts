@@ -41,8 +41,7 @@ const AUDIT_MAX_BYTES = 1024 * 1024;
 
 export function requestAuditFields(manifest: SandboxControlManifest, request: SandboxControlRequest) {
   return {
-    requestId: request.id, requestFamily: request.family, sandboxTaskId: manifest.taskId,
-    requestGeneration: request.generation, requestIssuedAt: request.issuedAt, requestExpiresAt: request.expiresAt
+    requestId: request.id, requestFamily: request.family, sandboxTaskId: manifest.taskId
   };
 }
 

@@ -14,8 +14,7 @@ test('isSandbox distinguishes direct host from a verified mounted sandbox', () =
   const controlRootId = 'a'.repeat(96);
   const env = {
     AGENT_INFRA_SANDBOX: '1',
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
-    AGENT_INFRA_CONTROL_GENERATION: generation,
+    AGENT_INFRA_CONTROL_GENERATION: 'different-host-generation',
     AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
     AGENT_INFRA_CONTROL_DIR: path.join(root, 'channel'),
     AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
@@ -42,7 +41,6 @@ test('isSandbox fails closed when sandbox configuration or its explicit marker i
     generation: 'generation', controlRootId: 'b'.repeat(96)
   });
   const completeConfig = {
-    AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_ROOT_ID: 'b'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: path.join(root, 'channel'),

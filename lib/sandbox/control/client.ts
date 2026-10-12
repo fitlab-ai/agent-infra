@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
   SANDBOX_CONTROL_MAX_BYTES,
   SANDBOX_CONTROL_STATUS_STALE_MS,
   isSandboxControlFamily,
@@ -53,11 +52,10 @@ function clientError(
 
 function preflight(
   statusDir: string,
-  generation: string,
   taskViewEffect: TaskViewAccessEffect | null = null,
   now = Date.now(),
   env: NodeJS.ProcessEnv = process.env
-): void {
+): string {
   if (fs.existsSync(statusDir)) {
     let identity;
     try {
@@ -68,9 +66,6 @@ function preflight(
         : 'SANDBOX_CONTROL_IDENTITY_MALFORMED';
       clientError(code, 'sandbox control identity is missing or invalid', false);
     }
-    if (identity.generation !== generation) {
-      clientError('SANDBOX_CONTROL_IDENTITY_GENERATION_MISMATCH', 'sandbox control identity generation does not match the request', false);
-    }
     if (env.AGENT_INFRA_CONTROL_ROOT_ID && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
       clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
     }
@@ -80,9 +75,6 @@ function preflight(
     status = readSandboxControlStatus(statusDir);
   } catch {
     clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', 'broker status is missing or invalid', true);
-  }
-  if (status.generation !== generation) {
-    clientError('SANDBOX_CONTROL_GENERATION_INVALID', 'broker status generation does not match this sandbox', false);
   }
   if (now - status.updatedAt > SANDBOX_CONTROL_STATUS_STALE_MS || status.updatedAt > now + 1_000) {
     clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', 'broker status heartbeat is stale', true);
@@ -107,6 +99,7 @@ function preflight(
       );
     }
   }
+  return status.generation;
 }
 
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
@@ -201,7 +194,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const channelDir = params.channelDir ?? process.env.AGENT_INFRA_CONTROL_DIR ?? '/run/agent-infra/control';
   const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
   const taskViewEffect = taskViewEffectForRequest(request);
-  preflight(statusDir, request.generation, taskViewEffect);
+  const hostGeneration = preflight(statusDir, taskViewEffect);
   const identityPath = path.join(statusDir, 'identity.json');
   if (fs.existsSync(statusDir)) {
     const identity = readSandboxControlIdentitySentinel(statusDir);
@@ -246,7 +239,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       try {
         // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
         accepted = true;
-        response = readPublishedResponse(raw, request.id, channelDir, accepted, request.generation);
+        response = readPublishedResponse(raw, request.id, channelDir, accepted, hostGeneration);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
@@ -268,7 +261,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
     }
     if (!accepted) {
       try {
-        preflight(statusDir, request.generation, taskViewEffect);
+        preflight(statusDir, taskViewEffect);
       } catch (error) {
         if (cancelPendingRequest(requestPath)) throw error;
         clientError(
@@ -402,16 +395,9 @@ export function recoverSandboxControlFromChannel(requestId: string, params: Read
   );
 }
 
-function authority(params: { token?: string; generation?: string }): { token: string; generation: string } {
-  const token = params.token ?? process.env.AGENT_INFRA_CONTROL_TOKEN;
-  const generation = params.generation ?? process.env.AGENT_INFRA_CONTROL_GENERATION;
-  if (!token || !generation) clientError('SANDBOX_CONTROL_UNAVAILABLE', 'control authority is missing', false);
-  return { token, generation };
-}
-
 export function requestSandboxControl(params: Readonly<{
   family: string; args: string[]; channelDir?: string; statusDir?: string;
-  token?: string; generation?: string; timeoutMs?: number;
+  timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
   if (params.family === 'task-create' || params.family === 'agent-client') {
@@ -420,11 +406,8 @@ export function requestSandboxControl(params: Readonly<{
   if (params.args[1] === 'complete') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', 'complete must use task-finalization', false);
   }
-  const auth = authority(params);
-  const issuedAt = Date.now();
   const request: SandboxControlRequest = {
-    version: 4, id: randomUUID(), ...auth, issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    version: 5, id: randomUUID(),
     family: params.family as 'task-lifecycle', args: params.args
   };
   return exchangeSandboxControl(request, params);
@@ -436,21 +419,14 @@ export function requestSandboxAgentOperation(params: Readonly<{
   payload: Record<string, unknown>;
   channelDir?: string;
   statusDir?: string;
-  token?: string;
-  generation?: string;
   timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isAgentClientId(params.agentClient)) {
     clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'agent-client id is invalid', false);
   }
-  const auth = authority(params);
-  const issuedAt = Date.now();
   const request: SandboxAgentClientRequest = {
-    version: 4,
+    version: 5,
     id: randomUUID(),
-    ...auth,
-    issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
     family: 'agent-client',
     agentClient: params.agentClient,
     operation: params.operation,
@@ -461,13 +437,10 @@ export function requestSandboxAgentOperation(params: Readonly<{
 
 export function requestSandboxTaskCreate(params: Readonly<{
   candidate: TaskCreateCandidateV1; channelDir?: string; statusDir?: string;
-  token?: string; generation?: string; timeoutMs?: number;
+  timeoutMs?: number;
 }>): SandboxControlResponse {
-  const auth = authority(params);
-  const issuedAt = Date.now();
   const request: SandboxTaskCreateRequest = {
-    version: 4, id: randomUUID(), ...auth, issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    version: 5, id: randomUUID(),
     family: 'task-create', candidate: params.candidate,
   };
   return exchangeSandboxControl(request, { ...params, timeoutMs: params.timeoutMs ?? 120_000 });

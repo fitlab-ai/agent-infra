@@ -552,18 +552,14 @@ test('typed controller verify returns only the live task binding without spawnin
     controllerProcess: opened.lease.controllerProcess
   };
   const request = {
-    version: 4 as const,
+    version: 5 as const,
     id: '12345678-1234-1234-1234-123456789abc',
-    token: manifest.token,
-    generation: manifest.generation,
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'agent-client' as const,
     agentClient: 'codex',
     operation: 'controller.verify',
     payload: { proof }
   };
-  const validated = validateSandboxControlRequest(request, manifest, { now: 2_000 });
+  const validated = validateSandboxControlRequest(request, manifest);
   assert.equal(request.operation, 'controller.verify');
   const before = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
   const result = await executeRequest(manifest, manifestPath, validated, {
@@ -640,15 +636,11 @@ test('TypeScript control entries retain explicit strip-types startup', () => {
 
 test('control requests are restricted to allowed lifecycle operations and rebound to the manifest task', () => {
   const request = validateSandboxControlRequest({
-    version: 4,
+    version: 5,
     id: '12345678-1234-1234-1234-123456789abc',
-    token: 'secret',
-    generation: 'generation-1',
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'cancel', '--agent', 'codex', '--reason', 'test'],
-  }, manifest, { now: 2_000 });
+  }, manifest);
   assert.deepEqual(bindSandboxControlTask(request, manifest.taskId!), [
     'TASK-20260809-010203',
     'cancel',
@@ -657,25 +649,21 @@ test('control requests are restricted to allowed lifecycle operations and reboun
     '--reason',
     'test'
   ]);
-  assert.throws(() => validateSandboxControlRequest({ ...request, args: ['08', 'complete'] }, manifest, { now: 2_000 }), /COMMAND_DENIED/u);
+  assert.throws(() => validateSandboxControlRequest({ ...request, args: ['08', 'complete'] }, manifest), /COMMAND_DENIED/u);
   assert.throws(
     () => validateSandboxControlRequest({ ...request, family: 'platform-issue' }, manifest),
     /REQUEST_INVALID/
   );
 });
 
-test('control protocol rejects request v2 and controller result parser enforces exact wire phases', () => {
+test('control protocol rejects unsupported request versions and controller result parser enforces exact wire phases', () => {
   const request = {
-    version: 4,
+    version: 5,
     id: '12345678-1234-1234-1234-123456789abc',
-    token: 'secret',
-    generation: 'generation-1',
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'status'],
   };
-  assert.throws(() => validateSandboxControlRequest({ ...request, version: 2 }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
+  assert.throws(() => validateSandboxControlRequest({ ...request, version: 6 }, manifest), /REQUEST_INVALID/);
   const opened = {
     version: 1,
     status: 'opened',
@@ -732,38 +720,27 @@ test('control protocol rejects request v2 and controller result parser enforces 
   assert.throws(() => parseCodexControllerResult({ ...response, exitCode: 1 }), /controller success result is invalid/);
 });
 
-test('branch-only sandboxes and incorrect tokens fail closed', () => {
+test('branch-only sandboxes fail closed while typed request schema remains usable', () => {
   const request = {
-    version: 4,
+    version: 5,
     id: '12345678-1234-1234-1234-123456789abc',
-    token: 'secret',
-    generation: 'generation-1',
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'cancel'],
   };
   assert.throws(
-    () => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }),
+    () => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }),
     /SANDBOX_CONTROL_BRANCH_ONLY: .*ai sandbox start --recreate <task-ref-or-correct-branch>/
   );
-  assert.throws(
-    () => validateSandboxControlRequest({ ...request, token: 'wrong' }, manifest, { now: 2_000 }),
-    /REQUEST_INVALID/
-  );
+  assert.equal(validateSandboxControlRequest(request, manifest).family, 'task-lifecycle');
   const branchManifest = { ...manifest, mode: 'branch-only' as const, taskId: null };
   assert.throws(() => validateSandboxControlRequest({
     version: request.version,
     id: request.id,
-    token: request.token,
-    generation: request.generation,
-    issuedAt: request.issuedAt,
-    expiresAt: request.expiresAt,
     family: 'agent-client',
     agentClient: 'codex',
     operation: 'controller.open',
     payload: { controllerProcess: { pid: 100, startTime: 10 } }
-  }, branchManifest, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
+  }, branchManifest), /SANDBOX_CONTROL_BRANCH_ONLY/);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-controller-denied-'));
   const manifestPath = path.join(root, 'manifest.json');
   fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
@@ -825,15 +802,11 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
   };
   for (const mode of ['task-bound', 'branch-only'] as const) {
     const request = validateSandboxControlRequest({
-      version: 4,
+      version: 5,
       id: '12345678-1234-1234-1234-123456789abc',
-      token: 'secret',
-      generation: 'generation-1',
-      issuedAt: 1_000,
-      expiresAt: 3_000,
       family: 'task-create',
       candidate,
-    }, { ...manifest, mode, taskId: mode === 'task-bound' ? manifest.taskId : null }, { now: 2_000 });
+    }, { ...manifest, mode, taskId: mode === 'task-bound' ? manifest.taskId : null });
     assert.equal(request.family, 'task-create');
     assert.equal(request.candidate.title, candidate.title);
   }
@@ -842,12 +815,8 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
 test('task-create executor preserves request identity when the host service throws', async () => {
   const requestId = '12345678-1234-4234-8234-123456789abc';
   const request = validateSandboxControlRequest({
-    version: 4,
+    version: 5,
     id: requestId,
-    token: 'secret',
-    generation: 'generation-1',
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'task-create',
     candidate: {
       version: 1,
@@ -864,7 +833,7 @@ test('task-create executor preserves request identity when the host service thro
         acceptanceCriteria: [], openQuestions: []
       }
     },
-  }, manifest, { now: 2_000 });
+  }, manifest);
   const result = await executeRequest(manifest, '/manifest.json', request, {
     createTask: async () => { throw new Error('TASK_CREATE_TEST_ESCAPED_EXCEPTION'); }
   });
@@ -919,15 +888,11 @@ test('task-create executor preserves accepted terminal status when the host serv
     }
   } as const;
   const request = validateSandboxControlRequest({
-    version: 4,
+    version: 5,
     id: requestId,
-    token: boundManifest.token,
-    generation: boundManifest.generation,
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'task-create',
     candidate,
-  }, boundManifest, { now: 2_000 });
+  }, boundManifest);
 
   try {
     const result = await executeRequest(boundManifest, '/manifest.json', request, {
@@ -1224,36 +1189,20 @@ test('cutover snapshot detects replaced generation evidence before materializati
   }
 });
 
-test('control request deadline and generation fail closed', () => {
+test('typed control request is independent of source generation and request age', () => {
   const request = {
-    version: 4,
+    version: 5,
     id: '12345678-1234-1234-1234-123456789abc',
-    token: 'secret',
-    generation: 'generation-1',
-    issuedAt: 1_000,
-    expiresAt: 3_000,
     family: 'task-lifecycle',
     args: ['08', 'status'],
   };
-  assert.throws(
-    () => validateSandboxControlRequest(request, manifest, { now: 3_001 }),
-    /SANDBOX_CONTROL_REQUEST_EXPIRED/
-  );
-  assert.throws(
-    () => validateSandboxControlRequest({ ...request, generation: 'stale' }, manifest, { now: 2_000 }),
-    /SANDBOX_CONTROL_GENERATION_INVALID/
-  );
-  assert.throws(
-    () => validateSandboxControlRequest({ ...request, expiresAt: 3_001 }, manifest, { now: 2_000 }),
-    /SANDBOX_CONTROL_REQUEST_DEADLINE_INVALID/
-  );
+  assert.equal(validateSandboxControlRequest(request, manifest).family, 'task-lifecycle');
 });
 
 test('pre-acceptance state errors expose the explicit retry contract', () => {
   for (const code of [
     'SANDBOX_CONTROL_BUSY',
     'SANDBOX_CONTROL_HANDOFF_ACTIVE',
-    'SANDBOX_CONTROL_REQUEST_EXPIRED',
     'SANDBOX_WORKTREE_BINDING_LOST'
   ]) {
     assert.deepEqual(controlError(new Error(code)), { code, message: code, retryable: true });

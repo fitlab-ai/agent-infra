@@ -1588,8 +1588,6 @@ export async function create(
                 ]
                 : []),
               '-e',
-              `AGENT_INFRA_CONTROL_TOKEN=${control.token}`,
-              '-e',
               `AGENT_INFRA_CONTROL_GENERATION=${control.generation}`,
               '-e',
               'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',

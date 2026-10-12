@@ -10,7 +10,6 @@ export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
 export const SANDBOX_CONTROL_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 export const SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES = 1024 * 1024;
 export const SANDBOX_CONTROL_RESERVATION_BYTES = SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES + 4 * 1024;
-export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
@@ -55,9 +54,7 @@ export type SandboxControlExecutorGateV2 = Readonly<{
   owner: SandboxControlBrokerOwner;
   requestId: string;
 }>;
-type RequestBase = Readonly<{
-  version: 4; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
-}>;
+type RequestBase = Readonly<{ version: 5; id: string }>;
 export type SandboxTaskCommandRequest = RequestBase & Readonly<{
   family: 'task-lifecycle'; args: string[];
 }>;
@@ -220,41 +217,29 @@ export function isSandboxControlFamily(value: string): value is SandboxControlFa
 
 export function validateSandboxControlRequest(
   value: unknown,
-  manifest: SandboxControlManifest,
-  options: { now?: number } = {}
+  manifest: SandboxControlManifest
 ): SandboxControlRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request must be an object');
   }
   const request = value as Record<string, unknown>;
   if (
-    request.version !== 4 || typeof request.id !== 'string'
-    || !/^[a-f0-9-]{16,64}$/.test(request.id) || request.token !== manifest.token
+    request.version !== 5 || typeof request.id !== 'string'
+    || !/^[a-f0-9-]{16,64}$/.test(request.id)
     || typeof request.family !== 'string' || !isSandboxControlFamily(request.family)
-    || !Number.isSafeInteger(request.issuedAt) || !Number.isSafeInteger(request.expiresAt)
   ) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
-  if (request.generation !== manifest.generation) {
-    fail('SANDBOX_CONTROL_GENERATION_INVALID', 'request generation does not match the broker');
-  }
-  const issuedAt = request.issuedAt as number;
-  const expiresAt = request.expiresAt as number;
-  const now = options.now ?? Date.now();
-  if (expiresAt <= issuedAt || expiresAt - issuedAt > SANDBOX_CONTROL_ADMISSION_WINDOW_MS || issuedAt > now + SANDBOX_CONTROL_FUTURE_SKEW_MS) {
-    fail('SANDBOX_CONTROL_REQUEST_DEADLINE_INVALID', 'request admission deadline is invalid');
-  }
-  if (now > expiresAt) fail('SANDBOX_CONTROL_REQUEST_EXPIRED', 'request admission deadline has passed', true);
   if (Buffer.byteLength(JSON.stringify(request), 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
     fail('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit');
   }
   if (request.family === 'task-create') {
-    const expected = ['candidate', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+    const expected = ['candidate', 'family', 'id', 'version'];
     if (Object.keys(request).sort().join(',') !== expected.sort().join(',')) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
     }
     return { ...request, candidate: validateTaskCreateCandidate(request.candidate) } as SandboxTaskCreateRequest;
   }
   if (request.family === 'agent-client') {
-    const expected = ['agentClient', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'operation', 'payload', 'token', 'version'];
+    const expected = ['agentClient', 'family', 'id', 'operation', 'payload', 'version'];
     if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
       || !isAgentClientId(request.agentClient)
       || typeof request.operation !== 'string' || !/^[a-z][a-z0-9.-]{0,63}$/u.test(request.operation)
@@ -266,7 +251,7 @@ export function validateSandboxControlRequest(
     }
     return request as SandboxAgentClientRequest;
   }
-  const expected = ['args', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+  const expected = ['args', 'family', 'id', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
@@ -300,7 +285,6 @@ export function controlError(error: unknown): SandboxControlError {
   const retryable = new Set([
     'SANDBOX_CONTROL_BUSY',
     'SANDBOX_CONTROL_HANDOFF_ACTIVE',
-    'SANDBOX_CONTROL_REQUEST_EXPIRED',
     'SANDBOX_WORKTREE_BINDING_LOST'
   ]).has(code);
   return { code, message, retryable };
