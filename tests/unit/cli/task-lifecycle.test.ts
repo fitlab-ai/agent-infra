@@ -22,7 +22,7 @@ function fixture(state: 'active' | 'blocked' = 'active') {
   const taskDir = path.join(repoRoot, '.agents', 'workspace', state, TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', 'active'), { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } }));
   fs.writeFileSync(
     path.join(taskDir, 'task.md'),
     `---\nid: ${TASK_ID}\nstatus: ${state}\ncurrent_step: code-review\nassigned_to: claude\nupdated_at: old\nagent_infra_version: v9.9.9\ntarget_date:\n${state === 'blocked' ? 'blocked_at: old\n' : ''}---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`
@@ -61,15 +61,17 @@ test('task move refuses a task-bound sandbox control consumer without changing t
   const f = fixture();
   const taskFile = path.join(f.taskDir, 'task.md');
   const registryFile = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
-  const controlDir = path.join(f.taskDir, '.runtime', 'sandbox-control');
-  fs.mkdirSync(controlDir, { recursive: true });
-  const manifest = path.join(controlDir, 'manifest.json');
-  fs.writeFileSync(manifest, '{"taskId":"fixture"}\n');
+  const controlRoot = path.join(f.repoRoot, '.agent-infra', 'sandbox-control', 'demo', 'tasks', TASK_ID);
+  fs.mkdirSync(controlRoot, { recursive: true });
+  const manifest = path.join(controlRoot, 'manifest.json');
+  fs.writeFileSync(manifest, JSON.stringify({
+    mode: 'task-bound', taskId: TASK_ID, project: 'demo', repoRoot: f.repoRoot
+  }) + '\n');
   const before = [fs.readFileSync(taskFile), fs.readFileSync(registryFile), fs.readFileSync(manifest)];
 
   const result = applyTaskLifecycle(
     { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Stop sandbox' },
-    { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+    { repoRoot: f.repoRoot, controlRoot, controlProject: 'demo', metadataProvider: () => METADATA }
   );
   assert.equal(result.error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
   assert.deepEqual([fs.readFileSync(taskFile), fs.readFileSync(registryFile), fs.readFileSync(manifest)], before);

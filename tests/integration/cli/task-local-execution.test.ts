@@ -12,14 +12,16 @@ const TASK_ID = 'TASK-20260919-010101';
 
 test('sandbox workflow and orchestration commands execute locally without publishing a broker request', onPlatforms('linux', 'darwin'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-local-execution-'));
-  const statusDir = path.join(root, 'control', 'public');
-  const channelDir = path.join(root, 'control', 'channel');
+  const controlRoot = path.join(root, 'control');
+  const statusDir = path.join(controlRoot, 'public');
+  const channelDir = path.join(controlRoot, 'channel');
   const requestsDir = path.join(channelDir, 'requests');
   const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   const generation = 'local-execution-generation';
   const controlRootId = 'a'.repeat(96);
   try {
     fs.mkdirSync(requestsDir, { recursive: true });
+    fs.mkdirSync(path.join(controlRoot, 'runtime'), { recursive: true });
     fs.mkdirSync(taskDir, { recursive: true });
     const gitEnv = gitSafeEnv();
     execFileSync('git', ['init', '-q'], { cwd: root, env: gitEnv });
@@ -47,6 +49,7 @@ test('sandbox workflow and orchestration commands execute locally without publis
       AGENT_INFRA_TASK_ID: TASK_ID,
       AGENT_INFRA_CONTROL_GENERATION: generation,
       AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
+      AGENT_INFRA_CONTROL_ROOT_DIR: controlRoot,
       AGENT_INFRA_CONTROL_DIR: channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
       AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),

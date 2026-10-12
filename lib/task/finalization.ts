@@ -70,6 +70,8 @@ type TaskFinalizationRequest = Readonly<{
 type TaskFinalizationOptions = Readonly<{
   repoRoot: string;
   controlBinding?: Readonly<{ generation: string; requestId: string }>;
+  controlRoot?: string;
+  controlProject?: string;
   manifestPath?: string;
   metadataProvider?: TaskLifecycleOptions['metadataProvider'];
   lifecycle?: typeof applyTaskLifecycle;
@@ -1068,7 +1070,13 @@ async function prepareUnderLock(
     } else {
       const result = lifecycle(
         { taskRef: taskId, intent: 'complete', agent: request.agent },
-        { repoRoot, prepareOnly: true, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) }
+        {
+          repoRoot,
+          prepareOnly: true,
+          ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+          ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+          ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+        }
       );
       lifecycleResult = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
@@ -1152,19 +1160,24 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
     return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
-      if (options.controlBinding && options.manifestPath) {
+      if (options.manifestPath || (options.controlRoot && fs.existsSync(path.join(options.controlRoot, 'manifest.json')))) {
         try {
-          const manifest = readSandboxControlManifest(options.manifestPath);
+          const manifestPath = options.manifestPath ?? path.join(options.controlRoot!, 'manifest.json');
+          const root = path.dirname(path.resolve(manifestPath));
+          if (options.controlRoot && path.resolve(options.controlRoot) !== root) {
+            throw new Error('manifest path is outside the bound control root');
+          }
+          const manifest = readSandboxControlManifest(manifestPath);
           const identity = validateSandboxControlIdentity({
             publicStatusDir: manifest.publicStatusDir,
-            root: path.dirname(path.resolve(options.manifestPath)),
+            root,
             mode: manifest.mode,
             taskId: manifest.taskId,
             generation: manifest.generation,
             controlRootId: manifest.controlRootId
           });
-          if (identity.state !== 'valid' || manifest.taskId !== resolved.taskId
-            || manifest.generation !== options.controlBinding.generation
+          if (identity.state !== 'valid' || manifest.mode !== 'task-bound' || manifest.taskId !== resolved.taskId
+            || (options.controlBinding && manifest.generation !== options.controlBinding.generation)
             || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
             throw new Error('current sandbox manifest does not match finalization request');
           }
@@ -1207,7 +1220,12 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       });
       receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
       const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
-      const lifecycleOptions = { repoRoot, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) };
+      const lifecycleOptions = {
+        repoRoot,
+        ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+        ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+        ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+      };
       const result = options.lifecycle
         ? options.lifecycle(lifecycleRequest, lifecycleOptions)
         : applyTaskLifecycleWithinTaskLock(lifecycleRequest, lifecycleOptions, resolved.taskId);

@@ -778,6 +778,7 @@ function expectedMounts(params: {
       }),
     workspaceViewRoot: view.root,
     controlDir: control.channelDir,
+    ...(params.workspace.mode === 'task-bound' ? { controlRootDir: control.root } : {}),
     controlStatusDir: control.statusDir,
     ...(taskSources === null
       ? {}

@@ -305,6 +305,9 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
       const config = loadConfig();
       const response = recoverSandboxControlFromHost(requestId, {
         managedRoot: path.join(config.controlBase, config.project),
+        controlBase: config.controlBase,
+        project: config.project,
+        repoRoot: config.repoRoot,
         timeoutMs: params.timeoutMs
       });
       if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') {

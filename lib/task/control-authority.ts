@@ -3,6 +3,7 @@ import path from 'node:path';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
+import { sandboxControlPaths } from '../sandbox/workspace-view.ts';
 import { getAgentClientAdapter } from '../agent-clients/registry.ts';
 import {
   activateMatchingOrchestrationDelegation,
@@ -47,6 +48,8 @@ export type TaskControlExecutionContext =
       mode: 'direct-host';
       repoRoot: string;
       runtimeDir?: string;
+      controlBase?: string;
+      project?: string;
     }>
   | Readonly<{
       source: 'sandbox-executor';
@@ -108,11 +111,15 @@ function absolute(name: string, value: string): string {
 export function createDirectHostExecutionContext(params: Readonly<{
   repoRoot: string;
   runtimeDir?: string;
+  controlBase?: string;
+  project?: string;
 }>): TaskControlExecutionContext {
   return {
     source: 'direct-host',
     mode: 'direct-host',
     repoRoot: absolute('repoRoot', params.repoRoot),
+    ...(params.controlBase === undefined ? {} : { controlBase: absolute('controlBase', params.controlBase) }),
+    ...(params.project === undefined ? {} : { project: params.project }),
     ...(params.runtimeDir === undefined ? {} : { runtimeDir: absolute('runtimeDir', params.runtimeDir) })
   };
 }
@@ -151,6 +158,8 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
     if (context.mode !== 'direct-host') invalidContext('direct-host mode is inconsistent');
     absolute('repoRoot', context.repoRoot);
     if (context.runtimeDir !== undefined) absolute('runtimeDir', context.runtimeDir);
+    if (Boolean(context.controlBase) !== Boolean(context.project)) invalidContext('control configuration is incomplete');
+    if (context.controlBase !== undefined) absolute('controlBase', context.controlBase);
     return;
   }
   if (context.mode !== 'task-bound-sandbox' || !/^TASK-\d{8}-\d{6}$/u.test(context.taskId)
@@ -204,6 +213,8 @@ async function applyLifecycleWithAuthority(
   context: TaskControlExecutionContext,
   request: TaskLifecycleControlRequest
 ): Promise<TaskLifecycleResult | LifecycleRecoveryResult> {
+  const taskId = lifecycleTaskId(request, context.repoRoot);
+  const controlRoot = taskId ? controlRootForTask(context, taskId) : undefined;
   const execute = async (underTaskLock = false): Promise<TaskLifecycleResult | LifecycleRecoveryResult> => {
     if (request.intent === 'recover-started') {
       const adapter = isAgentClientId(request.agent)
@@ -219,10 +230,17 @@ async function applyLifecycleWithAuthority(
       return adapter.recoverStarted(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
     }
     return underTaskLock
-      ? applyTaskLifecycleWithinTaskLock(request, { repoRoot: context.repoRoot }, taskId!)
-      : applyTaskLifecycle(request, { repoRoot: context.repoRoot });
+      ? applyTaskLifecycleWithinTaskLock(request, {
+        repoRoot: context.repoRoot,
+        ...(controlRoot ? { controlRoot } : {}),
+        ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {})
+      }, taskId!)
+      : applyTaskLifecycle(request, {
+        repoRoot: context.repoRoot,
+        ...(controlRoot ? { controlRoot } : {}),
+        ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {})
+      });
   };
-  const taskId = lifecycleTaskId(request, context.repoRoot);
   if (!taskId) return await execute();
   try {
     return await withTaskExecutionLock(
@@ -243,6 +261,18 @@ async function applyLifecycleWithAuthority(
     }
     return taskLifecycleFailure(request, { code: error.code, message: error.message }, taskId);
   }
+}
+
+function controlRootForTask(context: TaskControlExecutionContext, taskId: string): string | undefined {
+  if (context.source === 'sandbox-executor') return path.dirname(context.manifestPath);
+  if (!context.controlBase || !context.project) return undefined;
+  return sandboxControlPaths({
+    base: context.controlBase,
+    repoRoot: context.repoRoot,
+    project: context.project,
+    container: '',
+    identity: { mode: 'task-bound', taskId }
+  }).root;
 }
 
 function orchestration(
@@ -346,6 +376,10 @@ export function dispatchTaskControlOperation(
     });
   }
   if (operation.family === 'task-finalization') {
+    let taskId: string | null = null;
+    const resolved = resolveTaskRef(boundTaskRef(context, operation.request.taskRef), { repoRoot: context.repoRoot });
+    if (resolved.ok) taskId = resolved.taskId;
+    const controlRoot = taskId ? controlRootForTask(context, taskId) : undefined;
     return applyTaskFinalization({
       ...operation.request,
       taskRef: boundTaskRef(context, operation.request.taskRef)
@@ -353,8 +387,11 @@ export function dispatchTaskControlOperation(
       repoRoot: context.repoRoot,
       ...(context.source === 'sandbox-executor' ? {
         controlBinding: { generation: context.generation, requestId: context.requestId },
-        manifestPath: context.manifestPath
+        manifestPath: context.manifestPath,
+        controlRoot: path.dirname(context.manifestPath)
       } : {}),
+      ...(controlRoot ? { controlRoot } : {}),
+      ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {}),
       preflight: (request, options) => verifyTaskEvent(
         { ...request, event: 'complete-task.hard-preflight' }, options
       )

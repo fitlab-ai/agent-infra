@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { isSandbox } from '../../../lib/sandbox/environment.ts';
+import { resolveSandboxControlTransport } from '../../../lib/sandbox/environment.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { onPlatforms } from '../../helpers.ts';
 
@@ -57,6 +58,34 @@ test('isSandbox fails closed when sandbox configuration or its explicit marker i
       () => isSandbox(completeConfig, { statusMountPath: statusDir }),
       /SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE/u
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound sandbox requires the complete mounted control root while branch-only does not', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-task-root-'));
+  const statusDir = path.join(root, 'status');
+  fs.mkdirSync(statusDir);
+  const taskId = 'TASK-20261012-010203';
+  const controlRootId = 'c'.repeat(96);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId, generation: 'task-root-generation', controlRootId
+  });
+  const env = {
+    AGENT_INFRA_SANDBOX: '1',
+    AGENT_INFRA_TASK_ID: taskId,
+    AGENT_INFRA_CONTROL_GENERATION: 'task-root-generation',
+    AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
+    AGENT_INFRA_CONTROL_DIR: path.join(root, 'channel'),
+    AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
+    AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
+  };
+  try {
+    assert.equal(resolveSandboxControlTransport(env, { statusMountPath: statusDir }).kind, 'fail-closed');
+    assert.equal(resolveSandboxControlTransport({ ...env, AGENT_INFRA_CONTROL_ROOT_DIR: '/run/agent-infra/control-root' }, {
+      statusMountPath: statusDir
+    }).kind, 'broker-client');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

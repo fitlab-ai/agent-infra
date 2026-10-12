@@ -20,6 +20,7 @@ import {
   INTERNAL_CLI_PATH,
   loadFreshEsm,
   onPlatforms,
+  sandboxControlSafeEnv,
   writeNodeCommandShim,
   writeSandboxEngineFixture
 } from "../../helpers.ts";
@@ -134,9 +135,10 @@ function spawnSandboxCli(
   return spawnSync(process.execPath, cliArgs("sandbox", ...args), {
     cwd: fixture.repoDir,
     env: {
-      ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
+      ...envWithPrependedPath(sandboxControlSafeEnv(gitSafeEnv()), fixture.binDir),
       HOME: tmpDir,
       USERPROFILE: tmpDir,
+      AGENT_INFRA_SANDBOX: undefined,
       DOCKER_LOG_PATH: fixture.logPath,
       ...extraEnv
     },
@@ -478,7 +480,7 @@ test("sandbox rm --unbound validates every target before deleting the first one"
   }
 });
 
-test("sandbox rm refuses a missing task record without removing its task-bound container", () => {
+test("sandbox rm removes only the matching task-bound container when its task record is missing", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-task-record-"));
   const taskId = "TASK-20260101-000105";
   const branch = "feature/missing-task-record";
@@ -486,14 +488,17 @@ test("sandbox rm refuses a missing task record without removing its task-bound c
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      dockerStdoutForPs: sandboxRow(container, branch, "demo", "task-bound", taskId)
+      dockerStdoutForPs: [
+        sandboxRow(container, branch, "demo", "task-bound", taskId),
+        sandboxRow("demo-dev-feature..other-task", "feature/other-task", "demo", "task-bound", "TASK-20260101-000106")
+      ].join("\n")
     });
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", taskId]);
 
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /TASK_NOT_FOUND/);
-    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), false);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const removals = fixture.readDockerCalls().filter((call) => call[0] === "rm").map((call) => call.at(-1));
+    assert.deepEqual(removals, [container]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1065,6 +1070,12 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
       arg,
       `/workspace/.agents/workspace/completed/${taskId}`
     )));
+    assert.ok(runCall.some((arg) => isWritableMountFor(arg, '/run/agent-infra/control-root')
+      && arg.includes(`${controlRoot}:/run/agent-infra/control-root`)));
+    assert.ok(runCall.includes('AGENT_INFRA_CONTROL_ROOT_DIR=/run/agent-infra/control-root'));
+    assert.equal(controlRoot, path.join(
+      tmpDir, '.agent-infra', 'sandbox-control', 'demo', 'tasks', taskId
+    ));
     assert.equal(runCall.some((arg) => arg.includes(siblingTaskId)), false);
 
     const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", branch);

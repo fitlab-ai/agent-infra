@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -55,7 +56,7 @@ test('branch-only view is stable and exposes an empty registry', () => {
   assert.equal(fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'), '{"version":1,"ids":{}}\n');
 });
 
-test('task-bound control paths are rooted under the unique task runtime directory', () => {
+test('task-bound control paths use a stable project and full-task control root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-task-runtime-root-'));
   const taskId = 'TASK-20261006-010203';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -65,8 +66,42 @@ test('task-bound control paths are rooted under the unique task runtime director
     base: path.join(root, 'old-control-base'), repoRoot: root, project: 'p', container: 'p-dev-feature',
     identity: { mode: 'task-bound', taskId }
   });
-  assert.equal(control.root, path.join(fs.realpathSync.native(taskDir), '.runtime', 'sandbox-control'));
+  assert.equal(control.root, path.join(root, 'old-control-base', 'p', 'tasks', taskId));
+  assert.notEqual(control.root, path.join(fs.realpathSync.native(taskDir), '.runtime', 'sandbox-control'));
   assert.equal(control.runtimeDir, path.join(control.root, 'runtime'));
+  assert.equal(control.manifestPath, path.join(control.root, 'manifest.json'));
+  assert.notEqual(sandboxControlPaths({
+    base: path.join(root, 'old-control-base'), repoRoot: root, project: 'other-project', container: 'p-dev-feature',
+    identity: { mode: 'task-bound', taskId }
+  }).root, control.root);
+  assert.notEqual(sandboxControlPaths({
+    base: path.join(root, 'old-control-base'), repoRoot: root, project: 'p', container: 'p-dev-feature',
+    identity: { mode: 'task-bound', taskId: 'TASK-20261006-010204' }
+  }).root, control.root);
+  assert.equal(fs.existsSync(path.join(taskDir, '.runtime', 'orchestration.json')), false);
+});
+
+test('branch-only control paths retain their existing container identity layout', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-branch-control-root-'));
+  const control = sandboxControlPaths({
+    base: path.join(root, 'controls'), project: 'p', container: 'p-dev-feature',
+    identity: { mode: 'branch-only' }
+  });
+  const digest = createHash('sha256').update('branch-only').digest('hex').slice(0, 16);
+  assert.equal(control.root, path.join(root, 'controls', 'p', 'p-dev-feature', digest));
+});
+
+test('task-bound control materialization rejects a symlinked managed-root ancestor', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-root-link-'));
+  const base = path.join(root, 'controls');
+  const outside = path.join(root, 'outside');
+  fs.mkdirSync(path.join(base, 'p'), { recursive: true });
+  fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(base, 'p', 'tasks'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => materializeSandboxControl({
+    base, repoRoot: root, worktreeRoot: root, project: 'p', container: 'p-dev-feature', branch: 'feature',
+    identity: { mode: 'task-bound', taskId: 'TASK-20261006-010205' }
+  }), /symbolic link/u);
 });
 
 test('workspace mount targets are created by the host with private permissions', () => {
@@ -114,6 +149,7 @@ test('task-bound sandboxes bind only their completed task directory writable', (
     shellConfigBase: path.join(root, 'shell')
   }, 'feature/task', {
     worktree, workspaceViewRoot: path.join(root, 'view'), controlDir: path.join(root, 'control', 'channel'),
+    controlRootDir: path.join(root, 'control'),
     controlStatusDir: path.join(root, 'control', 'public'), taskSources: [path.join(repoRoot, 'active', taskId)],
     completedTaskSource: completedSource, taskId
   });

@@ -271,6 +271,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
     { Type: "bind", Source: completedTaskSource, Destination: `/workspace/.agents/workspace/completed/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
+    { Type: "bind", Source: control.root, Destination: "/run/agent-infra/control-root", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: control.runtimeDir, Destination: "/run/agent-infra/runtime", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
@@ -538,7 +539,7 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   }
 });
 
-test("completed task-bound recovery rejects a stale control mount after the task directory moved", () => {
+test("completed task-bound recovery keeps the task control root stable after the task directory moved", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-task-source-"));
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223554";
@@ -568,7 +569,7 @@ test("completed task-bound recovery rejects a stale control mount after the task
     assert.equal(snapshot.identityOk, true);
     assert.equal(taskMount?.sourceMatches, true);
     assert.equal(taskMount?.sourceAccessible, true);
-    assert.ok(classifySandboxRecovery(snapshot).some((finding) => finding.repairKind === "hard-failure"));
+    assert.equal(classifySandboxRecovery(snapshot).some((finding) => finding.repairKind === "hard-failure"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

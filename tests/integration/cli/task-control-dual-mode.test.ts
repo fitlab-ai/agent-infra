@@ -20,6 +20,7 @@ import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.t
 function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...sandboxControlSafeEnv(),
+    AGENT_INFRA_SANDBOX: undefined,
     AGENT_INFRA_TASK_ID: undefined,
     AGENT_INFRA_RUNTIME_DIR: undefined,
     AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
@@ -265,7 +266,7 @@ test('task orchestration validates the mounted identity before local execution',
     AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
   }));
   assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING');
+  assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CONTROL_TRANSPORT_INVALID');
 });
 
 test('partial sandbox or executor markers fail closed before task parsing', () => {
@@ -318,6 +319,7 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
     assert.equal(resolveSandboxControlTransport(cleanEnv({
       ...base,
       AGENT_INFRA_TASK_ID: TASK_ID,
+      AGENT_INFRA_CONTROL_ROOT_DIR: path.join(root, 'control-root'),
       AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
     }), options).kind, 'broker-client');
 
@@ -370,7 +372,7 @@ type SandboxFixture = ReturnType<typeof taskFixture> & Readonly<{
 
 function sandboxFixture(): SandboxFixture {
   const fixture = taskFixture(true, true);
-  const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-dual-mode-control-'));
+  const controlRoot = path.join(fixture.root, '.agent-infra', 'sandbox-control', 'dual-mode', 'tasks', TASK_ID);
   const channelDir = path.join(controlRoot, 'channel');
   const statusDir = path.join(controlRoot, 'public');
   const processingDir = path.join(controlRoot, 'processing');
@@ -427,6 +429,7 @@ function runSandboxClient(
       AGENT_INFRA_CONTROL_STATUS_DIR: fixture.statusDir,
       AGENT_INFRA_CONTROL_GENERATION: fixture.generation,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_ROOT_DIR: fixture.controlRoot,
       AGENT_INFRA_RUNTIME_DIR: path.join(fixture.controlRoot, 'runtime')
     },
     encoding: 'utf8'
@@ -547,6 +550,48 @@ test('direct-host and sandbox executor share lifecycle results', async () => {
   }
 });
 
+test('direct-host and sandbox executor protect the same task-bound control root before moving task state', async () => {
+  const directFixture = taskFixture();
+  const sandboxFixture = taskFixture();
+  const controlBase = path.join(directFixture.root, '.agent-infra', 'sandbox-control');
+  const controlRoot = path.join(controlBase, 'dual-mode', 'tasks', TASK_ID);
+  fs.mkdirSync(controlRoot, { recursive: true });
+  const manifestPath = path.join(controlRoot, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    mode: 'task-bound', taskId: TASK_ID, repoRoot: directFixture.root, project: 'dual-mode'
+  }));
+  fs.writeFileSync(path.join(controlRoot, 'lease.json'), '{}');
+  const sandboxRoot = path.join(sandboxFixture.root, '.agent-infra', 'sandbox-control', 'dual-mode', 'tasks', TASK_ID);
+  fs.mkdirSync(sandboxRoot, { recursive: true });
+  fs.writeFileSync(path.join(sandboxRoot, 'manifest.json'), JSON.stringify({
+    mode: 'task-bound', taskId: TASK_ID, repoRoot: sandboxFixture.root, project: 'dual-mode'
+  }));
+  fs.writeFileSync(path.join(sandboxRoot, 'lease.json'), '{}');
+  try {
+    const directContext = createDirectHostExecutionContext({
+      repoRoot: directFixture.root, controlBase, project: 'dual-mode'
+    });
+    const sandboxContext = createSandboxExecutorExecutionContext({
+      repoRoot: sandboxFixture.root,
+      worktreeRoot: sandboxFixture.root,
+      runtimeDir: path.join(sandboxRoot, 'runtime'),
+      taskId: TASK_ID,
+      generation: 'generation',
+      manifestPath: path.join(sandboxRoot, 'manifest.json'),
+      requestId: 'request-id'
+    });
+    for (const [context, fixture] of [[directContext, directFixture], [sandboxContext, sandboxFixture]] as const) {
+      const result = await dispatchTaskControlOperation(context, lifecycleOperation());
+      assert.equal((result as { status: string }).status, 'failed');
+      assert.equal((result as { error?: { code?: string } }).error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
+      assert.equal(fs.existsSync(path.join(fixture.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+    }
+  } finally {
+    fs.rmSync(directFixture.root, { recursive: true, force: true });
+    fs.rmSync(sandboxFixture.root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox lifecycle uses the shared task lock', async () => {
   const lockFixture = taskFixture();
   try {
@@ -565,19 +610,29 @@ test('sandbox lifecycle uses the shared task lock', async () => {
 test('direct-host and sandbox client transport preserve lifecycle results', async () => {
   const directFixture = taskFixture(true, true);
   const sandbox = sandboxFixture();
+  const directControlBase = path.join(directFixture.root, '.agent-infra', 'sandbox-control');
+  const directControlRoot = path.join(directControlBase, 'dual-mode', 'tasks', TASK_ID);
+  fs.mkdirSync(directControlRoot, { recursive: true });
+  fs.writeFileSync(path.join(directControlRoot, 'manifest.json'), JSON.stringify({
+    mode: 'task-bound', taskId: TASK_ID, repoRoot: directFixture.root, project: 'dual-mode'
+  }));
   const broker = startSandboxFixtureBroker(sandbox);
   try {
     waitForHealthyStatus(sandbox.statusDir, 5_000);
-    const directContext = createDirectHostExecutionContext({ repoRoot: directFixture.root });
+    const directContext = createDirectHostExecutionContext({
+      repoRoot: directFixture.root, controlBase: directControlBase, project: 'dual-mode'
+    });
     const directLifecycle = await dispatchTaskControlOperation(directContext, lifecycleOperation());
     const sandboxLifecycle = runSandboxClient(sandbox, 'task-lifecycle', [
       TASK_ID, 'block', '--agent', 'codex', '--reason', 'pause for dual-mode verification',
       '--unblock-condition', 'resume after verification'
     ]);
-    assert.equal(sandboxLifecycle.status, 0, sandboxLifecycle.stderr || JSON.stringify(sandboxLifecycle.payload));
+    assert.equal((directLifecycle as { status: string }).status, 'failed');
+    assert.equal((directLifecycle as { error?: { code?: string } }).error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
+    assert.equal(sandboxLifecycle.status, 1, sandboxLifecycle.stderr || JSON.stringify(sandboxLifecycle.payload));
     assert.deepEqual(comparableLifecycle(directLifecycle), comparableLifecycle(sandboxLifecycle.payload));
-    assert.equal(fs.existsSync(path.join(directFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md')), true);
-    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(directFixture.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
   } finally {
     await stopSandboxFixtureBroker(broker);
     fs.rmSync(directFixture.root, { recursive: true, force: true });
@@ -600,9 +655,10 @@ test('sandbox executor accepts a control root alias while preserving lifecycle t
       TASK_ID, 'block', '--agent', 'codex', '--reason', 'pause through control root alias',
       '--unblock-condition', 'resume after verification'
     ]);
-    assert.equal(result.status, 0, result.stderr || JSON.stringify(result.payload));
-    assert.equal(result.payload.status, 'applied');
-    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md')), true);
+    assert.equal(result.status, 1, result.stderr || JSON.stringify(result.payload));
+    assert.equal(result.payload.status, 'failed');
+    assert.equal((result.payload.error as { code?: string }).code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
+    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
   } finally {
     await stopSandboxFixtureBroker(broker);
     fs.rmSync(sandbox.root, { recursive: true, force: true });

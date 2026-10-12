@@ -106,6 +106,8 @@ type LifecycleFileSystem = {
 };
 type TaskLifecycleOptions = {
   repoRoot?: string;
+  controlRoot?: string;
+  controlProject?: string;
   metadataProvider?: () => TaskWriteMetadata;
   fileSystem?: Partial<LifecycleFileSystem>;
   taskFileSystem?: Partial<TaskFileSystem>;
@@ -274,6 +276,100 @@ function transferTaskContents(sourcePath: string, targetPath: string): void {
     || !sourceNames.every((name) => sameTaskEntry(path.join(sourcePath, name), path.join(targetPath, name)))) {
     throw new Error('completed target does not match task source after copy');
   }
+}
+
+function pathExists(candidate: string): boolean {
+  try { fs.lstatSync(candidate); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function assertTaskControlRootPath(controlRoot: string, taskId: string, expectedProject?: string): void {
+  if (path.basename(controlRoot) !== taskId || path.basename(path.dirname(controlRoot)) !== 'tasks'
+    || (expectedProject !== undefined && path.basename(path.dirname(path.dirname(controlRoot))) !== expectedProject)) {
+    throw new Error('control root path does not match the task/project layout');
+  }
+  const managedBase = path.dirname(path.dirname(path.dirname(controlRoot)));
+  let current = managedBase;
+  for (const segment of path.relative(managedBase, controlRoot).split(path.sep).filter(Boolean)) {
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error('control root ancestor is a symbolic link');
+    current = path.join(current, segment);
+  }
+  const stat = fs.lstatSync(controlRoot);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('control root is not a real directory');
+}
+
+function assertTaskControlManifestIdentity(controlRoot: string, taskId: string, repoRoot: string, expectedProject?: string): void {
+  const controlManifest = path.join(controlRoot, 'manifest.json');
+  if (!fs.existsSync(controlManifest)) throw new Error('control manifest is missing');
+  const manifestStat = fs.lstatSync(controlManifest);
+  if (!manifestStat.isFile() || manifestStat.isSymbolicLink()) throw new Error('control manifest is not a real file');
+  const manifest = JSON.parse(fs.readFileSync(controlManifest, 'utf8')) as {
+    mode?: unknown; taskId?: unknown; project?: unknown; repoRoot?: unknown;
+  };
+  const project = expectedProject ?? path.basename(path.dirname(path.dirname(controlRoot)));
+  if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId || manifest.project !== project
+    || typeof manifest.repoRoot !== 'string' || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
+    throw new Error('control manifest identity does not match the task');
+  }
+}
+
+function assertTaskControlRootIdentity(controlRoot: string, taskId: string, repoRoot: string, expectedProject?: string): void {
+  assertTaskControlRootPath(controlRoot, taskId, expectedProject);
+  assertTaskControlManifestIdentity(controlRoot, taskId, repoRoot, expectedProject);
+}
+
+function taskBoundControlMoveSafety(
+  request: TaskLifecycleRequest,
+  controlRoot: string | undefined,
+  options: TaskLifecycleOptions,
+  taskId: string,
+  repoRoot: string
+): LifecycleError | null {
+  if (!controlRoot) return null;
+  const controlManifest = path.join(controlRoot, 'manifest.json');
+  const controlLease = path.join(controlRoot, 'lease.json');
+  const stateExists = pathExists(controlRoot) || pathExists(controlManifest) || pathExists(controlLease);
+  if (stateExists) {
+    try { assertTaskControlRootIdentity(controlRoot, taskId, repoRoot, options.controlProject); }
+    catch {
+      return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control root is missing, malformed, or belongs to another task' };
+    }
+  }
+  if (request.intent !== 'complete' && (pathExists(controlManifest) || pathExists(controlLease))) {
+    return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory' };
+  }
+  return null;
+}
+
+function orchestrationMoveSafety(sourcePath: string): LifecycleError | null {
+  const orchestrationPath = path.join(sourcePath, '.runtime', 'orchestration.json');
+  if (!pathExists(orchestrationPath)) return null;
+  try {
+    const run = JSON.parse(fs.readFileSync(orchestrationPath, 'utf8')) as { status?: unknown; pendingDelegation?: unknown };
+    if (run.status === 'running' || run.pendingDelegation !== null && run.pendingDelegation !== undefined) {
+      return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task orchestration has an active or pending delegation; settle it before moving the task directory' };
+    }
+  } catch {
+    return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task orchestration state is unreadable; refusing to move the task directory' };
+  }
+  return null;
+}
+
+function runtimeMoveSafety(
+  request: TaskLifecycleRequest,
+  movingTaskDirectory: boolean,
+  options: TaskLifecycleOptions,
+  taskId: string,
+  repoRoot: string,
+  sourcePath: string
+): LifecycleError | null {
+  if (!movingTaskDirectory) return null;
+  const controlSafety = taskBoundControlMoveSafety(request, options.controlRoot, options, taskId, repoRoot);
+  return controlSafety ?? orchestrationMoveSafety(sourcePath);
 }
 
 function targetContainsTask(targetPath: string, taskId: string, request: TaskLifecycleRequest): boolean {
@@ -554,35 +650,6 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
   const targetPath = path.join(repoRoot, '.agents', 'workspace', spec.target, taskId);
   const requiredSteps = stepsForIntent(request.intent);
   const movingTaskDirectory = sourcePath !== targetPath;
-  const assertRuntimeMoveSafe = (): LifecycleError | null => {
-    if (!movingTaskDirectory) return null;
-    const controlManifest = path.join(sourcePath, '.runtime', 'sandbox-control', 'manifest.json');
-    const controlLease = path.join(sourcePath, '.runtime', 'sandbox-control', 'lease.json');
-    if (request.intent !== 'complete' && (fs.existsSync(controlManifest) || fs.existsSync(controlLease))) {
-      return {
-        code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
-        message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory'
-      };
-    }
-    const orchestrationPath = path.join(sourcePath, '.runtime', 'orchestration.json');
-    if (fs.existsSync(orchestrationPath)) {
-      try {
-        const run = JSON.parse(fs.readFileSync(orchestrationPath, 'utf8')) as { status?: unknown; pendingDelegation?: unknown };
-        if (run.status === 'running' || run.pendingDelegation !== null && run.pendingDelegation !== undefined) {
-          return {
-            code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
-            message: 'task orchestration has an active or pending delegation; settle it before moving the task directory'
-          };
-        }
-      } catch {
-        return {
-          code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
-          message: 'task orchestration state is unreadable; refusing to move the task directory'
-        };
-      }
-    }
-    return null;
-  };
   const currentTaskFile = path.join(sourcePath, 'task.md');
   const existingJournal = fs.existsSync(path.join(sourcePath, '.task-lifecycle.json'));
   if (sourceState === spec.target && !existingJournal) {
@@ -605,7 +672,7 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
     && !(request.intent === 'complete' && targetContainsTask(targetPath, taskId, request))) {
     return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
-  const moveSafety = assertRuntimeMoveSafe();
+  const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath);
   if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   const content = io.readFileSync(currentTaskFile);
   let frontmatter;
@@ -732,7 +799,7 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
   }
   if (fs.existsSync(targetPath) && !fs.existsSync(path.join(sourcePath, 'task.md'))) completed.add('directory-moved');
   if (!completed.has('directory-moved')) {
-    const moveSafety = assertRuntimeMoveSafe();
+    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath);
     if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     if (request.intent === 'complete') {
