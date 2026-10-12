@@ -19,6 +19,8 @@ import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { assertSandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
+import type { SandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -108,6 +110,7 @@ type TaskLifecycleOptions = {
   repoRoot?: string;
   controlRoot?: string;
   controlProject?: string;
+  sandboxLocalControlBinding?: SandboxLocalControlBinding;
   metadataProvider?: () => TaskWriteMetadata;
   fileSystem?: Partial<LifecycleFileSystem>;
   taskFileSystem?: Partial<TaskFileSystem>;
@@ -330,6 +333,17 @@ function taskBoundControlMoveSafety(
   repoRoot: string
 ): LifecycleError | null {
   if (!controlRoot) return null;
+  if (options.sandboxLocalControlBinding) {
+    try {
+      const binding = options.sandboxLocalControlBinding;
+      if (request.intent !== 'complete' || binding.root !== controlRoot || binding.taskId !== taskId
+        || binding.project !== options.controlProject) throw new Error('sandbox control binding does not match lifecycle request');
+      assertSandboxLocalControlBinding(binding);
+    } catch {
+      return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'sandbox control mount is missing, malformed, or belongs to another task' };
+    }
+    return null;
+  }
   const controlManifest = path.join(controlRoot, 'manifest.json');
   const controlLease = path.join(controlRoot, 'lease.json');
   const stateExists = pathExists(controlRoot) || pathExists(controlManifest) || pathExists(controlLease);

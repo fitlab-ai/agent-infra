@@ -64,7 +64,7 @@ function taskBoundManifestPaths(params: Readonly<{
     try { manifest = readSandboxControlManifest(manifestPath); } catch { throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID'); }
     if (manifest.mode !== 'task-bound' || manifest.taskId !== task.name || manifest.project !== params.project
       || fs.realpathSync.native(manifest.repoRoot) !== canonicalRepoRoot
-      || path.dirname(path.resolve(manifestPath)) !== canonicalTaskRoot) {
+      || path.dirname(fs.realpathSync.native(manifestPath)) !== canonicalTaskRoot) {
       throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
     }
     result.push(manifestPath);

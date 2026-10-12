@@ -1210,6 +1210,68 @@ export function readSandboxControlManifest(manifestPath: string): SandboxControl
   return readSandboxControlManifestValue(manifestPath);
 }
 
+export type SandboxLocalControlBinding = Readonly<{
+  root: string;
+  project: string;
+  taskId: string;
+  generation: string;
+  controlRootId: string;
+  channelDir: string;
+  statusDir: string;
+  runtimeDir: string;
+}>;
+
+function sameMountedControlDirectory(left: string, right: string): boolean {
+  try {
+    const leftStat = fs.lstatSync(left);
+    const rightStat = fs.lstatSync(right);
+    return leftStat.isDirectory() && !leftStat.isSymbolicLink()
+      && rightStat.isDirectory() && !rightStat.isSymbolicLink()
+      && leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch {
+    return false;
+  }
+}
+
+function sandboxLocalManifestMatches(binding: SandboxLocalControlBinding, manifest: SandboxControlManifest, root: string): boolean {
+  return manifest.mode === 'task-bound' && manifest.taskId === binding.taskId
+    && manifest.project === binding.project && manifest.generation === binding.generation
+    && manifest.controlRootId === binding.controlRootId
+    && manifest.channelDir === path.join(root, 'channel')
+    && manifest.publicStatusDir === path.join(root, 'public')
+    && manifest.processingDir === path.join(root, 'processing')
+    && manifest.runtimeDir === path.join(root, 'runtime');
+}
+
+export function assertSandboxLocalControlBinding(binding: SandboxLocalControlBinding): SandboxControlManifest {
+  if (!path.isAbsolute(binding.root) || path.resolve(binding.root) !== binding.root) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+  }
+  const rootStat = fs.lstatSync(binding.root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+  const manifest = readSandboxControlManifest(path.join(binding.root, 'manifest.json'));
+  const canonicalRoot = fs.realpathSync.native(binding.root);
+  if (!sandboxLocalManifestMatches(binding, manifest, canonicalRoot)) {
+    throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
+  }
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: binding.statusDir,
+    root: binding.root,
+    manifestRoot: path.dirname(path.join(binding.root, 'manifest.json')),
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
+  const aliasesMatch = sameMountedControlDirectory(manifest.channelDir, binding.channelDir)
+    && sameMountedControlDirectory(manifest.publicStatusDir, binding.statusDir)
+    && sameMountedControlDirectory(manifest.runtimeDir, binding.runtimeDir);
+  if (identity.state !== 'valid' || !aliasesMatch) {
+    throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
+  }
+  return manifest;
+}
+
 function readBrokerOwner(filePath: string): BrokerOwner | null {
   if (!fs.existsSync(filePath)) return null;
   if (!regularFile(filePath)) throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');

@@ -102,16 +102,16 @@ test('task move refuses active or unreadable orchestration state and preserves a
 
 test('safe task move carries task-owned runtime bytes to the new state intact', () => {
   const f = fixture();
-  const runtimeFile = path.join(f.taskDir, '.runtime', 'receipt', 'state.json');
+  const runtimeFile = path.join(f.taskDir, '.runtime', 'orchestration.json');
   fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
-  fs.writeFileSync(runtimeFile, '{"stable":true}\n');
+  fs.writeFileSync(runtimeFile, '{"status":"completed","pendingDelegation":null}\n');
   const before = fs.readFileSync(runtimeFile);
   const result = applyTaskLifecycle(
     { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Retry later' },
     { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
   );
   assert.equal(result.status, 'applied');
-  assert.deepEqual(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID, '.runtime', 'receipt', 'state.json')), before);
+  assert.deepEqual(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID, '.runtime', 'orchestration.json')), before);
   assert.equal(fs.existsSync(f.taskDir), false);
 });
 

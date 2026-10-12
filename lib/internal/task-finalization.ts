@@ -8,7 +8,7 @@ import {
 import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
-import { quiesceSandboxControlForTaskCompletion, readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
+import { assertSandboxLocalControlBinding, quiesceSandboxControlForTaskCompletion } from '../sandbox/control/lifecycle.ts';
 import { loadSandboxControlLocation } from '../sandbox/config.ts';
 import { serializeTaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
 import { verifyTaskEvent } from '../task/verification.ts';
@@ -17,18 +17,6 @@ import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-in
 const USAGE = 'Usage: agent-infra-internal task-finalization <N | TASK-id> complete --agent <agent>\n';
 
 type FinalizationError = Readonly<{ code: string; message: string; retryable: boolean }>;
-
-function sameMountedDirectory(left: string, right: string): boolean {
-  try {
-    const leftStat = fs.lstatSync(left);
-    const rightStat = fs.lstatSync(right);
-    return leftStat.isDirectory() && !leftStat.isSymbolicLink()
-      && rightStat.isDirectory() && !rightStat.isSymbolicLink()
-      && leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
-  } catch {
-    return false;
-  }
-}
 
 function envelope(
   status: 'completed' | 'failed' | 'blocked' | 'unknown',
@@ -96,30 +84,33 @@ async function taskFinalization(args: string[] = []): Promise<void> {
   const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
   if (transport.kind === 'sandbox-local') {
     const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
+    const channelDir = process.env.AGENT_INFRA_CONTROL_DIR;
+    const runtimeDir = process.env.AGENT_INFRA_RUNTIME_DIR;
     const taskId = process.env.AGENT_INFRA_TASK_ID;
     const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
     const controlRootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
     const controlRoot = process.env.AGENT_INFRA_CONTROL_ROOT_DIR;
-    if (!statusDir || !taskId || !generation || !controlRootId || !controlRoot || taskId !== resolved.taskId) {
+    const controlLocation = loadSandboxControlLocation(repoRoot);
+    if (!statusDir || !channelDir || !runtimeDir || !taskId || !generation || !controlRootId
+      || !controlRoot || !controlLocation?.project || taskId !== resolved.taskId) {
       const detail = { code: 'TASK_CONTROL_TRANSPORT_INVALID', message: 'sandbox task control identity is incomplete', retryable: false };
       process.stdout.write(envelope('failed', false, true, null, detail));
       process.exitCode = 1;
       return;
     }
+    const sandboxLocalControlBinding = {
+      root: controlRoot, project: controlLocation.project, taskId, generation, controlRootId,
+      channelDir, statusDir, runtimeDir
+    };
     const result = await applyTaskFinalization(boundOperation.request, {
       repoRoot,
       controlRoot,
+      controlProject: controlLocation.project,
+      sandboxLocalControlBinding,
       manifestPath: path.join(controlRoot, 'manifest.json'),
       beforeLifecycle: async (currentTaskId) => {
         if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
-        const manifest = readSandboxControlManifest(path.join(controlRoot, 'manifest.json'));
-        if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId
-          || manifest.generation !== generation || manifest.controlRootId !== controlRootId
-          || !sameMountedDirectory(manifest.channelDir, process.env.AGENT_INFRA_CONTROL_DIR ?? '')
-          || !sameMountedDirectory(manifest.publicStatusDir, statusDir)
-          || !sameMountedDirectory(manifest.runtimeDir, process.env.AGENT_INFRA_RUNTIME_DIR ?? '')) {
-          throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
-        }
+        assertSandboxLocalControlBinding(sandboxLocalControlBinding);
         await quiesceSandboxControlForTaskCompletion(
           controlRoot,
           { taskId, generation, controlRootId, statusDir }

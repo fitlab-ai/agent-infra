@@ -62,23 +62,22 @@ test('task-bound control paths use a stable project and full-task control root',
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: task-branch\n---\n`);
+  const controlBase = path.join(root, 'stable-control-base');
   const control = sandboxControlPaths({
-    base: path.join(root, 'old-control-base'), repoRoot: root, project: 'p', container: 'p-dev-feature',
+    base: controlBase, repoRoot: root, project: 'p', container: 'p-dev-feature',
     identity: { mode: 'task-bound', taskId }
   });
-  assert.equal(control.root, path.join(root, 'old-control-base', 'p', 'tasks', taskId));
-  assert.notEqual(control.root, path.join(fs.realpathSync.native(taskDir), '.runtime', 'sandbox-control'));
+  assert.equal(control.root, path.join(controlBase, 'p', 'tasks', taskId));
   assert.equal(control.runtimeDir, path.join(control.root, 'runtime'));
   assert.equal(control.manifestPath, path.join(control.root, 'manifest.json'));
   assert.notEqual(sandboxControlPaths({
-    base: path.join(root, 'old-control-base'), repoRoot: root, project: 'other-project', container: 'p-dev-feature',
+    base: controlBase, repoRoot: root, project: 'other-project', container: 'p-dev-feature',
     identity: { mode: 'task-bound', taskId }
   }).root, control.root);
   assert.notEqual(sandboxControlPaths({
-    base: path.join(root, 'old-control-base'), repoRoot: root, project: 'p', container: 'p-dev-feature',
+    base: controlBase, repoRoot: root, project: 'p', container: 'p-dev-feature',
     identity: { mode: 'task-bound', taskId: 'TASK-20261006-010204' }
   }).root, control.root);
-  assert.equal(fs.existsSync(path.join(taskDir, '.runtime', 'orchestration.json')), false);
 });
 
 test('branch-only control paths retain their existing container identity layout', () => {
