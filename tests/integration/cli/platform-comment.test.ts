@@ -36,7 +36,6 @@ function fixture() {
   for (const key of [
     'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
     'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
-    'AGENT_INFRA_EXECUTOR_MANIFEST', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING'
   ]) delete env[key];
   return { root, taskId, commentsPath, env };
 }
@@ -199,7 +198,6 @@ test('platform internal commands reject invalid payloads with exit code 1', () =
   for (const key of [
     'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
     'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
-    'AGENT_INFRA_EXECUTOR_MANIFEST', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING'
   ]) delete env[key];
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-comment', 'sync', 'TASK-20260101-000001'], {
     encoding: 'utf8', env

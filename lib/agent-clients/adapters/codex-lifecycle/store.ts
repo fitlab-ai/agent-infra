@@ -35,16 +35,13 @@ type CodexLifecycleActivationEvidence = Readonly<{
   packageVersion?: string;
   internalExecutableBuildHash?: string;
   lifecycleContractHash?: string;
-  hookSource?: 'project' | 'managed' | 'isolated-user';
+  hookSource?: 'project' | 'managed';
   hookSourcePathDigest?: string;
   hookSourceHash?: string;
   capabilitySessionId?: string;
   capabilityTurnId?: string;
-  capabilityToolUseId?: string;
   spawnToolUseId?: string;
   spawnObservedAt?: string;
-  controllerInstanceDigest?: string | null;
-  controlGeneration?: string | null;
 }>;
 
 type CodexAdapterState = Readonly<{

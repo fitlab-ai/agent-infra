@@ -28,7 +28,7 @@ const manualValidationWorkflowCommand = command === 'manual-validation';
 const taskControlMarkers = [
   'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
-  'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST'
+  'AGENT_INFRA_EXECUTOR_MANIFEST'
 ];
 const markerlessHelp = ['--help', '-h'].includes(process.argv[3] ?? '')
   && taskControlMarkers.every((key) => !process.env[key]);
@@ -124,11 +124,6 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
   case 'codex-lifecycle': {
     const { codexLifecycle } = await import('../lib/agent-clients/adapters/codex-lifecycle/cli.ts');
     await codexLifecycle(process.argv.slice(3));
-    break;
-  }
-  case 'codex-sandbox-controller': {
-    const { codexSandboxController } = await import('../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller-cli.ts');
-    await codexSandboxController(process.argv.slice(3));
     break;
   }
   case 'git-workflow': {

@@ -8,10 +8,8 @@ import {
   type SandboxControlError,
   type SandboxControlRequest,
   type SandboxControlResponse,
-  type SandboxAgentClientRequest,
   type SandboxTaskCreateRequest
 } from './protocol.ts';
-import { isAgentClientId } from '../../agent-clients/types.ts';
 import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
@@ -400,7 +398,7 @@ export function requestSandboxControl(params: Readonly<{
   timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create' || params.family === 'agent-client') {
+  if (params.family === 'task-create') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
   }
   if (params.args[1] === 'complete') {
@@ -409,28 +407,6 @@ export function requestSandboxControl(params: Readonly<{
   const request: SandboxControlRequest = {
     version: 5, id: randomUUID(),
     family: params.family as 'task-lifecycle', args: params.args
-  };
-  return exchangeSandboxControl(request, params);
-}
-
-export function requestSandboxAgentOperation(params: Readonly<{
-  agentClient: string;
-  operation: string;
-  payload: Record<string, unknown>;
-  channelDir?: string;
-  statusDir?: string;
-  timeoutMs?: number;
-}>): SandboxControlResponse {
-  if (!isAgentClientId(params.agentClient)) {
-    clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'agent-client id is invalid', false);
-  }
-  const request: SandboxAgentClientRequest = {
-    version: 5,
-    id: randomUUID(),
-    family: 'agent-client',
-    agentClient: params.agentClient,
-    operation: params.operation,
-    payload: params.payload
   };
   return exchangeSandboxControl(request, params);
 }

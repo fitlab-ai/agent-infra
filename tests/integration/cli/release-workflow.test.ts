@@ -164,7 +164,6 @@ function runCli(input: Fixture, ...args: string[]) {
   for (const key of [
     'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
     'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
-    'AGENT_INFRA_EXECUTOR_MANIFEST', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING'
   ]) delete env[key];
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'release-workflow', ...args, '--cwd', input.root], {
     cwd: input.root,

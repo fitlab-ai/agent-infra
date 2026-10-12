@@ -14,7 +14,6 @@ const criticalPhases = [...SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES];
 test('recovery registry covers the remaining broker families', () => {
   assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'cancel')?.class, 'lifecycle-mutation');
   assert.equal(findSandboxControlRecoveryOperation('task-create', 'create')?.class, 'task-create');
-  assert.equal(findSandboxControlRecoveryOperation('agent-client', 'controller.verify')?.class, 'agent-client-operation');
   assert.equal(digestControlRecoveryIntent('task-lifecycle', 'cancel').length, 64);
 });
 

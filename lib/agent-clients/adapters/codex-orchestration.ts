@@ -327,9 +327,7 @@ async function activateCodexOrchestrationDelegation(
         capabilitySessionId: evidence.parentThreadId,
         capabilityTurnId: evidence.parentTurnId,
         spawnToolUseId: evidence.spawnToolUseId,
-        spawnObservedAt: record.spawnObservedAt ?? undefined,
-        controllerInstanceDigest: null,
-        controlGeneration: null
+        spawnObservedAt: record.spawnObservedAt ?? undefined
         }
       }
     }, coreOptions(options));

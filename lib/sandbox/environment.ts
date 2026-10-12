@@ -86,7 +86,6 @@ export function resolveSandboxControlTransport(
 ): SandboxControlTransportDecision {
   const markerState = sandboxTaskMarkerState(env);
   const hasAnyMarker = markerState !== 'none'
-    || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
   const fixedStatusDir = options.statusMountPath ?? SANDBOX_CONTROL_STATUS_MOUNT;
   const fixedStatusProbe = path.isAbsolute(fixedStatusDir)
@@ -117,7 +116,7 @@ export function resolveSandboxControlTransport(
     ? configuredStatusProbe === 'present' ? configuredStatusDir : null
     : fixedStatusMounted ? fixedStatusDir : null;
   const statusMounted = statusDir !== null;
-  if (env.AGENT_INFRA_EXECUTOR_MANIFEST || env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING) {
+  if (env.AGENT_INFRA_EXECUTOR_MANIFEST) {
     return { kind: 'fail-closed', reasonCode: 'TASK_CONTROL_TRANSPORT_INVALID' };
   }
   const taskBound = Boolean(env.AGENT_INFRA_TASK_ID);

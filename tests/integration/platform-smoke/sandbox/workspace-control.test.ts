@@ -55,16 +55,8 @@ import {
 } from '../../../../lib/sandbox/control/executor.ts';
 import { createTask } from '../../../../lib/task/create-service.ts';
 import { SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
-import { parseCodexControllerResult } from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-client.ts';
-import { validateAgentClientOperation } from '../../../../lib/sandbox/control/agent-operation.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import { finalizeSandboxControlManifest } from '../../../../lib/sandbox/workspace-view.ts';
-import {
-  closeCodexControllerRegistration,
-  openCodexControllerRegistration,
-  readCodexControllerRegistration,
-  resolveCodexControllerBinding
-} from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-registration.ts';
 import { onPlatforms } from '../../../helpers.ts';
 
 function testRoot(prefix: string): string {
@@ -101,13 +93,6 @@ const manifest: SandboxControlManifest = {
   processingDir: '/processing',
   runtimeDir: '/runtime'
 };
-
-const controllerBuild = {
-  protocolVersion: 3,
-  packageVersion: '0.9.9-alpha.0',
-  internalExecutableBuildHash: 'a'.repeat(64),
-  lifecycleContractHash: 'b'.repeat(64)
-} as const;
 
 test('sandbox result evidence is strict, durable, and metadata-only', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-result-evidence-'));
@@ -359,272 +344,6 @@ test('sandbox executor authority revalidates the gate-bound broker owner and han
   }
 });
 
-test('controller registration requires a live requested process across create and replacement states', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-registration-'));
-  const manifestPath = path.join(root, 'manifest.json');
-  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-  const requested = { pid: 200, startTime: 20 };
-  const credentials = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)];
-  const opened = openCodexControllerRegistration({
-    manifest,
-    manifestPath,
-    controllerProcess: requested,
-    buildIdentity: controllerBuild
-  }, {
-    now: () => 1_000,
-    probeProcess: () => 'alive',
-    randomHex: () => credentials.shift()!
-  });
-  assert.equal(opened.status, 'opened');
-  assert.equal(readCodexControllerRegistration(manifestPath).controllerProcess.pid, 200);
-  assert.equal(fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8').includes(opened.lease.leaseSecret), false);
-
-  closeCodexControllerRegistration({ manifest, manifestPath, proof: {
-    version: 1,
-    leaseId: opened.lease.leaseId,
-    leaseSecret: opened.lease.leaseSecret,
-    controllerProcess: requested
-  } });
-  for (const state of ['dead', 'unknown'] as const) {
-    assert.throws(() => openCodexControllerRegistration({
-      manifest,
-      manifestPath,
-      controllerProcess: requested,
-      buildIdentity: controllerBuild
-    }, {
-      now: () => 1_000,
-      probeProcess: () => state,
-      randomHex: () => 'd'.repeat(64)
-    }), state === 'dead' ? /PROCESS_INACTIVE/ : /PROCESS_UNKNOWN/);
-    assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
-  }
-});
-
-test('controller registration replacement uses byte-equal compare before commit', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-registration-cas-'));
-  const manifestPath = path.join(root, 'manifest.json');
-  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-  const first = openCodexControllerRegistration({
-    manifest,
-    manifestPath,
-    controllerProcess: { pid: 100, startTime: 10 },
-    buildIdentity: controllerBuild
-  }, { now: () => 1_000, probeProcess: () => 'alive', randomHex: () => 'e'.repeat(64) });
-  const registrationPath = path.join(root, 'codex-controller.json');
-  const expired = { ...readCodexControllerRegistration(manifestPath), issuedAt: 0, expiresAt: 999 };
-  fs.writeFileSync(registrationPath, `${JSON.stringify(expired)}\n`, { mode: 0o600 });
-  assert.throws(() => openCodexControllerRegistration({
-    manifest,
-    manifestPath,
-    controllerProcess: { pid: 200, startTime: 20 },
-    buildIdentity: controllerBuild
-  }, {
-    now: () => 2_000,
-    probeProcess: () => 'alive',
-    randomHex: () => 'f'.repeat(64),
-    beforeCommit: () => fs.writeFileSync(registrationPath, `${JSON.stringify({ ...expired, leaseId: first.lease.leaseId.slice(0, -1) + '0' })}\n`, { mode: 0o600 })
-  }), /OWNERSHIP_LOST/);
-  assert.equal(readCodexControllerRegistration(manifestPath).controllerProcess.pid, 100);
-});
-
-test('controller registration covers every existing and requested process state without unsafe mutation', () => {
-  const existingStates = ['missing', 'alive', 'expired', 'dead', 'unknown', 'invalid'] as const;
-  const requestedStates = ['alive', 'dead', 'zombie', 'unknown'] as const;
-  for (const existingState of existingStates) {
-    for (const requestedState of requestedStates) {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), `controller-matrix-${existingState}-${requestedState}-`));
-      const manifestPath = path.join(root, 'manifest.json');
-      const file = path.join(root, 'codex-controller.json');
-      fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-      if (existingState !== 'missing') {
-        const seedValues = ['1'.repeat(64), '2'.repeat(64), '3'.repeat(64)];
-        openCodexControllerRegistration({
-          manifest,
-          manifestPath,
-          controllerProcess: { pid: 100, startTime: 10 },
-          buildIdentity: controllerBuild
-        }, { now: () => 1_000, probeProcess: () => 'alive', randomHex: () => seedValues.shift()! });
-        if (existingState === 'expired') {
-          const value = readCodexControllerRegistration(manifestPath);
-          fs.writeFileSync(file, `${JSON.stringify({ ...value, issuedAt: 0, expiresAt: 999 })}\n`, { mode: 0o600 });
-        } else if (existingState === 'invalid') {
-          fs.writeFileSync(file, `${JSON.stringify({ ...readCodexControllerRegistration(manifestPath), extra: true })}\n`, { mode: 0o600 });
-        }
-      }
-      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
-      const values = ['4'.repeat(64), '5'.repeat(64), '6'.repeat(64)];
-      const attempt = () => openCodexControllerRegistration({
-        manifest,
-        manifestPath,
-        controllerProcess: { pid: 200, startTime: 20 },
-        buildIdentity: controllerBuild
-      }, {
-        now: () => 2_000,
-        randomHex: () => values.shift()!,
-        probeProcess: (identity) => identity.pid === 100
-          ? existingState === 'alive' ? 'alive' : existingState === 'unknown' ? 'unknown' : 'dead'
-          : requestedState === 'alive' ? 'alive' : requestedState === 'unknown' ? 'unknown' : 'dead'
-      });
-      const succeeds = requestedState === 'alive'
-        && (existingState === 'missing' || existingState === 'expired' || existingState === 'dead');
-      if (succeeds) {
-        assert.equal(attempt().status, 'opened', `${existingState}/${requestedState}`);
-        assert.equal(readCodexControllerRegistration(manifestPath).controllerProcess.pid, 200);
-      } else {
-        assert.throws(attempt, Error, `${existingState}/${requestedState}`);
-        assert.equal(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, before, `${existingState}/${requestedState}`);
-      }
-    }
-  }
-});
-
-test('controller proof failures preserve the host registration', () => {
-  const cases = [
-    ['wrong-secret', 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID'],
-    ['expired', 'CODEX_SANDBOX_CONTROLLER_LEASE_EXPIRED'],
-    ['cross-task', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
-    ['cross-generation', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
-    ['cross-container', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
-    ['cross-protocol', 'CODEX_LIFECYCLE_PROTOCOL_MISMATCH'],
-    ['cross-process', 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID'],
-    ['dead-process', 'CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE'],
-    ['unknown-process', 'CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN']
-  ] as const;
-  for (const [scenario, expectedCode] of cases) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), `controller-proof-${scenario}-`));
-    const manifestPath = path.join(root, 'manifest.json');
-    fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-    const values = ['7'.repeat(64), '8'.repeat(64), '9'.repeat(64)];
-    const opened = openCodexControllerRegistration({
-      manifest,
-      manifestPath,
-      controllerProcess: { pid: 100, startTime: 10 },
-      buildIdentity: controllerBuild
-    }, { now: () => 1_000, probeProcess: () => 'alive', randomHex: () => values.shift()! });
-    const file = path.join(root, 'codex-controller.json');
-    const before = fs.readFileSync(file, 'utf8');
-    const proof = {
-      version: 1 as const,
-      leaseId: opened.lease.leaseId,
-      leaseSecret: scenario === 'wrong-secret' ? '0'.repeat(64) : opened.lease.leaseSecret,
-      controllerProcess: scenario === 'cross-process'
-        ? { pid: 101, startTime: 10 }
-        : opened.lease.controllerProcess
-    };
-    const candidateManifest = scenario === 'cross-task'
-      ? { ...manifest, taskId: 'TASK-20260809-999999' }
-      : scenario === 'cross-generation'
-        ? { ...manifest, generation: 'other-generation' }
-        : scenario === 'cross-container'
-          ? { ...manifest, containerIdentity: { ...manifest.containerIdentity, id: 'other-container' } }
-          : manifest;
-    assert.throws(() => resolveCodexControllerBinding({
-      manifest: candidateManifest,
-      manifestPath,
-      proof,
-      buildIdentity: scenario === 'cross-protocol'
-        ? { ...controllerBuild, protocolVersion: 2 as never }
-        : controllerBuild,
-      now: scenario === 'expired' ? 14_402_000 : 2_000,
-      probeProcess: () => scenario === 'dead-process' ? 'dead' : scenario === 'unknown-process' ? 'unknown' : 'alive'
-    }), new RegExp(expectedCode));
-    assert.equal(fs.readFileSync(file, 'utf8'), before, scenario);
-  }
-});
-
-test('typed controller verify returns only the live task binding without spawning or mutating state', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-verify-executor-'));
-  const manifestPath = path.join(root, 'manifest.json');
-  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-  const opened = openCodexControllerRegistration({
-    manifest,
-    manifestPath,
-    controllerProcess: { pid: 100, startTime: 10 },
-    buildIdentity: controllerBuild
-  }, { probeProcess: () => 'alive', randomHex: (() => {
-    const values = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
-    return () => values.shift()!;
-  })() });
-  const proof = {
-    version: 1 as const,
-    leaseId: opened.lease.leaseId,
-    leaseSecret: opened.lease.leaseSecret,
-    controllerProcess: opened.lease.controllerProcess
-  };
-  const request = {
-    version: 5 as const,
-    id: '12345678-1234-1234-1234-123456789abc',
-    family: 'agent-client' as const,
-    agentClient: 'codex',
-    operation: 'controller.verify',
-    payload: { proof }
-  };
-  const validated = validateSandboxControlRequest(request, manifest);
-  assert.equal(request.operation, 'controller.verify');
-  const before = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
-  const result = await executeRequest(manifest, manifestPath, validated, {
-    agentClientOperation: {
-      validate: () => undefined,
-      execute: () => Promise.resolve({
-        exitCode: 0,
-        stdout: `${JSON.stringify({
-          version: 1,
-          status: 'verified',
-          changed: false,
-          lease: null,
-          binding: {
-            taskId: manifest.taskId,
-            controlGeneration: manifest.generation,
-            controllerInstanceDigest: opened.lease.controllerInstanceDigest
-          },
-          error: null
-        })}\n`,
-        stderr: ''
-      })
-    }
-  });
-  assert.equal(result.exitCode, 0);
-  assert.deepEqual(JSON.parse(result.stdout), {
-    version: 1,
-    status: 'verified',
-    changed: false,
-    lease: null,
-    binding: {
-      taskId: manifest.taskId,
-      controlGeneration: manifest.generation,
-      controllerInstanceDigest: opened.lease.controllerInstanceDigest
-    },
-    error: null
-  });
-  assert.equal(result.stdout.includes(opened.lease.leaseSecret), false);
-  assert.equal(fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8'), before);
-});
-
-test('typed controller verify rejects a proof for a different process', () => {
-  const proof = {
-    version: 1 as const,
-    leaseId: 'a'.repeat(64),
-    leaseSecret: 'b'.repeat(64),
-    controllerProcess: { pid: 100, startTime: 10 }
-  };
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-process-proof-'));
-  const manifestPath = path.join(root, 'manifest.json');
-  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-  openCodexControllerRegistration({
-    manifest,
-    manifestPath,
-    controllerProcess: proof.controllerProcess,
-    buildIdentity: controllerBuild
-  }, { probeProcess: () => 'alive' });
-  assert.throws(() => resolveCodexControllerBinding({
-    manifest,
-    manifestPath,
-    proof: { ...proof, controllerProcess: { pid: 101, startTime: 10 } },
-    buildIdentity: controllerBuild,
-    probeProcess: () => 'alive'
-  }), /CODEX_SANDBOX_CONTROLLER_PROOF_INVALID/);
-});
-
 test('TypeScript control entries retain explicit strip-types startup', () => {
   assert.deepEqual(nodeEntryArgs('/repo/bin/internal-cli.ts', ['sandbox-control', 'serve']), [
     '--experimental-strip-types', '--no-warnings', '/repo/bin/internal-cli.ts', 'sandbox-control', 'serve'
@@ -656,7 +375,7 @@ test('control requests are restricted to allowed lifecycle operations and reboun
   );
 });
 
-test('control protocol rejects unsupported request versions and controller result parser enforces exact wire phases', () => {
+test('control protocol rejects unsupported request versions', () => {
   const request = {
     version: 5,
     id: '12345678-1234-1234-1234-123456789abc',
@@ -664,60 +383,7 @@ test('control protocol rejects unsupported request versions and controller resul
     args: ['08', 'status'],
   };
   assert.throws(() => validateSandboxControlRequest({ ...request, version: 6 }, manifest), /REQUEST_INVALID/);
-  const opened = {
-    version: 1,
-    status: 'opened',
-    changed: true,
-    lease: {
-      version: 1,
-      leaseId: 'c'.repeat(64),
-      leaseSecret: 'd'.repeat(64),
-      taskId: manifest.taskId!,
-      controlGeneration: manifest.generation,
-      controllerInstanceDigest: 'e'.repeat(64),
-      controllerProcess: { pid: 200, startTime: 20 },
-      buildIdentity: controllerBuild,
-      issuedAt: 1_000,
-      expiresAt: 2_000
-    },
-    error: null
-  };
-  const response = {
-    version: 2 as const,
-    id: request.id,
-    phase: 'completed' as const,
-    exitCode: 0,
-    stdout: `${JSON.stringify(opened)}\n`,
-    stderr: '',
-    error: null
-  };
-  assert.equal(parseCodexControllerResult(response).status, 'opened');
-  const verified = {
-    version: 1,
-    status: 'verified',
-    changed: false,
-    lease: null,
-    binding: {
-      taskId: manifest.taskId!,
-      controlGeneration: manifest.generation,
-      controllerInstanceDigest: 'e'.repeat(64)
-    },
-    error: null
-  };
-  const verifiedResult = parseCodexControllerResult({
-    ...response,
-    stdout: `${JSON.stringify(verified)}\n`
-  });
-  assert.equal(verifiedResult.status, 'verified');
-  assert.throws(
-    () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...verified, leaseSecret: 'd'.repeat(64) })}\n` }),
-    (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
-  );
-  assert.throws(
-    () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...opened, extra: true })}\n` }),
-    (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
-  );
-  assert.throws(() => parseCodexControllerResult({ ...response, exitCode: 1 }), /controller success result is invalid/);
+  assert.equal(validateSandboxControlRequest(request, manifest).family, 'task-lifecycle');
 });
 
 test('branch-only sandboxes fail closed while typed request schema remains usable', () => {
@@ -732,41 +398,6 @@ test('branch-only sandboxes fail closed while typed request schema remains usabl
     /SANDBOX_CONTROL_BRANCH_ONLY: .*ai sandbox start --recreate <task-ref-or-correct-branch>/
   );
   assert.equal(validateSandboxControlRequest(request, manifest).family, 'task-lifecycle');
-  const branchManifest = { ...manifest, mode: 'branch-only' as const, taskId: null };
-  assert.throws(() => validateSandboxControlRequest({
-    version: request.version,
-    id: request.id,
-    family: 'agent-client',
-    agentClient: 'codex',
-    operation: 'controller.open',
-    payload: { controllerProcess: { pid: 100, startTime: 10 } }
-  }, branchManifest), /SANDBOX_CONTROL_BRANCH_ONLY/);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-controller-denied-'));
-  const manifestPath = path.join(root, 'manifest.json');
-  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
-  assert.throws(() => openCodexControllerRegistration({
-    manifest: branchManifest,
-    manifestPath,
-    controllerProcess: { pid: 100, startTime: 10 },
-    buildIdentity: controllerBuild
-  }, { probeProcess: () => 'alive' }), /SANDBOX_CONTROL_BRANCH_ONLY/);
-  const proof = {
-    version: 1 as const,
-    leaseId: '7'.repeat(64),
-    leaseSecret: '8'.repeat(64),
-    controllerProcess: { pid: 100, startTime: 10 }
-  };
-  assert.throws(() => closeCodexControllerRegistration({
-    manifest: branchManifest, manifestPath, proof
-  }), /SANDBOX_CONTROL_BRANCH_ONLY/);
-  assert.throws(() => resolveCodexControllerBinding({
-    manifest: branchManifest,
-    manifestPath,
-    proof,
-    buildIdentity: controllerBuild,
-    probeProcess: () => 'alive'
-  }), /SANDBOX_CONTROL_BRANCH_ONLY/);
-  assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
 });
 
 test('control broker strips mixed-case sandbox authority from child environments', () => {
@@ -777,7 +408,6 @@ test('control broker strips mixed-case sandbox authority from child environments
     AGENT_INFRA_TASK_ID: 'task-id',
     AGENT_INFRA_RUNTIME_DIR: '/runtime',
     AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest.json',
-    AGENT_INFRA_CONTROL_CONTROLLER_BINDING: 'binding',
     AGENT_INFRA_TEST_SENTINEL: 'preserved'
   }), {
     AGENT_INFRA_TEST_SENTINEL: 'preserved'

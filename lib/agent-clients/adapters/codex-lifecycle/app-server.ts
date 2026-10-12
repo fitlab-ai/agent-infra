@@ -170,8 +170,7 @@ function validateCodexLifecycleHookConfig(value: unknown): void {
 
 function parseCodexHooksList(
   value: unknown,
-  repoRoot: string,
-  expectedSource: 'direct-host' | 'isolated-user' = 'direct-host'
+  repoRoot: string
 ): readonly DiscoveredHook[] {
   const root = object(value);
   const entries = Array.isArray(root?.data) ? root.data : [];
@@ -203,10 +202,8 @@ function parseCodexHooksList(
     && hook.currentHash.length > 0
     && hook.sourcePathDigest.length === 64
     && hook.pluginId === null
-    && (expectedSource === 'isolated-user'
-      ? hook.source === 'user' && hook.trustStatus !== 'modified'
-      : (hook.source === 'project' && hook.trustStatus === 'trusted')
-        || hook.isManaged && hook.trustStatus === 'managed')
+    && (hook.source === 'project' && hook.trustStatus === 'trusted'
+      || hook.isManaged && hook.trustStatus === 'managed')
   ));
   if (!valid) throw new Error('CODEX_PREFLIGHT_HOOKS_NOT_LOADED: lifecycle hooks are not loaded for this workspace');
   return Object.freeze(hooks);
@@ -628,7 +625,7 @@ function validateStaticCodexPreflight(repoRoot: string): Readonly<{ cliVersion: 
 async function discoverLifecycleHooks(repoRoot: string): Promise<Readonly<{
   discoveredHooks: readonly DiscoveredHook[];
   hookProvenance: Readonly<{
-    hookSource: 'isolated-user' | 'managed' | 'project';
+    hookSource: 'managed' | 'project';
     hookSourcePathDigest: string;
     hookSourceHash: string;
   }>;
@@ -641,8 +638,7 @@ async function discoverLifecycleHooks(repoRoot: string): Promise<Readonly<{
     await transport.initialize();
     discoveredHooks = parseCodexHooksList(
       await transport.request('hooks/list', { cwds: [repoRoot] }),
-      repoRoot,
-      process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT ? 'isolated-user' : 'direct-host'
+      repoRoot
     );
   } finally { transport.close(); }
   const lifecycleHooks = LIFECYCLE_HOOKS.map(({ event, matcher, phase }) => discoveredHooks.filter((hook) =>
@@ -660,9 +656,7 @@ async function discoverLifecycleHooks(repoRoot: string): Promise<Readonly<{
     throw new Error('CODEX_PREFLIGHT_HOOK_SOURCE_AMBIGUOUS: lifecycle hooks do not share one exact source');
   }
   const source = [...sources][0];
-  const hookSource = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT
-    ? 'isolated-user'
-    : source === 'managed' ? 'managed' : 'project';
+  const hookSource = source === 'managed' ? 'managed' : 'project';
   return {
     discoveredHooks,
     hookProvenance: Object.freeze({

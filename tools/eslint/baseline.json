@@ -1440,15 +1440,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/controller-registration.ts",
-      "ruleId": "complexity",
-      "stableId": "e86dca9d7d61a6a0a6de60b0a57347b589fbdac9c796c00e7a1ed07382ff361d",
-      "displayName": "openCodexControllerRegistration",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/task/orchestration.ts",
       "ruleId": "complexity",
       "stableId": "c79f97d77052fdc565cf1dd1d282ae8b043e3156ed88ea3eb11345aef2c06a97",
@@ -1491,15 +1482,6 @@
       "displayName": "parseChangeFile",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/controller-client.ts",
-      "ruleId": "complexity",
-      "stableId": "86fdbd003334a296d9b35b289977c48812bd673f48cafe188240edc0c3ff29ec",
-      "displayName": "parseCodexControllerResult",
-      "metric": 59,
-      "normalizedMessage": "complexity=59",
       "count": 1
     },
     {
@@ -1581,15 +1563,6 @@
       "displayName": "parseQualificationConfirmations.table.rows.map callback[0]#1",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/controller-registration.ts",
-      "ruleId": "complexity",
-      "stableId": "bf0c03b224c6643e1b2e210eb161d3ba7a37157e8351aa08a70424ef3267cfb3",
-      "displayName": "parseRegistration",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
       "count": 1
     },
     {
@@ -1845,15 +1818,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts",
-      "ruleId": "complexity",
-      "stableId": "fae94423a40dd1b2254bceee126ee00f4f17d86d807d9e3c3e5558ac76ad09b7",
-      "displayName": "prepareCodexSandboxController",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/completed-reentry.ts",
       "ruleId": "complexity",
       "stableId": "76eef978eea9dd6b534fb3edce3dc09e9342811747a129879462166faf12cf6f",
@@ -2085,15 +2049,6 @@
       "displayName": "recordPlatformOperation",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/controller-operation.ts",
-      "ruleId": "complexity",
-      "stableId": "7d3b36cbdce36481d3c4583ca6bf75a8a2e7e410ea44b512e8b48f1e17f018ea",
-      "displayName": "recover",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
       "count": 1
     },
     {
@@ -2508,15 +2463,6 @@
       "displayName": "sanitizeGitConfig",
       "metric": 27,
       "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts",
-      "ruleId": "complexity",
-      "stableId": "3ec5ff77bc569b16b03106c277ee77005e6f1765289ffdb0ccfc3225a0e60b7d",
-      "displayName": "sanitizedConfig",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {
@@ -2997,15 +2943,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/controller-context.ts",
-      "ruleId": "complexity",
-      "stableId": "7232f6d4210c457448b5b8d5418c5d94d545a8b9191c6c6414af6601b163e834",
-      "displayName": "validateContext",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
       "file": "lib/task/implementation-inputs.ts",
       "ruleId": "complexity",
       "stableId": "724595693182d71c52981c87acb2b0049ffc393a2bb24ad6b069cbe11410cbcd",
@@ -3183,15 +3120,6 @@
       "displayName": "verifiedResponse",
       "metric": 56,
       "normalizedMessage": "complexity=56",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/controller-context.ts",
-      "ruleId": "complexity",
-      "stableId": "cc61289a7287d0a6d9fdf97d6ce4ff0c27fde2022ce638489ac976aeb7683e1c",
-      "displayName": "verifyCodexSandboxControllerContextWithWarnings",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {

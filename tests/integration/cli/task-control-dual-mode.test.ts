@@ -23,7 +23,6 @@ function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     AGENT_INFRA_TASK_ID: undefined,
     AGENT_INFRA_RUNTIME_DIR: undefined,
     AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
-    AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined,
     ...overrides
   };
 }
@@ -328,7 +327,6 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
       { ...base, AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime') },
       { ...base, AGENT_INFRA_TASK_ID: TASK_ID },
       { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
-      { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' },
       { ...base, AGENT_INFRA_SANDBOX: undefined }
     ]) {
       assert.equal(resolveSandboxControlTransport(cleanEnv(env), options).kind, 'fail-closed');

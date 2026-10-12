@@ -60,8 +60,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'codex-lifecycle', 'resolve-start', 'conditional', 'progress'),
     descriptor('internal', 'codex-lifecycle', 'resolve-stop', 'conditional', 'progress'),
     descriptor('internal', 'codex-lifecycle', 'consume', 'conditional', 'progress'),
-    descriptor('internal', 'codex-sandbox-controller', 'verify-context', 'task-bound', 'diagnostic'),
-    descriptor('internal', 'codex-sandbox-controller', 'run', 'task-bound', 'progress'),
     descriptor('internal', 'git-workflow', 'inspect', 'conditional', 'diagnostic'),
     descriptor('internal', 'git-workflow', 'preview-tree', 'conditional', 'diagnostic'),
     descriptor('internal', 'git-workflow', 'snapshot', 'conditional', 'diagnostic'),
@@ -213,7 +211,7 @@ export const TASK_OPERATION_DESCRIPTORS = Object.freeze([
 ]);
 
 export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
-  'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
+  'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle',
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',

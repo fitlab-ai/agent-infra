@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
-import { isAgentClientId } from '../../agent-clients/types.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
@@ -13,7 +12,7 @@ export const SANDBOX_CONTROL_RESERVATION_BYTES = SANDBOX_CONTROL_MAX_TERMINAL_RE
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-create', 'agent-client'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-create'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -61,13 +60,7 @@ export type SandboxTaskCommandRequest = RequestBase & Readonly<{
 export type SandboxTaskCreateRequest = RequestBase & Readonly<{
   family: 'task-create'; candidate: TaskCreateCandidateV1;
 }>;
-export type SandboxAgentClientRequest = RequestBase & Readonly<{
-  family: 'agent-client';
-  agentClient: string;
-  operation: string;
-  payload: Record<string, unknown>;
-}>;
-export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest | SandboxAgentClientRequest;
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
 export type SandboxControlResultEvidence = Readonly<{
   version: 1;
@@ -238,19 +231,6 @@ export function validateSandboxControlRequest(
     }
     return { ...request, candidate: validateTaskCreateCandidate(request.candidate) } as SandboxTaskCreateRequest;
   }
-  if (request.family === 'agent-client') {
-    const expected = ['agentClient', 'family', 'id', 'operation', 'payload', 'version'];
-    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
-      || !isAgentClientId(request.agentClient)
-      || typeof request.operation !== 'string' || !/^[a-z][a-z0-9.-]{0,63}$/u.test(request.operation)
-      || !request.payload || typeof request.payload !== 'object' || Array.isArray(request.payload)) {
-      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'agent-client request schema is invalid');
-    }
-    if (manifest.mode !== 'task-bound' || !manifest.taskId) {
-      fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot coordinate agent clients');
-    }
-    return request as SandboxAgentClientRequest;
-  }
   const expected = ['args', 'family', 'id', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
@@ -269,7 +249,7 @@ export function validateSandboxControlRequest(
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
-  if (request.family === 'task-create' || request.family === 'agent-client') {
+  if (request.family === 'task-create') {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', `${request.family} requests do not bind a current task`);
   }
   if (request.args.length === 0) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'command arguments are required');

@@ -98,7 +98,6 @@ function fixture() {
       AGENT_INFRA_RUNTIME_DIR: undefined,
       AGENT_INFRA_TASK_ID: undefined,
       AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
-      AGENT_INFRA_CODEX_CONTROLLER_CONTEXT: undefined
     }), bin),
     hookDefinitionHash: crypto.createHash('sha256').update(hooks).digest('hex')
   };

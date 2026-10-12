@@ -216,15 +216,11 @@ function hostEvidenceMatches(
     && host.spawnToolUseId === start.spawnToolUseId
     && Boolean(host.spawnObservedAt)
     && host.spawnObservedAt === record.spawnObservedAt
-    && typeof host.controllerInstanceDigest === 'string'
-    && typeof host.controlGeneration === 'string'
     && hostRevisionMatches(record, receipt, host);
 }
 
 function hostRevisionMatches(record: StoredCodexLifecycle, receipt: DelegationReceipt, host: CodexLifecycleActivationEvidence): boolean {
-  return typeof host.controllerInstanceDigest === 'string'
-    && typeof host.controlGeneration === 'string'
-    && host.startRevision >= 1
+  return host.startRevision >= 1
     && record.revision > host.startRevision
     && record.state.child?.childThreadId === receipt.childId
     && record.state.stop?.childThreadId === receipt.childId;
