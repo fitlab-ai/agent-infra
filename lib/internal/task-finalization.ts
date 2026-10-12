@@ -7,7 +7,7 @@ import {
 import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
-import { quiesceSandboxControlForTaskCompletion } from '../sandbox/control/lifecycle.ts';
+import { assertSandboxLocalControlBinding, quiesceSandboxControlForTaskCompletion } from '../sandbox/control/lifecycle.ts';
 import { loadSandboxControlLocation } from '../sandbox/config.ts';
 import { serializeTaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
 import { verifyTaskEvent } from '../task/verification.ts';
@@ -109,9 +109,10 @@ async function taskFinalization(args: string[] = []): Promise<void> {
       manifestPath: path.join(controlRoot, 'manifest.json'),
       beforeLifecycle: async (currentTaskId) => {
         if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
+        assertSandboxLocalControlBinding(sandboxLocalControlBinding);
         await quiesceSandboxControlForTaskCompletion(
           controlRoot,
-          { taskId, generation, controlRootId, statusDir, localBinding: sandboxLocalControlBinding }
+          { taskId, generation, controlRootId, statusDir }
         );
       },
       preflight: (request, options) => verifyTaskEvent(
