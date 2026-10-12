@@ -269,7 +269,6 @@ function writeTaskBoundCleanupEvidence(
   const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;
   const controlRoot = sandboxControlPaths({
     base: config.controlBase,
-    repoRoot: config.repoRoot,
     project: config.project,
     container,
     identity: { mode: "task-bound", taskId }
@@ -377,7 +376,6 @@ function addControlRootVariant(
 ): string {
   const root = sandboxControlPaths({
     base: config.controlBase,
-    repoRoot: config.repoRoot,
     project: config.project,
     container,
     identity: { mode: "task-bound", taskId }

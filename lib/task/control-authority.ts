@@ -268,7 +268,6 @@ function controlRootForTask(context: TaskControlExecutionContext, taskId: string
   if (!context.controlBase || !context.project) return undefined;
   return sandboxControlPaths({
     base: context.controlBase,
-    repoRoot: context.repoRoot,
     project: context.project,
     container: '',
     identity: { mode: 'task-bound', taskId }
@@ -376,10 +375,10 @@ export function dispatchTaskControlOperation(
     });
   }
   if (operation.family === 'task-finalization') {
-    let taskId: string | null = null;
     const resolved = resolveTaskRef(boundTaskRef(context, operation.request.taskRef), { repoRoot: context.repoRoot });
-    if (resolved.ok) taskId = resolved.taskId;
-    const controlRoot = taskId ? controlRootForTask(context, taskId) : undefined;
+    const controlRoot = context.source === 'sandbox-executor'
+      ? path.dirname(context.manifestPath)
+      : resolved.ok ? controlRootForTask(context, resolved.taskId) : undefined;
     return applyTaskFinalization({
       ...operation.request,
       taskRef: boundTaskRef(context, operation.request.taskRef)
@@ -387,8 +386,7 @@ export function dispatchTaskControlOperation(
       repoRoot: context.repoRoot,
       ...(context.source === 'sandbox-executor' ? {
         controlBinding: { generation: context.generation, requestId: context.requestId },
-        manifestPath: context.manifestPath,
-        controlRoot: path.dirname(context.manifestPath)
+        manifestPath: context.manifestPath
       } : {}),
       ...(controlRoot ? { controlRoot } : {}),
       ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {}),

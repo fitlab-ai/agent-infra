@@ -321,7 +321,6 @@ function writeTaskBoundControlEvidence(
 ): string {
   const controlRoot = sandboxControlPaths({
     base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
-    repoRoot: repoDir,
     project,
     container,
     identity: { mode: "task-bound", taskId }
@@ -1031,7 +1030,6 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
     writeActiveTaskBranch(fixture.repoDir, siblingTaskId, "sibling-branch");
     controlRoot = sandboxControlPaths({
       base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
-      repoRoot: fixture.repoDir,
       project: "demo",
       container: `demo-dev-${branch}`,
       identity: { mode: "task-bound", taskId, shortId: "1" }

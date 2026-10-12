@@ -63,7 +63,6 @@ export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 
 
 export function sandboxControlPaths(params: Readonly<{
   base: string;
-  repoRoot?: string;
   project: string;
   container: string;
   identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;

@@ -19,7 +19,7 @@ import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
-import { assertSandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
+import { assertSandboxLocalControlBinding, readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import type { SandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
 
 const lifecycleIntentCatalog = [
@@ -289,6 +289,14 @@ function pathExists(candidate: string): boolean {
   }
 }
 
+function taskBoundControlStateExists(controlRoot: string): boolean {
+  return pathExists(path.join(controlRoot, 'manifest.json')) || pathExists(path.join(controlRoot, 'lease.json'));
+}
+
+function refusesTaskControlMove(request: TaskLifecycleRequest, controlRoot: string): boolean {
+  return request.intent !== 'complete' && taskBoundControlStateExists(controlRoot);
+}
+
 function assertTaskControlRootPath(controlRoot: string, taskId: string, expectedProject?: string): void {
   if (path.basename(controlRoot) !== taskId || path.basename(path.dirname(controlRoot)) !== 'tasks'
     || (expectedProject !== undefined && path.basename(path.dirname(path.dirname(controlRoot))) !== expectedProject)) {
@@ -307,15 +315,10 @@ function assertTaskControlRootPath(controlRoot: string, taskId: string, expected
 
 function assertTaskControlManifestIdentity(controlRoot: string, taskId: string, repoRoot: string, expectedProject?: string): void {
   const controlManifest = path.join(controlRoot, 'manifest.json');
-  if (!fs.existsSync(controlManifest)) throw new Error('control manifest is missing');
-  const manifestStat = fs.lstatSync(controlManifest);
-  if (!manifestStat.isFile() || manifestStat.isSymbolicLink()) throw new Error('control manifest is not a real file');
-  const manifest = JSON.parse(fs.readFileSync(controlManifest, 'utf8')) as {
-    mode?: unknown; taskId?: unknown; project?: unknown; repoRoot?: unknown;
-  };
+  const manifest = readSandboxControlManifest(controlManifest);
   const project = expectedProject ?? path.basename(path.dirname(path.dirname(controlRoot)));
   if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId || manifest.project !== project
-    || typeof manifest.repoRoot !== 'string' || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
+    || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
     throw new Error('control manifest identity does not match the task');
   }
 }
@@ -344,6 +347,9 @@ function taskBoundControlMoveSafety(
     }
     return null;
   }
+  if (refusesTaskControlMove(request, controlRoot)) {
+    return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory' };
+  }
   const controlManifest = path.join(controlRoot, 'manifest.json');
   const controlLease = path.join(controlRoot, 'lease.json');
   const stateExists = pathExists(controlRoot) || pathExists(controlManifest) || pathExists(controlLease);
@@ -353,7 +359,7 @@ function taskBoundControlMoveSafety(
       return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control root is missing, malformed, or belongs to another task' };
     }
   }
-  if (request.intent !== 'complete' && (pathExists(controlManifest) || pathExists(controlLease))) {
+  if (refusesTaskControlMove(request, controlRoot)) {
     return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory' };
   }
   return null;

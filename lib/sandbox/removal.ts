@@ -829,7 +829,7 @@ function resolveRmTarget(
     ? matchedContainers
     : [...new Set([...containerNameCandidates(config, effectiveBranch), ...matchedContainers])];
   const controlRoots = containers.flatMap((container) => identities.map((identity) => sandboxControlPaths({
-    base: config.controlBase, repoRoot: config.repoRoot, project: config.project, container, identity
+    base: config.controlBase, project: config.project, container, identity
   }).root));
   const workspaceViewRoots = containers.flatMap((container) => identities.map((identity) => sandboxWorkspaceViewPaths({
     base: config.workspaceViewBase, project: config.project, container, identity
@@ -1092,7 +1092,7 @@ async function rmPurgeCore(
         : null;
     if (!identity) return [];
     return [sandboxControlPaths({
-      base: config.controlBase, repoRoot: config.repoRoot, project: config.project,
+      base: config.controlBase, project: config.project,
       container: row.name, identity
     }).root];
   });

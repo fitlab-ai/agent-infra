@@ -642,8 +642,16 @@ function markSandboxControlRootQuiescing(root: string): void {
 
 function readTaskCompletionManifest(
   root: string,
-  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; statusDir: string }>
+  binding: Readonly<{
+    taskId: string;
+    generation: string;
+    controlRootId: string;
+    statusDir: string;
+    localBinding?: SandboxLocalControlBinding;
+  }>
 ): SandboxControlManifest {
+  const localBinding = binding.localBinding;
+  if (localBinding) assertSandboxLocalRoot(root, localBinding);
   const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
   const identity = validateSandboxControlIdentity({
     publicStatusDir: binding.statusDir,
@@ -658,12 +666,40 @@ function readTaskCompletionManifest(
     || manifest.controlRootId !== binding.controlRootId) {
     throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
   }
+  if (localBinding) assertSandboxLocalManifest(root, localBinding, manifest);
   return manifest;
+}
+
+function assertSandboxLocalRoot(root: string, binding: SandboxLocalControlBinding): void {
+  if (!path.isAbsolute(binding.root) || path.resolve(binding.root) !== binding.root || binding.root !== root) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+  }
+  const stat = fs.lstatSync(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+}
+
+function assertSandboxLocalManifest(
+  root: string,
+  binding: SandboxLocalControlBinding,
+  manifest: SandboxControlManifest
+): void {
+  if (!sandboxLocalManifestMatches(binding, manifest, fs.realpathSync.native(root))
+    || !sameMountedControlDirectory(manifest.channelDir, binding.channelDir)
+    || !sameMountedControlDirectory(manifest.publicStatusDir, binding.statusDir)
+    || !sameMountedControlDirectory(manifest.runtimeDir, binding.runtimeDir)) {
+    throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
+  }
 }
 
 export async function quiesceSandboxControlForTaskCompletion(
   root: string,
-  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; statusDir: string }>,
+  binding: Readonly<{
+    taskId: string;
+    generation: string;
+    controlRootId: string;
+    statusDir: string;
+    localBinding?: SandboxLocalControlBinding;
+  }>,
   timeoutMs = DEFAULT_QUIESCE_TIMEOUT_MS
 ): Promise<void> {
   const resolvedRoot = path.resolve(root);
@@ -1244,31 +1280,13 @@ function sandboxLocalManifestMatches(binding: SandboxLocalControlBinding, manife
 }
 
 export function assertSandboxLocalControlBinding(binding: SandboxLocalControlBinding): SandboxControlManifest {
-  if (!path.isAbsolute(binding.root) || path.resolve(binding.root) !== binding.root) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  }
-  const rootStat = fs.lstatSync(binding.root);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  const manifest = readSandboxControlManifest(path.join(binding.root, 'manifest.json'));
-  const canonicalRoot = fs.realpathSync.native(binding.root);
-  if (!sandboxLocalManifestMatches(binding, manifest, canonicalRoot)) {
-    throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
-  }
-  const identity = validateSandboxControlIdentity({
-    publicStatusDir: binding.statusDir,
-    root: binding.root,
-    mode: manifest.mode,
-    taskId: manifest.taskId,
-    generation: manifest.generation,
-    controlRootId: manifest.controlRootId
+  return readTaskCompletionManifest(binding.root, {
+    taskId: binding.taskId,
+    generation: binding.generation,
+    controlRootId: binding.controlRootId,
+    statusDir: binding.statusDir,
+    localBinding: binding
   });
-  const aliasesMatch = sameMountedControlDirectory(manifest.channelDir, binding.channelDir)
-    && sameMountedControlDirectory(manifest.publicStatusDir, binding.statusDir)
-    && sameMountedControlDirectory(manifest.runtimeDir, binding.runtimeDir);
-  if (identity.state !== 'valid' || !aliasesMatch) {
-    throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
-  }
-  return manifest;
 }
 
 function readBrokerOwner(filePath: string): BrokerOwner | null {

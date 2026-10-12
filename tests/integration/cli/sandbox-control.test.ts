@@ -617,7 +617,7 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
       identity: { mode: 'task-bound', taskId }
     });
     const controlRoot = sandboxControlPaths({
-      base: controlBase, repoRoot: root, project: 'demo', container: 'demo-dev-feature',
+      base: controlBase, project: 'demo', container: 'demo-dev-feature',
       identity: { mode: 'task-bound', taskId }
     }).root;
     assert.equal(setup.root, path.join(controlBase, 'demo', 'tasks', taskId));

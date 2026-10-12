@@ -24,75 +24,114 @@ function manifestDigest(manifest: SandboxControlManifest): string {
   });
 }
 
-function branchOnlyManifestPaths(managedRoot: string): string[] {
-  const result: string[] = [];
-  for (const container of fs.readdirSync(managedRoot, { withFileTypes: true })) {
-    if (!container.isDirectory() || container.isSymbolicLink()) continue;
-    const containerPath = path.join(managedRoot, container.name);
-    for (const identity of fs.readdirSync(containerPath, { withFileTypes: true })) {
-      if (!identity.isDirectory() || identity.isSymbolicLink() || !/^[a-f0-9]{16}$/u.test(identity.name)) continue;
-      result.push(path.join(containerPath, identity.name, 'manifest.json'));
-    }
-  }
-  return result;
+function readManagedManifest(manifestPath: string): SandboxControlManifest {
+  try { return readSandboxControlManifest(manifestPath); } catch { throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID'); }
 }
 
-function taskBoundManifestPaths(params: Readonly<{
-  managedRoot: string;
+function branchOnlyManifests(parentPath: string): SandboxControlManifest[] {
+  const manifests: SandboxControlManifest[] = [];
+  for (const identity of fs.readdirSync(parentPath, { withFileTypes: true })) {
+    if (!identity.isDirectory() || identity.isSymbolicLink() || !/^[a-f0-9]{16}$/u.test(identity.name)) continue;
+    manifests.push(readManagedManifest(path.join(parentPath, identity.name, 'manifest.json')));
+  }
+  return manifests;
+}
+
+function taskBoundManifests(params: Readonly<{
+  tasksRoot: string;
   controlBase: string;
   project: string;
-  repoRoot: string;
-}>): string[] {
-  const tasksRoot = path.join(params.managedRoot, 'tasks');
-  if (!fs.existsSync(tasksRoot)) return [];
-  assertDirectory(tasksRoot);
-  const canonicalManagedRoot = fs.realpathSync.native(params.managedRoot);
-  const canonicalTasksRoot = fs.realpathSync.native(tasksRoot);
-  if (path.dirname(canonicalTasksRoot) !== canonicalManagedRoot) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  const canonicalRepoRoot = fs.realpathSync.native(params.repoRoot);
-  const result: string[] = [];
-  for (const task of fs.readdirSync(tasksRoot, { withFileTypes: true })) {
+  canonicalTasksRoot: string;
+  canonicalRepoRoot: string;
+}>): SandboxControlManifest[] {
+  const manifests: SandboxControlManifest[] = [];
+  for (const task of fs.readdirSync(params.tasksRoot, { withFileTypes: true })) {
     if (!/^TASK-\d{8}-\d{6}$/u.test(task.name)) continue;
     if (!task.isDirectory() || task.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-    const taskRoot = path.join(tasksRoot, task.name);
+    const taskRoot = path.join(params.tasksRoot, task.name);
     assertNoSymlinkPath(params.controlBase, taskRoot);
     const canonicalTaskRoot = fs.realpathSync.native(taskRoot);
-    if (path.dirname(canonicalTaskRoot) !== canonicalTasksRoot) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+    if (path.dirname(canonicalTaskRoot) !== params.canonicalTasksRoot) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
     const manifestPath = path.join(taskRoot, 'manifest.json');
     if (!fs.existsSync(manifestPath)) continue;
-    let manifest: SandboxControlManifest;
-    try { manifest = readSandboxControlManifest(manifestPath); } catch { throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID'); }
+    const manifest = readManagedManifest(manifestPath);
     if (manifest.mode !== 'task-bound' || manifest.taskId !== task.name || manifest.project !== params.project
-      || fs.realpathSync.native(manifest.repoRoot) !== canonicalRepoRoot
+      || fs.realpathSync.native(manifest.repoRoot) !== params.canonicalRepoRoot
       || path.dirname(fs.realpathSync.native(manifestPath)) !== canonicalTaskRoot) {
       throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
     }
-    result.push(manifestPath);
+    manifests.push(manifest);
   }
-  return result;
+  return manifests;
 }
 
-function managedManifestPaths(params: Readonly<{
+type TaskBoundScanContext = Readonly<{
+  tasksRoot: string;
+  canonicalTasksRoot: string;
+  canonicalRepoRoot: string;
+}>;
+
+function validateManagedRoot(params: Readonly<{ managedRoot: string; controlBase?: string; project?: string }>): boolean {
+  if (params.controlBase && params.project
+    && path.resolve(params.managedRoot) !== path.resolve(params.controlBase, params.project)) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+  }
+  if (!fs.existsSync(params.managedRoot)) return false;
+  assertDirectory(params.managedRoot);
+  return true;
+}
+
+function taskBoundScanContext(params: Readonly<{
   managedRoot: string;
   controlBase?: string;
   project?: string;
   repoRoot?: string;
-}>): string[] {
+}>): TaskBoundScanContext | null {
+  if (!params.controlBase || !params.project || !params.repoRoot) return null;
+  const canonicalManagedRoot = fs.realpathSync.native(params.managedRoot);
+  const tasksRoot = path.join(params.managedRoot, 'tasks');
+  if (!fs.existsSync(tasksRoot)) return null;
+  assertDirectory(tasksRoot);
+  const canonicalTasksRoot = fs.realpathSync.native(tasksRoot);
+  if (path.dirname(canonicalTasksRoot) !== canonicalManagedRoot) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+  return {
+    tasksRoot,
+    canonicalTasksRoot,
+    canonicalRepoRoot: fs.realpathSync.native(params.repoRoot)
+  };
+}
+
+function manifestsForParent(
+  managedRoot: string,
+  parent: fs.Dirent,
+  params: Readonly<{ controlBase?: string; project?: string }>,
+  taskScan: TaskBoundScanContext | null
+): SandboxControlManifest[] {
+  if (!parent.isDirectory() || parent.isSymbolicLink()) return [];
+  const parentPath = path.join(managedRoot, parent.name);
+  if (parent.name === 'tasks' && taskScan && params.controlBase && params.project) {
+    return taskBoundManifests({
+      tasksRoot: parentPath,
+      controlBase: params.controlBase,
+      project: params.project,
+      canonicalTasksRoot: taskScan.canonicalTasksRoot,
+      canonicalRepoRoot: taskScan.canonicalRepoRoot
+    });
+  }
+  return branchOnlyManifests(parentPath);
+}
+
+function managedManifestCandidates(params: Readonly<{
+  managedRoot: string;
+  controlBase?: string;
+  project?: string;
+  repoRoot?: string;
+}>): SandboxControlManifest[] {
   const managedRoot = params.managedRoot;
-  if (params.controlBase && params.project
-    && path.resolve(managedRoot) !== path.resolve(params.controlBase, params.project)) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  }
-  if (!fs.existsSync(managedRoot)) return [];
-  const rootStat = fs.lstatSync(managedRoot);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  const result = branchOnlyManifestPaths(managedRoot);
-  if (params.controlBase && params.project && params.repoRoot) {
-    result.push(...taskBoundManifestPaths({
-      managedRoot, controlBase: params.controlBase, project: params.project, repoRoot: params.repoRoot
-    }));
-  }
-  return result;
+  if (!validateManagedRoot(params)) return [];
+  const taskScan = taskBoundScanContext(params);
+  return fs.readdirSync(managedRoot, { withFileTypes: true })
+    .flatMap((parent) => manifestsForParent(managedRoot, parent, params, taskScan));
 }
 
 function assertDirectory(directory: string): void {
@@ -251,9 +290,7 @@ export function recoverSandboxControlFromHost(requestId: string, params: Readonl
   let candidates: Array<{ manifest: SandboxControlManifest; records: AuditRecord[] }> = [];
   while (Date.now() < deadline) {
     candidates = [];
-    for (const manifestPath of managedManifestPaths(params)) {
-      let manifest: SandboxControlManifest;
-      try { manifest = readSandboxControlManifest(manifestPath); } catch { throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID'); }
+    for (const manifest of managedManifestCandidates(params)) {
       if (manifest.project !== (params.project ?? path.basename(path.resolve(params.managedRoot))) || !manifest.generation) {
         throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
       }
