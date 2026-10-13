@@ -101,7 +101,7 @@ function cleanupTaskIdByBranch(requestedRef: string, repoRoot: string): string |
     throw new Error(`SANDBOX_TASK_IDENTITY_AMBIGUOUS: branch '${requestedRef}' is bound to multiple tasks`);
   }
   const match = matches[0];
-  return match?.state === 'active' ? null : match?.taskId ?? null;
+  return match?.taskId ?? null;
 }
 
 export function resolveSandboxTarget(requestedRef: string, repoRoot: string): SandboxTarget {
