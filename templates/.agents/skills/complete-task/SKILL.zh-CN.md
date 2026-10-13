@@ -145,6 +145,8 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 
 摘要正文只记录当前任务证据能够支持的交付结果、关联 PR 与实际合入事实、验证命令及其范围/结果/未覆盖部分，以及已知待办；需要说明验证范围时可注明对应提交。没有证据支持的事实不推断，未完成事项写入待办。这是 Issue 收尾摘要，不是 PR 留言。
 
+摘要默认使用当前技能的语言：中文技能生成中文摘要，英文技能生成英文摘要。中英文摘要保持相同字段结构。
+
 在暂存前核对正文：删除候选和待收尾占位；不写本地短号、无关窗口/模型/receipt 操作流水或外层已有的完整 TASK-ID。不要删除或改写平台维护的评论 marker 和恢复 metadata；与产品行为有关的路径可按需保留。摘要不预测 Complete Task 的 finalization 终态，也不声称任务已完成或已归档。任务目标状态止于 `completed`，不默认追加 Archive Tasks；生命周期终态及 warning 由正式 task 评论和 receipt 承担。
 
 `stage-summary` 用于任务仍处于 active 时暂存摘要。任务进入 completed 后，不要假定该命令仍可用。若 finalization 结果表明已发布的交付事实需要更正，先确认现有受支持的评论同步入口允许在当前状态执行；不支持时，在最终汇报中如实说明限制，不新增入口或改变调用时序。
