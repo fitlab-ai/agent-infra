@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { isRemovedHashShortIdInput } from '../task/short-id.ts';
-import { resolveTaskRef } from '../task/resolve-ref.ts';
+import {
+  configuredShortIdLength,
+  inspectShortIdRegistry,
+  isRemovedHashShortIdInput,
+  normalizeShortIdInput
+} from '../task/short-id.ts';
 import {
   TASK_WORKSPACE_STATES,
   listTaskWorkspaces,
@@ -81,16 +85,19 @@ function taskIdentity(repoRoot: string, taskId: string, registry: Record<string,
 
 function cleanupTaskId(requestedRef: string, repoRoot: string): string | null {
   if (TASK_ID_RE.test(requestedRef)) return requestedRef;
-  if (!SHORT_ID_RE.test(requestedRef)) return null;
-  const task = resolveTaskRef(requestedRef, { repoRoot });
-  if (!task.ok) {
-    if (task.code === 'SHORT_ID_STALE' && task.taskId) {
-      const archivedTask = resolveTaskWorkspace(task.taskId, repoRoot);
-      if (archivedTask.state === 'archive') return task.taskId;
-    }
-    throw new Error(task.message);
+  const normalized = normalizeShortIdInput(requestedRef, {
+    shortIdLength: configuredShortIdLength(repoRoot)
+  });
+  if (normalized.kind === 'error') throw new Error(normalized.message);
+  if (normalized.kind !== 'shortId') return null;
+
+  const registry = inspectShortIdRegistry(repoRoot);
+  if (registry.status !== 'valid') throw new Error(registry.error.message);
+  const match = [...registry.shortIds].find(([, shortId]) => shortId === normalized.value);
+  if (!match) {
+    throw new Error(`Short id '${normalized.value}' not found in active task registry`);
   }
-  return task.taskId;
+  return match[0];
 }
 
 function cleanupTaskIdByBranch(requestedRef: string, repoRoot: string): string | null {
@@ -186,14 +193,11 @@ export function resolveSandboxCleanupTarget(
     };
   }
 
-  const target = resolveSandboxTarget(requestedRef, repoRoot);
   return {
     requestedRef,
-    branch: target.branch,
-    workspace: target.workspace.mode === 'task-bound'
-      ? { mode: 'task-bound', taskId: target.workspace.taskId }
-      : { mode: 'branch-only' },
-    taskState: target.workspace.mode === 'task-bound' ? 'active' : 'branch-only'
+    branch: requestedRef,
+    workspace: { mode: 'branch-only' },
+    taskState: 'branch-only'
   };
 }
 

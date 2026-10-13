@@ -251,6 +251,9 @@ test("sandbox rm cleans per-branch shell config dir", () => {
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project });
+    const activeWorkspace = path.join(fixture.repoDir, ".agents", "workspace", "active");
+    fs.mkdirSync(activeWorkspace, { recursive: true });
+    fs.writeFileSync(path.join(activeWorkspace, ".short-ids.json"), "{invalid json", "utf8");
     const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
     const removedBranchDir = path.join(shellConfigBase, "feature..rm-config");
     const keptBranchDir = path.join(shellConfigBase, "feature..keep");

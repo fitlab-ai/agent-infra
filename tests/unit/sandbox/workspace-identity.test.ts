@@ -103,19 +103,17 @@ test('resolveSandboxCleanupTarget maps archived task short id, branch, and TASK 
   const branch = 'agent-infra-bugfix-archived-cleanup';
   addArchivedTask(root, taskId, branch, '07');
 
-  const targets = ['7', branch, taskId].map((ref) =>
-    resolveSandboxCleanupTarget(ref, root, { allowProtected: true })
-  );
-
-  assert.deepEqual(targets.map(({ branch: targetBranch, workspace, taskState }) => ({
-    branch: targetBranch,
-    workspace,
-    taskState
-  })), [
-    { branch, workspace: { mode: 'task-bound', taskId }, taskState: 'archive' },
-    { branch, workspace: { mode: 'task-bound', taskId }, taskState: 'archive' },
-    { branch, workspace: { mode: 'task-bound', taskId }, taskState: 'archive' }
-  ]);
+  const expected = {
+    branch,
+    workspace: { mode: 'task-bound' as const, taskId },
+    taskState: 'archive' as const
+  };
+  for (const requestedRef of ['7', branch, taskId]) {
+    assert.deepEqual(resolveSandboxCleanupTarget(requestedRef, root, { allowProtected: true }), {
+      requestedRef,
+      ...expected
+    });
+  }
 });
 
 test('resolveSandboxCleanupTarget rejects a branch shared by tasks in different states', () => {
