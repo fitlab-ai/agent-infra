@@ -33,8 +33,7 @@ import {
   type OperationWarning,
   type OperationWarningSeverity
 } from './operation-outcome.ts';
-import { assertSandboxLocalControlBinding, readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
-import type { SandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
+import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import { validateSandboxControlIdentity } from '../sandbox/control/identity-sentinel.ts';
 
 const RECEIPT_VERSION = 4 as const;
@@ -73,7 +72,6 @@ type TaskFinalizationOptions = Readonly<{
   controlBinding?: Readonly<{ generation: string; requestId: string }>;
   controlRoot?: string;
   controlProject?: string;
-  sandboxLocalControlBinding?: SandboxLocalControlBinding;
   manifestPath?: string;
   metadataProvider?: TaskLifecycleOptions['metadataProvider'];
   lifecycle?: typeof applyTaskLifecycle;
@@ -1077,7 +1075,6 @@ async function prepareUnderLock(
           prepareOnly: true,
           ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
           ...(options.controlProject ? { controlProject: options.controlProject } : {}),
-          ...(options.sandboxLocalControlBinding ? { sandboxLocalControlBinding: options.sandboxLocalControlBinding } : {}),
           ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
         }
       );
@@ -1163,37 +1160,19 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
     return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
-      if (options.sandboxLocalControlBinding) {
+      if (options.controlBinding && options.manifestPath) {
         try {
-          const binding = options.sandboxLocalControlBinding;
-          if (binding.taskId !== resolved.taskId || binding.root !== options.controlRoot) {
-            throw new Error('sandbox control binding does not match finalization request');
-          }
-          assertSandboxLocalControlBinding(binding);
-        } catch (error) {
-          return failed(resolved.taskId, {
-            code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
-            message: error instanceof Error ? error.message : String(error), retryable: false
-          });
-        }
-      } else if (options.manifestPath || (options.controlRoot && fs.existsSync(path.join(options.controlRoot, 'manifest.json')))) {
-        try {
-          const manifestPath = options.manifestPath ?? path.join(options.controlRoot!, 'manifest.json');
-          const root = path.dirname(path.resolve(manifestPath));
-          if (options.controlRoot && path.resolve(options.controlRoot) !== root) {
-            throw new Error('manifest path is outside the bound control root');
-          }
-          const manifest = readSandboxControlManifest(manifestPath);
+          const manifest = readSandboxControlManifest(options.manifestPath);
           const identity = validateSandboxControlIdentity({
             publicStatusDir: manifest.publicStatusDir,
-            root,
+            root: path.dirname(path.resolve(options.manifestPath)),
             mode: manifest.mode,
             taskId: manifest.taskId,
             generation: manifest.generation,
             controlRootId: manifest.controlRootId
           });
-          if (identity.state !== 'valid' || manifest.mode !== 'task-bound' || manifest.taskId !== resolved.taskId
-            || (options.controlBinding && manifest.generation !== options.controlBinding.generation)
+          if (identity.state !== 'valid' || manifest.taskId !== resolved.taskId
+            || manifest.generation !== options.controlBinding.generation
             || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
             throw new Error('current sandbox manifest does not match finalization request');
           }
@@ -1240,7 +1219,6 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         repoRoot,
         ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
         ...(options.controlProject ? { controlProject: options.controlProject } : {}),
-        ...(options.sandboxLocalControlBinding ? { sandboxLocalControlBinding: options.sandboxLocalControlBinding } : {}),
         ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
       };
       const result = options.lifecycle

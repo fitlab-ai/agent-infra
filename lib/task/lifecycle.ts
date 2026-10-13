@@ -19,8 +19,6 @@ import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
-import { assertSandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
-import type { SandboxLocalControlBinding } from '../sandbox/control/lifecycle.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -110,7 +108,6 @@ type TaskLifecycleOptions = {
   repoRoot?: string;
   controlRoot?: string;
   controlProject?: string;
-  sandboxLocalControlBinding?: SandboxLocalControlBinding;
   metadataProvider?: () => TaskWriteMetadata;
   fileSystem?: Partial<LifecycleFileSystem>;
   taskFileSystem?: Partial<TaskFileSystem>;
@@ -320,35 +317,28 @@ function assertTaskControlManifestIdentity(controlRoot: string, taskId: string, 
   }
 }
 
-function assertTaskControlRootIdentity(controlRoot: string, taskId: string, repoRoot: string, expectedProject?: string): void {
-  assertTaskControlRootPath(controlRoot, taskId, expectedProject);
-  assertTaskControlManifestIdentity(controlRoot, taskId, repoRoot, expectedProject);
-}
-
 function taskBoundControlMoveSafety(
   request: TaskLifecycleRequest,
   controlRoot: string | undefined,
   options: TaskLifecycleOptions,
   taskId: string,
-  repoRoot: string
+  repoRoot: string,
+  validateManifestIdentity: boolean
 ): LifecycleError | null {
   if (!controlRoot) return null;
-  if (options.sandboxLocalControlBinding) {
-    try {
-      const binding = options.sandboxLocalControlBinding;
-      if (request.intent !== 'complete' || binding.root !== controlRoot || binding.taskId !== taskId
-        || binding.project !== options.controlProject) throw new Error('sandbox control binding does not match lifecycle request');
-      assertSandboxLocalControlBinding(binding);
-    } catch {
-      return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'sandbox control mount is missing, malformed, or belongs to another task' };
-    }
-    return null;
-  }
   const controlManifest = path.join(controlRoot, 'manifest.json');
   const controlLease = path.join(controlRoot, 'lease.json');
   const stateExists = pathExists(controlRoot) || pathExists(controlManifest) || pathExists(controlLease);
   if (stateExists) {
-    try { assertTaskControlRootIdentity(controlRoot, taskId, repoRoot, options.controlProject); }
+    try {
+      assertTaskControlRootPath(controlRoot, taskId, options.controlProject);
+      if (validateManifestIdentity) {
+        assertTaskControlManifestIdentity(controlRoot, taskId, repoRoot, options.controlProject);
+      } else {
+        const manifestStat = fs.lstatSync(controlManifest);
+        if (!manifestStat.isFile() || manifestStat.isSymbolicLink()) throw new Error('control manifest is not a real file');
+      }
+    }
     catch {
       return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control root is missing, malformed, or belongs to another task' };
     }
@@ -379,10 +369,11 @@ function runtimeMoveSafety(
   options: TaskLifecycleOptions,
   taskId: string,
   repoRoot: string,
-  sourcePath: string
+  sourcePath: string,
+  validateControlManifestIdentity: boolean
 ): LifecycleError | null {
   if (!movingTaskDirectory) return null;
-  const controlSafety = taskBoundControlMoveSafety(request, options.controlRoot, options, taskId, repoRoot);
+  const controlSafety = taskBoundControlMoveSafety(request, options.controlRoot, options, taskId, repoRoot, validateControlManifestIdentity);
   return controlSafety ?? orchestrationMoveSafety(sourcePath);
 }
 
@@ -686,7 +677,7 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
     && !(request.intent === 'complete' && targetContainsTask(targetPath, taskId, request))) {
     return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
-  const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath);
+  const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath, true);
   if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   const content = io.readFileSync(currentTaskFile);
   let frontmatter;
@@ -813,7 +804,7 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
   }
   if (fs.existsSync(targetPath) && !fs.existsSync(path.join(sourcePath, 'task.md'))) completed.add('directory-moved');
   if (!completed.has('directory-moved')) {
-    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath);
+    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath, false);
     if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     if (request.intent === 'complete') {

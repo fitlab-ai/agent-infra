@@ -7,7 +7,7 @@ import {
 import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
-import { assertSandboxLocalControlBinding, quiesceSandboxControlForTaskCompletion } from '../sandbox/control/lifecycle.ts';
+import { quiesceSandboxControlForTaskCompletion } from '../sandbox/control/lifecycle.ts';
 import { loadSandboxControlLocation } from '../sandbox/config.ts';
 import { serializeTaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
 import { verifyTaskEvent } from '../task/verification.ts';
@@ -83,33 +83,20 @@ async function taskFinalization(args: string[] = []): Promise<void> {
   const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
   if (transport.kind === 'sandbox-local') {
     const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
-    const channelDir = process.env.AGENT_INFRA_CONTROL_DIR;
-    const runtimeDir = process.env.AGENT_INFRA_RUNTIME_DIR;
     const taskId = process.env.AGENT_INFRA_TASK_ID;
     const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
     const controlRootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
     const controlRoot = process.env.AGENT_INFRA_CONTROL_ROOT_DIR;
-    const controlLocation = loadSandboxControlLocation(repoRoot);
-    if (!statusDir || !channelDir || !runtimeDir || !taskId || !generation || !controlRootId
-      || !controlRoot || !controlLocation?.project || taskId !== resolved.taskId) {
+    if (!statusDir || !taskId || !generation || !controlRootId || !controlRoot || taskId !== resolved.taskId) {
       const detail = { code: 'TASK_CONTROL_TRANSPORT_INVALID', message: 'sandbox task control identity is incomplete', retryable: false };
       process.stdout.write(envelope('failed', false, true, null, detail));
       process.exitCode = 1;
       return;
     }
-    const sandboxLocalControlBinding = {
-      root: controlRoot, project: controlLocation.project, taskId, generation, controlRootId,
-      channelDir, statusDir, runtimeDir
-    };
     const result = await applyTaskFinalization(boundOperation.request, {
       repoRoot,
-      controlRoot,
-      controlProject: controlLocation.project,
-      sandboxLocalControlBinding,
-      manifestPath: path.join(controlRoot, 'manifest.json'),
       beforeLifecycle: async (currentTaskId) => {
         if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
-        assertSandboxLocalControlBinding(sandboxLocalControlBinding);
         await quiesceSandboxControlForTaskCompletion(
           controlRoot,
           { taskId, generation, controlRootId, statusDir }
