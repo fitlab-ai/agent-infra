@@ -9,6 +9,7 @@ import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import type { TaskLifecycleResult } from '../task/lifecycle.ts';
 import type { AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult } from '../agent-clients/adapter.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+import { loadSandboxControlLocation } from '../sandbox/config.ts';
 
 const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.filter((intent) => intent !== 'complete').join(', ')}\nrecover-started: --auto\n`;
 
@@ -59,8 +60,9 @@ async function taskLifecycle(args: string[] = []): Promise<void> {
     repoRoot = resolved.repoRoot;
   }
 
+  const controlLocation = loadSandboxControlLocation(repoRoot);
   const result = await dispatchTaskControlOperation(
-    createDirectHostExecutionContext({ repoRoot }),
+    createDirectHostExecutionContext({ repoRoot, ...(controlLocation ?? {}) }),
     operation
   ) as TaskLifecycleResult | LifecycleRecoveryResult;
   process.stdout.write(`${JSON.stringify(result)}\n`);

@@ -829,7 +829,7 @@ function resolveRmTarget(
     ? matchedContainers
     : [...new Set([...containerNameCandidates(config, effectiveBranch), ...matchedContainers])];
   const controlRoots = containers.flatMap((container) => identities.map((identity) => sandboxControlPaths({
-    base: config.controlBase, repoRoot: config.repoRoot, project: config.project, container, identity
+    base: config.controlBase, project: config.project, container, identity
   }).root));
   const workspaceViewRoots = containers.flatMap((container) => identities.map((identity) => sandboxWorkspaceViewPaths({
     base: config.workspaceViewBase, project: config.project, container, identity
@@ -1083,6 +1083,19 @@ async function rmPurgeCore(
   const containers = runEngine(engine, 'docker', [
     'ps', '-a', '--filter', `label=${sandboxLabel(config)}`, '--format', '{{.Names}}'
   ]).split('\n').filter(Boolean);
+  const controlRoots = rows.flatMap((row) => {
+    if (!row.branch) return [];
+    const identity = row.workspaceMode === 'task-bound' && row.taskId
+      ? { mode: 'task-bound' as const, taskId: row.taskId }
+      : row.workspaceMode === 'branch-only'
+        ? { mode: 'branch-only' as const }
+        : null;
+    if (!identity) return [];
+    return [sandboxControlPaths({
+      base: config.controlBase, project: config.project,
+      container: row.name, identity
+    }).root];
+  });
   const completedTaskIds = [...new Set(rows
     .filter((row) => row.workspaceMode === 'task-bound' && row.taskId)
     .map((row) => row.taskId!))];
@@ -1115,9 +1128,8 @@ async function rmPurgeCore(
     if (!isCancel(selected) && selected) fs.rmSync(config.shareBase, { recursive: true, force: true });
     else cleanupCompleted = false;
   }
-  for (const base of [config.workspaceViewBase, config.controlBase]) {
-    fs.rmSync(path.join(base, config.project), { recursive: true, force: true });
-  }
+  fs.rmSync(path.join(config.workspaceViewBase, config.project), { recursive: true, force: true });
+  for (const root of new Set(controlRoots)) fs.rmSync(root, { recursive: true, force: true });
   if (cleanupCompleted) {
     for (const taskId of completedTaskIds) releaseStaleShortIdRegistry(config.repoRoot, taskId);
   }

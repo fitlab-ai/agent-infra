@@ -14,7 +14,6 @@ export function readSandboxControlStatusForRow(
     : { mode: 'branch-only' as const };
   const control = sandboxControlPaths({
     base: config.controlBase,
-    repoRoot: config.repoRoot,
     project: config.project,
     container: row.name,
     identity

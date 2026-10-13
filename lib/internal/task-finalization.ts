@@ -8,7 +8,7 @@ import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
 import { quiesceSandboxControlForTaskCompletion } from '../sandbox/control/lifecycle.ts';
-import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
+import { loadSandboxControlLocation } from '../sandbox/config.ts';
 import { serializeTaskFinalizationEnvelope } from '../task/finalization-envelope.ts';
 import { verifyTaskEvent } from '../task/verification.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
@@ -86,7 +86,8 @@ async function taskFinalization(args: string[] = []): Promise<void> {
     const taskId = process.env.AGENT_INFRA_TASK_ID;
     const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
     const controlRootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
-    if (!statusDir || !taskId || !generation || !controlRootId || taskId !== resolved.taskId) {
+    const controlRoot = process.env.AGENT_INFRA_CONTROL_ROOT_DIR;
+    if (!statusDir || !taskId || !generation || !controlRootId || !controlRoot || taskId !== resolved.taskId) {
       const detail = { code: 'TASK_CONTROL_TRANSPORT_INVALID', message: 'sandbox task control identity is incomplete', retryable: false };
       process.stdout.write(envelope('failed', false, true, null, detail));
       process.exitCode = 1;
@@ -97,7 +98,7 @@ async function taskFinalization(args: string[] = []): Promise<void> {
       beforeLifecycle: async (currentTaskId) => {
         if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
         await quiesceSandboxControlForTaskCompletion(
-          path.join(resolveTaskRuntimeRoot(taskId, { repoRoot }), 'sandbox-control'),
+          controlRoot,
           { taskId, generation, controlRootId, statusDir }
         );
       },
@@ -111,8 +112,9 @@ async function taskFinalization(args: string[] = []): Promise<void> {
     process.exitCode = exitCode(status);
     return;
   }
+  const controlLocation = loadSandboxControlLocation(repoRoot);
   const result = await dispatchTaskControlOperation(
-    createDirectHostExecutionContext({ repoRoot }),
+    createDirectHostExecutionContext({ repoRoot, ...(controlLocation ?? {}) }),
     boundOperation
   );
   if (result.status === 'prepared') {

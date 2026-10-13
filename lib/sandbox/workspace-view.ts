@@ -4,7 +4,6 @@ import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import { resolveTaskWorkspace } from './task-resolver.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
-import { resolveTaskRuntimeRoot } from '../task/runtime-paths.ts';
 import {
   createSandboxControlIdentitySentinel,
   writeSandboxControlIdentitySentinel
@@ -64,13 +63,21 @@ export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 
 
 export function sandboxControlPaths(params: Readonly<{
   base: string;
-  repoRoot?: string;
   project: string;
   container: string;
   identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
 }>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; runtimeDir: string; manifestPath: string }> {
   const root = params.identity.mode === 'task-bound'
-    ? path.join(resolveTaskRuntimeRoot(params.identity.taskId, { repoRoot: params.repoRoot }), 'sandbox-control')
+    ? (() => {
+      if (!/^TASK-\d{8}-\d{6}$/.test(params.identity.taskId)
+        || !params.project || path.basename(params.project) !== params.project || params.project === '.' || params.project === '..') {
+        throw new Error('SANDBOX_CONTROL_ROOT_INVALID');
+      }
+      const candidate = path.resolve(params.base, params.project, 'tasks', params.identity.taskId);
+      const relative = path.relative(path.resolve(params.base), candidate);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('SANDBOX_CONTROL_ROOT_INVALID');
+      return candidate;
+    })()
     : (() => {
       const digest = createHash('sha256').update('branch-only').digest('hex').slice(0, 16);
       return path.resolve(params.base, params.project, params.container, digest);
@@ -92,6 +99,23 @@ function assertSafeDirectory(directory: string, expectedBase: string): void {
   }
   if (fs.existsSync(directory) && fs.lstatSync(directory).isSymbolicLink()) {
     throw new Error(`Sandbox workspace view must not be a symbolic link: ${directory}`);
+  }
+}
+
+function assertSafeTaskBoundControlRoot(basePath: string, root: string): void {
+  const relative = path.relative(basePath, root);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Sandbox control root escapes its configured base: ${root}`);
+  }
+  if (fs.existsSync(basePath) && fs.lstatSync(basePath).isSymbolicLink()) {
+    throw new Error(`Sandbox control base must not be a symbolic link: ${basePath}`);
+  }
+  let current = basePath;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) {
+      throw new Error(`Sandbox control root must not contain a symbolic link: ${current}`);
+    }
   }
 }
 
@@ -263,7 +287,11 @@ export function materializeSandboxControl(params: Readonly<{
   }>;
 }>): SandboxControlSetup {
   const { root, channelDir, statusDir, processingDir, runtimeDir, manifestPath } = sandboxControlPaths(params);
-  assertSafeDirectory(root, params.identity.mode === 'task-bound' ? path.dirname(root) : path.resolve(params.base));
+  if (params.identity.mode === 'task-bound') {
+    assertSafeTaskBoundControlRoot(path.resolve(params.base), root);
+  } else {
+    assertSafeDirectory(root, path.resolve(params.base));
+  }
   if (fs.existsSync(root)) {
     if (!params.replacementLease || path.resolve(params.replacementLease.root) !== root) {
       throw new Error('SANDBOX_CONTROL_REPLACEMENT_REQUIRED');

@@ -237,3 +237,16 @@ export function loadConfig({
     }
   };
 }
+
+export function loadSandboxControlLocation(repoRoot = detectRepoRoot()): Readonly<{
+  controlBase: string;
+  project: string;
+}> | null {
+  const configPath = path.join(repoRoot, '.agents', '.airc.json');
+  if (!fs.existsSync(configPath)) return null;
+  const airc = JSON.parse(fs.readFileSync(configPath, 'utf8')) as AircConfig;
+  if (typeof airc.project !== 'string' || !airc.project) return null;
+  const home = homedir();
+  if (!home) throw new Error('sandbox: home directory is required');
+  return { controlBase: hostJoin(home, '.agent-infra', 'sandbox-control'), project: airc.project };
+}

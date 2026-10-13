@@ -1108,7 +1108,6 @@ export async function create(
   const container = containerName(effectiveConfig, branch);
   const controlPaths = sandboxControlPaths({
     base: effectiveConfig.controlBase,
-    repoRoot: effectiveConfig.repoRoot,
     project: effectiveConfig.project,
     container,
     identity: target.workspace
@@ -1493,6 +1492,7 @@ export async function create(
               shellConfigHostDir: hostShellConfig.hostDir,
               workspaceViewRoot: workspaceView.root,
               controlDir: control.channelDir,
+              ...(target.workspace.mode === 'task-bound' ? { controlRootDir: control.root } : {}),
               controlStatusDir: control.statusDir,
               ...(target.workspace.mode === 'task-bound' ? { runtimeDir: control.runtimeDir } : {}),
               ...(target.workspace.mode === 'task-bound'
@@ -1596,7 +1596,10 @@ export async function create(
               '-e',
               `AGENT_INFRA_CONTROL_ROOT_ID=${control.controlRootId}`,
               ...(target.workspace.mode === 'task-bound'
-                ? ['-e', 'AGENT_INFRA_RUNTIME_DIR=/run/agent-infra/runtime']
+                ? [
+                  '-e', 'AGENT_INFRA_CONTROL_ROOT_DIR=/run/agent-infra/control-root',
+                  '-e', 'AGENT_INFRA_RUNTIME_DIR=/run/agent-infra/runtime'
+                ]
                 : []),
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,

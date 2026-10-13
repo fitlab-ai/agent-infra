@@ -342,7 +342,6 @@ async function ensureSandboxControlBroker(params: {
 }): Promise<void> {
   const control = sandboxControlPaths({
     base: params.config.controlBase ?? path.join(params.config.home, '.agent-infra', 'sandbox-control'),
-    repoRoot: params.config.repoRoot,
     project: params.config.project,
     container: params.container,
     identity: params.workspace
@@ -753,7 +752,6 @@ function expectedMounts(params: {
   });
   const control = sandboxControlPaths({
     base: config.controlBase ?? path.join(config.home, '.agent-infra', 'sandbox-control'),
-    repoRoot: config.repoRoot,
     project: config.project,
     container: params.container,
     identity: params.workspace
@@ -778,6 +776,7 @@ function expectedMounts(params: {
       }),
     workspaceViewRoot: view.root,
     controlDir: control.channelDir,
+    ...(params.workspace.mode === 'task-bound' ? { controlRootDir: control.root } : {}),
     controlStatusDir: control.statusDir,
     ...(taskSources === null
       ? {}
@@ -1296,7 +1295,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       let completedReentry: { manifest: SandboxControlManifest; evidence: Awaited<ReturnType<typeof prepareCompletedReentry>> } | null = null;
       if (params.reentry === 'completed' && params.workspace?.mode === 'task-bound') {
         const control = sandboxControlPaths({
-          base: params.config.controlBase, repoRoot: params.config.repoRoot, project: params.config.project,
+          base: params.config.controlBase, project: params.config.project,
           container: params.row.name, identity: params.workspace
         });
         const manifest = readSandboxControlManifest(control.manifestPath);

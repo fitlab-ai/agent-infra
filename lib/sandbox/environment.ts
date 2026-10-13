@@ -14,6 +14,7 @@ const TASK_MARKER_KEYS = [
   'AGENT_INFRA_TASK_ID',
   'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_DIR',
+  'AGENT_INFRA_CONTROL_ROOT_DIR',
   'AGENT_INFRA_CONTROL_STATUS_DIR',
   'AGENT_INFRA_RUNTIME_DIR'
 ] as const;
@@ -106,6 +107,10 @@ export function resolveSandboxControlTransport(
   if (!hasCompleteConfig) {
     return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
   }
+  if (markerState === 'task-bound'
+    && (!env.AGENT_INFRA_CONTROL_ROOT_DIR || !path.isAbsolute(env.AGENT_INFRA_CONTROL_ROOT_DIR))) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
+  }
   const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const configuredStatusProbe = configuredStatusDir && path.isAbsolute(configuredStatusDir)
     ? nativeDirectoryProbe(configuredStatusDir) : 'absent';
@@ -138,7 +143,7 @@ export function resolveSandboxControlTransport(
       && (sentinel.taskId !== env.AGENT_INFRA_TASK_ID || !runtime)) {
       return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
     }
-    if (sentinel.mode === 'branch-only' && (taskBound || runtime)) {
+    if (sentinel.mode === 'branch-only' && (taskBound || runtime || Boolean(env.AGENT_INFRA_CONTROL_ROOT_DIR))) {
       return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
     }
     return { kind: options.localWorkflow ? 'sandbox-local' : 'broker-client', reasonCode: null };

@@ -17,9 +17,10 @@ test('task-bound mount topology leaves completed target visible for its writable
     worktree: '/worktree',
     shellConfigHostDir: '/shell/feature',
     workspaceViewRoot: '/views/current',
-    controlDir: '/control/current',
-    controlStatusDir: '/control/status',
-    runtimeDir: '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime',
+    controlDir: '/control/current-root/channel',
+    controlRootDir: '/control/current-root',
+    controlStatusDir: '/control/current-root/public',
+    runtimeDir: '/control/current-root/runtime',
     taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
     completedTaskSource: '/repo/.agents/workspace/completed/TASK-20260809-010203',
     taskId: 'TASK-20260809-010203'
@@ -38,9 +39,10 @@ test('task-bound mount topology leaves completed target visible for its writable
     '/share/common',
     '/share/branches/feature',
     '/shell/feature',
-    '/control/status',
-    '/control/current',
-    '/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'
+    '/control/current-root/public',
+    '/control/current-root/channel',
+    '/control/current-root/runtime',
+    '/control/current-root'
   ]);
   assert.equal(mounts.some((mount) => mount.hostPaths.some((hostPath) =>
     controllerContext === hostPath || controllerContext.startsWith(`${hostPath}/`))), false);
@@ -81,19 +83,24 @@ test('task-bound mount topology leaves completed target visible for its writable
   assert.equal(mounts.some((mount) => mount.containerPath === '/workspace/.agents/workspace/completed'), false);
   assert.equal(mounts.some((mount) => mount.containerPath === '/workspace/.agents/workspace/completed/TASK-20260809-010203'), true);
   assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/runtime'), {
-    hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203/.runtime/sandbox-control/runtime'],
+    hostPaths: ['/control/current-root/runtime'],
     containerPath: '/run/agent-infra/runtime',
     readOnly: false
   });
   assert.equal(mounts.some((mount) => mount.hostPaths.some((hostPath) => hostPath.includes('private-capabilities'))), false);
   assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control-status'), {
-    hostPaths: ['/control/status'],
+    hostPaths: ['/control/current-root/public'],
     containerPath: '/run/agent-infra/control-status',
     readOnly: true
   });
   assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control'), {
-    hostPaths: ['/control/current'],
+    hostPaths: ['/control/current-root/channel'],
     containerPath: '/run/agent-infra/control',
+    readOnly: false
+  });
+  assert.deepEqual(mounts.find((mount) => mount.containerPath === '/run/agent-infra/control-root'), {
+    hostPaths: ['/control/current-root'],
+    containerPath: '/run/agent-infra/control-root',
     readOnly: false
   });
 });
@@ -115,4 +122,5 @@ test('branch-only topology mounts each isolated workspace state read-only', () =
       { hostPaths: [path.join('/views/empty', 'archive')], containerPath: '/workspace/.agents/workspace/archive', readOnly: true }
     ]
   );
+  assert.equal(mounts.some((mount) => mount.containerPath === '/run/agent-infra/control-root'), false);
 });

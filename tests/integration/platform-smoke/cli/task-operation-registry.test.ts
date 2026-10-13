@@ -310,6 +310,7 @@ test('mounted sandbox control requires a matching identity sentinel', onPlatform
     assert.deepEqual(resolveSandboxControlTransport({
       ...baseEnv,
       AGENT_INFRA_TASK_ID: 'TASK-20260101-000001',
+      AGENT_INFRA_CONTROL_ROOT_DIR: root,
       AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
     }, { statusMountPath: statusDir, localWorkflow: true }), {
       kind: 'sandbox-local', reasonCode: null

@@ -70,6 +70,8 @@ type TaskFinalizationRequest = Readonly<{
 type TaskFinalizationOptions = Readonly<{
   repoRoot: string;
   controlBinding?: Readonly<{ generation: string; requestId: string }>;
+  controlRoot?: string;
+  controlProject?: string;
   manifestPath?: string;
   metadataProvider?: TaskLifecycleOptions['metadataProvider'];
   lifecycle?: typeof applyTaskLifecycle;
@@ -1068,7 +1070,13 @@ async function prepareUnderLock(
     } else {
       const result = lifecycle(
         { taskRef: taskId, intent: 'complete', agent: request.agent },
-        { repoRoot, prepareOnly: true, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) }
+        {
+          repoRoot,
+          prepareOnly: true,
+          ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+          ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+          ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+        }
       );
       lifecycleResult = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
@@ -1207,7 +1215,12 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       });
       receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
       const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
-      const lifecycleOptions = { repoRoot, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) };
+      const lifecycleOptions = {
+        repoRoot,
+        ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+        ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+        ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+      };
       const result = options.lifecycle
         ? options.lifecycle(lifecycleRequest, lifecycleOptions)
         : applyTaskLifecycleWithinTaskLock(lifecycleRequest, lifecycleOptions, resolved.taskId);
