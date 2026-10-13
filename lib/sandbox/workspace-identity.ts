@@ -101,14 +101,14 @@ function cleanupTaskId(requestedRef: string, repoRoot: string): string | null {
 }
 
 function cleanupTaskIdByBranch(requestedRef: string, repoRoot: string): string | null {
-  const matches = TASK_WORKSPACE_STATES
+  const taskIds = new Set(TASK_WORKSPACE_STATES
     .flatMap((state) => listTaskWorkspaces(repoRoot, state))
-    .filter((task) => task.branch === requestedRef);
-  if (matches.length > 1) {
+    .filter((task) => task.branch === requestedRef)
+    .map((task) => task.taskId));
+  if (taskIds.size > 1) {
     throw new Error(`SANDBOX_TASK_IDENTITY_AMBIGUOUS: branch '${requestedRef}' is bound to multiple tasks`);
   }
-  const match = matches[0];
-  return match?.taskId ?? null;
+  return taskIds.values().next().value ?? null;
 }
 
 export function resolveSandboxTarget(requestedRef: string, repoRoot: string): SandboxTarget {
