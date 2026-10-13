@@ -1,8 +1,8 @@
 ---
 name: complete-task
 description: >
-  标记任务完成并归档。
-  当任务工作已完成并验证、需要收尾归档时使用。
+  标记任务完成。
+  当任务工作已完成并验证、需要提交任务收尾时使用。
   仅当对话包含可解析的任务引用时才可自动调用本技能。
 ---
 
@@ -142,6 +142,12 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 
 1. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
 2. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`。该命令把正文和 SHA-256 写入 task 目录的 durable staging record；本步骤不得直接发布 summary 评论。
+
+摘要正文只记录当前任务证据能够支持的交付结果、关联 PR 与实际合入事实、验证命令及其范围/结果/未覆盖部分，以及已知待办；需要说明验证范围时可注明对应提交。没有证据支持的事实不推断，未完成事项写入待办。这是 Issue 收尾摘要，不是 PR 留言。
+
+在暂存前核对正文：删除候选和待收尾占位；不写本地短号、无关窗口/模型/receipt 操作流水或外层已有的完整 TASK-ID。不要删除或改写平台维护的评论 marker 和恢复 metadata；与产品行为有关的路径可按需保留。摘要不预测 Complete Task 的 finalization 终态，也不声称任务已完成或已归档。任务目标状态止于 `completed`，不默认追加 Archive Tasks；生命周期终态及 warning 由正式 task 评论和 receipt 承担。
+
+`stage-summary` 用于任务仍处于 active 时暂存摘要。任务进入 completed 后，不要假定该命令仍可用。若 finalization 结果表明已发布的交付事实需要更正，先确认现有受支持的评论同步入口允许在当前状态执行；不支持时，在最终汇报中如实说明限制，不新增入口或改变调用时序。
 
 若账本含合法的 `PRC-N` post-review 豁免，摘要正文必须镜像 task.md 中的裁决理由、提交范围、人工身份与时间，并明确这是人工覆盖而非自动校验成功。已有匹配 workflow warning 时，同时镜像其原始 failure code/message；尚无 warning 时只写“裁决已记录、最终门禁待验证”，不得提前宣称豁免已通过。summary marker 仍由同一 `--kind summary` intent 唯一维护。
 
