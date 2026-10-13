@@ -525,6 +525,27 @@ test("sandbox rm rejects a missing task record with multiple sandbox branches", 
   }
 });
 
+test("sandbox rm rejects an unmapped short id before sandbox cleanup side effects", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-short-id-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const registeredTaskId = "TASK-20260101-000107";
+    writeShortIdRegistry(fixture.repoDir, { "07": registeredTaskId });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "08"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /short id '08' not found/i);
+    assert.deepEqual(fixture.readDockerCalls(), []);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fixture.repoDir, ".agents", "workspace", "active", ".short-ids.json"), "utf8")), {
+      version: 1,
+      ids: { "07": registeredTaskId }
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes task sandboxes with released short ids", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
   const tasks = [

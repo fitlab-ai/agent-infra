@@ -35,6 +35,16 @@ function addTaskInState(root: string, state: string, taskId: string, branch: str
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: ${state}\nbranch: ${branch}\n---\n`);
 }
 
+function addArchivedTask(root: string, taskId: string, branch: string, shortId: string): void {
+  const taskDir = path.join(root, '.agents', 'workspace', 'archive', '2026', '10', '13', taskId, 'local');
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n`);
+  fs.writeFileSync(
+    path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+    `${JSON.stringify({ version: 1, ids: { [shortId]: taskId } })}\n`
+  );
+}
+
 test('resolveSandboxTarget preserves task identity for TASK-id and short id', () => {
   const root = fixture();
   addTask(root, 'TASK-20260809-010203', 'agent-infra-feature-one', '8');
@@ -85,6 +95,42 @@ test('resolveSandboxCleanupTarget resolves a retained short id to the completed 
     requestedRef: '7', branch: 'agent-infra-fix-completed',
     workspace: { mode: 'task-bound', taskId }, taskState: 'completed'
   });
+});
+
+test('resolveSandboxCleanupTarget maps archived task short id, branch, and TASK id to one identity', () => {
+  const root = fixture();
+  const taskId = 'TASK-20261013-010211';
+  const branch = 'agent-infra-bugfix-archived-cleanup';
+  addArchivedTask(root, taskId, branch, '07');
+
+  const targets = ['7', branch, taskId].map((ref) =>
+    resolveSandboxCleanupTarget(ref, root, { allowProtected: true })
+  );
+
+  assert.deepEqual(targets.map(({ branch: targetBranch, workspace, taskState }) => ({
+    branch: targetBranch,
+    workspace,
+    taskState
+  })), [
+    { branch, workspace: { mode: 'task-bound', taskId }, taskState: 'archive' },
+    { branch, workspace: { mode: 'task-bound', taskId }, taskState: 'archive' },
+    { branch, workspace: { mode: 'task-bound', taskId }, taskState: 'archive' }
+  ]);
+});
+
+test('resolveSandboxCleanupTarget rejects a branch shared by tasks in different states', () => {
+  const root = fixture();
+  const branch = 'agent-infra-feature-reused';
+  addTask(root, 'TASK-20261013-010212', branch, '08');
+  const archivedTaskId = 'TASK-20261013-010213';
+  const archiveDir = path.join(root, '.agents', 'workspace', 'archive', '2026', '10', '13', archivedTaskId, 'local');
+  fs.mkdirSync(archiveDir, { recursive: true });
+  fs.writeFileSync(path.join(archiveDir, 'task.md'), `---\nid: ${archivedTaskId}\nstatus: completed\nbranch: ${branch}\n---\n`);
+
+  assert.throws(
+    () => resolveSandboxCleanupTarget(branch, root, { allowProtected: true }),
+    /SANDBOX_TASK_IDENTITY_AMBIGUOUS/
+  );
 });
 
 test('resolveSandboxCleanupTarget uses the supplied sandbox branch when the task record is unavailable', () => {
