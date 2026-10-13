@@ -1,8 +1,8 @@
 ---
 name: complete-task
 description: >
-  Mark a task as completed and archive it.
-  Use when a task's work is done and verified and you want to close and archive it.
+  Mark a task as completed.
+  Use when a task's work is done and verified and you need to finalize the task.
   Only invoke this skill automatically when the conversation includes a resolvable task reference.
 ---
 
@@ -143,6 +143,14 @@ When a valid `platform_issue_identity` exists, execute in this exact order:
 
 1. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
 2. Write the business summary to a temporary file and run `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`. This stores the body and SHA-256 in the task's durable staging record; it must not publish the summary comment directly.
+
+The summary body records only delivery results, the associated PR and actual merge facts, verification commands with their scope/results/uncovered areas, and known todo items supported by current task evidence. Include the related commit when it helps explain verification scope. Do not infer unsupported facts; list unfinished work as a todo. This is an Issue closeout summary, not a PR comment.
+
+Use the active skill's language by default: the Chinese skill produces a Chinese summary, and the English skill produces an English summary. Keep the same field structure in both languages.
+
+Before staging, check the body: remove candidate or pending-closeout placeholders; omit the local short id, unrelated window/model/receipt operation details, and the full TASK-ID already shown by the outer comment. Do not remove or rewrite platform-managed comment markers or recovery metadata. Keep paths when they help explain product behavior. The summary does not predict the Complete Task finalization result or claim that the task is completed or archived. The task target state is `completed`; do not append Archive Tasks by default. The formal task comment and receipt carry the lifecycle terminal status and warnings.
+
+Use `stage-summary` to stage the body while the task is active. Do not assume the command remains available after the task reaches completed. If the finalization result shows that a published delivery fact needs correction, first confirm that an existing supported comment-sync entry point accepts the current task state. If none does, report that limitation in the final response; do not add an entry point or change the call sequence.
 
 When the ledger contains a valid `PRC-N` post-review exemption, the summary body must mirror the ruling reason, commit scope, human identity, and time from task.md, and state that this is a human override rather than an automatic verification success. If a matching workflow warning exists, also mirror its original failure code/message. If no warning exists yet, state only that the ruling is recorded and final gate verification is pending; do not claim that the exemption has passed. The same `--kind summary` intent remains the sole owner of the summary marker.
 
