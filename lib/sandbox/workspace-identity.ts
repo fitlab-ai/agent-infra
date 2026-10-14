@@ -1,8 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { isRemovedHashShortIdInput } from '../task/short-id.ts';
-import { resolveTaskRef } from '../task/resolve-ref.ts';
 import {
+  configuredShortIdLength,
+  inspectShortIdRegistry,
+  isRemovedHashShortIdInput,
+  normalizeShortIdInput
+} from '../task/short-id.ts';
+import {
+  TASK_WORKSPACE_STATES,
+  listTaskWorkspaces,
   resolveTaskWorkspace,
   type TaskWorkspaceState
 } from './task-resolver.ts';
@@ -79,10 +85,29 @@ function taskIdentity(repoRoot: string, taskId: string, registry: Record<string,
 
 function cleanupTaskId(requestedRef: string, repoRoot: string): string | null {
   if (TASK_ID_RE.test(requestedRef)) return requestedRef;
-  if (!SHORT_ID_RE.test(requestedRef)) return null;
-  const task = resolveTaskRef(requestedRef, { repoRoot });
-  if (!task.ok) throw new Error(task.message);
-  return task.taskId;
+  const shortIdLength = configuredShortIdLength(repoRoot);
+  const normalized = normalizeShortIdInput(requestedRef, { shortIdLength });
+  if (normalized.kind === 'error') throw new Error(normalized.message);
+  if (normalized.kind !== 'shortId') return null;
+
+  const registry = inspectShortIdRegistry(repoRoot, shortIdLength);
+  if (registry.status !== 'valid') throw new Error(registry.error.message);
+  const match = [...registry.shortIds].find(([, shortId]) => shortId === normalized.value);
+  if (!match) {
+    throw new Error(`Short id '${normalized.value}' not found in active task registry`);
+  }
+  return match[0];
+}
+
+function cleanupTaskIdByBranch(requestedRef: string, repoRoot: string): string | null {
+  const taskIds = new Set(TASK_WORKSPACE_STATES
+    .flatMap((state) => listTaskWorkspaces(repoRoot, state))
+    .filter((task) => task.branch === requestedRef)
+    .map((task) => task.taskId));
+  if (taskIds.size > 1) {
+    throw new Error(`SANDBOX_TASK_IDENTITY_AMBIGUOUS: branch '${requestedRef}' is bound to multiple tasks`);
+  }
+  return taskIds.values().next().value ?? null;
 }
 
 export function resolveSandboxTarget(requestedRef: string, repoRoot: string): SandboxTarget {
@@ -139,7 +164,8 @@ export function resolveSandboxCleanupTarget(
     throw new Error(`Invalid task short id '${requestedRef}': task short ids must use bare digits`);
   }
 
-  const taskId = cleanupTaskId(requestedRef, repoRoot);
+  const taskId = cleanupTaskId(requestedRef, repoRoot)
+    ?? cleanupTaskIdByBranch(requestedRef, repoRoot);
   if (taskId) {
     let task: ReturnType<typeof resolveTaskWorkspace>;
     try {
@@ -166,14 +192,11 @@ export function resolveSandboxCleanupTarget(
     };
   }
 
-  const target = resolveSandboxTarget(requestedRef, repoRoot);
   return {
     requestedRef,
-    branch: target.branch,
-    workspace: target.workspace.mode === 'task-bound'
-      ? { mode: 'task-bound', taskId: target.workspace.taskId }
-      : { mode: 'branch-only' },
-    taskState: target.workspace.mode === 'task-bound' ? 'active' : 'branch-only'
+    branch: requestedRef,
+    workspace: { mode: 'branch-only' },
+    taskState: 'branch-only'
   };
 }
 

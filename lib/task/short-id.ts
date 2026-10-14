@@ -464,7 +464,10 @@ function loadShortIdByTaskId(repoRoot: string): Map<string, string> {
   return map;
 }
 
-function inspectShortIdRegistry(repoRoot: string): ShortIdRegistryInspection {
+function inspectShortIdRegistry(
+  repoRoot: string,
+  shortIdLength = configuredShortIdLength(repoRoot)
+): ShortIdRegistryInspection {
   const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
   if (!fs.existsSync(registryPath)) {
     return {
@@ -503,7 +506,7 @@ function inspectShortIdRegistry(repoRoot: string): ShortIdRegistryInspection {
   }
 
   try {
-    const registry = validateRegistry(parsed, registryPath, configuredShortIdLength(repoRoot));
+    const registry = validateRegistry(parsed, registryPath, shortIdLength);
     const shortIds = new Map<string, string>();
     for (const [key, taskId] of Object.entries(registry.ids)) shortIds.set(taskId, key);
     return { status: 'valid', shortIds };

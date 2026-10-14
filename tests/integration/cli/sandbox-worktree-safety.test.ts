@@ -220,7 +220,8 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
 function writeTaskBoundCleanupEvidence(
   config: SandboxConfig,
   taskId: string,
-  branch: string
+  branch: string,
+  state: "completed" | "archive" = "completed"
 ): { controlRoot: string; intentPath: string; target: {
   branch: string;
   effectiveBranch: string;
@@ -232,14 +233,16 @@ function writeTaskBoundCleanupEvidence(
   controlRoots: string[];
   workspaceViewRoots: never[];
 } } {
-  const taskDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  const taskDir = state === "archive"
+    ? path.join(config.repoRoot, ".agents", "workspace", "archive", "2026", "08", "24", taskId, "local")
+    : path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
     path.join(taskDir, "task.md"),
     `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n`,
     "utf8"
   );
-  const receiptDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  const receiptDir = taskDir;
   const generation = "task-bound-generation";
   const requestId = "a".repeat(16);
   fs.writeFileSync(
@@ -988,7 +991,7 @@ test("sandbox rm releases a stale short id after task-bound cleanup", onPlatform
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     const config = rmOneConfig(fixture, tmpDir);
-    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch, "archive");
     const registryPath = path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json");
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
     fs.writeFileSync(
@@ -1000,7 +1003,7 @@ test("sandbox rm releases a stale short id after task-bound cleanup", onPlatform
     const cleanupTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
     assert.deepEqual(cleanupTarget, {
       requestedRef: "07", branch,
-      workspace: { mode: "task-bound", taskId }, taskState: "completed"
+      workspace: { mode: "task-bound", taskId }, taskState: "archive"
     });
     await withFixtureDocker(fixture, () => rm.rmOne(config, [], cleanupTarget.branch, {
       assumeYes: true,
