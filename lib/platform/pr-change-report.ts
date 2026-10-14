@@ -429,12 +429,15 @@ function runMechanicalChangeReport(repoRoot: string, baseSha: string, headSha: s
   return validated.value;
 }
 
+const DOCUMENTATION_CATEGORY = { label: '文档', prefixes: ['docs/'] } as const;
+
 const CHANGE_CATEGORIES = [
   { label: '运行时代码', prefixes: ['bin/', 'lib/', 'src/', 'scripts/'] },
   { label: '测试与校验', prefixes: ['test/', 'tests/'] },
   { label: '模板与生成内容', prefixes: ['templates/'] },
   { label: '技能与协作配置', prefixes: ['.agents/'] },
-  { label: '文档与其他', prefixes: [] }
+  DOCUMENTATION_CATEGORY,
+  { label: '其他', prefixes: [] }
 ] as const;
 
 function emptyChangeTotals(): ChangeTotals {
@@ -443,7 +446,10 @@ function emptyChangeTotals(): ChangeTotals {
 
 function categoryForChangeFile(file: ChangeFile): (typeof CHANGE_CATEGORIES)[number] {
   const filePath = file.newPath || file.oldPath || '';
-  return CHANGE_CATEGORIES.find((category) => category.prefixes.some((prefix) => filePath.startsWith(prefix))) || CHANGE_CATEGORIES[CHANGE_CATEGORIES.length - 1]!;
+  const category = CHANGE_CATEGORIES.find((entry) => entry.prefixes.some((prefix) => prefix && filePath.startsWith(prefix)));
+  if (category) return category;
+  if (/\.(?:md|mdx|markdown|rst)$/i.test(filePath)) return DOCUMENTATION_CATEGORY;
+  return CHANGE_CATEGORIES[CHANGE_CATEGORIES.length - 1]!;
 }
 
 function summarizeChangeCategories(files: ChangeFile[]): Array<{ label: string; totals: ChangeTotals }> {
@@ -553,7 +559,7 @@ function renderEvidence(evidence: Evidence): string {
 function renderPrechecks(checks: Precheck[]): string[] {
   return checks.flatMap((check) => [
     `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeReportText(check.rationale)}`,
-    ...check.evidence.slice(0, 1).map(renderEvidence)
+    ...check.evidence.map(renderEvidence)
   ]);
 }
 

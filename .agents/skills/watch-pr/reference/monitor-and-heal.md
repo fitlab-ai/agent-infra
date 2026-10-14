@@ -17,6 +17,20 @@
 
 每轮重建 precheck 时，六项 `rationale` 都必须是对应检查的实际高层结论，并各带至少一条路径、行号和简短 `detail` 证据；`change-composition` 要说明职责集中位置，兼容、旧路径、冗余和范围检查要分别说明实际结果，禁止复用泛化套话。理由和证据详情遵循当前已部署技能的语言，中文技能必须使用中文。
 
+按逻辑变化组使用现有六项 `rationale` 和 `Evidence[]` 说明目标/验收对应、行为增减、必要性、冗余或重复、范围、相关测试及测试充分性。列出可定位的代码/测试/文档证据；缺证据时明确写未确认。renderer 会展示每项的全部 evidence。源码行数、执行/调用次数和流程统一是不同结论：diff 行数不能证明执行次数或流程行为变化；CI 全绿也不能证明必要性。不得由分析建议自行扩大自愈或重构权限。
+
+完整 PR 的范围继续绑定当前权威 base/head/merge-base/patch 与完整统计。增量单独绑定上一有效报告 head → 当前 head：在覆盖旧 sidecar 前，用 `readPrChangeReport` 校验旧报告，只在 repository/resource identity 匹配当前 PR 时采用旧 `identity.head.sha`。对两个 head 做 tree-to-tree diff 并明确列出 SHA，不用 merge-base 替代端点差异，不把增量 totals 加到完整 PR totals。没有旧报告、报告无效或身份不符时标注上一 head 未确认，不从全量推算或填零。两个 SHA 相同只报告 head 未变化；rebase 后仍比较原 head 和新 head 的树差异。sidecar 无效只使增量不可确认，不改变现有 full-PR 报告流程。
+
+## Precheck Route
+
+`summary-sync --strict` 成功后，消费其结构化结果中的 `nextAction`，再决定是否进入 readiness：
+
+- `nextAction=review-code`：停止当前 Watch PR readiness 与自愈循环，按统一 helper 推荐 `review-code` 并结束本轮。不得把 CI 绿色当作清除必要性疑点，也不得自动实施冗余清理或重构。
+- `nextAction=watch-pr`：继续现有 readiness 分类与自愈决策树。
+- `nextAction` 缺失或 invalid：遵循严格刷新失败出口，进入求助流程，不推断为 `watch-pr`。
+
+此 route 只复用 core 已由六项 checks 推导的结果；不会把 `review-code` 报告或自动修复权限授予 Watch PR。
+
 ## 自愈决策树
 
 ```text

@@ -17,6 +17,20 @@ Before readiness in every round, and after an external push, self-heal commit, o
 
 When rebuilding the precheck, each of the six `rationale` fields must state the corresponding high-level finding and include at least one path, line range, and concise `detail` as evidence. `change-composition` must describe where responsibilities are concentrated; compatibility, legacy-path, redundancy, and scope checks must state their actual results separately, without reused generic boilerplate. Use the deployed skill's language for rationales and evidence details; Chinese skill deployments must use Chinese.
 
+Use the six existing `rationale` fields and `Evidence[]` to explain each logical change group: its goal and acceptance-criteria alignment, behavior added or removed, necessity, redundancy or duplication, scope, related tests, and test adequacy. Cite locatable code, test, or documentation evidence; mark unsupported points as unconfirmed. The renderer displays every evidence item. Source line counts, execution/call counts, and workflow unification are distinct claims: diff line counts cannot prove execution-count or workflow-behavior changes, and green CI cannot prove necessity. Analysis must not expand self-heal or refactoring authority.
+
+Keep complete-PR scope bound to the current authoritative base/head/merge-base/patch and its full statistics. Report the increment separately as previous valid report head → current head. Before overwriting the prior sidecar, validate it with `readPrChangeReport`; use its `identity.head.sha` only when its repository/resource identity matches the current PR. Compare the two head trees directly and state both SHAs. Do not substitute a merge-base diff for these endpoints or add increment totals to complete-PR totals. If no prior report exists, it is invalid, or its identity differs, mark the previous head unconfirmed; do not infer values from the full PR or fill in zeroes. Identical SHAs mean the head did not change. After a rebase, compare the old and new head trees. An invalid sidecar makes only the increment unconfirmed; the existing full-PR report flow continues.
+
+## Precheck Route
+
+After `summary-sync --strict` succeeds, consume its structured `nextAction` result before entering readiness:
+
+- `nextAction=review-code`: stop this Watch PR readiness/self-heal loop, recommend `review-code` through the unified helper, and end the round. Green CI does not clear necessity concerns, and Watch PR must not perform automatic redundancy cleanup or refactoring.
+- `nextAction=watch-pr`: continue through the existing readiness classification and self-heal decision tree.
+- Missing or invalid `nextAction`: use the strict-refresh help exit; do not infer `watch-pr`.
+
+This route reuses the result already derived by the core from the six checks. It does not grant Watch PR authority to write a `review-code` report or perform automatic fixes.
+
 ## Self-Heal Decision Tree
 
 ```text
