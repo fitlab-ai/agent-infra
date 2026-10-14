@@ -23,7 +23,6 @@ import {
   dispatchOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
 import { appendCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
-import { resolveTaskRuntimeRoot } from '../../../lib/task/runtime-paths.ts';
 const fixtureRoots = new Set<string>();
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
@@ -162,7 +161,7 @@ async function prepareLifecycleTask(root: string, hookDefinitionHash: string) {
     taskId,
     taskDir,
     bindingMarker: taskName,
-    storeRoot: resolveTaskRuntimeRoot(taskId, { repoRoot: root })
+    storeRoot: path.join(taskDir, '.runtime')
   };
 }
 
