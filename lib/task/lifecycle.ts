@@ -103,6 +103,9 @@ type LifecycleFileSystem = {
   readFileSync: (file: string) => string;
   writeFileSync: (file: string, content: string, flag?: string) => void;
   unlinkSync: (file: string) => void;
+  rmdirSync: (directory: string) => void;
+  readdirSync: (directory: string) => string[];
+  readMountInfoSync: () => string;
 };
 type TaskLifecycleOptions = {
   repoRoot?: string;
@@ -127,8 +130,24 @@ const DEFAULT_IO: LifecycleFileSystem = {
   renameSync: (source, target) => fs.renameSync(source, target),
   readFileSync: (file) => fs.readFileSync(file, 'utf8'),
   writeFileSync: (file, content, flag) => fs.writeFileSync(file, content, { encoding: 'utf8', flag: flag ?? 'w' }),
-  unlinkSync: (file) => fs.unlinkSync(file)
+  unlinkSync: (file) => fs.unlinkSync(file),
+  rmdirSync: (directory) => fs.rmdirSync(directory),
+  readdirSync: (directory) => fs.readdirSync(directory),
+  readMountInfoSync: () => fs.readFileSync('/proc/self/mountinfo', 'utf8')
 };
+
+function isVirtiofsMountPoint(directory: string, mountInfo: string): boolean {
+  const decodeMountInfoPath = (value: string): string => value.replace(/\\([0-7]{3})/gu, (_match, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)));
+  const expected = path.resolve(directory);
+  return mountInfo.split('\n').some((line) => {
+    if (!line) return false;
+    const fields = line.split(' ');
+    const separator = fields.indexOf('-');
+    return separator >= 0
+      && fields[separator + 1] === 'virtiofs'
+      && path.resolve(decodeMountInfoPath(fields[4] ?? '')) === expected;
+  });
+}
 
 function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'>, error: LifecycleError, extra: Partial<TaskLifecycleResult> = {}): TaskLifecycleResult {
   return {
@@ -863,7 +882,18 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
   }
   const activeTaskPath = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   if (request.intent === 'complete' && fs.existsSync(activeTaskPath)) {
-    try { fs.rmdirSync(activeTaskPath); }
+    try {
+      let sourceIsVirtiofsMount = false;
+      try { sourceIsVirtiofsMount = isVirtiofsMountPoint(activeTaskPath, io.readMountInfoSync()); }
+      catch { /* Platforms without mountinfo retain the ordinary directory cleanup path. */ }
+      if (sourceIsVirtiofsMount) {
+        if (io.readdirSync(activeTaskPath).length > 0) {
+          throw new Error('virtiofs source directory is not empty after task contents were transferred');
+        }
+      } else {
+        io.rmdirSync(activeTaskPath);
+      }
+    }
     catch (error) {
       return failed(request, { code: 'LIFECYCLE_SOURCE_DIRECTORY_CLEANUP_FAILED', message: String(error) }, {
         taskId, sourceState, targetState: spec.target, sourcePath: activeTaskPath, targetPath, journalPath,
