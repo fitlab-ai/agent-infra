@@ -85,13 +85,12 @@ function taskIdentity(repoRoot: string, taskId: string, registry: Record<string,
 
 function cleanupTaskId(requestedRef: string, repoRoot: string): string | null {
   if (TASK_ID_RE.test(requestedRef)) return requestedRef;
-  const normalized = normalizeShortIdInput(requestedRef, {
-    shortIdLength: configuredShortIdLength(repoRoot)
-  });
+  const shortIdLength = configuredShortIdLength(repoRoot);
+  const normalized = normalizeShortIdInput(requestedRef, { shortIdLength });
   if (normalized.kind === 'error') throw new Error(normalized.message);
   if (normalized.kind !== 'shortId') return null;
 
-  const registry = inspectShortIdRegistry(repoRoot);
+  const registry = inspectShortIdRegistry(repoRoot, shortIdLength);
   if (registry.status !== 'valid') throw new Error(registry.error.message);
   const match = [...registry.shortIds].find(([, shortId]) => shortId === normalized.value);
   if (!match) {
