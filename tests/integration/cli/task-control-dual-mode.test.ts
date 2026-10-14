@@ -12,7 +12,7 @@ import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation
 } from '../../../lib/task/control-authority.ts';
-import { withRepositoryMutationLock, withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { resolveSandboxControlTransport } from '../../../lib/internal/task-operation-registry.ts';
 import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.ts';
@@ -605,42 +605,6 @@ test('sandbox lifecycle uses the shared task lock', async () => {
     fs.rmSync(lockFixture.root, { recursive: true, force: true });
   }
 
-});
-
-test('formal lifecycle authority blocks on the repository lock without changing task or registry bytes', async () => {
-  const fixture = taskFixture();
-  const context = createDirectHostExecutionContext({ repoRoot: fixture.root });
-  const taskPath = path.join(fixture.taskDir, 'task.md');
-  const registryPath = path.join(fixture.root, '.agents', 'workspace', 'active', '.short-ids.json');
-  const taskBefore = fs.readFileSync(taskPath);
-  const registryBefore = fs.readFileSync(registryPath);
-  let releaseLock!: () => void;
-  let heldLock: Promise<void> | undefined;
-  try {
-    heldLock = withRepositoryMutationLock(fixture.root, () => new Promise<void>((resolve) => { releaseLock = resolve; }));
-    const blocked = await dispatchTaskControlOperation(context, {
-      family: 'task-lifecycle',
-      request: { taskRef: TASK_ID, intent: 'cancel', agent: 'codex', reason: 'repository lock contention' }
-    });
-    assert.equal((blocked as { status: string }).status, 'failed');
-    assert.equal((blocked as { error?: { code?: string } }).error?.code, 'ORCHESTRATION_LOCK_BUSY');
-    assert.deepEqual(fs.readFileSync(taskPath), taskBefore);
-    assert.deepEqual(fs.readFileSync(registryPath), registryBefore);
-
-    releaseLock();
-    await heldLock;
-    const applied = await dispatchTaskControlOperation(context, {
-      family: 'task-lifecycle',
-      request: { taskRef: TASK_ID, intent: 'cancel', agent: 'codex', reason: 'repository lock released' }
-    });
-    assert.equal((applied as { status: string }).status, 'applied');
-    assert.equal(fs.existsSync(path.join(fixture.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
-    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).ids, {});
-  } finally {
-    if (releaseLock) releaseLock();
-    await heldLock?.catch(() => undefined);
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
 });
 
 test('direct-host and sandbox client transport preserve lifecycle results', async () => {

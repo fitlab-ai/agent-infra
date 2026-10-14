@@ -24,7 +24,7 @@ import {
 import { applyTaskLifecycle, applyTaskLifecycleWithinTaskLock } from '../../../lib/task/lifecycle.ts';
 import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/verification.ts';
-import { withRepositoryMutationLock, withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-08-24 12:00:00+00:00', agentInfraVersion: 'v0.9.9' };
@@ -574,25 +574,13 @@ test('host finalization rejects an inconsistent copied-back lifecycle journal wi
   }
 });
 
-test('finalization commit participates in the repository mutation lock', async () => {
+test('finalization commit stays serialized by the task lock', async () => {
   const f = fixture();
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
-  let releaseLock!: () => void;
   let releaseTaskLock!: () => void;
   try {
     assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
-    const heldLock = withRepositoryMutationLock(f.repoRoot, () => new Promise<void>((resolve) => { releaseLock = resolve; }));
-    assert.equal(typeof releaseLock, 'function');
-
-    const blocked = await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    assert.equal(blocked.status, 'blocked');
-    assert.equal(blocked.error?.code, 'ORCHESTRATION_LOCK_BUSY');
-    assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
-
-    releaseLock();
-    await heldLock;
-
     const heldTaskLock = withTaskExecutionLock(f.repoRoot, TASK_ID, 'existing-task-request', () => new Promise<void>((resolve) => { releaseTaskLock = resolve; }));
     assert.equal(typeof releaseTaskLock, 'function');
     const taskBlocked = await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
@@ -604,13 +592,12 @@ test('finalization commit participates in the repository mutation lock', async (
 
     assert.equal((await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
   } finally {
-    if (releaseLock) releaseLock();
     if (releaseTaskLock) releaseTaskLock();
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
 
-test('finalization releases the repository lock during verification and commits stay serialized', async () => {
+test('paused finalization verification keeps the same task serialized and allows another task', async () => {
   const f = fixture();
   const otherTaskId = 'TASK-20260101-000002';
   const otherTaskDir = path.join(f.repoRoot, '.agents', 'workspace', 'active', otherTaskId);
@@ -630,31 +617,28 @@ test('finalization releases the repository lock during verification and commits 
     markVerificationStarted();
     return verificationGate;
   };
-  let releaseRepository!: () => void;
-  let heldRepository: Promise<void> | undefined;
   let finalization: Promise<Awaited<ReturnType<typeof commitPreparedTaskFinalization>>> | undefined;
+  let secondVerificationCalls = 0;
   try {
     const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
     assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
     finalization = commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     await verificationStarted;
 
-    const originalTask = fs.readFileSync(path.join(otherTaskDir, 'task.md'));
-    const originalRegistry = fs.readFileSync(registryPath);
-    heldRepository = withRepositoryMutationLock(f.repoRoot, () => new Promise<void>((resolve) => { releaseRepository = resolve; }));
-    const blocked = applyTaskLifecycle(
-      { taskRef: otherTaskId, intent: 'cancel', agent: 'codex', reason: 'competing repository mutation' },
-      { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
-    );
-    assert.equal(blocked.status, 'failed');
-    assert.equal(blocked.error?.code, 'ORCHESTRATION_LOCK_BUSY');
-    assert.deepEqual(fs.readFileSync(path.join(otherTaskDir, 'task.md')), originalTask);
-    assert.deepEqual(fs.readFileSync(registryPath), originalRegistry);
+    const secondTaskCommit = await commitPreparedTaskFinalization(request, options(
+      f.repoRoot,
+      commentSync,
+      async () => {
+        secondVerificationCalls += 1;
+        return verification('pass');
+      }
+    ));
+    assert.equal(secondTaskCommit.status, 'blocked');
+    assert.equal(secondTaskCommit.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+    assert.equal(secondVerificationCalls, 0);
 
-    releaseRepository();
-    await heldRepository;
     const concurrentTaskMutation = applyTaskLifecycle(
-      { taskRef: otherTaskId, intent: 'cancel', agent: 'codex', reason: 'verification is paused' },
+      { taskRef: otherTaskId, intent: 'cancel', agent: 'codex', reason: 'competing repository mutation' },
       { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
     );
     assert.equal(concurrentTaskMutation.status, 'applied', JSON.stringify(concurrentTaskMutation));
@@ -663,12 +647,10 @@ test('finalization releases the repository lock during verification and commits 
     releaseVerification(verification('pass'));
     assert.equal((await finalization).status, 'completed');
   } finally {
-    if (releaseRepository) releaseRepository();
     if (finalization) {
       releaseVerification(verification('pass'));
       await finalization.catch(() => undefined);
     }
-    await heldRepository?.catch(() => undefined);
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });

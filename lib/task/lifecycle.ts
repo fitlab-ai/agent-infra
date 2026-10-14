@@ -18,7 +18,7 @@ import { validateCurrentTaskContract } from './current-contract.ts';
 import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
-import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -937,9 +937,7 @@ function applyTaskLifecycle(request: TaskLifecycleRequest, options: TaskLifecycl
     })();
   if (!taskId) return applyTaskLifecycleUnlocked(request, options);
   try {
-    return withRepositoryMutationLock(repoRoot, () =>
-      withTaskExecutionLock(repoRoot, taskId, 'task-lifecycle.move', () => applyTaskLifecycleUnlocked(request, options))
-    );
+    return withTaskExecutionLock(repoRoot, taskId, 'task-lifecycle.move', () => applyTaskLifecycleUnlocked(request, options));
   } catch (error) {
     if (error instanceof TaskExecutionLockError) {
       return failed(request, { code: error.code, message: error.message }, { taskId });
@@ -948,12 +946,6 @@ function applyTaskLifecycle(request: TaskLifecycleRequest, options: TaskLifecycl
   }
 }
 
-/**
- * Applies lifecycle mutations for a caller that already holds the task lock.
- * The caller must also hold the repository mutation lock first for operations
- * that move task directories or change the shared short-id registry. The
- * prepare-only completion phase changes only task-local journal/document data.
- */
 function applyTaskLifecycleWithinTaskLock(
   request: TaskLifecycleRequest,
   options: TaskLifecycleOptions,
