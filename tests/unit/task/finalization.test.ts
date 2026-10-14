@@ -24,6 +24,7 @@ import {
 import { applyTaskLifecycle, applyTaskLifecycleWithinTaskLock } from '../../../lib/task/lifecycle.ts';
 import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/verification.ts';
+import { withRepositoryMutationLock, withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-08-24 12:00:00+00:00', agentInfraVersion: 'v0.9.9' };
@@ -569,6 +570,42 @@ test('host finalization rejects an inconsistent copied-back lifecycle journal wi
       { '01': TASK_ID }
     );
   } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('finalization commit participates in the repository mutation lock', async () => {
+  const f = fixture();
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  let releaseLock!: () => void;
+  let releaseTaskLock!: () => void;
+  try {
+    assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
+    const heldLock = withRepositoryMutationLock(f.repoRoot, () => new Promise<void>((resolve) => { releaseLock = resolve; }));
+    assert.equal(typeof releaseLock, 'function');
+
+    const blocked = await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(blocked.status, 'blocked');
+    assert.equal(blocked.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+    assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
+
+    releaseLock();
+    await heldLock;
+
+    const heldTaskLock = withTaskExecutionLock(f.repoRoot, TASK_ID, 'existing-task-request', () => new Promise<void>((resolve) => { releaseTaskLock = resolve; }));
+    assert.equal(typeof releaseTaskLock, 'function');
+    const taskBlocked = await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(taskBlocked.status, 'blocked');
+    assert.equal(taskBlocked.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+    assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
+    releaseTaskLock();
+    await heldTaskLock;
+
+    assert.equal((await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
+  } finally {
+    if (releaseLock) releaseLock();
+    if (releaseTaskLock) releaseTaskLock();
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });

@@ -24,7 +24,7 @@ import {
 } from './lifecycle.ts';
 import { enumerateAllTaskDirs, resolveTaskRef } from './resolve-ref.ts';
 import { inspectShortIdRegistry } from './short-id.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 import type { TaskVerificationResult } from './verification.ts';
 import { projectFinalizationWarning } from './workflow-warning-intents.ts';
@@ -1159,7 +1159,8 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
+    return await withRepositoryMutationLock(repoRoot, () =>
+      withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
       if (options.controlBinding && options.manifestPath) {
         try {
           const manifest = readSandboxControlManifest(options.manifestPath);
@@ -1305,7 +1306,8 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         });
       }
       return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
-    });
+      })
+    );
   } catch (error) {
     const detail = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }

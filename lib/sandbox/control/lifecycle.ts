@@ -661,28 +661,11 @@ function readTaskCompletionManifest(
   return manifest;
 }
 
-export async function quiesceSandboxControlForTaskCompletion(
+export function validateSandboxControlTaskIdentity(
   root: string,
-  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; statusDir: string }>,
-  timeoutMs = DEFAULT_QUIESCE_TIMEOUT_MS
-): Promise<void> {
-  const resolvedRoot = path.resolve(root);
-  const manifest = readTaskCompletionManifest(resolvedRoot, binding);
-  markSandboxControlRootQuiescing(resolvedRoot);
-  const deadline = Date.now() + timeoutMs;
-  const startupPath = path.join(resolvedRoot, BROKER_STARTING_FILE);
-  const brokerPath = path.join(resolvedRoot, 'broker.json');
-  while (true) {
-    const startup = readStartupOwner(startupPath);
-    if (fs.existsSync(startupPath) && !startup) throw new Error('SANDBOX_CONTROL_BROKER_START_TRANSITION');
-    const broker = readBrokerOwner(brokerPath);
-    if (broker && (broker.token !== manifest.token || broker.generation !== manifest.generation)) {
-      throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');
-    }
-    if (!startup && !broker) return;
-    if (Date.now() >= deadline) throw new Error('SANDBOX_CONTROL_BROKER_DRAIN_TIMEOUT');
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
+  binding: Readonly<{ taskId: string; generation: string; controlRootId: string; statusDir: string }>
+): void {
+  readTaskCompletionManifest(path.resolve(root), binding);
 }
 
 function recordSandboxRemovalPending(

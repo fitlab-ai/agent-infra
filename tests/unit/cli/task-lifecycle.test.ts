@@ -9,6 +9,7 @@ import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../li
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
 import { supportsPosixModeBits } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -146,6 +147,54 @@ test('complete fills the empty completed mount, preserves task data, and retains
   assert.equal(fs.readlinkSync(path.join(targetDir, '.runtime', 'payload-link')), 'payload.bin');
   assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), false);
   assert.equal(fs.existsSync(f.taskDir), false);
+});
+
+test('complete preserves an empty virtiofs source mount and resolves the task from completed state', () => {
+  const f = fixture();
+  let rmdirCalls = 0;
+  const mountPoint = f.taskDir.replaceAll('\\', '\\\\').replaceAll(' ', '\\040');
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'complete', agent: 'codex' },
+    {
+      repoRoot: f.repoRoot,
+      metadataProvider: () => METADATA,
+      fileSystem: {
+        readMountInfoSync: () => `36 25 0:42 / ${mountPoint} rw,nosuid - virtiofs task-source rw\n`,
+        rmdirSync: () => { rmdirCalls += 1; }
+      } as never
+    }
+  );
+
+  assert.equal(result.status, 'applied', JSON.stringify(result));
+  assert.equal(rmdirCalls, 0);
+  assert.deepEqual(fs.readdirSync(f.taskDir), []);
+  const resolved = resolveTaskRef(TASK_ID, { repoRoot: f.repoRoot });
+  assert.ok(resolved.ok);
+  assert.equal(resolved.state, 'completed');
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+    { '01': TASK_ID }
+  );
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+});
+
+test('complete does not suppress EBUSY when the source path is not a virtiofs mountpoint', () => {
+  const f = fixture();
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'complete', agent: 'codex' },
+    {
+      repoRoot: f.repoRoot,
+      metadataProvider: () => METADATA,
+      fileSystem: {
+        readMountInfoSync: () => '',
+        rmdirSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); }
+      } as never
+    }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'LIFECYCLE_SOURCE_DIRECTORY_CLEANUP_FAILED');
+  assert.deepEqual(result.completedSteps, ['task-written', 'directory-moved']);
 });
 
 test('dry-run plans the same transition without changing bytes, mtime, directories, or registry', () => {
