@@ -948,6 +948,12 @@ function applyTaskLifecycle(request: TaskLifecycleRequest, options: TaskLifecycl
   }
 }
 
+/**
+ * Applies lifecycle mutations for a caller that already holds the task lock.
+ * The caller must also hold the repository mutation lock first for operations
+ * that move task directories or change the shared short-id registry. The
+ * prepare-only completion phase changes only task-local journal/document data.
+ */
 function applyTaskLifecycleWithinTaskLock(
   request: TaskLifecycleRequest,
   options: TaskLifecycleOptions,

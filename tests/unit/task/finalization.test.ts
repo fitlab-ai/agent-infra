@@ -610,6 +610,69 @@ test('finalization commit participates in the repository mutation lock', async (
   }
 });
 
+test('finalization releases the repository lock during verification and commits stay serialized', async () => {
+  const f = fixture();
+  const otherTaskId = 'TASK-20260101-000002';
+  const otherTaskDir = path.join(f.repoRoot, '.agents', 'workspace', 'active', otherTaskId);
+  fs.mkdirSync(otherTaskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(otherTaskDir, 'task.md'),
+    fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').replaceAll(TASK_ID, otherTaskId)
+  );
+  const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { '01': TASK_ID, '02': otherTaskId } })}\n`);
+
+  let releaseVerification!: (result: TaskVerificationResult) => void;
+  let markVerificationStarted!: () => void;
+  const verificationStarted = new Promise<void>((resolve) => { markVerificationStarted = resolve; });
+  const verificationGate = new Promise<TaskVerificationResult>((resolve) => { releaseVerification = resolve; });
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+    markVerificationStarted();
+    return verificationGate;
+  };
+  let releaseRepository!: () => void;
+  let heldRepository: Promise<void> | undefined;
+  let finalization: Promise<Awaited<ReturnType<typeof commitPreparedTaskFinalization>>> | undefined;
+  try {
+    const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+    assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
+    finalization = commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    await verificationStarted;
+
+    const originalTask = fs.readFileSync(path.join(otherTaskDir, 'task.md'));
+    const originalRegistry = fs.readFileSync(registryPath);
+    heldRepository = withRepositoryMutationLock(f.repoRoot, () => new Promise<void>((resolve) => { releaseRepository = resolve; }));
+    const blocked = applyTaskLifecycle(
+      { taskRef: otherTaskId, intent: 'cancel', agent: 'codex', reason: 'competing repository mutation' },
+      { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+    );
+    assert.equal(blocked.status, 'failed');
+    assert.equal(blocked.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+    assert.deepEqual(fs.readFileSync(path.join(otherTaskDir, 'task.md')), originalTask);
+    assert.deepEqual(fs.readFileSync(registryPath), originalRegistry);
+
+    releaseRepository();
+    await heldRepository;
+    const concurrentTaskMutation = applyTaskLifecycle(
+      { taskRef: otherTaskId, intent: 'cancel', agent: 'codex', reason: 'verification is paused' },
+      { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+    );
+    assert.equal(concurrentTaskMutation.status, 'applied', JSON.stringify(concurrentTaskMutation));
+    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', otherTaskId, 'task.md')), true);
+
+    releaseVerification(verification('pass'));
+    assert.equal((await finalization).status, 'completed');
+  } finally {
+    if (releaseRepository) releaseRepository();
+    if (finalization) {
+      releaseVerification(verification('pass'));
+      await finalization.catch(() => undefined);
+    }
+    await heldRepository?.catch(() => undefined);
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization rejects a journal that claims a retained short id was released', async () => {
   const f = fixture();
   const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };

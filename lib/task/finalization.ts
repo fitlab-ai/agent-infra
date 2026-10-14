@@ -1158,9 +1158,11 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   const repoRoot = path.resolve(options.repoRoot);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
+  const withCommitLocks = <T>(operation: () => T): T => withRepositoryMutationLock(repoRoot, () =>
+    withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', operation)
+  );
   try {
-    return await withRepositoryMutationLock(repoRoot, () =>
-      withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
+    const localResult = withCommitLocks(() => {
       if (options.controlBinding && options.manifestPath) {
         try {
           const manifest = readSandboxControlManifest(options.manifestPath);
@@ -1230,45 +1232,73 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
         return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed, step.error);
       }
+      return {
+        verificationPending: { receipt, lifecycle: step, changed: result.changed }
+      };
+    });
+    if (!('verificationPending' in localResult)) return localResult;
+    const pending = localResult.verificationPending;
 
-      let verificationResult: TaskVerificationResult;
-      try {
-        verificationResult = await (options.verify ?? verifyTaskEvent)(
-          { taskRef: resolved.taskId, event: 'complete-task.completed' },
-          { repoRoot }
+    let verificationResult: TaskVerificationResult | null = null;
+    let verificationError: FinalizationError | null = null;
+    try {
+      verificationResult = await (options.verify ?? verifyTaskEvent)(
+        { taskRef: resolved.taskId, event: 'complete-task.completed' },
+        { repoRoot }
+      );
+    } catch (error) {
+      verificationError = errorOf(error, 'VERIFY_FAILED', true);
+    }
+
+    return withCommitLocks(() => {
+      const currentReceipt = readReceipt(repoRoot, resolved.taskId);
+      if (!currentReceipt || currentReceipt.receiptId !== pending.receipt.receiptId) {
+        return failed(resolved.taskId, {
+          code: 'TASK_FINALIZATION_RECEIPT_INVALID', message: 'verification receipt changed identity during completion', retryable: false
+        });
+      }
+      if (currentReceipt.verification !== 'pending') {
+        return terminalResult(
+          resolved.taskId,
+          currentReceipt,
+          { lifecycle: pending.lifecycle, verification: { status: 'no-op', changed: false, error: null } },
+          false
         );
-      } catch (error) {
-        const detail = errorOf(error, 'VERIFY_FAILED', true);
-        const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
-        let updated: TaskFinalizationReceipt;
+      }
+
+      let receipt = currentReceipt;
+      if (verificationError) {
+        const warnings = replaceWarning(receipt, warningFromError('verification', verificationError), 'open');
         try {
-          updated = updateReceipt(repoRoot, receipt, {
+          receipt = updateReceipt(repoRoot, receipt, {
             lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
-            warnings, lastError: detail
+            warnings, lastError: verificationError
           });
         } catch (persistCause) {
           const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
           persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
-          persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
+          persistError.message = `${persistError.message}; verification also failed: ${verificationError.code}: ${verificationError.message}`;
           return failed(resolved.taskId, persistError, {
-            changed: result.changed,
-            lifecycle: step,
+            changed: pending.changed,
+            lifecycle: pending.lifecycle,
             verification: { status: 'blocked', changed: false, error: persistError },
             completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
           });
         }
-        const verification: TaskFinalizationStep = { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail };
-        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
+        const verification: TaskFinalizationStep = {
+          status: verificationError.retryable ? 'blocked' : 'failed', changed: false, error: verificationError
+        };
+        return terminalResult(resolved.taskId, receipt, { lifecycle: pending.lifecycle, verification }, pending.changed, verificationError);
       }
 
-      const verification = verificationStep(verificationResult);
-      if (verificationResult.status === 'pass') {
+      const verified = verificationResult!;
+      const verification = verificationStep(verified);
+      if (verified.status === 'pass') {
         const resolvedVerificationWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
-        const warnings = applyVerificationWarnings(receipt, verificationResult);
+        const warnings = applyVerificationWarnings(receipt, verified);
         const hasOpenWarnings = warnings.some((warning) => warning.status === 'open');
-        let updated: TaskFinalizationReceipt;
         try {
-          updated = updateReceipt(repoRoot, receipt, {
+          receipt = updateReceipt(repoRoot, receipt, {
             lifecycle: 'done', verification: 'done',
             taskComment: resolvedVerificationWarning ? 'pending' : receipt.taskComment,
             warningProjection: hasOpenWarnings ? 'pending' : 'done', warnings, lastError: null
@@ -1277,20 +1307,19 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
           const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
           persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
           return failed(resolved.taskId, persistError, {
-            changed: result.changed,
-            lifecycle: step,
+            changed: pending.changed,
+            lifecycle: pending.lifecycle,
             verification,
             completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
           });
         }
-        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed);
+        return terminalResult(resolved.taskId, receipt, { lifecycle: pending.lifecycle, verification }, pending.changed);
       }
 
       const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
-      const warnings = applyVerificationWarnings(receipt, verificationResult);
-      let updated: TaskFinalizationReceipt;
+      const warnings = applyVerificationWarnings(receipt, verified);
       try {
-        updated = updateReceipt(repoRoot, receipt, {
+        receipt = updateReceipt(repoRoot, receipt, {
           lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
           warnings, lastError: detail
         });
@@ -1299,15 +1328,14 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
         persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
         return failed(resolved.taskId, persistError, {
-          changed: result.changed,
-          lifecycle: step,
+          changed: pending.changed,
+          lifecycle: pending.lifecycle,
           verification: { status: 'blocked', changed: false, error: persistError },
           completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
         });
       }
-      return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
-      })
-    );
+      return terminalResult(resolved.taskId, receipt, { lifecycle: pending.lifecycle, verification }, pending.changed, detail);
+    });
   } catch (error) {
     const detail = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }

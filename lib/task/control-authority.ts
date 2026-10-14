@@ -39,7 +39,7 @@ import type {
   AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult
 } from '../agent-clients/adapter.ts';
 import { resolveTaskContext, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 
 export type TaskControlExecutionContext =
@@ -243,12 +243,15 @@ async function applyLifecycleWithAuthority(
   };
   if (!taskId) return await execute();
   try {
-    return await withTaskExecutionLock(
+    const underTaskLock = () => withTaskExecutionLock(
       context.repoRoot,
       taskId,
       `task-lifecycle.${request.intent}`,
       () => execute(true)
     );
+    return request.intent === 'recover-started'
+      ? await underTaskLock()
+      : await withRepositoryMutationLock(context.repoRoot, underTaskLock);
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;
     if (request.intent === 'recover-started') {
