@@ -4,7 +4,7 @@
 {"source":"platform-pr-inspect","diff":"three-dot-find-renames","metrics":["numstat-lines","git-blob-bytes"],"publish":["pr-summary","user-response"]}
 -->
 
-PR 创建或复用成功后，使用 `platform-pr inspect` 返回的权威 `base.sha` 与 `head.sha` 统计完整 PR 差异，不以最后一个 commit 或工作树状态代替。任务意图 digest 只覆盖 `# 任务`/`# Task` 到 `## 上下文`/`## Context` 的语义区间，因此生命周期日志、收据和版本元数据不会使同一 head 的 sidecar 失效。
+PR 创建或复用成功后，使用 `platform-pr inspect` 返回的权威 `base.sha` 与 `head.sha` 统计完整 PR 差异，不以最后一个 commit 或工作树状态代替。完整 PR 继续使用下文现有 three-dot、merge-base、patch 与 sidecar 身份。任务意图 digest 只覆盖 `# 任务`/`# Task` 到 `## 上下文`/`## Context` 的语义区间，因此生命周期日志、收据和版本元数据不会使同一 head 的 sidecar 失效。
 
 ## 证据命令
 
@@ -24,7 +24,15 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的 `target-alignment`、`change-composition`、`compatibility-policy`、`legacy-path-cleanup`、`redundancy`、`scope-discipline`。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
 
-生成 candidate 时，六项 `rationale` 必须分别写出实际检查结论：`target-alignment` 说明目标对应关系，`change-composition` 概括新增代码集中承担的职责，`compatibility-policy` 说明兼容策略，`legacy-path-cleanup` 说明旧路径处理，`redundancy` 说明冗余检查结果，`scope-discipline` 说明范围判断。不得六项复用“符合范围”等泛化套话；每项至少提供一条直接支持结论的路径、行号和简短 `detail`，并遵循当前已部署技能的语言。中文技能必须使用中文。这些高层理由和证据会直接展示在 canonical 摘要中。
+生成 candidate 时，按逻辑变化组用六项 `rationale` 和 `Evidence[]` 给出可读分析，不新增组级字段。每组说明其目标/验收对应、行为增加与减少、必要性、冗余或重复实现、范围、对应测试及测试是否充分；列出支撑结论的路径、行号和简短证据。六项检查各自仍须写实际结论：`target-alignment` 说明目标对应关系，`change-composition` 概括职责和行为变化，`compatibility-policy` 说明兼容策略，`legacy-path-cleanup` 说明旧路径处理，`redundancy` 说明重复/冗余结果，`scope-discipline` 说明范围判断。不得复用泛化套话；证据不足的维度明确标记未确认，不推断结论。证据详情遵循当前已部署技能的语言，中文技能必须使用中文。canonical renderer 会完整展示每项 `Evidence[]`。
+
+每组解释覆盖生产代码、测试和文档中适用的变化，并区分源码行数变化、执行/调用次数变化和流程统一。diff 行数仅支持代码文本增减；不能据此推断执行次数减少或流程统一。执行次数、流程行为和测试充分性须有各自直接证据；没有证据时明确说明缺口。CI 全绿不能代替必要性或冗余判断。
+
+## 完整 PR 与本轮增量
+
+完整 PR 统计始终使用当前权威 snapshot 的 `base.sha...head.sha` 和现有 three-dot mechanical report。报告可另外描述最近一次有效 canonical sidecar 的 `identity.head.sha` 到当前 snapshot `head.sha` 的本轮增量。重建报告前，使用现有 `readPrChangeReport` 校验先前 sidecar；仅当其 repository/resource identity 与当前 PR 一致时，才把旧 head 作为增量起点。用 `git diff --find-renames --numstat {previous-head} {current-head}`、`--name-status` 和 `--summary` 的两个端点比较本轮树差异，不使用 merge-base 代替这个范围，不把增量 totals 加到完整 PR totals。
+
+第一次没有旧 sidecar、旧报告无效或 PR identity 不符时，写明“上一 head 不可确认”，不得由完整 PR 统计推算本轮数字，也不得填造零值。两个 SHA 相同则说明 head 未变化，不额外生成统计。rebase 后仍按旧 head 与新 head 两个树端点比较；结果描述树差异，不代表提交数或执行次数变化。旧 sidecar 缺失/无效不阻断完整 PR 报告生成。
 
 脚本在 merge base 与 head 之间同时计算 `numstat` 行数和 Git blob 的精确字节数。字节比字符具有稳定口径，也能覆盖二进制文件和同行内缩减；子模块不是 blob，按 0 字节贡献核算。新增文件的旧字节数为 0，删除文件的新字节数为 0，纯 rename 的净字节数为 0，copy 只计新增目标内容。
 
@@ -40,6 +48,8 @@ core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计�
 - 模板或生成镜像
 - 文档
 - 配置、依赖与其他
+
+canonical 汇总中的固定分类把 `docs/`、Markdown/MDX/reStructuredText 文档与其他文件分别统计；更具体的运行时代码、测试、模板及 `.agents/` 分类优先。其余文件进入“其他”。
 
 输出表格必须包含“部分、文件数、新增行、删除行、净增行、旧字节、新字节、净字节”，并有合计行。字节列表示本次变更涉及文件的 blob 内容体积，不表示整个仓库或工作树的磁盘占用。使用精确整数；可附加 KiB/MiB 便于阅读，但不能替代字节数。
 

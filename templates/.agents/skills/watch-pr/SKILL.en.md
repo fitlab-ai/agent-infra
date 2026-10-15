@@ -48,7 +48,22 @@ Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deter
 
 Before running this step, read `reference/monitor-and-heal.md` and `.agents/rules/pr-checks-commands.md`.
 
-Initialize `repairCommits=[]` and `rebaseAttempts=0`. Before readiness in every round, run `platform-pr summary-context`, rebuild the task-bound `pr-change-report.json` for the authoritative PR head using the shared PR change-report contract, and refresh the single summary with a body containing one `<!-- canonical-pr-change-report -->` placeholder via `summary-sync --change-report-file ... --result no_op --strict`. `--strict` preserves report or summary refresh failures as `failed/blocked` instead of treating warnings as success. A report or summary refresh failure must not enter the ready/complete exit; use step 4. After the refresh, run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route only by `readiness.state`: `ready` to step 7, `conflicting|checks-failed` to step 3, and `pending|timed-out|cancelled` to step 4.
+Initialize `repairCommits=[]` and `rebaseAttempts=0`. Before overwriting the current report in each round, validate and retain its prior identity and head using the core reader; a missing or invalid report means there is no prior head:
+
+```bash
+node --experimental-strip-types --input-type=module -e '
+import { readPrChangeReport } from "./lib/platform/pr-change-report.ts";
+const report = readPrChangeReport(`.agents/workspace/active/${process.argv[1]}/pr-change-report.json`);
+const previous = report.ok
+  ? { repository: report.value.identity.repository, resource: report.value.identity.resource, head: report.value.identity.head.sha }
+  : { status: "unavailable" };
+process.stdout.write(`${JSON.stringify(previous)}\n`);
+' {task-id}
+```
+
+Then run `platform-pr summary-context` and compare the retained repository/resource identity with the authoritative snapshot; discard a mismatch and mark the increment unconfirmed. Rebuild the task-bound `pr-change-report.json` for the authoritative PR head using the shared PR change-report contract, and refresh the single summary with a body containing one `<!-- canonical-pr-change-report -->` placeholder via `summary-sync --change-report-file ... --result no_op --strict`. Complete-PR statistics keep the current base/head/merge-base/patch and existing totals. Only when the prior report is valid, the PR identity matches, and the heads differ, describe the separate head-to-head tree diff using `git diff --find-renames --numstat {previous-head} {current-head}`, `--name-status`, and `--summary`. Do not substitute a merge-base diff for this range or add increment totals to the full PR. If no valid prior head exists, state that it is unconfirmed; do not infer from complete-PR statistics or fill in zeroes. Matching heads mean there was no new head transition.
+
+`--strict` preserves report or summary refresh failures as `failed/blocked` instead of treating warnings as success. A report or summary refresh failure must not enter the ready/complete exit; use step 4. After a successful refresh, consume `nextAction` from the structured `summary-sync` result: `review-code` exits readiness/self-heal and follows the code-review branch in step 7; only `watch-pr` continues to `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`. Missing or invalid `nextAction` follows the refresh-failure exit; do not infer `watch-pr`. Route readiness only by `readiness.state`: `ready` to step 7, `conflicting|checks-failed` to step 3, and `pending|timed-out|cancelled` to step 4.
 
 ### 3. Self-Heal Loop
 
@@ -77,7 +92,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - **Do not change** `pr_delivery_fact` or `current_step`
 - **Append** to `## Activity Log` (do not overwrite prior entries; `{N}` = number of existing Watch PR entries for this task + 1):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {success: PR ready, repair commits: {k} [{SHA summary}] / blocked: blocked: {summary}}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {success: PR ready, repair commits: {k} [{SHA summary}] / review required: nextAction=review-code / blocked: {summary}}
   ```
 
 ### 6. Verification Gate
@@ -125,6 +140,8 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
   Next step - Re-run code review:
   {next-step-commands}
   ```
+
+- `summary-sync.nextAction == review-code`: state that the report requires code review; this does not mean PR readiness passed. Generate the sole next step with `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` and end the round. Do not continue readiness/self-heal or edit code automatically.
 
 - "Blocked": output only the step 4 blocker explanation; do not recommend a next-step command.
 

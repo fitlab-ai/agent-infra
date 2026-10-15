@@ -71,7 +71,8 @@ function categorizedMechanical(base = sha('b'), head = sha('c')): MechanicalChan
     { status: 'M', oldPath: 'tests/example.test.ts', newPath: 'tests/example.test.ts', additions: 2, deletions: 0, oldBytes: 5, newBytes: 7, netBytes: 2 },
     { status: 'A', oldPath: null, newPath: 'templates/example.md', additions: 3, deletions: 0, oldBytes: 0, newBytes: 20, netBytes: 20 },
     { status: 'D', oldPath: '.agents/example.md', newPath: null, additions: 0, deletions: 2, oldBytes: 10, newBytes: 0, netBytes: -10 },
-    { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 0, newBytes: 4, netBytes: 4 }
+    { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 0, newBytes: 4, netBytes: 4 },
+    { status: 'A', oldPath: null, newPath: 'package.json', additions: 1, deletions: 0, oldBytes: 0, newBytes: 1, netBytes: 1 }
   ];
   return {
     version: 1,
@@ -81,8 +82,8 @@ function categorizedMechanical(base = sha('b'), head = sha('c')): MechanicalChan
     patchSha256: 'e'.repeat(64),
     files,
     totals: {
-      files: 5, textFiles: 4, binaryFiles: 1, additions: 9, deletions: 3,
-      oldBytes: 25, newBytes: 44, netBytes: 19
+      files: 6, textFiles: 5, binaryFiles: 1, additions: 10, deletions: 3,
+      oldBytes: 25, newBytes: 45, netBytes: 20
     }
   };
 }
@@ -205,15 +206,21 @@ test('summary body requires one placeholder and core renders the canonical repor
 test('canonical report renders high-level change categories and all six precheck details', () => {
   const digest = 'd'.repeat(64);
   const value = categorizedMechanical();
-  const built = buildPrChangeReport(identity(), digest, value, detailedCandidate(digest));
+  const precheck = detailedCandidate(digest);
+  precheck.checks[0]!.evidence.push({
+    path: 'tests/report-rendering.test.ts', startLine: 22, endLine: 25,
+    detail: 'A second source confirms the rendered behavior.'
+  });
+  const built = buildPrChangeReport(identity(), digest, value, precheck);
   assert.equal(built.ok, true);
   if (!built.ok) return;
 
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /\| 运行时代码 \| 1 \| 4 \| 1 \| \+3 \| 10 \| 13 \| \+3 \| 1 \/ 0 \|/);
   assert.match(rendered, /\| 技能与协作配置 \| 1 \| 0 \| 2 \| -2 \| 10 \| 0 \| -10 \| 1 \/ 0 \|/);
-  assert.match(rendered, /\| 文档与其他 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/);
-  assert.match(rendered, /\| \*\*合计\*\* \| 5 \| 9 \| 3 \| \+6 \| 25 \| 44 \| \+19 \| 4 \/ 1 \|/);
+  assert.match(rendered, /\| 文档 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/);
+  assert.match(rendered, /\| 其他 \| 1 \| 1 \| 0 \| \+1 \| 0 \| 1 \| \+1 \| 1 \/ 0 \|/);
+  assert.match(rendered, /\| \*\*合计\*\* \| 6 \| 10 \| 3 \| \+7 \| 25 \| 45 \| \+20 \| 5 \/ 1 \|/);
   const precheckSection = rendered.split('#### 适宜性预检\n')[1]!;
   assert.match(precheckSection, /^- 结论：\*\*通过\*\*（6\/6 项通过）；继续监控 PR；正式审查：否。/);
   for (const id of PRECHECK_IDS) {
@@ -221,6 +228,11 @@ test('canonical report renders high-level change categories and all six precheck
     assert.match(precheckSection, new RegExp(`checks/${id}\\.ts`));
     assert.match(precheckSection, new RegExp(`Evidence-${id}-&lt;detail&gt;`));
   }
+  assert.match(precheckSection, /<code>tests\/report-rendering\.test\.ts<\/code>:22-25：A second source confirms the rendered behavior\./);
+  assert.ok(
+    precheckSection.indexOf('Evidence-target-alignment-&lt;detail&gt;') <
+      precheckSection.indexOf('A second source confirms the rendered behavior.')
+  );
   assert.equal(rendered, renderCanonicalChangeReport(built.value));
 });
 
@@ -313,6 +325,7 @@ test('canonical report summarizes a precheck review route in Chinese', () => {
   const built = buildPrChangeReport(identity(), digest, mechanical(), precheck);
   assert.equal(built.ok, true);
   if (!built.ok) return;
+  assert.equal(built.value.precheck.route, 'review-code');
 
   const rendered = renderCanonicalChangeReport(built.value);
   const precheckSection = rendered.split('#### 适宜性预检\n')[1]!;

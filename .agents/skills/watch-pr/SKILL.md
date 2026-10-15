@@ -5,7 +5,7 @@ description: >
   当需要持续监控 PR 直到门禁通过且明确可合入时使用。
 ---
 
-# 监控 Pull Request
+# 监控拉取请求
 
 在 `create-pr` 之后持续监控同一 PR head 的全部 checks 与 mergeability。只有全部 checks 通过且平台明确可合入才进入成功出口；check 失败走既有修复，合并冲突走受限 rebase 自愈，未知或无法安全闭环时 fail-closed。
 
@@ -48,7 +48,22 @@ description: >
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。每轮 readiness 前先调用 `platform-pr summary-context`，按共享 PR change-report contract 以当前权威 PR head 重建任务绑定的 `pr-change-report.json`，再用含唯一 `<!-- canonical-pr-change-report -->` 占位符的正文调用 `summary-sync --change-report-file ... --result no_op --strict` 刷新同一条摘要。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不得把 warning 当作成功；刷新失败时不得进入 ready/complete 出口，按步骤 4 记录阻塞。刷新完成后调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
+进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。每次覆盖当前报告前，先用 core 导出的 reader 验证并暂存现有报告的身份与 head；文件不存在或验证失败即记为无上一 head：
+
+```bash
+node --experimental-strip-types --input-type=module -e '
+import { readPrChangeReport } from "./lib/platform/pr-change-report.ts";
+const report = readPrChangeReport(`.agents/workspace/active/${process.argv[1]}/pr-change-report.json`);
+const previous = report.ok
+  ? { repository: report.value.identity.repository, resource: report.value.identity.resource, head: report.value.identity.head.sha }
+  : { status: "unavailable" };
+process.stdout.write(`${JSON.stringify(previous)}\n`);
+' {task-id}
+```
+
+随后调用 `platform-pr summary-context`，比较暂存的 repository/resource identity 与当前权威 snapshot；不匹配时丢弃旧 head 并标记增量未确认。按共享 PR change-report contract 用当前权威 PR head 重建任务绑定的 `pr-change-report.json`，再用含唯一 `<!-- canonical-pr-change-report -->` 占位符的正文调用 `summary-sync --change-report-file ... --result no_op --strict` 刷新同一条摘要。完整 PR 仍使用当前 base/head/merge-base/patch 与现有 totals。只有在上一报告有效、PR identity 相同且两个 head 不同的情况下，才用 `git diff --find-renames --numstat {previous-head} {current-head}`、`--name-status`、`--summary` 描述独立的 head→head 树差异；不使用 merge-base 替代该范围，不把增量 totals 加入完整 PR。无有效上一 head 时写明未确认，不从完整 PR 推算或填零；head 相同只说明没有新的 head 转换。
+
+`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不得把 warning 当作成功；刷新失败时不得进入 ready/complete 出口，按步骤 4 记录阻塞。刷新成功后，消费 `summary-sync` 结构化结果的 `nextAction`：`review-code` 立即结束 readiness/self-heal 路径，按步骤 7 的代码审查分支退出；`watch-pr` 才继续调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`。缺失或 invalid `nextAction` 按刷新失败处理，不推断为 `watch-pr`。readiness 只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
 
 ### 3. 自愈循环
 
@@ -77,7 +92,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - **不改** `pr_delivery_fact` 与 `current_step`
 - **追加**到 `## 活动日志`（不要覆盖之前的记录；`{N}` = 本任务已有 Watch PR 条目数 + 1）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {成功：PR ready, repair commits: {k} [{sha 摘要}] / 阻塞：blocked: {简述}}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {成功：PR ready, repair commits: {k} [{sha 摘要}] / 需复核：nextAction=review-code / 阻塞：blocked: {简述}}
   ```
 
 ### 6. 完成校验
@@ -123,6 +138,8 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
   下一步 - 重新代码审查：
   {next-step-commands}
   ```
+
+- `summary-sync.nextAction == review-code`：说明报告要求代码审查；这不表示 PR readiness 已通过。使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成唯一下一步，结束本轮。不得继续 readiness/self-heal 或自行修改代码。
 
 - 「阻塞」：仅输出步骤 4 的阻塞说明，不推荐下一步命令。
 
