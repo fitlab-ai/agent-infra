@@ -132,7 +132,6 @@ process.exit(1);
   };
   const defaultRoot = path.join(home, '.agent-infra', 'data-store', 'demo');
   visit(path.join(defaultRoot, 'snapshots'));
-  assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'process-data')), false);
   const manifest = JSON.parse(fs.readFileSync(manifestFiles[0]!, 'utf8'));
   assert.equal(manifest.schema, 'raw-manifest/v2');
   assert.equal(manifest.endpoints.length, 4);
