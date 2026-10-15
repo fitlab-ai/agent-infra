@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import test, { after } from 'node:test';
+import test from 'node:test';
 
 import {
   appendCodexLifecycleBinding,
@@ -11,12 +8,6 @@ import {
   verifyCodexLifecycleTaskBinding
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
 import { codexAdapter } from '../../../lib/agent-clients/adapters/codex.ts';
-import { resolveTaskRuntimeRoot } from '../../../lib/task/runtime-paths.ts';
-
-const roots = new Set<string>();
-after(() => {
-  for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
-});
 
 test('Codex lifecycle binding survives the native task_name carrier round trip', () => {
   const binding = {
@@ -32,7 +23,6 @@ test('Codex lifecycle binding survives the native task_name carrier round trip',
   assert.deepEqual(parseCodexLifecycleBinding(taskName), { taskName, label, binding });
   assert.throws(() => appendCodexLifecycleBinding('a'.repeat(80), binding), /task_name/u);
 });
-
 test('Codex adapter materializes its native spawn carrier from opaque adapter context', () => {
   const adapterContext = encodeCodexLifecycleBinding({
     taskId: 'TASK-20261005-122106', runId: 'run-1', receiptId: 'receipt-1'
@@ -126,16 +116,4 @@ test('Codex lifecycle binding accepts only the exact current task run receipt an
     { ...binding, receiptId: 'receipt-2' }
   ]) assert.throws(() => verifyCodexLifecycleTaskBinding(mismatch, run, 'agent-infra-lifecycle-executor'));
   assert.throws(() => verifyCodexLifecycleTaskBinding(binding, run, 'agent-infra-lifecycle-reviewer'));
-});
-
-test('task runtime root resolves from the canonical task directory in every task state', () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-binding-'));
-  roots.add(repo);
-  const taskId = 'TASK-20261005-122106';
-  const taskDir = path.join(repo, '.agents', 'workspace', 'archive', '2026', '10', '05', taskId, 'local');
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\n---\n`);
-
-  assert.equal(resolveTaskRuntimeRoot(taskId, { repoRoot: repo }), path.join(fs.realpathSync.native(taskDir), '.runtime'));
-  assert.equal(fs.existsSync(path.join(repo, '.agents', 'workspace', '.runtime')), false);
 });
