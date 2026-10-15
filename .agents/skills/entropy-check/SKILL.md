@@ -12,7 +12,7 @@ disable-model-invocation: true
 
 - 本技能是 agent-infra 仓库本地维护技能，不属于 `update-agent-infra` 分发模板。
 - 本技能不修改业务代码、规则、skill 或文档；只创建一份审查报告。
-- 报告写入 `.agents/workspace/logs/entropy-check/entropy-check-YYYYMMDD-HHMMSS.md`。
+- 报告写入 `~/.agent-infra/reports/agent-infra/entropy-check/entropy-check-YYYYMMDD-HHMMSS.md`。
 - 发现项只给出证据与建议，不自动创建任务、不自动改文件。
 - 不确定的边界选择写入报告的 `## 人工裁决待办`，不中途向用户提问。
 
@@ -23,7 +23,7 @@ disable-model-invocation: true
 创建输出目录：
 
 ```bash
-mkdir -p .agents/workspace/logs/entropy-check
+mkdir -p "$HOME/.agent-infra/reports/agent-infra/entropy-check"
 ```
 
 运行并记录以下命令，原文写入报告 `## 状态核对`：
@@ -78,7 +78,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 按 `reference/report-template.md` 创建报告：
 
 ```bash
-report=".agents/workspace/logs/entropy-check/entropy-check-$(date "+%Y%m%d-%H%M%S").md"
+report="$HOME/.agent-infra/reports/agent-infra/entropy-check/entropy-check-$(date "+%Y%m%d-%H%M%S").md"
 ```
 
 报告必须保留结构化章节，便于发版流程引用报告路径并让维护者裁定后续任务。
