@@ -137,6 +137,14 @@ function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
+function commandError(error: unknown): { code: string; message: string } {
+  if (!(error instanceof Error)) return { code: 'DATA_COMMAND_FAILED', message: String(error) };
+  return {
+    code: 'dataRootCode' in error ? String(error.dataRootCode) : 'DATA_COMMAND_FAILED',
+    message: error.message
+  };
+}
+
 function optionString(parsed: ParsedArgs, name: string): string | undefined {
   const value = parsed.options.get(name);
   return typeof value === 'string' ? value : undefined;
@@ -340,8 +348,7 @@ async function cmdData(args: string[]): Promise<number> {
         return 1;
     }
   } catch (error) {
-    const code = error instanceof Error && 'dataRootCode' in error ? String(error.dataRootCode) : 'DATA_COMMAND_FAILED';
-    writeJson({ ok: false, error: { code, message: error instanceof Error ? error.message : String(error) } });
+    writeJson({ ok: false, error: commandError(error) });
     return 1;
   }
 }
