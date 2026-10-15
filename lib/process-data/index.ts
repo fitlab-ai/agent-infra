@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { detectRepoRoot } from '../task/resolve-ref.ts';
@@ -51,15 +52,79 @@ function parseArgs(args: string[], valueOptions: Set<string>, booleanOptions: Se
   return { positionals, options };
 }
 
-function dataRoot(repoRoot: string, requested?: string): string {
+type DataRootError = Error & { dataRootCode: string };
+
+function dataRootError(code: string, message: string): DataRootError {
+  return Object.assign(new Error(message), { dataRootCode: code });
+}
+
+function assertOutsideTaskTree(repoRoot: string, resolved: string): void {
   const workspace = path.resolve(repoRoot, '.agents', 'workspace');
-  const resolved = path.resolve(repoRoot, requested ?? path.join('.agents', 'workspace', 'process-data'));
-  const relative = path.relative(repoRoot, resolved);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('data root must be inside the repository');
   const taskRoots = ['active', 'blocked', 'completed', 'archive'].map((state) => path.join(workspace, state));
   if (resolved === workspace || taskRoots.some((taskRoot) => resolved === taskRoot || resolved.startsWith(`${taskRoot}${path.sep}`))) {
     throw new Error('data root cannot be the workspace root or a task directory');
   }
+}
+
+function configuredProject(repoRoot: string): string {
+  let config: unknown;
+  try {
+    config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as unknown;
+  } catch {
+    throw dataRootError('DATA_CONFIG_INVALID', '.agents/.airc.json must contain a valid project name in its project field');
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw dataRootError('DATA_CONFIG_INVALID', '.agents/.airc.json must contain a valid project name in its project field');
+  }
+  const project = (config as { project?: unknown }).project;
+  if (typeof project !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(project)) {
+    throw dataRootError('DATA_CONFIG_INVALID', '.agents/.airc.json project must be a valid lowercase project name');
+  }
+  return project;
+}
+
+function defaultDataRoot(repoRoot: string): string {
+  const project = configuredProject(repoRoot);
+  let home: string;
+  try {
+    home = os.homedir();
+  } catch {
+    throw dataRootError('DATA_HOME_UNAVAILABLE', 'cannot resolve the current user home directory');
+  }
+  if (!home || !path.isAbsolute(home)) {
+    throw dataRootError('DATA_HOME_UNAVAILABLE', 'cannot resolve the current user home directory');
+  }
+
+  const resolvedHome = path.resolve(home);
+  const resolved = path.join(resolvedHome, '.agent-infra', 'data-store', project);
+  assertOutsideTaskTree(repoRoot, resolved);
+  let current = resolvedHome;
+  for (const component of ['.agent-infra', 'data-store', project]) {
+    current = path.join(current, component);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      const detail = error instanceof Error ? error.message : String(error);
+      throw dataRootError('DATA_ROOT_UNSAFE', `cannot inspect default data root component ${current}: ${detail}`);
+    }
+    if (stat.isSymbolicLink()) {
+      throw dataRootError('DATA_ROOT_UNSAFE', `default data root cannot traverse a symlink: ${current}`);
+    }
+    if (!stat.isDirectory()) {
+      throw dataRootError('DATA_ROOT_UNSAFE', `default data root component must be a directory: ${current}`);
+    }
+  }
+  return resolved;
+}
+
+function dataRoot(repoRoot: string, requested?: string): string {
+  if (requested === undefined) return defaultDataRoot(repoRoot);
+  const resolved = path.resolve(repoRoot, requested);
+  const relative = path.relative(repoRoot, resolved);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('data root must be inside the repository');
+  assertOutsideTaskTree(repoRoot, resolved);
   let current = resolved;
   while (current !== repoRoot) {
     if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error('data root cannot traverse a symlink');
@@ -275,7 +340,8 @@ async function cmdData(args: string[]): Promise<number> {
         return 1;
     }
   } catch (error) {
-    writeJson({ ok: false, error: { code: 'DATA_COMMAND_FAILED', message: error instanceof Error ? error.message : String(error) } });
+    const code = error instanceof Error && 'dataRootCode' in error ? String(error.dataRootCode) : 'DATA_COMMAND_FAILED';
+    writeJson({ ok: false, error: { code, message: error instanceof Error ? error.message : String(error) } });
     return 1;
   }
 }

@@ -4,28 +4,33 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 import { CLI_PATH } from '../../helpers.ts';
 import { createObjectStore, publishSnapshot } from '../../../lib/process-data/store.ts';
 
-function fixture() {
+function fixture(project: unknown = 'demo') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-cli-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-home-'));
   spawnSync('git', ['init', '-q'], { cwd: root });
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project }));
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001'), { recursive: true });
   fs.writeFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
     '---\nid: TASK-20260101-000001\n---\n\n# Task\n'
   );
-  return root;
+  return { root, home };
 }
 
-function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
-  return spawnSync('node', [CLI_PATH, 'data', ...args], { cwd: root, encoding: 'utf8', env });
+function run(root: string, home: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
+  const isolatedEnv = { ...env, HOME: home, USERPROFILE: home };
+  return spawnSync('node', [CLI_PATH, 'data', ...args], { cwd: root, encoding: 'utf8', env: isolatedEnv });
 }
 
 test('historical v1 snapshots remain readable while local capture is retired', () => {
-  const root = fixture();
-  const dataRoot = path.join(root, '.agents', 'workspace', 'process-data');
+  const { root, home } = fixture();
+  const dataRoot = path.join(root, '.historical-data');
   const store = createObjectStore(dataRoot);
   const object = store.put(Buffer.from('legacy evidence'));
   const published = publishSnapshot(dataRoot, {
@@ -42,51 +47,51 @@ test('historical v1 snapshots remain readable while local capture is retired', (
   });
   const snapshotId = published.snapshotId;
 
-  const verify = run(root, ['verify', snapshotId]);
+  const verify = run(root, home, ['verify', snapshotId, '--root', dataRoot]);
   assert.equal(verify.status, 0, verify.stderr);
   assert.equal(JSON.parse(verify.stdout).ok, true);
 
-  const audit = run(root, ['audit', snapshotId, '--format', 'json']);
+  const audit = run(root, home, ['audit', snapshotId, '--format', 'json', '--root', dataRoot]);
   assert.equal(audit.status, 0, audit.stderr);
   assert.ok(Array.isArray(JSON.parse(audit.stdout).findings));
 
-  const before = fs.readdirSync(path.join(root, '.agents', 'workspace', 'process-data', 'repairs')).length;
-  const repair = run(root, ['repair', snapshotId]);
+  const before = fs.readdirSync(path.join(dataRoot, 'repairs')).length;
+  const repair = run(root, home, ['repair', snapshotId, '--root', dataRoot]);
   assert.equal(repair.status, 0, repair.stderr);
   assert.equal(JSON.parse(repair.stdout).applied, false);
-  const after = fs.readdirSync(path.join(root, '.agents', 'workspace', 'process-data', 'repairs')).length;
+  const after = fs.readdirSync(path.join(dataRoot, 'repairs')).length;
   assert.equal(after, before);
 
-  const exported = run(root, ['export', snapshotId, '--repairs', 'none', '--output', '-']);
+  const exported = run(root, home, ['export', snapshotId, '--repairs', 'none', '--output', '-', '--root', dataRoot]);
   assert.equal(exported.status, 0, exported.stderr);
   assert.match(exported.stdout, /"schema":"normalized\/v1"/);
 });
 
 test('local, all and excerpt capture options fail before creating the data root', () => {
   for (const args of [['capture', '--source', 'local'], ['capture', '--source', 'all'], ['capture', '--include-excerpts']]) {
-    const root = fixture();
-    const result = run(root, args);
+    const { root, home } = fixture();
+    const result = run(root, home, args);
     assert.equal(result.status, 1);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'process-data')), false);
+    assert.equal(fs.existsSync(path.join(home, '.agent-infra', 'data-store')), false);
   }
 });
 
 test('unknown data subcommand fails without creating the default root', () => {
-  const root = fixture();
-  const result = run(root, ['unknown']);
+  const { root, home } = fixture();
+  const result = run(root, home, ['unknown']);
   assert.equal(result.status, 1);
-  assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'process-data')), false);
+  assert.equal(fs.existsSync(path.join(home, '.agent-infra', 'data-store')), false);
 });
 
 test('data help exposes the v2 export as-of option', () => {
-  const root = fixture();
-  const result = run(root, ['--help']);
+  const { root, home } = fixture();
+  const result = run(root, home, ['--help']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /export .*--as-of <ISO>/);
 });
 
 test('full capture uses explicit GitHub pages through a fake gh boundary', () => {
-  const root = fixture();
+  const { root, home } = fixture();
   const fake = path.join(root, 'fake-gh.mjs');
   fs.writeFileSync(fake, `
 const args = process.argv.slice(2);
@@ -108,7 +113,7 @@ if (args[0] === 'api') {
 process.stderr.write('unexpected gh args: ' + JSON.stringify(args));
 process.exit(1);
 `);
-  const result = run(root, ['capture'], {
+  const result = run(root, home, ['capture'], {
     ...process.env,
     AGENT_INFRA_GH_BIN: process.execPath,
     AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
@@ -125,9 +130,104 @@ process.exit(1);
       else if (entry.name === 'manifest.json') manifestFiles.push(candidate);
     }
   };
-  visit(path.join(root, '.agents', 'workspace', 'process-data', 'snapshots'));
+  const defaultRoot = path.join(home, '.agent-infra', 'data-store', 'demo');
+  visit(path.join(defaultRoot, 'snapshots'));
+  assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'process-data')), false);
   const manifest = JSON.parse(fs.readFileSync(manifestFiles[0]!, 'utf8'));
   assert.equal(manifest.schema, 'raw-manifest/v2');
   assert.equal(manifest.endpoints.length, 4);
   assert.equal(manifest.endpoints.every((endpoint: { pages: unknown[] }) => endpoint.pages.length === 1), true);
+
+  const snapshotId = path.basename(path.dirname(manifestFiles[0]!));
+  const verify = run(root, home, ['verify', snapshotId]);
+  assert.equal(verify.status, 0, verify.stderr);
+  assert.equal(JSON.parse(verify.stdout).ok, true);
+  const audit = run(root, home, ['audit', snapshotId, '--format', 'json']);
+  assert.equal(audit.status, 0, audit.stderr);
+  assert.equal(JSON.parse(audit.stdout).ok, true);
+  const repair = run(root, home, ['repair', snapshotId]);
+  assert.equal(repair.status, 0, repair.stderr);
+  assert.equal(JSON.parse(repair.stdout).applied, false);
+  const exported = run(root, home, ['export', snapshotId, '--output', '-']);
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.match(exported.stdout, /"schema":"normalized\/v2"/);
+});
+
+test('invalid project configuration fails before creating the default root', () => {
+  for (const project of [undefined, 42, '../escape', 'Demo']) {
+    const { root, home } = fixture(project);
+    if (project === undefined) fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{}');
+    const result = run(root, home, ['verify', 'missing-snapshot']);
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'DATA_CONFIG_INVALID');
+    assert.equal(fs.existsSync(path.join(home, '.agent-infra', 'data-store')), false);
+  }
+  const { root, home } = fixture();
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{');
+  const malformed = run(root, home, ['verify', 'missing-snapshot']);
+  assert.equal(malformed.status, 1);
+  assert.equal(JSON.parse(malformed.stdout).error.code, 'DATA_CONFIG_INVALID');
+  assert.equal(fs.existsSync(path.join(home, '.agent-infra', 'data-store')), false);
+
+  const missing = fixture();
+  fs.rmSync(path.join(missing.root, '.agents', '.airc.json'));
+  const missingConfig = run(missing.root, missing.home, ['verify', 'missing-snapshot']);
+  assert.equal(missingConfig.status, 1);
+  assert.equal(JSON.parse(missingConfig.stdout).error.code, 'DATA_CONFIG_INVALID');
+  assert.equal(fs.existsSync(path.join(missing.home, '.agent-infra', 'data-store')), false);
+});
+
+test('default root rejects symlink and non-directory path components', () => {
+  const linked = fixture();
+  const infra = path.join(linked.home, '.agent-infra');
+  try {
+    fs.symlinkSync(path.join(linked.home, 'outside'), infra, 'dir');
+    const linkResult = run(linked.root, linked.home, ['verify', 'missing-snapshot']);
+    assert.equal(linkResult.status, 1);
+    assert.equal(JSON.parse(linkResult.stdout).error.code, 'DATA_ROOT_UNSAFE');
+  } catch (error) {
+    if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+  }
+
+  const nonDirectory = fixture();
+  fs.writeFileSync(path.join(nonDirectory.home, '.agent-infra'), 'file');
+  const fileResult = run(nonDirectory.root, nonDirectory.home, ['verify', 'missing-snapshot']);
+  assert.equal(fileResult.status, 1);
+  assert.equal(JSON.parse(fileResult.stdout).error.code, 'DATA_ROOT_UNSAFE');
+});
+
+test('default root fails closed when the home directory cannot be resolved', () => {
+  const { root, home } = fixture();
+  const preload = path.join(home, 'unavailable-home.mjs');
+  fs.writeFileSync(preload, "import os from 'node:os'; os.homedir = () => '';\n");
+  const result = run(root, home, ['verify', 'missing-snapshot'], {
+    ...process.env,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${pathToFileURL(preload).href}`].filter(Boolean).join(' ')
+  });
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).error.code, 'DATA_HOME_UNAVAILABLE');
+  assert.equal(fs.existsSync(path.join(home, '.agent-infra', 'data-store')), false);
+});
+
+test('explicit root remains repository-relative and export output remains repository-local', () => {
+  const { root, home } = fixture();
+  const dataRoot = path.join(root, '.local-data');
+  const store = createObjectStore(dataRoot);
+  const object = store.put(Buffer.from('explicit root'));
+  const published = publishSnapshot(dataRoot, {
+    scope: 'local', repository: 'example/repo', observedFrom: '2026-01-01T00:00:00.000Z',
+    observedTo: '2026-01-01T00:00:01.000Z', objects: [{ sourceKind: 'local-file', sourceIdentity: 'task.md', sha256: object.sha256, bytes: 13 }],
+    endpoints: [], excerptsEnabled: false,
+    records: [{ recordId: 'explicit', kind: 'artifact', sourceIdentity: 'task.md', sourceSha256: object.sha256 }], quality: [], repairs: []
+  });
+  const verify = run(root, home, ['verify', published.snapshotId, '--root', '.local-data']);
+  assert.equal(verify.status, 0, verify.stderr);
+  const outside = run(root, home, ['verify', published.snapshotId, '--root', home]);
+  assert.equal(outside.status, 1);
+  assert.match(JSON.parse(outside.stdout).error.message, /inside the repository/);
+
+  const exportOutside = run(root, home, ['export', published.snapshotId, '--root', '.local-data', '--output', path.join(home, 'export.json')]);
+  assert.equal(exportOutside.status, 1);
+  assert.match(JSON.parse(exportOutside.stdout).error.message, /export output must be inside the repository/);
+  assert.equal(fs.existsSync(path.join(home, 'export.json')), false);
 });

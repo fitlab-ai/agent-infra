@@ -12,7 +12,11 @@ ai data repair <snapshot-id> [--root <dir>] [--apply]
 ai data export <snapshot-id> [--root <dir>] [--as-of <ISO>] [--repairs none|applied] [--output <file|->]
 ```
 
-`--source github` is the default. `--source local`, `--source all`, and `--include-excerpts` fail closed; they do not create a data root, checkpoint, or snapshot. Existing `raw-manifest/v1` local, all, and GitHub snapshots remain readable by `verify`, `audit`, `repair`, and `export`.
+`--source github` is the default. `--source local`, `--source all`, and `--include-excerpts` fail closed; they do not create a data root, checkpoint, or snapshot. Existing `raw-manifest/v1` local, all, and GitHub snapshots remain readable by `verify`, `audit`, `repair`, and `export` when their repository-local root is supplied with `--root`.
+
+Without `--root`, all five commands use `~/.agent-infra/data-store/<project>/`. The project key comes from the repository's `.agents/.airc.json` `project` field and must use the configured lowercase project-name format. Missing or invalid configuration fails without falling back to a repository directory. This changes the default location only; existing data is not copied or discovered automatically.
+
+An explicit `--root` keeps its repository-local contract: relative paths resolve from the repository root, and absolute paths must still be inside the repository. `export --output` remains a separate repository-local output path.
 
 ## Observation and lineage
 
@@ -25,7 +29,7 @@ HTTP `Date`, page evidence, and the checkpoint prove the observed request and lo
 ## Storage and verification
 
 ```text
-process-data/
+~/.agent-infra/data-store/<project>/
   objects/sha256/<prefix>/<digest>
   snapshots/YYYY/MM/DD/<snapshot-id>/
   checkpoints/github/<repository-key>.json
