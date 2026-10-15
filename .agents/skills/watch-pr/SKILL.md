@@ -5,7 +5,7 @@ description: >
   当需要持续监控 PR 直到门禁通过且明确可合入时使用。
 ---
 
-# 监控 Pull Request
+# 监控拉取请求
 
 在 `create-pr` 之后持续监控同一 PR head 的全部 checks 与 mergeability。只有全部 checks 通过且平台明确可合入才进入成功出口；check 失败走既有修复，合并冲突走受限 rebase 自愈，未知或无法安全闭环时 fail-closed。
 

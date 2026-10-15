@@ -2,7 +2,7 @@
 
 `watch-pr` 步骤 2/3/4 的平台无关判定逻辑。具体平台命令（监控、解析失败 run、拉日志、读取 PR 号）见 `.agents/rules/pr-checks-commands.md`；本文件只描述与平台无关的分类与决策。
 
-## Readiness 分类
+## 就绪状态分类
 
 按 `.agents/rules/pr-checks-commands.md` 的监控命令执行后，依其退出码归为三类：
 
@@ -21,7 +21,7 @@
 
 完整 PR 的范围继续绑定当前权威 base/head/merge-base/patch 与完整统计。增量单独绑定上一有效报告 head → 当前 head：在覆盖旧 sidecar 前，用 `readPrChangeReport` 校验旧报告，只在 repository/resource identity 匹配当前 PR 时采用旧 `identity.head.sha`。对两个 head 做 tree-to-tree diff 并明确列出 SHA，不用 merge-base 替代端点差异，不把增量 totals 加到完整 PR totals。没有旧报告、报告无效或身份不符时标注上一 head 未确认，不从全量推算或填零。两个 SHA 相同只报告 head 未变化；rebase 后仍比较原 head 和新 head 的树差异。sidecar 无效只使增量不可确认，不改变现有 full-PR 报告流程。
 
-## Precheck Route
+## 预检分流
 
 `summary-sync --strict` 成功后，消费其结构化结果中的 `nextAction`，再决定是否进入 readiness：
 
