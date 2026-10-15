@@ -56,15 +56,26 @@ Assign exactly one classification per item:
 
 Only `executable` items may run. Commands must not expose credentials, environment variables, full argv, absolute user paths, or raw transcripts. Leave a coverage gap when safety cannot be established.
 
+## Artifact Directory and Evidence Paths
+
+Choose `{evidence-dir}` once per run. Write the report and every evidence JSON generated in that run to this directory:
+
+- `task-bound`: use the `TaskDir` returned in the structured result of `task-context resolve`; never construct it from the task ID.
+- `branch-only`: only after the user explicitly passes a valid `--branch` with valid explicit-mode input, create the directory once with Node built-ins: `fs.mkdtempSync(path.join(os.tmpdir(), "tmp-"))`. Use the existing Node runtime's `node:fs`, `node:os`, and `node:path`; do not add a script, helper, or storage layer. A task-resolution failure must not enter this branch.
+
+Keep the report name returned by the core: `validation-run.md|validation-run-r{N}.md`. For task-bound evidence, remove `.md` from that report name to get `{artifact-stem}`, then name each file `{artifact-stem}-{MV-N}-{snapshot|inplace}.json`; different report rounds, targets, and scopes therefore do not overwrite each other. Branch-only writes `validation-run.md` in its new directory and uses `validation-run-{MV-N}-{snapshot|inplace}.json`. Generate paths with Node `path.join(evidence-dir, filename)` and pass the full path as one argument, correctly quoted for the current shell, to `--evidence-file`. Do not split paths containing spaces. Do not create a file for a scope that was not run.
+
+Put evidence relative filenames in the report, never absolute user paths. The branch-only completion result separately gives `{evidence-dir}` as the retrieval path; the report and all JSON files are in that directory.
+
 ## Per-item Execution
 
 1. Invoke each executable item separately:
 
    ```bash
-   agent-infra-internal task-validate {task-ref|branch-ref} --scope snapshot --format json -- {command...}
+   agent-infra-internal task-validate {task-ref|branch-ref} --scope snapshot --format json --evidence-file "{evidence-file}" -- {command...}
    ```
 
-2. Only when the item or first-run evidence proves a dependency on uncommitted content, original mounts, or in-place permissions, explicitly invoke that item a second time with `--scope inplace` and record the reason.
+2. Only when the item or first-run evidence proves a dependency on uncommitted content, original mounts, or in-place permissions, explicitly invoke that item a second time with `--scope inplace`, use its separate scope evidence path, and record the reason.
 3. One item failure does not stop independent remaining items. Record exit status, cleanup, and the sanitized JSON allowlist separately.
 4. When the list is non-empty but no item is `executable`, still create and complete a validation-run artifact after started; do not run placeholder or fabricated commands.
 5. Always stop before started for invalid input. In automatic mode, also stop before started without an artifact when both sources are reliably empty or the sole possible source is unreadable with no local items; those source-based stop conditions do not apply to valid explicit mode.

@@ -4,6 +4,7 @@
 
 - 模式：`{explicit|automatic}`
 - 上下文：`{task-bound|branch-only}`（branch-only 另记 `recoverable: false`）
+- 报告与 evidence：同一产物目录；仅记录 evidence 文件名，不记录绝对路径
 - 输入判定：{sanitized-input-decision}
 - PR 来源状态：`{success|no-op|failed|blocked}` / `{stable-code-or-none}`
 
@@ -50,6 +51,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - 来源：`{source}`
 - 分类：`{classification}`
 - Scope：`{snapshot|inplace|not-run}`
+- Evidence 文件：`{evidence-filename|not-created}`（仅相对文件名）
 - 命令名称：`{basename-only|not-run}`
 - 退出状态：`{exit-status|not-run}`
 - 运行时升级：{none-or-reason}

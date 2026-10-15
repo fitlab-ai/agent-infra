@@ -4,6 +4,7 @@
 
 - Mode: `{explicit|automatic}`
 - Context: `{task-bound|branch-only}` (branch-only also records `recoverable: false`)
+- Report and evidence: same artifact directory; record evidence filenames only, never absolute paths
 - Input decision: {sanitized-input-decision}
 - PR source status: `{success|no-op|failed|blocked}` / `{stable-code-or-none}`
 
@@ -50,6 +51,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - Source: `{source}`
 - Classification: `{classification}`
 - Scope: `{snapshot|inplace|not-run}`
+- Evidence file: `{evidence-filename|not-created}` (filename only)
 - Command name: `{basename-only|not-run}`
 - Exit status: `{exit-status|not-run}`
 - Runtime upgrade: {none-or-reason}
