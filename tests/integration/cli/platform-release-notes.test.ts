@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function run(args: string[], cwd = process.cwd()) {
   return spawnSync(
@@ -33,7 +32,7 @@ test('platform-release-notes rejects invalid context input with JSON and exit 1'
 });
 
 test('platform-release-notes accepts every documented context value flag', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-context-'));
+  const root = createTempDir('release-notes-context-');
   try {
     const result = run([
       'context',
@@ -59,7 +58,7 @@ test('platform-release-notes rejects publish without notes input', () => {
 });
 
 test('platform-release-notes stages an external file and returns structured digest facts', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-cli-'));
+  const root = createTempDir('release-notes-cli-');
   const worktree = path.join(root, 'worktree');
   const notesFile = path.join(root, 'notes.md');
   fs.mkdirSync(worktree);
@@ -93,7 +92,7 @@ test('platform-release-notes strictly rejects invalid stage and publish flags', 
 });
 
 test('platform-release-notes removes stdin-backed publish files on every result', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-stdin-'));
+  const root = createTempDir('release-notes-stdin-');
   const worktree = path.join(root, 'worktree');
   const temporary = path.join(root, 'temporary');
   const input = 'Notes\n';

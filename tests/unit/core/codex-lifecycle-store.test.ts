@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import {
@@ -13,13 +12,14 @@ import {
   prepareOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
 });
 function temporaryRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
+  const root = createTempDir('codex-lifecycle-store-');
   fixtureRoots.add(root);
   return root;
 }

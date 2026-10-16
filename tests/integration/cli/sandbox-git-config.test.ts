@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   loadFreshEsm
 } from "../../helpers.ts";
 
@@ -113,7 +113,7 @@ test("ensureShellConfigSymlinks wires all four $HOME entries without a shell com
 
 test("prepareHostShellConfig writes sanitized config files and returns read-only mount metadata", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-"));
+  const tmpDir = createTempDir("agent-infra-host-shell-config-");
 
   try {
     fs.writeFileSync(path.join(tmpDir, ".gitconfig"), [
@@ -179,7 +179,7 @@ test("prepareHostShellConfig writes sanitized config files and returns read-only
 
 test("prepareHostShellConfig writes a minimal .gitconfig with safe.directory entries when the host has none", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-no-gitconfig-"));
+  const tmpDir = createTempDir("agent-infra-host-shell-config-no-gitconfig-");
 
   try {
     // Intentionally do NOT create tmpDir/.gitconfig — simulate a host without one.
@@ -212,7 +212,7 @@ test("prepareHostShellConfig writes a minimal .gitconfig with safe.directory ent
 
 test("prepareHostShellConfig removes stale files from the previous host config snapshot", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-cleanup-"));
+  const tmpDir = createTempDir("agent-infra-host-shell-config-cleanup-");
   const hostDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
 
   try {
@@ -418,7 +418,7 @@ test("sanitizeGitConfig installs one canonical GitHub credential and URL rewrite
 
 test("prepareHostShellConfig leaves the host gitconfig unchanged", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-gitconfig-unchanged-"));
+  const tmpDir = createTempDir("agent-infra-host-gitconfig-unchanged-");
   const original = "[credential]\n  helper = !/opt/homebrew/bin/gh auth git-credential\n";
 
   try {
@@ -439,7 +439,7 @@ test("prepareHostShellConfig leaves the host gitconfig unchanged", async () => {
 
 test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing the inode", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-write-sanitized-gitconfig-"));
+  const tmpDir = createTempDir("agent-infra-write-sanitized-gitconfig-");
   const hostConfigDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
 
   try {

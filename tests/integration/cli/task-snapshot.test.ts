@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 test('internal task-snapshot resolves full and short task refs without writes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-snapshot-integration-'));
+  const root = createTempDir('task-snapshot-integration-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
   const active = path.join(root, '.agents', 'workspace', 'active');

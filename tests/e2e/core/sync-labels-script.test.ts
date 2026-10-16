@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { envWithPrependedPath, filePath, read, writeNodeCommandShim } from "../../helpers.ts";
+import { createTempDir, envWithPrependedPath, filePath, read, writeNodeCommandShim } from "../../helpers.ts";
 
 const scriptPath = filePath(".github/scripts/sync-labels-to-set.sh");
 
@@ -23,10 +22,6 @@ type FakeGhState = {
 function write(filePathname: string, content: string) {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
   fs.writeFileSync(filePathname, content, "utf8");
-}
-
-function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "sync-labels-script-"));
 }
 
 function writeFakeGh(binDir: string) {
@@ -101,7 +96,7 @@ process.exit(1);
 }
 
 function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "" }: RunScriptOptions = {}) {
-  const tempDir = makeTempDir();
+  const tempDir = createTempDir("sync-labels-script-");
   const statePath = path.join(tempDir, "state.json");
   const binDir = path.join(tempDir, "bin");
   fs.mkdirSync(binDir, { recursive: true });

@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 
-import { loadFreshEsm } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 const CANONICAL_AGENT_CLIENTS = [
@@ -46,8 +45,8 @@ function parseMarkdownFrontmatter(content: string) {
 }
 
 test("syncTemplates preserves manual custom skills and generates commands for manual and sourced skills", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-skills-"));
-  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-source-"));
+  const tmpDir = createTempDir("agent-infra-custom-skills-");
+  const sourceRoot = createTempDir("agent-infra-custom-source-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -161,8 +160,8 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
 });
 
 test("syncTemplates cleans stale files from sourced skills without touching manual custom skills", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-cleanup-"));
-  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-cleanup-source-"));
+  const tmpDir = createTempDir("agent-infra-custom-cleanup-");
+  const sourceRoot = createTempDir("agent-infra-custom-cleanup-source-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -222,8 +221,8 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
 });
 
 test("syncTemplates reports missing sources and skips built-in skill conflicts from custom sources", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-conflict-"));
-  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-conflict-source-"));
+  const tmpDir = createTempDir("agent-infra-custom-conflict-");
+  const sourceRoot = createTempDir("agent-infra-custom-conflict-source-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");

@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { encodeCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
 
 function canonical(enabled: readonly string[]) {
@@ -17,7 +16,7 @@ function canonical(enabled: readonly string[]) {
 }
 
 function fixture(config: unknown): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-next-steps-'));
+  const root = createTempDir('agent-client-next-steps-');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(
     path.join(root, '.agents', '.airc.json'),

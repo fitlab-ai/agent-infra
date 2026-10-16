@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { parseImplementationInputs } from '../../../lib/task/implementation-inputs.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const header = '## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n';
 for (const [label, time, evidence, expected] of [
@@ -26,7 +26,7 @@ test('non-decision actions accept absent or empty input tables', async () => {
 });
 
 async function run(table: string, evidence: string, decision: boolean) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'implementation-contract-'));
+  const root = createTempDir('implementation-contract-');
   try {
     const configDir = path.join(root, '.agents/skills/probe/config');
     fs.mkdirSync(configDir, { recursive: true });

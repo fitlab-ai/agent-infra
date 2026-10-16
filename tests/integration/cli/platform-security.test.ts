@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 test('platform-security validates input before resolving a provider', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-security-cli-'));
+  const root = createTempDir('platform-security-cli-');
   try {
     const result = spawnSync(process.execPath, [
       '--experimental-strip-types', INTERNAL_CLI_PATH, 'platform-security', 'read',

@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { clearProviderSessions } from '../../../lib/platform/provider-loader.ts';
 import { initializeLabels } from '../../../lib/platform/repository-metadata.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function fixtureRoot(metadataFailure = false): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repository-metadata-runtime-'));
+  const root = createTempDir('repository-metadata-runtime-');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     labels: { in: { docs: ['docs/'], core: ['lib/'] } },

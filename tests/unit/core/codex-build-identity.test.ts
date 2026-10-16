@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
@@ -12,6 +11,7 @@ import {
   resolveLifecycleExecutableFiles,
   verifyLifecycleBuildIdentity
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
@@ -19,7 +19,7 @@ after(() => {
 });
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-build-identity-'));
+  const root = createTempDir('codex-build-identity-');
   fixtureRoots.add(root);
   fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
   fs.mkdirSync(path.join(root, '.codex', 'agents'), { recursive: true });

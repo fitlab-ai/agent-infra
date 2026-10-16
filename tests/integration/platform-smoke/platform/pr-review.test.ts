@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -15,11 +14,12 @@ import {
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
 import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 type MockReview = { id: number; commit_id: string; body: string; html_url: string };
 
 function fixture(repository = 'acme/widgets') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-adapter-'));
+  const root = createTempDir('pr-review-adapter-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', `git@github.com:${repository}.git`], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });

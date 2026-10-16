@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { parseRunArgs, runSkill } from '../../../lib/run/index.ts';
 import { buildTuiCommand, renderPrompt, selectTui } from '../../../lib/run/tui.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260430-163836';
 
 function writeTaskFixture(options: { withShortId?: boolean } = {}): string {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-skill-repo-'));
+  const repoRoot = createTempDir('run-skill-repo-');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(

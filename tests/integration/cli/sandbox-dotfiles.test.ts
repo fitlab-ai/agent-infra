@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   assertModeBits,
   loadFreshEsm,
   onPlatforms
@@ -81,7 +81,7 @@ function required<T>(value: T | undefined, message = "expected value"): T {
 }
 
 function makeDotfilesFixture(prefix: string = "agent-infra-materialize-dotfiles-") {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const tmpDir = createTempDir(prefix);
   const srcDir = path.join(tmpDir, "src");
   const cacheDir = path.join(tmpDir, "cache");
   const externalDir = path.join(tmpDir, "external");
@@ -122,7 +122,7 @@ function readMaterializeResult(sandboxDotfiles: DotfilesModule, srcDir: string, 
 
 test("buildContainerEnvFile writes tool env vars to a private env file", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-"));
+  const tmpDir = createTempDir("agent-infra-env-file-");
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([
@@ -143,7 +143,7 @@ test("buildContainerEnvFile writes tool env vars to a private env file", async (
 
 test("buildContainerEnvFile stores GH_TOKEN in the env file but not docker argv", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-token-"));
+  const tmpDir = createTempDir("agent-infra-env-file-token-");
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([
@@ -166,7 +166,7 @@ test("buildContainerEnvFile stores GH_TOKEN in the env file but not docker argv"
 
 test("buildContainerEnvFile falls back to the host GH token on WSL2", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-wsl2-token-"));
+  const tmpDir = createTempDir("agent-infra-env-file-wsl2-token-");
   const calls: string[] = [];
   let hostEnvDir = "";
 
@@ -196,7 +196,7 @@ test("buildContainerEnvFile falls back to the host GH token on WSL2", async () =
 
 test("buildContainerEnvFile keeps the WSL2 engine token as the preferred result", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-wsl2-preferred-"));
+  const tmpDir = createTempDir("agent-infra-env-file-wsl2-preferred-");
   let hostEnvDir = "";
 
   try {
@@ -253,7 +253,7 @@ test("buildContainerEnvFile returns empty docker args when there are no env vars
 
 test("buildContainerEnvFile cleanup removes the temporary directory", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-cleanup-"));
+  const tmpDir = createTempDir("agent-infra-env-file-cleanup-");
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([
@@ -271,7 +271,7 @@ test("buildContainerEnvFile cleanup removes the temporary directory", async () =
 
 test("buildContainerEnvFile rejects newlines and removes the temporary directory", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-newline-"));
+  const tmpDir = createTempDir("agent-infra-env-file-newline-");
 
   try {
     assert.throws(() => sandboxCreate.buildContainerEnvFile([

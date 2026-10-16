@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   envWithPrependedPath,
   gitSafeEnv,
   loadFreshEsm,
@@ -64,7 +64,7 @@ function restoreDockerContext(previousValue: string | undefined) {
 }
 
 test("sandbox vm stop warns instead of stopping when OrbStack is not running", onPlatforms("darwin", "linux"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-vm-stop-orb-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-vm-stop-orb-");
   const repoDir = path.join(tmpDir, "repo");
   const binDir = path.join(tmpDir, "bin");
   const orbPath = path.join(binDir, "orb");

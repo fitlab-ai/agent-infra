@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
@@ -11,10 +10,10 @@ import {
   readSandboxControlTransition,
   writeSandboxControlTransition
 } from '../../../lib/sandbox/control/audit.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 function fixture(): { root: string; manifest: SandboxControlManifest } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-audit-'));
+  const root = createTempDir('sandbox-control-audit-');
   const manifest = {
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'project', container: 'container',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: {}, branch: 'feature',

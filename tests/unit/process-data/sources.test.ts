@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { redactExcerpt } from '../../../lib/process-data/privacy.ts';
 import { collectGitHubBoundary, collectLocalObjects, fetchRestCollection, projectGitHubItem, projectGitHubTimelineItem } from '../../../lib/process-data/sources.ts';
 import { enumerateAllTaskDirs } from '../../../lib/task/resolve-ref.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function clientFor(pages: unknown[]): GitHubClient {
   return {
@@ -99,7 +99,7 @@ test('excerpt privacy rejects common cloud and messaging credentials', () => {
 });
 
 test('all-state enumeration includes the dated archive while local capture excludes sensitive bodies', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-sources-'));
+  const root = createTempDir('process-data-sources-');
   const ids = ['TASK-20260101-000001', 'TASK-20260101-000002', 'TASK-20260101-000003', 'TASK-20260101-000004'];
   const dirs = [
     path.join(root, '.agents', 'workspace', 'active', ids[0]!),

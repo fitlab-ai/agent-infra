@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   assertModeBits,
   cliArgs,
   envWithPrependedPath,
@@ -157,7 +157,7 @@ test("collectHostProxyEntries does not duplicate case-insensitive environment ke
 
 test("buildContainerEnvFile appends proxy entries after tool env and before GH_TOKEN", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-proxy-env-file-"));
+  const tmpDir = createTempDir("agent-infra-proxy-env-file-");
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([
@@ -189,7 +189,7 @@ test("buildContainerEnvFile appends proxy entries after tool env and before GH_T
 
 test("buildContainerEnvFile rejects newlines in additional proxy entries and cleans up", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-proxy-env-file-newline-"));
+  const tmpDir = createTempDir("agent-infra-proxy-env-file-newline-");
 
   try {
     assert.throws(() => sandboxCreate.buildContainerEnvFile([], "native", () => "", {
@@ -203,7 +203,7 @@ test("buildContainerEnvFile rejects newlines in additional proxy entries and cle
 });
 
 test("sandbox create inherits host proxy variables only when explicitly requested", { timeout: 90_000 }, () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-proxy-cli-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-proxy-cli-");
 
   try {
     const defaultFixture = writeSandboxEngineFixture(path.join(tmpDir, "default"), { project: "demo" });

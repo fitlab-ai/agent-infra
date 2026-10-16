@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 const CANONICAL_AGENT_CLIENTS = [
@@ -56,7 +55,7 @@ function withStubbedExecSync<T>(fn: () => T | Promise<T>): Promise<T> {
 }
 
 test("gitlab projects skip github-owned managed directories", async () => withStubbedExecSync(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-platform-gating-"));
+  const tmpDir = createTempDir("ai-collab-platform-gating-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -89,7 +88,7 @@ test("gitlab projects skip github-owned managed directories", async () => withSt
 }));
 
 test("platform switch removes stale github-owned files", async () => withStubbedExecSync(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-platform-switch-"));
+  const tmpDir = createTempDir("ai-collab-platform-switch-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -121,7 +120,7 @@ test("shared hooks are distributed to all platforms", async () => withStubbedExe
   const platforms = ["github", "gitlab", "gitea", "custom"];
 
   for (const platformType of platforms) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ai-collab-shared-hooks-${platformType}-`));
+    const tmpDir = createTempDir(`ai-collab-shared-hooks-${platformType}-`);
 
     try {
       const projectRoot = path.join(tmpDir, "project");
@@ -154,7 +153,7 @@ test("shared hooks are distributed to all platforms", async () => withStubbedExe
 }));
 
 test("custom platforms skip all known-platform directories", async () => withStubbedExecSync(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-custom-platform-skip-"));
+  const tmpDir = createTempDir("ai-collab-custom-platform-skip-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -185,7 +184,7 @@ test("custom platforms skip all known-platform directories", async () => withStu
 }));
 
 test("platform switch only removes guarded workflows with provable official ownership", async () => withStubbedExecSync(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-guarded-platform-switch-"));
+  const tmpDir = createTempDir("ai-collab-guarded-platform-switch-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");

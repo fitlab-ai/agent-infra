@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 
-import { CLI_PATH, onPlatforms, gitSafeEnv, initIsolatedGitRepo, escapeRegExp } from '../../helpers.ts';
+import { createTempDir, CLI_PATH, onPlatforms, gitSafeEnv, initIsolatedGitRepo, escapeRegExp } from '../../helpers.ts';
 import { buildProcessTreeStopCommand, buildStopCommand, isProcessAlive } from '../../../lib/server/process-control.ts';
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import { terminateSandboxControlExecution } from '../../../lib/sandbox/control/state.ts';
@@ -37,7 +37,7 @@ test('buildProcessTreeStopCommand targets the whole execution tree', () => {
 });
 
 test('sandbox execution termination waits for the entire POSIX process group', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-process-group-'));
+  const root = createTempDir('sandbox-process-group-');
   const childPidPath = path.join(root, 'child.pid');
   const leader = spawn(process.execPath, ['-e', [
     "const {spawn}=require('node:child_process')",
@@ -80,7 +80,7 @@ test('sandbox execution termination waits for the entire POSIX process group', o
 const PROJECT = 'lifecycle';
 
 function makeRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-lifecycle-'));
+  const dir = createTempDir('server-lifecycle-');
   initIsolatedGitRepo(dir);
   fs.mkdirSync(path.join(dir, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.agents', '.airc.json'), JSON.stringify({ project: PROJECT }));
@@ -240,7 +240,7 @@ test(
   'server start fails outside a Git worktree without writing a pid record',
   onPlatforms('linux', 'darwin'),
   () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-outside-git-'));
+    const dir = createTempDir('server-outside-git-');
     try {
       const started = runServerFrom(dir, dir, 'start');
       assert.notEqual(started.status, 0);

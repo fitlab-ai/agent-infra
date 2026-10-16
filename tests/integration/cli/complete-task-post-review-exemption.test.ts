@@ -1,18 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { renderTaskVerification } from "../../../lib/task/verification.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
-import { gitSafeEnv } from "../../helpers.ts";
+import { createTempDir, gitSafeEnv } from "../../helpers.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import { sha256File } from "../../../lib/task/artifact-receipts.ts";
 
 test("complete-task renders an exemption covering multiple post-review commits", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-post-review-exemption-"));
+  const root = createTempDir("complete-task-post-review-exemption-");
   const taskId = "TASK-20260927-000001";
   const git = (args: string[]) => {
     const result = spawnSync("git", args, { cwd: root, encoding: "utf8", env: gitSafeEnv() });

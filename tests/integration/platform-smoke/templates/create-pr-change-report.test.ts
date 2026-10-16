@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { filePath, gitSafeEnv, initIsolatedGitRepo } from "../../../helpers.ts";
+import { createTempDir, filePath, gitSafeEnv, initIsolatedGitRepo } from "../../../helpers.ts";
 
 const runtimeScript = filePath(".agents/skills/create-pr/scripts/change-report.mjs");
 const templateScript = filePath("templates/.agents/skills/create-pr/scripts/change-report.mjs");
@@ -19,7 +18,7 @@ function git(repo: string, args: string[]): string {
 }
 
 test("create-pr change report reconciles line counts and blob byte sizes", (t) => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "create-pr-change-report-"));
+  const repo = createTempDir("create-pr-change-report-");
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   initIsolatedGitRepo(repo);
   git(repo, ["config", "user.email", "test@example.com"]);

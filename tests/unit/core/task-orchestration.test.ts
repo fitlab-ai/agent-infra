@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
@@ -30,7 +29,7 @@ import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
-import { recordArtifactCompletions } from '../../helpers.ts';
+import { createTempDir, recordArtifactCompletions } from '../../helpers.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -62,7 +61,7 @@ function prepareOrchestrationDelegation(
 }
 
 function fixture(step: string) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-'));
+  const root = createTempDir('orchestration-');
   fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
   fs.mkdirSync(taskDir, { recursive: true });

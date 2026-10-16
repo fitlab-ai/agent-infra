@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath } from "../../helpers.ts";
+import { createTempDir, filePath } from "../../helpers.ts";
 
 const scriptPath = filePath(".github/scripts/generate-bottle-block.mjs");
 const rootUrl = "https://github.com/fitlab-ai/agent-infra/releases/download/v0.6.2";
@@ -35,7 +34,7 @@ function bottleJson(platform: string, sha256: string, options: { rootUrl?: strin
 }
 
 function withTempDir(callback: (dir: string) => void) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-bottles-"));
+  const dir = createTempDir("agent-infra-bottles-");
   try {
     callback(dir);
   } finally {

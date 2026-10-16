@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { createTempDir } from '../../helpers.ts';
 
 async function check(content: string) {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decision-detail-gate-'));
+  const taskDir = createTempDir('decision-detail-gate-');
   fs.writeFileSync(path.join(taskDir, 'review-analysis.md'), content);
   return verifyInProcess({
     mode: 'check',
@@ -56,7 +56,7 @@ test('decision-details gate rejects duplicate ids', async () => {
     '- **要决定什么**：B',
     ''
   ].join('\n');
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decision-detail-readonly-'));
+  const taskDir = createTempDir('decision-detail-readonly-');
   const artifact = path.join(taskDir, 'review-analysis.md');
   fs.writeFileSync(artifact, content);
   const before = fs.readFileSync(artifact);

@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { decide } from '../../../../lib/decide.ts';
 import { withTaskExecutionLock } from '../../../../lib/task/task-execution-lock.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function makeTask(rows: string[] = [
   '| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |'
 ]): { repoRoot: string; taskId: string; taskMd: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'decide-'));
+  const repoRoot = createTempDir('decide-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });

@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { resolvePlatformProviderContext } from "../../../lib/platform/context.ts";
-import { filePath } from "../../helpers.ts";
+import { createTempDir, filePath } from "../../helpers.ts";
 import { check, evaluateRequiredChecks } from "../../../lib/platform/verification-required.ts";
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
@@ -140,7 +139,7 @@ test("required-checks skips tasks without a PR or with PR flow disabled", () => 
 });
 
 test("required-checks fails closed when a loaded platform provider lacks checks inspection", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "required-checks-provider-"));
+  const root = createTempDir("required-checks-provider-");
   try {
     fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agents", ".airc.json"), JSON.stringify({

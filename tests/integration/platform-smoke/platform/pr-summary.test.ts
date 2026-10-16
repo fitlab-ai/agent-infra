@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -27,7 +26,7 @@ import {
   taskIntentDigest,
   writePrChangeReportAtomic
 } from '../../../../lib/platform/pr-change-report.ts';
-import { filePath } from '../../../helpers.ts';
+import { createTempDir, filePath } from '../../../helpers.ts';
 import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
 
@@ -48,7 +47,7 @@ function candidate(taskIntentSha256: string): PrecheckCandidate {
 }
 
 function summaryFixture(): { root: string; taskId: string; reportPath: string; baseSha: string; headSha: string } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-summary-'));
+  const root = createTempDir('pr-summary-');
   const taskId = 'TASK-20260101-000042';
   git(root, ['init', '-q', '-b', 'feature']);
   git(root, ['config', 'user.name', 'Codex']);

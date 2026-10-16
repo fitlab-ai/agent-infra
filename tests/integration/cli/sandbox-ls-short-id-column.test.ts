@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { loadFreshEsm } from '../../helpers.ts';
+import { createTempDir, loadFreshEsm } from '../../helpers.ts';
 import { lookupShortIdByBranch } from '../../../lib/task/short-id.ts';
 
 function mkFixture(): { repoRoot: string; activeDir: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-ls-shortid-'));
+  const repoRoot = createTempDir('sb-ls-shortid-');
   const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
   fs.mkdirSync(activeDir, { recursive: true });
   return { repoRoot, activeDir };

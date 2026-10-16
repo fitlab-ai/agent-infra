@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 import {
   acquireGitHubCheckpoint,
   commitGitHubCheckpoint,
@@ -36,7 +36,7 @@ function writeStaleOwner(paths: ReturnType<typeof checkpointPaths>, ownerId: str
 }
 
 test('checkpoint is single-writer, owner-specific, and committed atomically', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-'));
+  const root = createTempDir('process-data-checkpoint-');
   const published = publishEmptyBase(root);
   const manifest = JSON.parse(fs.readFileSync(path.join(published.path, 'manifest.json'), 'utf8')) as { manifestSha256: string };
   const first = acquireGitHubCheckpoint(root, 'acme/demo');
@@ -72,7 +72,7 @@ test('checkpoint is single-writer, owner-specific, and committed atomically', ()
 });
 
 test('checkpoint recovery promotes a verified candidate over an existing expected-old head', onPlatforms('linux'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-recovery-'));
+  const root = createTempDir('process-data-checkpoint-recovery-');
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
   const old = {
@@ -107,7 +107,7 @@ test('checkpoint recovery promotes a verified candidate over an existing expecte
 });
 
 test('checkpoint recovery rejects a candidate whose derived snapshot is corrupt', onPlatforms('linux'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-corrupt-recovery-'));
+  const root = createTempDir('process-data-checkpoint-corrupt-recovery-');
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
   fs.appendFileSync(path.join(published.path, 'normalized.jsonl'), '{"schema":"normalized/v2","recordId":"corrupt"}\n');
@@ -132,7 +132,7 @@ test('checkpoint recovery rejects a candidate whose derived snapshot is corrupt'
 });
 
 test('checkpoint recovery rejects a verified snapshot with a mismatched watermark', onPlatforms('linux'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-watermark-recovery-'));
+  const root = createTempDir('process-data-checkpoint-watermark-recovery-');
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
   const manifest = JSON.parse(fs.readFileSync(path.join(published.path, 'manifest.json'), 'utf8')) as { manifestSha256: string };
@@ -156,7 +156,7 @@ test('checkpoint recovery rejects a verified snapshot with a mismatched watermar
 });
 
 test('checkpoint recovery rejects a candidate owned by a different stale lock', onPlatforms('linux'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-owner-recovery-'));
+  const root = createTempDir('process-data-checkpoint-owner-recovery-');
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
   const manifest = JSON.parse(fs.readFileSync(path.join(published.path, 'manifest.json'), 'utf8')) as { manifestSha256: string };
@@ -188,7 +188,7 @@ test('checkpoint recovery rejects a candidate owned by a different stale lock', 
 });
 
 test('checkpoint recovery rejects an ownerless legacy candidate without a canonical head', onPlatforms('linux'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-ownerless-recovery-'));
+  const root = createTempDir('process-data-checkpoint-ownerless-recovery-');
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
   const manifest = JSON.parse(fs.readFileSync(path.join(published.path, 'manifest.json'), 'utf8')) as { manifestSha256: string };
@@ -212,7 +212,7 @@ test('checkpoint recovery rejects an ownerless legacy candidate without a canoni
 });
 
 test('checkpoint commit rejects an invalid or mismatched watermark', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-watermark-commit-'));
+  const root = createTempDir('process-data-checkpoint-watermark-commit-');
   const published = publishEmptyBase(root);
   const first = acquireGitHubCheckpoint(root, 'acme/demo');
   assert.equal(first.ok, true);
@@ -229,7 +229,7 @@ test('checkpoint commit rejects an invalid or mismatched watermark', () => {
 });
 
 test('busy checkpoint acquisition does not promote a recovery candidate', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-busy-recovery-'));
+  const root = createTempDir('process-data-checkpoint-busy-recovery-');
   const first = acquireGitHubCheckpoint(root, 'acme/demo');
   assert.equal(first.ok, true);
   if (!first.ok) return;

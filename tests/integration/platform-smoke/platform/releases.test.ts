@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 import { inspectPlatformRelease, reconcileReleaseMilestones, upsertPlatformRelease } from '../../../../lib/platform/releases.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function fixture() {
-  const root = fs.mkdtempSync(`${os.tmpdir()}/platform-release-`);
+  const root = createTempDir("platform-release-");
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: root });
   fs.mkdirSync(`${root}/.agents`, { recursive: true });

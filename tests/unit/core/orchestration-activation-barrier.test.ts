@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
@@ -13,6 +12,7 @@ import {
   readRun,
   recoverPreparedOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const taskId = 'TASK-20260101-000001';
 const policy = {
@@ -25,7 +25,7 @@ after(() => {
 });
 
 function fixture(monotonicNow: () => number, now: () => string) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-barrier-'));
+  const root = createTempDir('orchestration-barrier-');
   fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });

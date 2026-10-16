@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -15,6 +14,7 @@ import {
   writeManualValidationTransactionAtomic
 } from '../../../lib/task/manual-validation-transaction.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const input = {
   transactionId: 'mv-transaction-1',
@@ -80,7 +80,7 @@ test('manual-validation retry starts a clean next attempt', () => {
 });
 
 test('manual-validation generation archive is retryable after an interrupted receipt move', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-generation-'));
+  const taskDir = createTempDir('manual-validation-generation-');
   const stateDir = path.join(taskDir, '.manual-validation');
   const historyDir = path.join(stateDir, 'history');
   fs.mkdirSync(historyDir, { recursive: true });
@@ -117,7 +117,7 @@ test('manual-validation generation archive is retryable after an interrupted rec
 });
 
 test('manual-validation generation archive rejects an invalid history receipt', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-generation-invalid-'));
+  const taskDir = createTempDir('manual-validation-generation-invalid-');
   const stateDir = path.join(taskDir, '.manual-validation');
   const historyDir = path.join(stateDir, 'history');
   fs.mkdirSync(historyDir, { recursive: true });

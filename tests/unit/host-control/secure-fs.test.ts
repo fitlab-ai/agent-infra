@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -10,14 +9,10 @@ import {
   readStableFileSync,
   writeAtomicFile
 } from '../../../lib/task/secure-fs.ts';
-import { onPlatforms } from '../../helpers.ts';
-
-function testRoot(prefix: string): string {
-  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-}
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 test('readStableFile binds digest and validation to one descriptor buffer', async () => {
-  const root = testRoot('host-control-secure-fs-');
+  const root = createTempDir('host-control-secure-fs-');
   const candidate = path.join(root, 'code.md');
   fs.writeFileSync(candidate, 'hello\n');
   const result = await readStableFile(candidate, { maxBytes: 1024 });
@@ -28,7 +23,7 @@ test('readStableFile binds digest and validation to one descriptor buffer', asyn
 });
 
 test('bounded readers reject oversized files and mismatched digests', async () => {
-  const root = testRoot('host-control-secure-fs-bounds-');
+  const root = createTempDir('host-control-secure-fs-bounds-');
   const candidate = path.join(root, 'code.md');
   fs.writeFileSync(candidate, 'hello\n');
   try {
@@ -41,7 +36,7 @@ test('bounded readers reject oversized files and mismatched digests', async () =
 });
 
 test('readStableFile rejects a symlink terminal', onPlatforms('linux', 'darwin'), async () => {
-  const root = testRoot('host-control-secure-fs-link-');
+  const root = createTempDir('host-control-secure-fs-link-');
   const target = path.join(root, 'target.md');
   const candidate = path.join(root, 'code.md');
   fs.writeFileSync(target, 'hello\n');
@@ -53,7 +48,7 @@ test('readStableFile rejects a symlink terminal', onPlatforms('linux', 'darwin')
 });
 
 test('writeAtomicFile uses an exclusive temporary file and preserves exact bytes', onPlatforms('linux', 'darwin'), async () => {
-  const root = testRoot('host-control-secure-fs-write-');
+  const root = createTempDir('host-control-secure-fs-write-');
   const target = path.join(root, 'artifact.md');
   await writeAtomicFile(target, Buffer.from('safe\n'));
   assert.equal(fs.readFileSync(target, 'utf8'), 'safe\n');

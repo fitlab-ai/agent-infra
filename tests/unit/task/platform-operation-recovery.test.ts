@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { inspectPlatformCommentOperation } from '../../../lib/platform/issue-comments.ts';
 import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations } from '../../../lib/task/platform-operation-recovery.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -30,7 +30,7 @@ test('Issue metadata recovery confirms requested fields while ignoring unrelated
 });
 
 function fixture() {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-operation-recovery-'));
+  const repoRoot = createTempDir('platform-operation-recovery-');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   const taskFile = path.join(taskDir, 'task.md');

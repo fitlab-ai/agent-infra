@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { filePath, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, filePath, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
@@ -32,7 +31,7 @@ function codeArtifact(taskId: string, artifact: string): string {
 }
 
 test('internal task-verify resolves task identity and invokes the typed engine', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-integration-'));
+  const root = createTempDir('task-verify-integration-');
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     const id = 'TASK-20260101-000001';
@@ -68,7 +67,7 @@ test('internal task-verify resolves task identity and invokes the typed engine',
 });
 
 test('code artifact verification applies the local structural contract', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-code-artifact-'));
+  const root = createTempDir('task-verify-code-artifact-');
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     const id = 'TASK-20260101-000001';
@@ -96,7 +95,7 @@ test('code artifact verification applies the local structural contract', () => {
 });
 
 test('review artifact verification uses the schema pattern contract', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-review-artifact-'));
+  const root = createTempDir('task-verify-review-artifact-');
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     const id = 'TASK-20260101-000001';
@@ -121,7 +120,7 @@ test('review artifact verification uses the schema pattern contract', () => {
 });
 
 test('required PR delivery gates on normalized merged state and platform availability', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'required-pr-delivery-'));
+  const root = createTempDir('required-pr-delivery-');
   const id = 'TASK-20260101-000001';
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
@@ -190,7 +189,7 @@ test('required PR delivery gates on normalized merged state and platform availab
 });
 
 test('review-pr task-verify reports re-sync after publication write-back as a soft audit (PL-8)', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-pr-verify-'));
+  const root = createTempDir('review-pr-verify-');
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });

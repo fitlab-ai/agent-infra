@@ -9,14 +9,14 @@ import {
   validateServerConfig,
   DEFAULT_SERVER_CONFIG
 } from '../../../../lib/server/config.ts';
-import { initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
+import { createTempDir, initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
 
 function platformTest(name: string, fn: () => void): void {
   test(name, onPlatforms('linux', 'darwin', 'win32'), fn);
 }
 
 function makeRepo(serverJson?: unknown, localJson?: unknown): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-config-'));
+  const dir = createTempDir('server-config-');
   initIsolatedGitRepo(dir);
   fs.mkdirSync(path.join(dir, '.agents'), { recursive: true });
   if (serverJson !== undefined) {

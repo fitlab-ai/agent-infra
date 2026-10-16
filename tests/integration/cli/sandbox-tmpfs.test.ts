@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
@@ -407,7 +407,7 @@ test("recovery classification maps faults to the smallest repair kind", () => {
 });
 
 test("recovery accepts bind sources that resolve to the same filesystem object", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-source-identity-"));
+  const tmpDir = createTempDir("agent-infra-recovery-source-identity-");
   const config = recoveryFixtureConfig(tmpDir);
   const expectedSource = path.join(
     config.home,
@@ -467,7 +467,7 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
 });
 
 test("task-bound recovery probes the real task.md view instead of mount declarations", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-task-view-"));
+  const tmpDir = createTempDir("agent-infra-recovery-task-view-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
   const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
@@ -540,7 +540,7 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
 });
 
 test("completed task-bound recovery keeps the task control root stable after the task directory moved", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-task-source-"));
+  const tmpDir = createTempDir("agent-infra-completed-task-source-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223554";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -576,7 +576,7 @@ test("completed task-bound recovery keeps the task control root stable after the
 });
 
 test("completed readiness failures never invoke replacement and provide manual disposal commands", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-reentry-failure-"));
+  const tmpDir = createTempDir("agent-infra-completed-reentry-failure-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223555";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -649,7 +649,7 @@ test("completed readiness failures never invoke replacement and provide manual d
 });
 
 test("healthy completed re-entry rejects an explicit recreate request", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-recreate-healthy-"));
+  const tmpDir = createTempDir("agent-infra-completed-recreate-healthy-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223556";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -693,7 +693,7 @@ test("healthy completed re-entry rejects an explicit recreate request", async ()
 });
 
 test("completed container start restores the historical source only while starting", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-stopped-source-"));
+  const tmpDir = createTempDir("agent-infra-completed-stopped-source-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223557";
   taskBoundRecoveryFixture(config, taskId);
@@ -717,7 +717,7 @@ test("completed container start restores the historical source only while starti
 });
 
 test("completed re-entry refuses missing control evidence before starting", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-missing-evidence-"));
+  const tmpDir = createTempDir("agent-infra-completed-missing-evidence-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223557";
   taskBoundRecoveryFixture(config, taskId);
@@ -737,7 +737,7 @@ test("completed re-entry refuses missing control evidence before starting", asyn
 });
 
 test("fresh task-bound readiness succeeds without restart when task.md is readable", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-healthy-"));
+  const tmpDir = createTempDir("agent-infra-fresh-task-bound-healthy-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -765,7 +765,7 @@ test("fresh task-bound readiness succeeds without restart when task.md is readab
 });
 
 test("fresh task-bound readiness restarts once when task.md becomes readable", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-retry-"));
+  const tmpDir = createTempDir("agent-infra-fresh-task-bound-retry-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -801,7 +801,7 @@ test("fresh task-bound readiness restarts once when task.md becomes readable", a
 });
 
 test("fresh task-bound readiness remains fail-closed after one unreadable task.md retry", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-failed-"));
+  const tmpDir = createTempDir("agent-infra-fresh-task-bound-failed-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -835,7 +835,7 @@ test("fresh task-bound readiness remains fail-closed after one unreadable task.m
 });
 
 test("fresh task-bound readiness does not restart a legacy parent topology", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-legacy-"));
+  const tmpDir = createTempDir("agent-infra-fresh-task-bound-legacy-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -863,7 +863,7 @@ test("fresh task-bound readiness does not restart a legacy parent topology", asy
 });
 
 test("running task-bound readiness fails closed without restart when task.md is unreadable", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-running-task-bound-unreadable-"));
+  const tmpDir = createTempDir("agent-infra-running-task-bound-unreadable-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
   const fixture = taskBoundRecoveryFixture(config, taskId);
@@ -895,7 +895,7 @@ test("running task-bound readiness fails closed without restart when task.md is 
 });
 
 test("recovery recognizes tmpfs declared only through HostConfig on OrbStack", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-orbstack-tmpfs-"));
+  const tmpDir = createTempDir("agent-infra-recovery-orbstack-tmpfs-");
   const config = recoveryFixtureConfig(tmpDir);
   const mounts = recoveryFixtureMounts(config).filter(
     (mount) => mount.Destination !== "/home/devuser/.codex"
@@ -949,7 +949,7 @@ test("recovery recognizes tmpfs declared only through HostConfig on OrbStack", (
 });
 
 test("tmpfs permission probe compares numeric owner, primary group, and mode", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-primary-group-"));
+  const tmpDir = createTempDir("agent-infra-recovery-primary-group-");
   const config = recoveryFixtureConfig(tmpDir);
   let permissionProbe: string[] | undefined;
 
@@ -1003,7 +1003,7 @@ test("tmpfs permission repair uses devuser's configured primary group", () => {
 });
 
 test("running permission repair re-assesses seed targets before hydration", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-permissions-"));
+  const tmpDir = createTempDir("agent-infra-recovery-permissions-");
   const config = recoveryFixtureConfig(tmpDir);
   let permissionsRepaired = false;
   let brokerChecks = 0;
@@ -1058,7 +1058,7 @@ test("running permission repair re-assesses seed targets before hydration", asyn
 });
 
 test("recovery rejects mount and identity hard failures before writes", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-topology-"));
+  const tmpDir = createTempDir("agent-infra-recovery-topology-");
   const config = recoveryFixtureConfig(tmpDir);
   const worktreeSource = path.join(config.worktreeBase, "feature..demo");
   const wrongWorktreeSource = path.join(tmpDir, "wrong-worktree");
@@ -1194,7 +1194,7 @@ test("recovery rejects mount and identity hard failures before writes", async ()
 });
 
 test("hard recovery failure requires explicit container replacement authorization", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-recreate-"));
+  const tmpDir = createTempDir("agent-infra-recovery-recreate-");
   let recreated = false;
   let writes = 0;
   const replacementCommands: string[][] = [];
@@ -1288,7 +1288,7 @@ test("WSL2 worktree probes run Git inside WSL with an engine path", () => {
 });
 
 test("task-bound recovery keeps the branch-only code and recommends the full task id", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-task-bound-hint-"));
+  const tmpDir = createTempDir("agent-infra-recovery-task-bound-hint-");
   const config = recoveryFixtureConfig(tmpDir);
   let writes = 0;
   const taskId = "TASK-20260814-223553";
@@ -1328,7 +1328,7 @@ test("task-bound recovery keeps the branch-only code and recommends the full tas
 });
 
 test("unauthorized recovery leads with the recreate command and demotes the finding detail", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-lead-command-"));
+  const tmpDir = createTempDir("agent-infra-recovery-lead-command-");
   const config = recoveryFixtureConfig(tmpDir);
   let writes = 0;
 
@@ -1365,7 +1365,7 @@ test("unauthorized recovery leads with the recreate command and demotes the find
 });
 
 test("container replacement snapshots the worktree before the callback and rejects drift", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-worktree-drift-"));
+  const tmpDir = createTempDir("agent-infra-recovery-worktree-drift-");
   const config = recoveryFixtureConfig(tmpDir);
   const worktree = path.join(config.worktreeBase, "feature..demo");
   const replacementCommands: string[][] = [];
@@ -1412,7 +1412,7 @@ test("container replacement snapshots the worktree before the callback and rejec
 });
 
 test("explicit recreation replaces a healthy running container", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-explicit-recreate-"));
+  const tmpDir = createTempDir("agent-infra-recovery-explicit-recreate-");
   const config = recoveryFixtureConfig(tmpDir);
   const replacementCommands: string[][] = [];
   let recreated = false;
@@ -1450,7 +1450,7 @@ test("explicit recreation replaces a healthy running container", async () => {
 });
 
 test("recreation rejected by a live replacement lease preserves the running container", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-replacement-busy-"));
+  const tmpDir = createTempDir("agent-infra-recovery-replacement-busy-");
   const config = recoveryFixtureConfig(tmpDir);
   const replacementCommands: string[][] = [];
   const replacementBusy = new Error("SANDBOX_CONTROL_REPLACEMENT_BUSY: fixture lease is active");
@@ -1481,7 +1481,7 @@ test("recreation rejected by a live replacement lease preserves the running cont
 });
 
 test("container replacement preserves the original failure when the worktree is unchanged", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-original-failure-"));
+  const tmpDir = createTempDir("agent-infra-recovery-original-failure-");
   const config = recoveryFixtureConfig(tmpDir);
   const worktree = path.join(config.worktreeBase, "feature..demo");
   const before = git(worktree, "status", "--short", "--branch");
@@ -1522,7 +1522,7 @@ test("container replacement preserves the original failure when the worktree is 
 });
 
 test("container replacement fails before Docker writes when the worktree snapshot is invalid", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-worktree-invalid-"));
+  const tmpDir = createTempDir("agent-infra-recovery-worktree-invalid-");
   const config = recoveryFixtureConfig(tmpDir);
   const worktree = path.join(config.worktreeBase, "feature..demo");
   const replacementCommands: string[][] = [];
@@ -1553,7 +1553,7 @@ test("container replacement fails before Docker writes when the worktree snapsho
 });
 
 test("container replacement reports how to restore a detached worktree branch", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-detached-"));
+  const tmpDir = createTempDir("agent-infra-recovery-detached-");
   const config = recoveryFixtureConfig(tmpDir);
   const worktree = path.join(config.worktreeBase, "feature..demo");
   const replacementCommands: string[][] = [];
@@ -1587,7 +1587,7 @@ test("container replacement reports how to restore a detached worktree branch", 
 });
 
 test("container replacement names both candidate dirs when the worktree is ambiguous", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-ambiguous-"));
+  const tmpDir = createTempDir("agent-infra-recovery-ambiguous-");
   const config = recoveryFixtureConfig(tmpDir);
   const worktree = path.join(config.worktreeBase, "feature..demo");
   const legacyWorktree = path.join(config.worktreeBase, "feature-demo");
@@ -1622,7 +1622,7 @@ test("container replacement names both candidate dirs when the worktree is ambig
 });
 
 test("control broker readiness failure enters the explicit container replacement boundary", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-broker-recreate-"));
+  const tmpDir = createTempDir("agent-infra-broker-recreate-");
   let recreated = false;
   const replacementCommands: string[][] = [];
   const config = recoveryFixtureConfig(tmpDir);
@@ -1679,7 +1679,7 @@ test("control broker readiness failure enters the explicit container replacement
 });
 
 test("fresh readiness restarts once when OrbStack workspace mounts are still settling", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-readiness-orbstack-"));
+  const tmpDir = createTempDir("agent-infra-fresh-readiness-orbstack-");
   const config = recoveryFixtureConfig(tmpDir);
   const container = "demo-dev-feature..demo";
   let restarted = false;
@@ -1718,7 +1718,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
 });
 
 test("fresh readiness remains fail-closed after one workspace mount restart", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-readiness-failed-"));
+  const tmpDir = createTempDir("agent-infra-fresh-readiness-failed-");
   const config = recoveryFixtureConfig(tmpDir);
   let restarts = 0;
   const settlingDestination = "/workspace/.agents/workspace/completed";
@@ -1802,7 +1802,7 @@ function hasSequence(call: string[], expected: string[]): boolean {
 }
 
 test("sandbox create copies codex seeds into tmpfs without binding their runtime targets", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-run-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tmpfs-run-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -1953,7 +1953,7 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
 });
 
 test("sandbox create gives each branch a distinct Codex app-server package source", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-package-branches-"));
+  const tmpDir = createTempDir("agent-infra-codex-package-branches-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -1989,7 +1989,7 @@ test("sandbox create gives each branch a distinct Codex app-server package sourc
 });
 
 test("sandbox create skips missing tmpfs seed entries", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-missing-seed-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tmpfs-missing-seed-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {

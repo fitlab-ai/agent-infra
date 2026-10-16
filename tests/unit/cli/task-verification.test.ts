@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -20,6 +19,7 @@ import {
   prepareDelegation,
   sealDelegation
 } from '../../../lib/task/delegation-receipts.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
@@ -47,7 +47,7 @@ const codexLifecycleProvenance = {
 
 
 function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verification-unit-'));
+  const root = createTempDir('task-verification-unit-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });

@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { releaseNoteContext } from '../../../../lib/platform/release-notes.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 test('release-note context maps rewritten PR commits and keeps unrelated commits direct', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-context-'));
+  const root = createTempDir('release-notes-context-');
   const git = (args: string[], env: NodeJS.ProcessEnv = {}) => execFileSync('git', ['-c', 'tag.gpgSign=false', ...args], {
     cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env }
   }).trim();

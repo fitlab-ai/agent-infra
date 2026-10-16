@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
@@ -49,7 +48,7 @@ test('platform-pr sync-in-labels requires a PR token before platform access', ()
 });
 
 test('platform-pr sync-in-labels routes all remote reads and writes through an external provider', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-provider-'));
+  const root = createTempDir('platform-pr-provider-');
   const calls = path.join(root, 'provider-calls.txt');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
@@ -85,7 +84,7 @@ test('platform-pr sync-in-labels routes all remote reads and writes through an e
 
 for (const identityKind of ['id', 'key']) {
   test(`platform-pr sync-in-labels preserves external ${identityKind} closing Issue identity`, () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), `platform-pr-${identityKind}-`));
+    const root = createTempDir(`platform-pr-${identityKind}-`);
     const calls = path.join(root, 'provider-calls.txt');
     try {
       execFileSync('git', ['init', '-q'], { cwd: root });
@@ -133,7 +132,7 @@ for (const identityKind of ['id', 'key']) {
 }
 
 test('platform-pr sync-in-labels reports unsupported provider capabilities without GitHub fallback', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-unsupported-'));
+  const root = createTempDir('platform-pr-unsupported-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
@@ -157,7 +156,7 @@ test('platform-pr sync-in-labels reports unsupported provider capabilities witho
 });
 
 test('platform-pr summary-sync validates required report input before invoking the operation', () => {
-  const bodyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-summary-'));
+  const bodyRoot = createTempDir('platform-pr-summary-');
   const bodyFile = path.join(bodyRoot, 'body.md');
   fs.writeFileSync(bodyFile, '');
   try {
@@ -196,7 +195,7 @@ test('platform-pr summary-sync strict mode keeps report failures non-zero withou
 });
 
 function externalFixture(taskContent: string) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-external-'));
+  const root = createTempDir('platform-pr-external-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
   const taskId = 'TASK-20260101-000001';
@@ -245,7 +244,7 @@ function externalFixture(taskContent: string) {
 }
 
 function createFixture(fact: ReturnType<typeof buildUnboundFact> | ReturnType<typeof buildBoundFact> = buildUnboundFact()) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-create-'));
+  const root = createTempDir('platform-pr-create-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
@@ -636,7 +635,7 @@ test('platform-pr resolve-external paginates, binds one merged fork PR, audits e
 });
 
 test('platform-pr create refuses to locate or create a PR before remote branch delivery', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-cli-'));
+  const root = createTempDir('platform-pr-cli-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
@@ -684,7 +683,7 @@ test('platform-pr create refuses to locate or create a PR before remote branch d
 });
 
 test('platform-pr create rechecks a bound PR before replaying it', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-bound-replay-'));
+  const root = createTempDir('platform-pr-bound-replay-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
@@ -763,7 +762,7 @@ test('platform-pr create rejects a bound PR whose head differs from the verified
 });
 
 test('platform-pr create does not require commit finalization evidence before remote validation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-gate-'));
+  const root = createTempDir('platform-pr-gate-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });

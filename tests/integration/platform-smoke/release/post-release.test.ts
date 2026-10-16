@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -15,6 +14,7 @@ import {
 } from '../../../../lib/internal/release-workflow.ts';
 import type { CommandRunner } from '../../../../lib/internal/release-workflow.ts';
 import { sha256Transcript } from '../../../../lib/internal/demo-transcript.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function result(status: number, stdout = '', stderr = '') {
   return { status, stdout, stderr, pid: 1, signal: null, output: [], error: undefined };
@@ -27,7 +27,7 @@ const recordingInputs = [
 ];
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-'));
+  const root = createTempDir('agent-infra-demo-');
   for (const file of recordingInputs) {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     fs.writeFileSync(path.join(root, file), file);
@@ -62,7 +62,7 @@ function commit(root: string, message: string) {
 }
 
 function releaseFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-release-'));
+  const root = createTempDir('agent-infra-release-');
   spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
   spawnSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
   spawnSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
@@ -17,6 +16,7 @@ import {
   removeSandboxControlRoot
 } from "../../../lib/sandbox/control/lifecycle.ts";
 import {
+  createTempDir,
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
@@ -64,7 +64,7 @@ function createLinkedWorktree(): {
   worktree: string;
   cleanup(): void;
 } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-worktree-safety-"));
+  const root = createTempDir("agent-infra-worktree-safety-");
   const repo = path.join(root, "repo");
   const base = path.join(root, "worktrees");
   const worktree = path.join(base, "feature..safe-delete");
@@ -428,7 +428,7 @@ async function cleanRmOneFixture(
 }
 
 test("sandbox rm retries control and workspace cleanup after the container is already gone", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-partial-retry-"));
+  const tmpDir = createTempDir("agent-infra-rm-partial-retry-");
   const branch = "feature/partial-retry";
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -506,7 +506,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
 });
 
 test("sandbox rm removes an empty control container parent after control cleanup", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-empty-control-parent-"));
+  const tmpDir = createTempDir("agent-infra-rm-empty-control-parent-");
   const branch = "feature/empty-control-parent";
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -662,7 +662,7 @@ test("recovered worktree safety accepts clearly partial admin metadata", onPlatf
 
 test("recovered worktree safety resolves the common Git directory from a linked repo root", onPlatforms("linux", "darwin", "win32"), async () => {
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-worktree-linked-root-"));
+  const root = createTempDir("agent-infra-worktree-linked-root-");
   const mainRepo = path.join(root, "main");
   const repoRoot = path.join(root, "management");
   const worktreeBase = path.join(root, "sandboxes");
@@ -920,7 +920,7 @@ test("managed worktree removal only uses the registered-path fallback when expli
 test("sandbox rm clean path uses injectable default-yes confirmations and removes selected state", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-confirm-"));
+  const tmpDir = createTempDir("agent-infra-rm-clean-confirm-");
   const branch = "feature/clean-confirm";
   const prompts: string[] = [];
   try {
@@ -945,7 +945,7 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
 test("sandbox rm preserves another registered worktree", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-preserve-worktree-"));
+  const tmpDir = createTempDir("agent-infra-rm-preserve-worktree-");
   const targetBranch = "feature/remove-selected";
   const retainedBranch = "feature/retain-registered";
   try {
@@ -985,7 +985,7 @@ test("sandbox rm preserves another registered worktree", onPlatforms("linux", "d
 
 test("sandbox rm releases a stale short id after task-bound cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-stale-short-id-"));
+  const tmpDir = createTempDir("agent-infra-rm-stale-short-id-");
   const branch = "feature/stale-short-id";
   const taskId = "TASK-20260824-000015";
   try {
@@ -1021,7 +1021,7 @@ test("sandbox rm releases a stale short id after task-bound cleanup", onPlatform
 
 test("sandbox rm preserves a stale short id when container removal cannot be confirmed", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unconfirmed-short-id-"));
+  const tmpDir = createTempDir("agent-infra-rm-unconfirmed-short-id-");
   const branch = "feature/unconfirmed-short-id";
   const taskId = "TASK-20260824-000017";
   const container = `demo-dev-${branch.replaceAll("/", "..")}`;
@@ -1059,7 +1059,7 @@ test("sandbox rm preserves a stale short id when container removal cannot be con
 
 test("sandbox rm deletes an active task sandbox without auxiliary preflight", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
+  const tmpDir = createTempDir("agent-infra-rm-auxiliary-preflight-active-");
   const branch = "feature/auxiliary-preflight-active";
   const taskId = "TASK-20260824-000014";
   const previousRemovalUpdates = process.env.DOCKER_REMOVAL_UPDATES_INSPECT;
@@ -1112,7 +1112,7 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
 
 test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-purge-"));
+  const tmpDir = createTempDir("agent-infra-rm-auxiliary-preflight-purge-");
   const branch = "feature/auxiliary-preflight-purge";
   const taskId = "TASK-20260824-000013";
   try {
@@ -1134,7 +1134,7 @@ test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("
   }
 });
 test("sandbox prune preserves every orphan group when an orphan worktree is dirty", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-prune-dirty-"));
+  const tmpDir = createTempDir("agent-infra-prune-dirty-");
   const cleanBranch = "feature/clean-prune";
   const dirtyBranch = "feature/dirty-prune";
   try {

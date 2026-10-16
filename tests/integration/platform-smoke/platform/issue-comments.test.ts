@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -19,6 +18,7 @@ import {
 } from '../../../../lib/platform/issue-comments.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { sanitizeMarkdownDocument } from '../../../../lib/platform/comment-safety.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 test('task comments preserve frontmatter and body in reversible details format', () => {
   const task = '---\nid: TASK-20260101-000001\ntype: feature\n---\n\n# Task\n\nBody | `code`\n';
@@ -232,7 +232,7 @@ test('chunk marker validation rejects incomplete and contradictory sets', () => 
 });
 
 function syncFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-comment-'));
+  const root = createTempDir('platform-comment-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001'), { recursive: true });

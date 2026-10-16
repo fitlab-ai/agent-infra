@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import * as semver from "semver";
 
 import {
+  createTempDir,
   buildCommandSyncFiles,
   escapeRegExp,
   exists,
@@ -554,7 +554,7 @@ test("version format validation hooks are wired into templates and local config"
 });
 
 test("version format validation hooks enforce exact v-prefixed semver", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-hook-"));
+  const tempRoot = createTempDir("agent-infra-version-hook-");
   const hooksDir = path.join(tempRoot, ".git-hooks");
   const aiHooksDir = path.join(tempRoot, ".agents", "hooks");
   const configDir = path.join(tempRoot, ".agents");
@@ -693,7 +693,7 @@ test("rendered rules README references only distributed files", () => {
   const replacements = { project: collaborator.project, org: collaborator.org };
 
   for (const language of ["en", "zh-CN"]) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-render-"));
+    const tmp = createTempDir("rules-render-");
     try {
       copySkillDir("templates/.agents/rules", tmp, replacements, language, "github");
       const rendered = new Set(

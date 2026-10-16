@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH } from '../../helpers.ts';
 import { createObjectStore, publishSnapshot } from '../../../lib/process-data/store.ts';
 
 function fixture(project: unknown = 'demo') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-cli-'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-home-'));
+  const root = createTempDir('process-data-cli-');
+  const home = createTempDir('process-data-home-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project }));

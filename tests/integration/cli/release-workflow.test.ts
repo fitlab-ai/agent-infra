@@ -6,15 +6,15 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-import { INTERNAL_CLI_PATH, gitSafeEnv, onPlatforms } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, gitSafeEnv, onPlatforms } from '../../helpers.ts';
 import { collectDemoTranscript, DEMO_PROJECT_PATH, sha256Transcript } from '../../../lib/internal/demo-transcript.ts';
 
 type Fixture = { root: string; origin: string; preload: string; tools: string; environment: NodeJS.ProcessEnv };
 
 function fixture(version = '0.8.6'): Fixture {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-workflow-cli-'));
-  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'release-workflow-origin-'));
-  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'release-workflow-tools-'));
+  const root = createTempDir('release-workflow-cli-');
+  const origin = createTempDir('release-workflow-origin-');
+  const tools = createTempDir('release-workflow-tools-');
   const preload = path.join(root, 'fake-fetch.mjs');
   execFileSync('git', ['init', '-q', '--bare', origin]);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });

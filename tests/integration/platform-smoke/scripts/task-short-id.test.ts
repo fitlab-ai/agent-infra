@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { createTempDir } from "../../../helpers.ts";
 
 const TEMPLATES_SKILLS = path.resolve(process.cwd(), "templates/.agents/skills");
 
@@ -67,7 +67,7 @@ const SCRIPT = path.resolve(
 );
 
 function mkTmp(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "tsid-"));
+  return createTempDir("tsid-");
 }
 
 function mkTask(activeDir: string, taskId: string): string {

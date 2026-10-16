@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { onPlatforms } from '../../helpers/platform.ts';
@@ -10,9 +9,10 @@ import {
   resolveSandboxLockNamespace,
   stableSandboxLockPath
 } from '../../../lib/sandbox/control/native-file-lock.ts';
+import { createTempDir } from '../../helpers.ts';
 
 test('native lock namespace is stable and outside the carrier tree', (t) => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-lock-home-'));
+  const home = createTempDir('sandbox-lock-home-');
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const domain = 'a'.repeat(64);
   const first = resolveSandboxLockNamespace('native:' + 'b'.repeat(64), { home, lockDomain: domain });
@@ -26,7 +26,7 @@ test('native lock namespace is stable and outside the carrier tree', (t) => {
 test('native lock serializes same-carrier contenders and retains the lock object', (t) => {
   const capability = probeNativeLockCapability();
   assert.equal(capability.supported, true, capability.reason);
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-lock-contend-'));
+  const home = createTempDir('sandbox-lock-contend-');
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const carrier = `native:${'c'.repeat(64)}`;
   const first = acquireSandboxResourceLock(carrier, { home, lockDomain: 'd'.repeat(64) });
@@ -49,7 +49,7 @@ test('native lock capability reports the platform locking primitive', () => {
 });
 
 test('native lock preserves a replacement file during acquisition', onPlatforms('darwin', 'linux'), (t) => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-lock-mode-'));
+  const home = createTempDir('sandbox-lock-mode-');
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const lockPath = stableSandboxLockPath('descriptor-mode', undefined, { home });
   const movedPath = `${lockPath}.moved`;

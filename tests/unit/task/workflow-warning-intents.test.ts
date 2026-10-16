@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { applyWorkflowWarningIntent } from '../../../lib/task/workflow-warning-intents.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function fixture() {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'warning-intents-'));
+  const repoRoot = createTempDir('warning-intents-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });

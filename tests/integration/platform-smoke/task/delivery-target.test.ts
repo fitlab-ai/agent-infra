@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -14,6 +13,7 @@ import {
 } from '../../../../lib/task/delivery-target.ts';
 import { classifyDeliveryState } from '../../../../lib/task/delivery.ts';
 import { extractReviewTargetHead, extractReviewedHead } from '../../../../lib/task/review-fingerprint.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 test('delivery target binding prefers explicit values only before a task is bound', () => {
   const result = bindDeliveryTarget({
@@ -34,7 +34,7 @@ test('delivery target binding rejects changes after a task is bound', () => {
 });
 
 test('delivery defaults require an explicit project configuration', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-target-config-'));
+  const root = createTempDir('delivery-target-config-');
   try {
     fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{}\n');
@@ -55,7 +55,7 @@ test('delivery target validators reject ambiguous refs and accept nested branch 
 });
 
 test('merge-base resolution returns a stable diff base', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-target-'));
+  const root = createTempDir('delivery-target-');
   try {
     const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
     git(['init', '-q', '-b', 'main']);

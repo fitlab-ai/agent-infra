@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
@@ -14,7 +13,7 @@ const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径*
 const ANALYSIS_DECISION = '- **本任务路径**：标准路径。\n- **判定依据**：夹具需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现高风险边界。';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-artifact-cli-'));
+  const root = createTempDir('task-artifact-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
@@ -15,6 +14,7 @@ import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument }
 import { renderTaskComment } from "../../../lib/platform/issue-comments.ts";
 
 import {
+  createTempDir,
   filePath,
   gitSafeEnv,
   initIsolatedGitRepo,
@@ -649,7 +649,7 @@ function commitInWorktree(worktreePath: string, message: string): string {
 }
 
 async function withTempRoot<T>(prefix: string, fn: (tempRoot: string) => T | Promise<T>): Promise<T> {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const tempRoot = createTempDir(prefix);
   try {
     return await fn(tempRoot);
   } finally {

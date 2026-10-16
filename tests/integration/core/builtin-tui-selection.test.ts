@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { loadFreshEsm } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 type SyncReport = ReturnType<SyncTemplatesModule["syncTemplates"]> & {
@@ -122,7 +121,7 @@ function canonicalAgentClients(enabled: readonly string[]) {
 }
 
 test("syncTemplates: canonical agentClients keep full built-in client behavior", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-default-"));
+  const tmpDir = createTempDir("ai-tui-default-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -147,7 +146,7 @@ test("syncTemplates: canonical agentClients keep full built-in client behavior",
 });
 
 test("syncTemplates: canonical client subset skips owned managed/merged entries", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-subset-"));
+  const tmpDir = createTempDir("ai-tui-subset-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -170,7 +169,7 @@ test("syncTemplates: canonical client subset skips owned managed/merged entries"
 });
 
 test("syncTemplates: Claude rules use protected baselines while root CLAUDE.md stays user-owned", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-claude-owned-assets-"));
+  const tmpDir = createTempDir("ai-claude-owned-assets-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -203,7 +202,7 @@ test("syncTemplates: Claude rules use protected baselines while root CLAUDE.md s
 });
 
 test("syncTemplates: Antigravity uses shared skills without client-owned project assets", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-switch-"));
+  const tmpDir = createTempDir("ai-tui-switch-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -230,7 +229,7 @@ test("syncTemplates: Antigravity uses shared skills without client-owned project
 });
 
 test("syncTemplates leaves user-owned command files outside managed paths untouched", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-custom-indep-"));
+  const tmpDir = createTempDir("ai-tui-custom-indep-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -255,7 +254,7 @@ test("syncTemplates leaves user-owned command files outside managed paths untouc
 });
 
 test("syncTemplates: empty canonical state disables every built-in client", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-empty-"));
+  const tmpDir = createTempDir("ai-tui-empty-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -282,7 +281,7 @@ test("syncTemplates: empty canonical state disables every built-in client", asyn
 });
 
 test("syncTemplates: ejected entries owned by disabled TUIs are preserved and not removed", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-ejected-"));
+  const tmpDir = createTempDir("ai-tui-ejected-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -317,7 +316,7 @@ test("syncTemplates: ejected entries owned by disabled TUIs are preserved and no
 });
 
 test("syncTemplates: canonical agentClients controls assets and rejects incomplete input", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-agent-clients-canonical-"));
+  const tmpDir = createTempDir("ai-agent-clients-canonical-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -344,7 +343,7 @@ test("syncTemplates: canonical agentClients controls assets and rejects incomple
 });
 
 test("syncTemplates: disabling Antigravity leaves shared skills untouched", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-safe-disable-"));
+  const tmpDir = createTempDir("ai-tui-safe-disable-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
@@ -374,7 +373,7 @@ test("syncTemplates: every built-in client subset converges idempotently", async
   );
 
   for (let mask = 0; mask < 32; mask += 1) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ai-tui-matrix-${mask}-`));
+    const tmpDir = createTempDir(`ai-tui-matrix-${mask}-`);
     try {
       const projectRoot = path.join(tmpDir, "project");
       const templateRoot = makeTemplateRoot(tmpDir);

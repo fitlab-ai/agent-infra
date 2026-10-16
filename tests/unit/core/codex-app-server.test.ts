@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
@@ -14,13 +13,14 @@ import {
   validateCodexLifecycleHookConfig
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { appendCodexLifecycleBinding } from '../../../lib/agent-clients/adapters/codex-lifecycle/binding.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
 });
 function temporaryRoot(prefix: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const root = createTempDir(prefix);
   fixtureRoots.add(root);
   return root;
 }

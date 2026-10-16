@@ -2,16 +2,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { acquireSandboxResourceLock } from '../../../lib/sandbox/control/native-file-lock.ts';
-import { filePath } from '../../helpers.ts';
+import { createTempDir, filePath } from '../../helpers.ts';
 
 for (const termination of ['release', 'kill'] as const) {
   test(`native lock excludes other processes and recovers after ${termination}`, { timeout: 15_000 }, async (t) => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-lock-process-'));
+    const home = createTempDir('sandbox-lock-process-');
     const moduleUrl = pathToFileURL(filePath('dist/lib/sandbox/control/native-file-lock.js')).href;
     const child = spawn(process.execPath, ['--input-type=module', '-e', `
       const { acquireSandboxResourceLock } = await import(process.argv[1]);

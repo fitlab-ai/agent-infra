@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { check } from '../../../lib/platform/verification-sync.ts';
+import { createTempDir } from '../../helpers.ts';
 
 test('concurrent platform checks retain their own repository utilities across awaits', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-context-'));
+  const root = createTempDir('verification-context-');
   try {
     const results = await Promise.all(['first', 'second'].map((name) => {
       const repoRoot = path.join(root, name);

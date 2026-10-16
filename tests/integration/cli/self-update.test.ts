@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { CLI_PATH, filePath, onPlatforms, read, writeNodeCommandShim } from "../../helpers.ts";
+import { createTempDir, CLI_PATH, filePath, onPlatforms, read, writeNodeCommandShim } from "../../helpers.ts";
 
 function writeFile(filePathname: string, content: string): void {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
@@ -49,7 +48,7 @@ function readCalls(filePathname: string): string[][] {
 }
 
 test("ai update runs npm self-update from a persistent npm global install", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-cli-"));
+  const root = createTempDir("agent-infra-self-update-cli-");
   try {
     const prefix = path.join(root, "npm-prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -79,7 +78,7 @@ test("ai update runs npm self-update from a persistent npm global install", () =
 });
 
 test("ai update propagates a non-zero npm manager exit code", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-cli-failure-"));
+  const root = createTempDir("agent-infra-self-update-cli-failure-");
   try {
     const prefix = path.join(root, "npm-prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -103,7 +102,7 @@ test("ai update propagates a non-zero npm manager exit code", () => {
 });
 
 test("ai update fails closed when the running CLI has no supported persistent source", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-unknown-"));
+  const root = createTempDir("agent-infra-self-update-unknown-");
   const emptyPath = path.join(root, "empty-bin");
   fs.mkdirSync(emptyPath);
   try {
@@ -122,7 +121,7 @@ test("ai update fails closed when the running CLI has no supported persistent so
 });
 
 test("ai update fails closed instead of using a cwd manager when PATH has no npm", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-cwd-manager-"));
+  const root = createTempDir("agent-infra-self-update-cwd-manager-");
   try {
     const prefix = path.join(root, "npm-prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -151,7 +150,7 @@ test("ai update fails closed instead of using a cwd manager when PATH has no npm
 });
 
 test("Windows npm.cmd works when Node and global package directories are separate", onPlatforms("win32"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-win-"));
+  const root = createTempDir("agent-infra-self-update-win-");
   try {
     const prefix = path.join(root, "AppData", "npm");
     const globalRoot = path.join(prefix, "node_modules");

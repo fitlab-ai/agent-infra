@@ -1,12 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { runAi } from '../../../lib/server/runner.ts';
-import { envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
+import { createTempDir, envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
 
 test('runAi spawns ai with argv and captures stdout/stderr', async () => {
   const result = await runAi(['task', 'status', '#7'], {
@@ -26,7 +25,7 @@ test('runAi spawns ai with argv and captures stdout/stderr', async () => {
 });
 
 test('runAi waits for asynchronous chunk callbacks before resolving', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-runner-'));
+  const tmpDir = createTempDir('server-runner-');
   const binDir = path.join(tmpDir, 'bin');
   const aiJsPath = path.join(binDir, 'ai.js');
   fs.mkdirSync(binDir, { recursive: true });
@@ -53,7 +52,7 @@ test('runAi waits for asynchronous chunk callbacks before resolving', async () =
 });
 
 test('runAi runs commands from the configured working directory', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-runner-cwd-'));
+  const tmpDir = createTempDir('server-runner-cwd-');
   const binDir = path.join(tmpDir, 'bin');
   const aiJsPath = path.join(binDir, 'ai.js');
   fs.mkdirSync(binDir, { recursive: true });

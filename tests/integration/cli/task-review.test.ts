@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -17,7 +16,7 @@ const scenarios = [
 ] as const;
 
 function fixture(scenario: (typeof scenarios)[number], line: string) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-review-'));
+  const root = createTempDir('task-review-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });

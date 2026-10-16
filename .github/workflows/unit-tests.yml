@@ -81,6 +81,12 @@ jobs:
         env:
           AGENT_INFRA_TEST_CONCURRENCY: '1'
 
+      - name: Run macOS path-sensitive CLI regressions
+        if: matrix.os == 'macos-latest'
+        run: node scripts/run-tests.js --skip-build tests/integration/cli/process-data.test.ts tests/integration/cli/task-validate.test.ts tests/integration/cli/task-control-dual-mode.test.ts tests/integration/cli/sandbox-control.test.ts
+        env:
+          AGENT_INFRA_TEST_CONCURRENCY: '1'
+
       - name: Verify canonical demo LFS object
         if: matrix.os == 'ubuntu-latest'
         shell: bash

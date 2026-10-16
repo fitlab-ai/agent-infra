@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
 
 import { serializeAgentClients } from '../../../lib/agent-clients/config.ts';
@@ -9,7 +7,7 @@ import { planAgentClientReconciliation } from '../../../lib/agent-clients/reconc
 import { AGENT_CLIENT_IDS } from '../../../lib/agent-clients/types.ts';
 import { getAgentClientAdapter } from '../../../lib/agent-clients/registry.ts';
 import type { AgentClientState } from '../../../lib/agent-clients/types.ts';
-import { filePath } from '../../helpers.ts';
+import { createTempDir, filePath } from '../../helpers.ts';
 import { loadFreshEsm } from '../../helpers/esm.ts';
 import type { SyncTemplatesModule } from '../../helpers/esm.ts';
 
@@ -27,7 +25,7 @@ test('all 16 project integration combinations stay equivalent across core and st
   const templateRoot = filePath('templates');
 
   for (let mask = 0; mask < 16; mask += 1) {
-    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `agent-client-mask-${mask}-`));
+    const projectRoot = createTempDir(`agent-client-mask-${mask}-`);
     try {
       const installMask = ((mask << 1) | (mask >> 3)) & 0b1111;
       const state = stateFor(mask, installMask);

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -9,6 +8,7 @@ import {
   planAgentClientReconciliation
 } from '../../../lib/agent-clients/reconcile.ts';
 import { AGENT_CLIENT_IDS } from '../../../lib/agent-clients/types.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function writeTemplates(root: string): void {
   const files = [
@@ -50,7 +50,7 @@ function projectConfig(): Record<string, unknown> {
 }
 
 test('canonical state is normalized before enabled mutation without rewriting sandbox tools', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-plan-'));
+  const root = createTempDir('agent-client-reconcile-plan-');
   try {
     writeTemplates(root);
     const input = projectConfig();
@@ -87,7 +87,7 @@ test('canonical state is normalized before enabled mutation without rewriting sa
 });
 
 test('canonical state without sandbox stays byte-stable for an unchanged mutation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-no-sandbox-'));
+  const root = createTempDir('agent-client-reconcile-no-sandbox-');
   try {
     writeTemplates(root);
     const initial = planAgentClientReconciliation({
@@ -128,7 +128,7 @@ test('canonical state without sandbox stays byte-stable for an unchanged mutatio
 });
 
 test('executor writes planned seeds, commits config atomically, and converges on rerun', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-apply-'));
+  const root = createTempDir('agent-client-reconcile-apply-');
   try {
     writeTemplates(root);
     fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
@@ -169,7 +169,7 @@ test('executor writes planned seeds, commits config atomically, and converges on
 });
 
 test('disabled user-modified seed is protected and config rename failure preserves original config', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-protect-'));
+  const root = createTempDir('agent-client-reconcile-protect-');
   try {
     writeTemplates(root);
     fs.mkdirSync(path.join(root, '.agents'), { recursive: true });

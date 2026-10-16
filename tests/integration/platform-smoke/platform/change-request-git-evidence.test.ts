@@ -1,13 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { resolveMaterializedReviewedHeadRelation } from "../../../../lib/platform/change-request-git-evidence.ts";
 import type { PullRequestSnapshot } from "../../../../lib/platform/pull-requests.ts";
-import { gitSafeEnv } from "../../../helpers.ts";
+import { createTempDir, gitSafeEnv } from "../../../helpers.ts";
 
 const providerSource = path.resolve("tests/fixtures/platform-providers/git-evidence-provider.mjs");
 
@@ -39,7 +38,7 @@ function repositorySnapshot(root: string) {
 }
 
 function fixture(advanceTarget = false) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "change-request-evidence-"));
+  const root = createTempDir("change-request-evidence-");
   const remote = path.join(root, "remote.git");
   const seed = path.join(root, "seed");
   const caller = path.join(root, "caller");

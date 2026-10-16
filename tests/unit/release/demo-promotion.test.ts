@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -12,9 +11,10 @@ import {
 } from '../../../lib/internal/demo-promotion.ts';
 import { sha256Bytes } from '../../../lib/internal/demo-promotion.ts';
 import type { DemoAssetPaths, PromotionFs } from '../../../lib/internal/demo-promotion.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-promotion-'));
+  const root = createTempDir('agent-infra-demo-promotion-');
   const assets = path.join(root, 'assets');
   fs.mkdirSync(assets);
   const stagingDir = fs.mkdtempSync(path.join(assets, '.demo-init.promotion-'));

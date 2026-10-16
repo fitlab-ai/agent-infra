@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { streamCommand } from '../../../lib/server/streamer.ts';
 import { runAi } from '../../../lib/server/runner.ts';
 import { outboundToText, type DisplayMessage, type OutboundMessage } from '../../../lib/server/display.ts';
-import { envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
+import { createTempDir, envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
 
 function isDisplayKind<K extends DisplayMessage['kind']>(
   message: OutboundMessage,
@@ -60,7 +59,7 @@ test('streamCommand can forward output before process completion', async () => {
 });
 
 test('streamCommand sends streamed payload before finished when reply is slow', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-streamer-'));
+  const tmpDir = createTempDir('server-streamer-');
   const binDir = path.join(tmpDir, 'bin');
   const aiJsPath = path.join(binDir, 'ai.js');
   fs.mkdirSync(binDir, { recursive: true });

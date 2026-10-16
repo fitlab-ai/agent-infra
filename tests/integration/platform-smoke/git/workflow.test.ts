@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { commitExplicitPaths, inspectGitWorkflow, previewCommitTree, pushGitRefs, pushRebasedBranch } from '../../../../lib/git/workflow.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function fixture(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-'));
+  const root = createTempDir('git-workflow-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });

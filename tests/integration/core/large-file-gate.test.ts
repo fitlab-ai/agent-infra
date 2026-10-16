@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { filePath, gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
+import { createTempDir, filePath, gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
 
 const checkScript = filePath(".git-hooks/check-large-files.cjs");
 const oneMiB = 1024 * 1024;
@@ -28,7 +27,7 @@ function runCheck(repositoryRoot: string) {
 }
 
 function withRepository(run: (repositoryRoot: string) => void) {
-  const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-large-file-"));
+  const repositoryRoot = createTempDir("agent-infra-large-file-");
   try {
     initIsolatedGitRepo(repositoryRoot);
     run(repositoryRoot);

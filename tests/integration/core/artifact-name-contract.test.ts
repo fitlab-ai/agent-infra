@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { buildLifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { findAuthoritativeReviewCodeArtifact } from '../../../lib/task/review-fingerprint.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
+import { createTempDir } from '../../helpers.ts';
 
 for (const consumer of ['lifecycle facts', 'review selection'] as const) {
   test(`${consumer} uses only canonical artifact identities`, () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-name-contract-'));
+    const root = createTempDir('artifact-name-contract-');
     const content = '---\nid: TASK-20260909-160000\nstatus: active\n---\n# Task\n';
     try {
       fs.writeFileSync(path.join(root, 'task.md'), content);

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -19,6 +18,7 @@ import {
 import type { LifecycleRecoveryOptions } from '../../../lib/agent-clients/adapters/codex-lifecycle/recovery.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeTask } from '../../../lib/task/write.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const MODEL_POLICY = {
@@ -39,7 +39,7 @@ const PROVENANCE = {
 } as const;
 
 function fixture(stopReady = true) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-recovery-'));
+  const root = createTempDir('lifecycle-recovery-');
   const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: requirement-analysis\nassigned_to: codex\nupdated_at: old\nagent_infra_version: v0.9.16-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);

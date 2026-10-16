@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260719-000001';
 
 function fixture(): { repoRoot: string; taskMd: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-context-cli-'));
+  const repoRoot = createTempDir('task-context-cli-');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   spawnSync('git', ['checkout', '-q', '-b', 'feature/current'], { cwd: repoRoot });
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);

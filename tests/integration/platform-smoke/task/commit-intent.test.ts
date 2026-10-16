@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { onPlatforms } from '../../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../../helpers.ts';
 
 import {
   checkpointIntentDigest,
@@ -40,7 +39,7 @@ function intent(root: string): CheckpointIntent {
 }
 
 test('checkpoint intent is atomically persisted and removed after synchronization', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-intent-'));
+  const root = createTempDir('commit-intent-');
   const taskDir = path.join(root, 'TASK-20260101-000001');
   try {
     fs.mkdirSync(taskDir);
@@ -57,7 +56,7 @@ test('checkpoint intent is atomically persisted and removed after synchronizatio
 });
 
 test('checkpoint intent rejects a task directory mismatch and inconsistent state', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-intent-'));
+  const root = createTempDir('commit-intent-');
   const taskDir = path.join(root, 'TASK-20260101-000001');
   const otherDir = path.join(root, 'TASK-20260101-000002');
   try {
@@ -73,7 +72,7 @@ test('checkpoint intent rejects a task directory mismatch and inconsistent state
 });
 
 test('checkpoint intent rejects a symlink at its task-local path', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-intent-'));
+  const root = createTempDir('commit-intent-');
   const taskDir = path.join(root, 'TASK-20260101-000001');
   try {
     fs.mkdirSync(taskDir);
@@ -87,7 +86,7 @@ test('checkpoint intent rejects a symlink at its task-local path', onPlatforms('
 });
 
 test('checkpoint commit identity requires parent, tree, subject, and changed paths to match', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-identity-'));
+  const root = createTempDir('commit-identity-');
   const git = (...args: string[]) => execFileSync('git', args, {
     cwd: root,
     encoding: 'utf8',

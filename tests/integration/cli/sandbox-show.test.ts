@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
+  createTempDir,
   CLI_PATH,
   INTERNAL_CLI_PATH,
   cliArgs,
@@ -38,7 +38,7 @@ function makeConfig(home: string): SandboxConfig {
 
 test('collectSandboxDetail collects existing worktree and per-tool state dirs', async () => {
   const { collectSandboxDetail } = await loadFreshEsm<ShowModule>('lib/sandbox/commands/show.js');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-detail-'));
+  const home = createTempDir('sb-show-detail-');
   const config = makeConfig(home);
   const branch = 'feature/show';
 
@@ -60,7 +60,7 @@ test('collectSandboxDetail collects existing worktree and per-tool state dirs', 
 
 test('collectSandboxDetail returns empty results when nothing exists for the branch', async () => {
   const { collectSandboxDetail } = await loadFreshEsm<ShowModule>('lib/sandbox/commands/show.js');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-empty-'));
+  const home = createTempDir('sb-show-empty-');
   const config = makeConfig(home);
 
   const detail = collectSandboxDetail(config, 'feature/empty');
@@ -74,7 +74,7 @@ test('collectSandboxDetail returns empty results when nothing exists for the bra
 
 test('collectSandboxDetail excludes disabled clients even when host state remains', async () => {
   const { collectSandboxDetail } = await loadFreshEsm<ShowModule>('lib/sandbox/commands/show.js');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-selected-'));
+  const home = createTempDir('sb-show-selected-');
   const config = {
     ...makeConfig(home),
     agentClientState: {
@@ -103,7 +103,7 @@ test('collectSandboxDetail excludes disabled clients even when host state remain
 
 test('collectSandboxDetail covers the legacy (dash) sanitize candidate', async () => {
   const { collectSandboxDetail } = await loadFreshEsm<ShowModule>('lib/sandbox/commands/show.js');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-legacy-'));
+  const home = createTempDir('sb-show-legacy-');
   const config = makeConfig(home);
   const branch = 'feature/legacy';
 
@@ -121,7 +121,7 @@ test('collectSandboxDetail covers the legacy (dash) sanitize candidate', async (
 });
 
 function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: string; binDir: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-cli-'));
+  const repoRoot = createTempDir('sb-show-cli-');
   const binDir = path.join(repoRoot, 'bin');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   const agentsDir = path.join(repoRoot, '.agents');

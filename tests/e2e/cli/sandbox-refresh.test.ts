@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { loadFreshEsm } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm } from "../../helpers.ts";
 
 type ProbeResult = {
   status: number | null;
@@ -78,7 +78,7 @@ function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
 // developer's real ~/.agent-infra state. tmpDir is removed after fn resolves, so
 // any filesystem assertion that depends on it must run inside the callback.
 async function withTempHomeOn<T>(platform: NodeJS.Platform, fn: (home: string) => T | Promise<T>): Promise<T> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-refresh-"));
+  const tmpDir = createTempDir("agent-infra-refresh-");
   try {
     return await withHome(tmpDir, () => withPlatform(platform, () => fn(tmpDir)));
   } finally {
@@ -116,7 +116,7 @@ test("probeClaudeStatus maps claude status process results", async () => {
 
 test("runProbe resolves Windows command shims through the shell wrapper", async () => {
   const { runProbe } = await loadFreshEsm<ShellModule>("lib/sandbox/shell.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-refresh-win32-"));
+  const tmpDir = createTempDir("agent-infra-refresh-win32-");
   const claudePath = path.join(tmpDir, "claude.cmd");
   const previousPath = process.env.PATH;
   const previousPathext = process.env.PATHEXT;

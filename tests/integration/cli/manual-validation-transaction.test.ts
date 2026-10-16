@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -20,6 +19,7 @@ import type { ManualValidationTransaction } from '../../../lib/task/manual-valid
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000042';
 
@@ -116,7 +116,7 @@ function fakeClient(baseSha: string, headSha: string, state: FakeGitHubState): G
 }
 
 function createFixture(): Fixture {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-transaction-'));
+  const root = createTempDir('manual-validation-transaction-');
   git(root, ['init', '-q', '-b', 'feature']);
   git(root, ['config', 'user.name', 'Codex']);
   git(root, ['config', 'user.email', 'codex@example.com']);

@@ -1,17 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, filePath } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, filePath } from '../../helpers.ts';
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-comment-cli-'));
+  const root = createTempDir('platform-comment-cli-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
   const taskId = 'TASK-20260101-000001';

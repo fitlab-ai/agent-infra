@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { envWithPrependedPath, read } from "../../helpers.ts";
+import { createTempDir, envWithPrependedPath, read } from "../../helpers.ts";
 
 function makeFakeGif(frameCount: number, initialDelayCs: number = 2): Buffer {
   const bytes = [
@@ -117,7 +117,7 @@ function resolvePythonCommand() {
 }
 
 function setupDemoRegenFixture({ withLocalSettings }: { withLocalSettings: boolean }) {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "demo-regen-"));
+  const repoDir = createTempDir("demo-regen-");
   const assetsDir = path.join(repoDir, "assets");
   const scriptsDir = path.join(repoDir, "scripts");
   const binDir = path.join(repoDir, "bin");
@@ -204,7 +204,7 @@ esac
 }
 
 test("normalize-gif-duration distributes delays to hit the target duration", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "normalize-gif-"));
+  const tempDir = createTempDir("normalize-gif-");
   const gifPath = path.join(tempDir, "demo.gif");
 
   try {
@@ -232,7 +232,7 @@ test("normalize-gif-duration distributes delays to hit the target duration", () 
 });
 
 test("normalize-gif-duration leaves files without GCE blocks unchanged", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "normalize-gif-"));
+  const tempDir = createTempDir("normalize-gif-");
   const gifPath = path.join(tempDir, "empty.gif");
   const original = Buffer.from("GIF89a\x3B", "binary");
 
@@ -257,7 +257,7 @@ test("normalize-gif-duration leaves files without GCE blocks unchanged", () => {
 });
 
 test("normalize-gif-duration ignores GCE-like bytes inside image data", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "normalize-gif-"));
+  const tempDir = createTempDir("normalize-gif-");
   const gifPath = path.join(tempDir, "demo.gif");
 
   try {

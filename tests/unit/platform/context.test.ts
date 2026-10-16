@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { parseGitHubRemote, resolvePlatformContext } from '../../../lib/platform/context.ts';
+import { createTempDir } from '../../helpers.ts';
 
 test('GitHub remote parser accepts HTTPS and SCP-like remotes', () => {
   assert.equal(parseGitHubRemote('https://github.com/acme/widgets.git'), 'acme/widgets');
@@ -14,7 +14,7 @@ test('GitHub remote parser accepts HTTPS and SCP-like remotes', () => {
 });
 
 test('platform context resolves fork parent and separated capabilities', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-context-'));
+  const root = createTempDir('platform-context-');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
   const requested: string[] = [];
@@ -108,7 +108,7 @@ test('non-GitHub platform does not probe gh', async () => {
 });
 
 test('platform context returns observable no-op for unsupported platform and missing remote', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-context-'));
+  const root = createTempDir('platform-context-');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"custom"}}');
   assert.equal((await resolvePlatformContext({ cwd: root })).error?.code, 'PLATFORM_PROVIDER_SOURCE_MISSING');

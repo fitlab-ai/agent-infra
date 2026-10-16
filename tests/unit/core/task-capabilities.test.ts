@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -13,6 +12,7 @@ import { parseLifecyclePathDecision } from '../../../lib/task/lifecycle-path.ts'
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
 import { buildStatusModel } from '../../../lib/task/commands/status.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function recordCompletedReports(taskDir: string, content: string): string {
   const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name)).sort((left, right) => {
@@ -197,7 +197,7 @@ test('resolved human decisions route every stage back to review and code decisio
 });
 
 test('rework classification uses ordered completed review cycles and ignores an approved boundary', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-rework-cycles-'));
+  const root = createTempDir('capability-rework-cycles-');
   try {
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -258,7 +258,7 @@ test('recommendation facts cannot bypass a missing prerequisite', () => {
 });
 
 test('lifecycle facts derive execution busy from an open lifecycle activity', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-execution-'));
+  const root = createTempDir('capability-execution-');
   try {
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -379,7 +379,7 @@ test('streamlined routing compares code against analysis when plan is not select
 });
 
 test('lifecycle facts route to re-execution after newly completed upstream reports', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-upstream-rework-'));
+  const root = createTempDir('capability-upstream-rework-');
   try {
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -471,7 +471,7 @@ test('qualification diagnostics do not change lifecycle routing', () => {
 });
 
 test('qualification recovery only evaluates the latest active artifact in each family', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-qualification-latest-'));
+  const root = createTempDir('capability-qualification-latest-');
   try {
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -497,7 +497,7 @@ test('qualification recovery only evaluates the latest active artifact in each f
 });
 
 test('an absent qualification audit does not mark the latest artifact stale', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-qualification-optional-'));
+  const root = createTempDir('capability-qualification-optional-');
   try {
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -576,7 +576,7 @@ test('approved reviews without latest input bindings cannot authorize downstream
 });
 
 test('lifecycle facts use completed review receipts rather than review body formatting', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-review-receipt-'));
+  const root = createTempDir('capability-review-receipt-');
   try {
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });

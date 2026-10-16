@@ -2,15 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH } from '../../helpers.ts';
 
 const SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
 function mkFixture(): { repoRoot: string; activeDir: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-files-'));
+  const repoRoot = createTempDir('task-files-');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   const agentsDir = path.join(repoRoot, '.agents');
   fs.mkdirSync(path.join(agentsDir, 'scripts'), { recursive: true });

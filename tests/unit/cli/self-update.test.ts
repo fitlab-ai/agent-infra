@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -9,7 +8,7 @@ import {
   detectUpdateSource
 } from "../../../lib/self-update.ts";
 import { needsShell, resolveCommand } from "../../../lib/run/host.ts";
-import { onPlatforms } from "../../helpers.ts";
+import { createTempDir, onPlatforms } from "../../helpers.ts";
 
 type CommandResult = {
   status: number | null;
@@ -63,7 +62,7 @@ function npmRunner(prefix: string, root: string, status = 0, calls: string[][] =
 }
 
 test("host command resolution honors Windows PATHEXT and batch shell rules", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-command-"));
+  const root = createTempDir("agent-infra-host-command-");
   try {
     const binDir = path.join(root, "node");
     const npmCmd = path.join(binDir, "npm.cmd");
@@ -79,7 +78,7 @@ test("host command resolution honors Windows PATHEXT and batch shell rules", () 
 });
 
 test("POSIX command resolution skips a non-executable earlier PATH file", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-command-mode-"));
+  const root = createTempDir("agent-infra-host-command-mode-");
   try {
     const first = path.join(root, "first");
     const second = path.join(root, "second");
@@ -96,7 +95,7 @@ test("POSIX command resolution skips a non-executable earlier PATH file", onPlat
 });
 
 test("POSIX command resolution uses PATH instead of a non-standard Path variable", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-command-path-case-"));
+  const root = createTempDir("agent-infra-host-command-path-case-");
   try {
     const first = path.join(root, "first");
     const second = path.join(root, "second");
@@ -113,7 +112,7 @@ test("POSIX command resolution uses PATH instead of a non-standard Path variable
 });
 
 test("POSIX command resolution preserves the current directory for an empty PATH entry", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-command-empty-path-"));
+  const root = createTempDir("agent-infra-host-command-empty-path-");
   const previousCwd = process.cwd();
   try {
     process.chdir(root);
@@ -133,7 +132,7 @@ test("POSIX command resolution preserves the current directory for an empty PATH
 });
 
 test("self-update rejects a manager resolved from an empty POSIX PATH entry", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-empty-path-"));
+  const root = createTempDir("agent-infra-self-update-empty-path-");
   const previousCwd = process.cwd();
   try {
     const prefix = path.join(root, "prefix");
@@ -159,7 +158,7 @@ test("self-update rejects a manager resolved from an empty POSIX PATH entry", on
 });
 
 test("Windows npm source accepts a Node manager directory separate from global packages", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-win-"));
+  const root = createTempDir("agent-infra-self-update-win-");
   try {
     const prefix = path.join(root, "AppData", "npm");
     const globalRoot = path.join(prefix, "node_modules");
@@ -194,7 +193,7 @@ test("Windows npm source accepts a Node manager directory separate from global p
 });
 
 test("POSIX npm source rejects a manager outside its global prefix", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-posix-"));
+  const root = createTempDir("agent-infra-self-update-posix-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "lib", "node_modules");
@@ -217,7 +216,7 @@ test("POSIX npm source rejects a manager outside its global prefix", onPlatforms
 });
 
 test("POSIX npm source accepts a symlinked npm entry point", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-npm-link-"));
+  const root = createTempDir("agent-infra-self-update-npm-link-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "lib", "node_modules");
@@ -244,7 +243,7 @@ test("POSIX npm source accepts a symlinked npm entry point", onPlatforms("linux"
 });
 
 test("manager failure returns the manager exit code without success output contract", onPlatforms("linux", "darwin"), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-failure-"));
+  const root = createTempDir("agent-infra-self-update-failure-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -267,7 +266,7 @@ test("manager failure returns the manager exit code without success output contr
 });
 
 test("Homebrew source uses the formula manager without probing npm", onPlatforms("linux", "darwin"), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-brew-"));
+  const root = createTempDir("agent-infra-self-update-brew-");
   try {
     const homebrewRoot = path.join(root, "homebrew");
     const formulaRoot = path.join(homebrewRoot, "opt", "agent-infra");
@@ -300,7 +299,7 @@ test("Homebrew source uses the formula manager without probing npm", onPlatforms
 });
 
 test("self-update rejects a package root that does not match npm global root", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-package-root-"));
+  const root = createTempDir("agent-infra-self-update-package-root-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -323,7 +322,7 @@ test("self-update rejects a package root that does not match npm global root", o
 });
 
 test("self-update rejects a package name that is not agent-infra", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-package-name-"));
+  const root = createTempDir("agent-infra-self-update-package-name-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -350,7 +349,7 @@ test("self-update rejects a package name that is not agent-infra", onPlatforms("
 });
 
 test("self-update rejects PATH shadowing from a different installed package", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-shadow-"));
+  const root = createTempDir("agent-infra-self-update-shadow-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -377,7 +376,7 @@ test("self-update rejects PATH shadowing from a different installed package", on
 });
 
 test("self-update refuses when npm and Homebrew both claim the package", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-dual-"));
+  const root = createTempDir("agent-infra-self-update-dual-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -412,7 +411,7 @@ test("self-update refuses when npm and Homebrew both claim the package", onPlatf
 });
 
 test("self-update fails closed when no package manager is on PATH", onPlatforms("linux", "darwin"), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-no-manager-"));
+  const root = createTempDir("agent-infra-self-update-no-manager-");
   try {
     const { entry } = makePackage(path.join(root, "prefix", "node_modules"));
     const calls: string[][] = [];
@@ -434,7 +433,7 @@ test("self-update fails closed when no package manager is on PATH", onPlatforms(
 });
 
 test("self-update refuses a manager that disappears after probing", onPlatforms("linux", "darwin"), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-drift-"));
+  const root = createTempDir("agent-infra-self-update-drift-");
   try {
     const prefix = path.join(root, "prefix");
     const globalRoot = path.join(prefix, "node_modules");
@@ -470,7 +469,7 @@ test("self-update returns 1 for manager signal and spawn failures", onPlatforms(
     { signal: "SIGTERM" as NodeJS.Signals },
     { error: new Error("spawn failed") }
   ]) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-run-failure-"));
+    const root = createTempDir("agent-infra-self-update-run-failure-");
     try {
       const prefix = path.join(root, "prefix");
       const globalRoot = path.join(prefix, "node_modules");

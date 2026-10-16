@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,11 +9,12 @@ import {
   clearProviderSessions,
   loadPlatformProvider
 } from '../../../../lib/platform/provider-loader.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 const fixtureRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../fixtures/platform-providers');
 
 function repository(): string {
-  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'platform-provider-')));
+  const root = createTempDir('platform-provider-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.mkdirSync(path.join(root, 'one'));

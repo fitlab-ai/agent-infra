@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
 import { writeTask } from '../../../lib/task/write.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-07-15 12:34:56+00:00', agentInfraVersion: 'v9.9.9' };
@@ -15,7 +14,7 @@ const METADATA = { timestamp: '2026-07-15 12:34:56+00:00', agentInfraVersion: 'v
 type FixtureState = 'active' | 'blocked' | 'completed' | 'archive';
 
 function fixture(state: FixtureState = 'active') {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-write-'));
+  const repoRoot = createTempDir('task-write-');
   const taskDir = state === 'archive'
     ? path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '07', '15', TASK_ID, 'local')
     : path.join(repoRoot, '.agents', 'workspace', state, TASK_ID);

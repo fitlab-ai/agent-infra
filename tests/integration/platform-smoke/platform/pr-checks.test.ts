@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -9,6 +8,7 @@ import { classifyPullRequestReadiness, classifyRequiredChecks, resolveRunCandida
 import { fetchCheckLogText, parseRunJobIdentity } from '../../../../lib/platform/github-data.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 test('required checks classify terminal and non-terminal states', () => {
   assert.equal(classifyRequiredChecks([]).state, 'no-required');
@@ -19,7 +19,7 @@ test('required checks classify terminal and non-terminal states', () => {
 });
 
 test('PR readiness watcher reaches injected deadline and preserves the observed head', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-readiness-watch-'));
+  const root = createTempDir('pr-readiness-watch-');
   const taskId = 'TASK-20260101-000001';
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });

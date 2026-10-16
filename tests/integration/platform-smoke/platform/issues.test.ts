@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -12,9 +11,10 @@ import {
   syncPlatformIssue
 } from '../../../../lib/platform/issues.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function fixture(issueNumber = '') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-issue-'));
+  const root = createTempDir('platform-issue-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');

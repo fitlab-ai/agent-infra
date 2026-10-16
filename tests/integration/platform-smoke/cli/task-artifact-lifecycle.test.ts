@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -20,13 +19,13 @@ import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.ts';
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
-import { recordArtifactCompletions } from '../../../helpers.ts';
+import { createTempDir, recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
 
 function fixture(files: Record<string, string> = {}, completeReports = true) {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-lifecycle-'));
+  const repoRoot = createTempDir('artifact-lifecycle-');
   spawnSync('git', ['init', '-q'], { cwd: repoRoot });
   fs.writeFileSync(path.join(repoRoot, '.gitignore'), '.agents/workspace/\n');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);

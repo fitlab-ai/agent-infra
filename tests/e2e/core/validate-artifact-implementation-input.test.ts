@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'implementation-input-gate-'));
+  const root = createTempDir('implementation-input-gate-');
   const taskDir = path.join(root, 'TASK-20260101-000001');
   fs.mkdirSync(taskDir);
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---

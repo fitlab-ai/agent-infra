@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { resolveTaskContext } from '../../../lib/task/resolve-ref.ts';
 import { parseTaskScope } from '../../../lib/task/command-options.ts';
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function fixture(): string {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-context-'));
+  const repoRoot = createTempDir('task-context-');
   fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', 'active'), { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), '{}\n');
   execFileSync('git', ['init', '-q'], { cwd: repoRoot });

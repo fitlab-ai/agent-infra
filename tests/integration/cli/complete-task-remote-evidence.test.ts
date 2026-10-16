@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { PlatformChangeRequestSnapshot } from "../../../lib/platform/snapshots.ts";
 import { renderTaskVerification } from "../../../lib/task/verification.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
-import { gitSafeEnv } from "../../helpers.ts";
+import { createTempDir, gitSafeEnv } from "../../helpers.ts";
 import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import { sha256File } from "../../../lib/task/artifact-receipts.ts";
@@ -88,7 +87,7 @@ function writeTask(
 }
 
 test("complete-task gate verifies target advancement and consecutive squash merges from isolated remote evidence", async () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-remote-evidence-"));
+  const fixtureRoot = createTempDir("complete-task-remote-evidence-");
   const remote = path.join(fixtureRoot, "remote.git");
   const seed = path.join(fixtureRoot, "seed");
   const caller = path.join(fixtureRoot, "caller");
@@ -204,7 +203,7 @@ test("complete-task gate verifies target advancement and consecutive squash merg
 });
 
 test("complete-task consumes a human exemption for merged identity failures before and after archival", async () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-identity-exemption-"));
+  const fixtureRoot = createTempDir("complete-task-identity-exemption-");
   const taskId = "TASK-20260731-000003";
   try {
     git(fixtureRoot, ["init", "-q", "-b", "main"]);
@@ -293,7 +292,7 @@ test("complete-task consumes a human exemption for merged identity failures befo
 });
 
 test("complete-task keeps merged identity failures closed without a valid exemption", async () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-invalid-identity-exemption-"));
+  const fixtureRoot = createTempDir("complete-task-invalid-identity-exemption-");
   const reviewedHead = "a".repeat(40);
   try {
     git(fixtureRoot, ["init", "-q", "-b", "main"]);

@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { gitSafeEnv, initIsolatedGitRepo } from '../../helpers/git.ts';
 import { materializeSandboxGitMetadata } from '../../../lib/sandbox/git-metadata.ts';
+import { createTempDir } from '../../helpers.ts';
 
 test('sandbox Git metadata projects a linked worktree gitfile without changing the host file', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-sandbox-git-metadata-'));
+  const fixtureRoot = createTempDir('agent-infra-sandbox-git-metadata-');
   const repoRoot = path.join(fixtureRoot, 'repo');
   const worktreeRoot = path.join(fixtureRoot, 'worktree');
   const unrelatedRepoRoot = path.join(fixtureRoot, 'unrelated-repo');

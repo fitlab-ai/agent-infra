@@ -1,12 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { resolveLocalReviewedCommitRelation } from "../../../../lib/git/reviewed-commit-equivalence.ts";
-import { gitSafeEnv } from "../../../helpers.ts";
+import { createTempDir, gitSafeEnv } from "../../../helpers.ts";
 
 function git(root: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8", env: gitSafeEnv() });
@@ -26,7 +25,7 @@ function writeCommit(root: string, files: Record<string, string>, message: strin
 }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reviewed-commit-equivalence-"));
+  const root = createTempDir("reviewed-commit-equivalence-");
   git(root, ["init", "-q", "-b", "master"]);
   git(root, ["config", "user.name", "Test"]);
   git(root, ["config", "user.email", "test@example.com"]);

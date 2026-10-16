@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   gitSafeEnv,
   loadFreshEsm,
   onPlatforms,
@@ -23,7 +24,7 @@ const CANONICAL_AGENT_CLIENTS = [
 
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-config-");
   const previousCwd = process.cwd();
 
   try {
@@ -64,7 +65,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
 
 test("loadConfig parses the optional project sandbox init command", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-init-command-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-init-command-");
   const previousCwd = process.cwd();
   const configPath = path.join(tmpDir, ".agents", ".airc.json");
 
@@ -101,7 +102,7 @@ test("loadConfig parses the optional project sandbox init command", async () => 
 
 test("loadConfig combines canonical Agent Client state with non-client sandbox tools", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-canonical-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-canonical-");
   const previousCwd = process.cwd();
 
   try {
@@ -141,7 +142,7 @@ test("loadConfig combines canonical Agent Client state with non-client sandbox t
 
 test("loadConfig parses sandbox refresh interval days", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-refresh-interval-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-refresh-interval-");
   const previousCwd = process.cwd();
 
   try {
@@ -201,7 +202,7 @@ test("dotfilesCacheDir returns project-scoped cache path under .agent-infra cach
 
 test("loadConfig preserves configured sandbox engine", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-config-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-engine-config-");
   const previousCwd = process.cwd();
 
   try {
@@ -232,7 +233,7 @@ test("loadConfig preserves configured sandbox engine", async () => {
 
 test("loadConfig preserves configured darwin-only sandbox engine with platform context", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-darwin-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-engine-darwin-");
   const previousCwd = process.cwd();
 
   try {
@@ -261,7 +262,7 @@ test("loadConfig preserves configured darwin-only sandbox engine with platform c
 
 test("loadConfig resolves per-platform sandbox engine object for the matching platform", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-per-platform-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-engine-per-platform-");
   const previousCwd = process.cwd();
 
   try {
@@ -292,7 +293,7 @@ test("loadConfig resolves per-platform sandbox engine object for the matching pl
 
 test("loadConfig rejects unsupported sandbox engine values", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-invalid-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-engine-invalid-");
   const previousCwd = process.cwd();
 
   try {
@@ -322,7 +323,7 @@ test("loadConfig rejects unsupported sandbox engine values", async () => {
 
 test("loadConfig fails when .agents/.airc.json is missing", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-missing-config-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-missing-config-");
   const previousCwd = process.cwd();
 
   try {
@@ -359,7 +360,7 @@ test("findRuntimeEngineMismatches reports node runtime engine conflicts", async 
 
 test("loadConfig warns when sandbox node runtime does not satisfy package engines", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-mismatch-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-engine-mismatch-");
   const previousCwd = process.cwd();
   const stderr: string[] = [];
 
@@ -397,7 +398,7 @@ test("loadConfig warns when sandbox node runtime does not satisfy package engine
 
 test("loadConfig does not warn when sandbox node runtime satisfies package engines", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-match-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-engine-match-");
   const previousCwd = process.cwd();
   const stderr: string[] = [];
 
@@ -434,7 +435,7 @@ test("loadConfig does not warn when sandbox node runtime satisfies package engin
 
 test("loadConfig skips runtime engine warnings for invalid package json", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-invalid-package-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-invalid-package-");
   const previousCwd = process.cwd();
   const stderr: string[] = [];
 
@@ -467,7 +468,7 @@ test("loadConfig skips runtime engine warnings for invalid package json", async 
 
 test("loadConfig skips runtime engine warnings when a custom Dockerfile is configured", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-dockerfile-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-dockerfile-");
   const previousCwd = process.cwd();
   const stderr: string[] = [];
 
@@ -509,7 +510,7 @@ test("loadConfig skips runtime engine warnings when a custom Dockerfile is confi
 
 test("loadConfig uses os.homedir on Windows when HOME is unset", onPlatforms("win32"), async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-userprofile-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-userprofile-");
   const previousCwd = process.cwd();
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -9,13 +8,14 @@ import { executeCommitOperation } from '../../../../lib/task/commit-operation.ts
 import { checkpointIntentDigest, intentPath, readCheckpointIntent, writeCheckpointIntent } from '../../../../lib/task/commit-intent.ts';
 import { activateDelegation, dispatchDelegation, prepareDelegation } from '../../../../lib/task/delegation-receipts.ts';
 import { beginOrResumeOrchestration, readRun } from '../../../../lib/task/orchestration.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
 function fixture(branch = 'feature') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-operation-'));
+  const root = createTempDir('commit-operation-');
   git(root, ['init', '-q', '-b', branch]);
   git(root, ['config', 'user.name', 'Codex']);
   git(root, ['config', 'user.email', 'codex@example.com']);
@@ -101,7 +101,7 @@ test('commit core rejects a missing push policy before writing Git state', () =>
 
 test('taskless protected branch keeps the local commit and reports a push warning', () => {
   const root = fixture('main');
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-operation-remote-'));
+  const remote = createTempDir('commit-operation-remote-');
   try {
     git(remote, ['init', '-q', '--bare']);
     git(root, ['remote', 'set-url', 'origin', remote]);
@@ -140,7 +140,7 @@ test('taskless ordinary push failure preserves the local commit for a later push
 
 test('task-bound push-only retry ignores review artifacts and only follows Git facts', () => {
   const root = fixture();
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-operation-remote-'));
+  const remote = createTempDir('commit-operation-remote-');
   const missingRemote = path.join(remote, 'missing.git');
   const taskId = 'TASK-20260101-000005';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -177,7 +177,7 @@ test('task-bound push-only retry ignores review artifacts and only follows Git f
 
 test('push-only retry refuses an unexpected same-tree HEAD before pushing', () => {
   const root = fixture();
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-operation-remote-'));
+  const remote = createTempDir('commit-operation-remote-');
   try {
     git(remote, ['init', '-q', '--bare']);
     git(root, ['remote', 'set-url', 'origin', remote]);

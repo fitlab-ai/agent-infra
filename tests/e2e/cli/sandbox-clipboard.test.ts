@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 
-import { loadFreshEsm, onPlatforms } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm, onPlatforms } from "../../helpers.ts";
 
 type KeysModule = typeof import("../../../lib/sandbox/clipboard/keys.ts");
 type PathsModule = typeof import("../../../lib/sandbox/clipboard/paths.ts");
@@ -23,7 +22,7 @@ function invokeExitHandler(handler: PtyExitHandler | null, event: PtyExitEvent) 
 
 test("linux clipboard receiver stores a hashed PNG and a persistent pending marker", onPlatforms("linux"), async () => {
   const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-home-"));
+  const home = createTempDir("agent-infra-inbox-home-");
   const agentDir = path.join(home, ".agent-infra");
   const temp = "/tmp/agent-infra-cp-123e4567-e89b-12d3-a456-426614174000.png";
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
@@ -42,7 +41,7 @@ test("linux clipboard receiver stores a hashed PNG and a persistent pending mark
 
 test("clipboard inbox distinguishes a missing marker from a malformed marker", async () => {
   const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-marker-"));
+  const home = createTempDir("agent-infra-inbox-marker-");
   const clipboard = path.join(home, ".agent-infra", "clipboard");
   fs.mkdirSync(clipboard, { recursive: true });
   try {
@@ -56,7 +55,7 @@ test("clipboard inbox distinguishes a missing marker from a malformed marker", a
 
 test("linux clipboard receiver rejects a non-PNG before creating inbox files", onPlatforms("linux"), async () => {
   const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-invalid-"));
+  const home = createTempDir("agent-infra-inbox-invalid-");
   const agentDir = path.join(home, ".agent-infra");
   const temp = "/tmp/agent-infra-cp-123e4567-e89b-12d3-a456-426614174001.png";
   fs.mkdirSync(agentDir, { recursive: true });
@@ -115,7 +114,7 @@ test("buildBracketedPaste wraps text in paste markers", async () => {
 
 test("clipboard path helpers write atomically and prune old png files", async () => {
   const paths = await loadFreshEsm<PathsModule>("lib/sandbox/clipboard/paths.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-clipboard-"));
+  const tmpDir = createTempDir("agent-infra-clipboard-");
 
   try {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -366,7 +365,7 @@ test("clipboard bridge falls back when node-pty spawn fails", async () => {
 
 test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-bridge-home-"));
+  const tmpDir = createTempDir("agent-infra-bridge-home-");
   const stdin = new EventEmitter() as EventEmitter & {
     isTTY: boolean;
     setRawMode(value: boolean): void;
@@ -432,7 +431,7 @@ test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
 
 test("clipboard bridge prefers a pending remote image and warns once for a malformed marker", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-pending-bridge-"));
+  const home = createTempDir("agent-infra-pending-bridge-");
   const clipboard = path.join(home, ".agent-infra", "clipboard");
   fs.mkdirSync(clipboard, { recursive: true });
   fs.writeFileSync(path.join(clipboard, "1234567890abcdef.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -472,7 +471,7 @@ test("clipboard bridge prefers a pending remote image and warns once for a malfo
 
 test("clipboard bridge converts pasted Windows image paths to container clipboard paths", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-bridge-home-"));
+  const tmpDir = createTempDir("agent-infra-bridge-home-");
   const stdin = new EventEmitter() as EventEmitter & {
     isTTY: boolean;
     setRawMode(value: boolean): void;

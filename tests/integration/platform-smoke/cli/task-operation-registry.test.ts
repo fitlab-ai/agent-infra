@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -24,7 +23,7 @@ import {
 } from '../../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../../lib/sandbox/control/task-view.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
-import { onPlatforms } from '../../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../../helpers.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
 import { parseReviewCommand } from '../../../../lib/task/review-command.ts';
 
@@ -243,7 +242,7 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
 });
 
 test('task-bound git input identity is checked before the commit module can load', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-input-'));
+  const root = createTempDir('task-operation-input-');
   const inputPath = path.join(root, 'commit.json');
   const taskEnv = {
     AGENT_INFRA_SANDBOX: '1',
@@ -286,7 +285,7 @@ test('host-direct routes remain unchanged without task-bound markers', () => {
 });
 
 test('mounted sandbox control requires a matching identity sentinel', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-identity-'));
+  const root = createTempDir('task-operation-identity-');
   const statusDir = path.join(root, 'status');
   const generation = 'registry-generation';
   const controlRootId = 'a'.repeat(96);
@@ -324,7 +323,7 @@ test('mounted sandbox control requires a matching identity sentinel', onPlatform
 });
 
 test('fixed status mount fails closed when a sandbox process clears its markers', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-fixed-mount-'));
+  const root = createTempDir('task-operation-fixed-mount-');
   const statusDir = path.join(root, 'status');
   fs.mkdirSync(statusDir);
   try {
@@ -338,7 +337,7 @@ test('fixed status mount fails closed when a sandbox process clears its markers'
 });
 
 test('an unavailable status probe fails closed before selecting a direct-host route', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-unavailable-probe-'));
+  const root = createTempDir('task-operation-unavailable-probe-');
   const statusPath = path.join(root, 'status');
   fs.writeFileSync(statusPath, 'not a directory');
   try {
@@ -351,7 +350,7 @@ test('an unavailable status probe fails closed before selecting a direct-host ro
 });
 
 test('ordinary environment variables cannot select the production status mount', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-env-mount-'));
+  const root = createTempDir('task-operation-env-mount-');
   const fakeMount = path.join(root, 'status');
   fs.mkdirSync(fakeMount);
   try {

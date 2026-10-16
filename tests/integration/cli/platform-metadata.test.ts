@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function rootWithNoneProvider(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-metadata-cli-'));
+  const root = createTempDir('platform-metadata-cli-');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'none' } }));
   return root;

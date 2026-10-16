@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 
-import { CLI_PATH, cliArgs } from "../../helpers.ts";
+import { createTempDir, CLI_PATH, cliArgs } from "../../helpers.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 function canonical(enabled: readonly string[]) {
@@ -32,7 +31,7 @@ function makeProject(tmpDir: string, config: Record<string, unknown>) {
 }
 
 test("agent-infra sync with canonical state refreshes all built-in client seeds", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-default-"));
+  const tmpDir = createTempDir("ai-update-tuis-default-");
   try {
     makeProject(tmpDir, {
       project: "demo",
@@ -64,7 +63,7 @@ test("agent-infra sync with canonical state refreshes all built-in client seeds"
 });
 
 test("agent-infra sync with canonical subset only refreshes enabled client seeds", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-subset-"));
+  const tmpDir = createTempDir("ai-update-tuis-subset-");
   try {
     makeProject(tmpDir, {
       project: "demo",
@@ -97,7 +96,7 @@ test("agent-infra sync with canonical subset only refreshes enabled client seeds
 });
 
 test("agent-infra sync with empty canonical state installs no built-in seeds", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-empty-"));
+  const tmpDir = createTempDir("ai-update-tuis-empty-");
   try {
     makeProject(tmpDir, {
       project: "demo",
@@ -133,7 +132,7 @@ test("agent-infra sync with empty canonical state installs no built-in seeds", (
 });
 
 test("agent-infra sync is idempotent: second run does not change canonical state or duplicate entries", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-idempotent-"));
+  const tmpDir = createTempDir("ai-update-tuis-idempotent-");
   try {
     makeProject(tmpDir, {
       project: "demo",

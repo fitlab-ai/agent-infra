@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -17,6 +16,7 @@ import {
   writePrChangeReportAtomic
 } from '../../../lib/platform/pr-change-report.ts';
 import type { MechanicalChangeReport, PrecheckCandidate, PullRequestIdentity } from '../../../lib/platform/pr-change-report.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const sha = (letter: string) => letter.repeat(40);
 
@@ -335,7 +335,7 @@ test('canonical report summarizes a precheck review route in Chinese', () => {
 });
 
 test('atomic report writes are readable and reject symlink consumption', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-change-report-'));
+  const root = createTempDir('pr-change-report-');
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, mechanical(), candidate(digest));

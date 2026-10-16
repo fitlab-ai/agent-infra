@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-import { loadFreshEsm, onPlatforms, read, supportsPosixModeBits } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm, onPlatforms, read, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
@@ -82,7 +81,7 @@ This directory is the runtime workspace for multi-AI collaboration. All contents
 `;
 
 test("syncTemplates creates runtime workspace states and retires only provably official files", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-"));
+  const tmpDir = createTempDir("ai-collab-runtime-workspace-");
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
     const ownedRoot = path.join(tmpDir, "owned");
@@ -120,7 +119,7 @@ test("syncTemplates creates runtime workspace states and retires only provably o
 });
 
 test("syncTemplates retires a recorded-baseline file and protects one that drifted from it", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-retired-baseline-"));
+  const tmpDir = createTempDir("ai-collab-retired-baseline-");
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
     const pristine = "# project workspace\n";
@@ -155,7 +154,7 @@ test("syncTemplates retires a recorded-baseline file and protects one that drift
 });
 
 test("syncTemplates retires generated Trae skill mirrors and preserves local files", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-retired-trae-skills-"));
+  const tmpDir = createTempDir("agent-infra-retired-trae-skills-");
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
     const projectRoot = path.join(tmpDir, "project");
@@ -211,7 +210,7 @@ test("syncTemplates retires generated Trae skill mirrors and preserves local fil
 });
 
 test("syncTemplates does not traverse a retired managed directory symlink", onPlatforms("linux", "darwin"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-retired-symlink-"));
+  const tmpDir = createTempDir("agent-infra-retired-symlink-");
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
     const projectRoot = path.join(tmpDir, "project");
@@ -237,7 +236,7 @@ test("syncTemplates does not traverse a retired managed directory symlink", onPl
 });
 
 test("syncTemplates rejects a symbolic-link runtime workspace before template writes", onPlatforms("linux", "darwin"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-link-"));
+  const tmpDir = createTempDir("ai-collab-runtime-workspace-link-");
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
     const projectRoot = path.join(tmpDir, "project");
@@ -259,7 +258,7 @@ test("syncTemplates rejects a symbolic-link runtime workspace before template wr
 test("syncTemplates uses PATH templates even in an agent-infra project and removes legacy templateSource", async () => {
   const originalExecSync = childProcess.execSync;
   const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-"));
+  const tmpDir = createTempDir("ai-collab-sync-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -377,7 +376,7 @@ test("syncTemplates uses PATH templates even in an agent-infra project and remov
 test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () => {
   const originalExecSync = childProcess.execSync;
   const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-win32-"));
+  const tmpDir = createTempDir("ai-collab-sync-win32-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -430,7 +429,7 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
 });
 
 test("guarded managed files use persisted three-way baselines", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-guarded-managed-"));
+  const tmpDir = createTempDir("ai-collab-guarded-managed-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -511,7 +510,7 @@ test("guarded managed files use persisted three-way baselines", async () => {
 
 test("agent-infra package lookup failure is diagnostic and does not install into the project", async () => {
   const originalExecSync = childProcess.execSync;
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-package-missing-"));
+  const tmpDir = createTempDir("ai-collab-package-missing-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -542,7 +541,7 @@ test("agent-infra package lookup failure is diagnostic and does not install into
 });
 
 test("syncTemplates persists the exact prerelease template version idempotently", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-installer-version-"));
+  const tmpDir = createTempDir("ai-collab-sync-installer-version-");
   const templatePackageVersion = "9.8.7-alpha.6";
   const expectedTemplateVersion = `v${templatePackageVersion}`;
 
@@ -581,7 +580,7 @@ test("syncTemplates persists the exact prerelease template version idempotently"
 });
 
 test("syncTemplates rejects client ids in sandbox.tools.ids without rewriting config", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
+  const tmpDir = createTempDir("ai-collab-sync-sandbox-tools-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -619,7 +618,7 @@ test("syncTemplates rejects unsupported sandbox tool shapes without rewriting co
     [{ tools: ["agent-infra", "codex"] }, "sandbox.tools"],
     [{ tools: { ids: ["agent-infra"], definitions: {} }, customTools: [] }, "sandbox.customTools"]
   ] as const) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-invalid-sandbox-tools-"));
+    const tmpDir = createTempDir("ai-collab-sync-invalid-sandbox-tools-");
     try {
       const projectRoot = path.join(tmpDir, "project");
       const { templateRoot } = createTemplateInstall(tmpDir);
@@ -655,7 +654,7 @@ test("syncTemplates rejects unsupported sandbox tool shapes without rewriting co
 });
 
 test("syncTemplates preserves canonical client selection and non-client sandbox tools", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-custom-tools-"));
+  const tmpDir = createTempDir("ai-collab-sync-sandbox-custom-tools-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -700,7 +699,7 @@ test("syncTemplates preserves canonical client selection and non-client sandbox 
 });
 
 test("syncTemplates prefers platform-specific variants and composes with zh-CN localization", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-"));
+  const tmpDir = createTempDir("ai-collab-sync-platform-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -735,7 +734,7 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
 });
 
 test("syncTemplates selects JSON language variants for managed config files", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-json-lang-"));
+  const tmpDir = createTempDir("ai-collab-sync-json-lang-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -805,7 +804,7 @@ test("syncTemplates selects JSON language variants for managed config files", as
 });
 
 test("syncTemplates includes external-only files for managed directories", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-dir-"));
+  const tmpDir = createTempDir("ai-collab-sync-template-source-dir-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -853,7 +852,7 @@ test("syncTemplates includes external-only files for managed directories", async
 });
 
 test("syncTemplates keeps built-ins authoritative and lets later external template sources override earlier sources", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-priority-"));
+  const tmpDir = createTempDir("ai-collab-sync-template-source-priority-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -921,7 +920,7 @@ test("syncTemplates keeps built-ins authoritative and lets later external templa
 });
 
 test("syncTemplates ignores external platform variants when a built-in variant already exists", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-builtin-variant-"));
+  const tmpDir = createTempDir("ai-collab-sync-template-source-builtin-variant-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -967,7 +966,7 @@ test("syncTemplates ignores external platform variants when a built-in variant a
 });
 
 test("syncTemplates selects platform and language variants from external template sources", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-variant-"));
+  const tmpDir = createTempDir("ai-collab-sync-template-source-variant-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1006,7 +1005,7 @@ test("syncTemplates selects platform and language variants from external templat
 });
 
 test("syncTemplates reports invalid external template sources and keeps built-in behavior", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-invalid-"));
+  const tmpDir = createTempDir("ai-collab-sync-template-source-invalid-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1053,7 +1052,7 @@ test("syncTemplates reports invalid external template sources and keeps built-in
 });
 
 test("syncTemplates removes stale managed files but preserves merged and ejected files", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-cleanup-"));
+  const tmpDir = createTempDir("ai-collab-sync-cleanup-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1108,7 +1107,7 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
 });
 
 test("syncTemplates keeps an ejected entry that has no template source under a managed directory wildcard", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-project-only-ejected-"));
+  const tmpDir = createTempDir("ai-collab-sync-project-only-ejected-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1145,7 +1144,7 @@ test("syncTemplates keeps an ejected entry that has no template source under a m
 });
 
 test("syncTemplates preserves custom skills when the template has only an empty same-name directory", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-empty-skill-dir-"));
+  const tmpDir = createTempDir("ai-collab-sync-empty-skill-dir-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1190,7 +1189,7 @@ test("syncTemplates preserves custom skills when the template has only an empty 
 });
 
 test("syncTemplates preserves stale files that match merged glob patterns", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-glob-"));
+  const tmpDir = createTempDir("ai-collab-sync-glob-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1227,7 +1226,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
 });
 
 test("syncTemplates syncs the managed shared hook as a single file", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-github-hook-"));
+  const tmpDir = createTempDir("ai-collab-sync-github-hook-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1310,7 +1309,7 @@ test("syncTemplates syncs the managed shared hook as a single file", async () =>
 });
 
 test("syncTemplates reports shared pre-commit as a merged pending file", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-github-pre-commit-"));
+  const tmpDir = createTempDir("ai-collab-sync-github-pre-commit-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1350,7 +1349,7 @@ test("syncTemplates reports shared pre-commit as a merged pending file", async (
 });
 
 test("syncTemplates preserves project testing discipline as a merged file", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-testing-discipline-"));
+  const tmpDir = createTempDir("ai-collab-sync-testing-discipline-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");

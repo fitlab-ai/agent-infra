@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from '../../helpers.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
@@ -14,7 +13,7 @@ import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-deliv
 const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-orchestration-cli-'));
+  const root = createTempDir('task-orchestration-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
@@ -64,7 +63,7 @@ function approvedRouteFixture(
   prFlow: 'required' | 'disabled' | undefined,
   through: 'plan' | 'code' | 'review-code' = 'review-code'
 ) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-orchestration-route-cli-'));
+  const root = createTempDir('task-orchestration-route-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });

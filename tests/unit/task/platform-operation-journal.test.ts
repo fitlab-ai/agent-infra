@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -10,9 +9,10 @@ import {
   readPlatformOperationJournal,
   recordPlatformOperation
 } from '../../../lib/task/platform-operation-journal.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function fixture() {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-operation-journal-'));
+  const repoRoot = createTempDir('platform-operation-journal-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });

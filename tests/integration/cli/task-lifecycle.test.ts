@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lifecycle-cli-'));
+  const root = createTempDir('task-lifecycle-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
@@ -81,7 +80,7 @@ test('task-lifecycle recover-started auto is a no-op when no orchestration run e
 const RESTORE_TASK_ID = 'TASK-20260202-000002';
 
 function stagingFixture({ initGit = true } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lifecycle-restore-cli-'));
+  const root = createTempDir('task-lifecycle-restore-cli-');
   if (initGit) spawnSync('git', ['init', '-q'], { cwd: root });
   const staging = path.join(root, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });

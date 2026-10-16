@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
@@ -10,6 +9,7 @@ import {
   captureWorkspaceSnapshot,
   diffWorkspaceSnapshots
 } from '../../../lib/task/workspace-snapshot.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function git(root: string, args: string[]): void {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -17,7 +17,7 @@ function git(root: string, args: string[]): void {
 }
 
 test('task-scoped snapshots isolate ignored active tasks while retaining Git-visible changes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
+  const root = createTempDir('orchestration-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -47,7 +47,7 @@ test('task-scoped snapshots isolate ignored active tasks while retaining Git-vis
 });
 
 test('repository-wide context snapshots retain active task coverage', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
+  const root = createTempDir('orchestration-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -71,7 +71,7 @@ test('repository-wide context snapshots retain active task coverage', () => {
 });
 
 test('task-scoped and repository-wide contexts retain their explicit scope', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
+  const root = createTempDir('orchestration-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -94,7 +94,7 @@ test('task-scoped and repository-wide contexts retain their explicit scope', () 
 });
 
 test('repository snapshots ignore lifecycle artifacts while detecting Git-visible changes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-repository-snapshot-'));
+  const root = createTempDir('orchestration-repository-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -125,7 +125,7 @@ test('repository snapshots ignore lifecycle artifacts while detecting Git-visibl
 });
 
 test('versioned orchestration snapshots combine a linked worktree with task state from another root', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-split-snapshot-'));
+  const root = createTempDir('orchestration-split-snapshot-');
   const stateRoot = path.join(root, 'state');
   const gitRoot = path.join(root, 'worktree');
   fs.mkdirSync(stateRoot);

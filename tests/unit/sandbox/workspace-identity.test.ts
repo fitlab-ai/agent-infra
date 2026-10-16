@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
@@ -9,9 +8,10 @@ import {
   resolveSandboxTarget,
   sameSandboxWorkspaceIdentity
 } from '../../../lib/sandbox/workspace-identity.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function fixture(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-identity-'));
+  const root = createTempDir('sandbox-identity-');
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   return root;
 }
