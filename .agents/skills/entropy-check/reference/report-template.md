@@ -1,6 +1,6 @@
 # 熵减审查报告
 
-- **报告文件**：`.agents/workspace/logs/entropy-check/entropy-check-YYYYMMDD-HHMMSS.md`
+- **报告文件**：`~/.agent-infra/reports/agent-infra/entropy-check/entropy-check-YYYYMMDD-HHMMSS.md`
 - **执行者**：{agent}
 - **执行时间**：{timestamp}
 
