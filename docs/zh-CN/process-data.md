@@ -12,7 +12,11 @@ ai data repair <snapshot-id> [--root <dir>] [--apply]
 ai data export <snapshot-id> [--root <dir>] [--as-of <ISO>] [--repairs none|applied] [--output <file|->]
 ```
 
-`--source github` 是默认值。`--source local`、`--source all` 和 `--include-excerpts` 会失败关闭，不创建 data root、checkpoint 或 snapshot。历史 `raw-manifest/v1` 的 local、all、GitHub 快照仍可由 `verify`、`audit`、`repair` 和 `export` 读取。
+`--source github` 是默认值。`--source local`、`--source all` 和 `--include-excerpts` 会失败关闭，不创建 data root、checkpoint 或 snapshot。历史 `raw-manifest/v1` 的 local、all、GitHub 快照仍可在通过 `--root` 指定仓库内根目录后由 `verify`、`audit`、`repair` 和 `export` 读取。
+
+未指定 `--root` 时，五个命令统一使用 `~/.agent-infra/data-store/<project>/`。项目键读取仓库 `.agents/.airc.json` 的 `project` 字段，并须符合现有小写项目名格式。配置缺失或非法时命令失败，不回退到仓库目录。这只切换默认位置；现有数据不会自动复制或发现。
+
+显式 `--root` 保持仓库内路径语义：相对路径从仓库根解析，绝对路径仍须位于仓库内。`export --output` 仍是独立的仓库内输出路径。
 
 ## 观察边界与 lineage
 
@@ -25,7 +29,7 @@ HTTP `Date`、页面证据和 checkpoint 只证明本轮观察请求及本地 li
 ## 存储与校验
 
 ```text
-process-data/
+~/.agent-infra/data-store/<project>/
   objects/sha256/<prefix>/<digest>
   snapshots/YYYY/MM/DD/<snapshot-id>/
   checkpoints/github/<repository-key>.json

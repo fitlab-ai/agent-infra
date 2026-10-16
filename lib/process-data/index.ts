@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { detectRepoRoot } from '../task/resolve-ref.ts';
@@ -52,16 +53,26 @@ function parseArgs(args: string[], valueOptions: Set<string>, booleanOptions: Se
 }
 
 function dataRoot(repoRoot: string, requested?: string): string {
-  const workspace = path.resolve(repoRoot, '.agents', 'workspace');
-  const resolved = path.resolve(repoRoot, requested ?? path.join('.agents', 'workspace', 'process-data'));
+  let boundary = repoRoot;
+  let input = requested;
+  if (input === undefined) {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { project?: unknown };
+    if (typeof config.project !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.project)) {
+      throw new Error('.agents/.airc.json must contain a valid project name in its project field');
+    }
+    boundary = path.resolve(os.homedir());
+    input = path.join(boundary, '.agent-infra', 'data-store', config.project);
+  }
+  const resolved = path.resolve(repoRoot, input);
   const relative = path.relative(repoRoot, resolved);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('data root must be inside the repository');
+  if (requested !== undefined && (!relative || relative.startsWith('..') || path.isAbsolute(relative))) throw new Error('data root must be inside the repository');
+  const workspace = path.resolve(repoRoot, '.agents', 'workspace');
   const taskRoots = ['active', 'blocked', 'completed', 'archive'].map((state) => path.join(workspace, state));
   if (resolved === workspace || taskRoots.some((taskRoot) => resolved === taskRoot || resolved.startsWith(`${taskRoot}${path.sep}`))) {
     throw new Error('data root cannot be the workspace root or a task directory');
   }
   let current = resolved;
-  while (current !== repoRoot) {
+  while (current !== boundary) {
     if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error('data root cannot traverse a symlink');
     current = path.dirname(current);
   }
