@@ -879,14 +879,21 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-test("sandbox create runs the configured project init command in the mounted workspace", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox create runs the configured project init command in the mounted workspace", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = createTempDir("agent-infra-sandbox-project-init-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       sandbox: { initCommand: "npm ci" }
     });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init",
+      identity: { mode: "branch-only" }
+    }).root;
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
     const result = spawnSandboxCli(
@@ -908,15 +915,23 @@ test("sandbox create runs the configured project init command in the mounted wor
     ]);
     assert.match(result.stdout, /Sandbox ready/);
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox create does not rerun project init for an existing worktree", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox create does not rerun project init for an existing worktree", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = createTempDir("agent-infra-sandbox-project-init-existing-worktree-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", sandbox: { initCommand: "npm ci" } });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init-existing",
+      identity: { mode: "branch-only" }
+    }).root;
     fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json", ".gitignore"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
@@ -946,18 +961,26 @@ test("sandbox create does not rerun project init for an existing worktree", onPl
     assert.match(repeatedCreate.stdout, /Sandbox ready/);
     assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "exec" && call.at(-1) === "npm ci").length, 1);
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox create reports project init failure and preserves the failed sandbox for diagnosis", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox create reports project init failure and preserves the failed sandbox for diagnosis", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = createTempDir("agent-infra-sandbox-project-init-fail-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       sandbox: { initCommand: "npm ci" }
     });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init-fail",
+      identity: { mode: "branch-only" }
+    }).root;
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
     const result = spawnSandboxCli(
@@ -983,18 +1006,26 @@ test("sandbox create reports project init failure and preserves the failed sandb
       true
     );
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox create retries project init after a failed create on the same worktree", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox create retries project init after a failed create on the same worktree", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = createTempDir("agent-infra-sandbox-project-init-retry-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       sandbox: { initCommand: "npm ci" }
     });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init-retry",
+      identity: { mode: "branch-only" }
+    }).root;
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
 
@@ -1025,6 +1056,7 @@ test("sandbox create retries project init after a failed create on the same work
     assert.match(retried.stdout, /Sandbox ready/);
     assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "exec" && call.at(-1) === "npm ci").length, 2);
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
