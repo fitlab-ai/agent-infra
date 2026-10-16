@@ -56,15 +56,26 @@ branch-only 没有 task ref，两个发现来源都不可读，一律记为 `una
 
 只有 `executable` 可以运行。命令不得输出凭据、环境变量、完整 argv、绝对用户路径或原始 transcript；不能证明安全就保留覆盖缺口。
 
+## 产物目录与 evidence 路径
+
+每轮只选择一次 `{evidence-dir}`，报告和该轮生成的所有 evidence JSON 都写入该目录：
+
+- `task-bound`：直接使用 `task-context resolve` 结构化结果返回的 `TaskDir`。不得按 task ID 拼路径。
+- `branch-only`：仅在用户显式传入合法 `--branch` 且输入是合法显式模式后，使用 Node 内置 API 创建一次目录：`fs.mkdtempSync(path.join(os.tmpdir(), "tmp-"))`。调用现有 Node 运行环境的 `node:fs`、`node:os`、`node:path`；不创建脚本、helper 或额外存储层。不得在 task resolution 失败时走此分支。
+
+报告沿用核心返回的 `validation-run.md|validation-run-r{N}.md` 名称；task-bound evidence 取该报告名去掉 `.md` 后作为 `{artifact-stem}`，文件名为 `{artifact-stem}-{MV-N}-{snapshot|inplace}.json`，因此不同报告轮次、目标及同一目标的 snapshot/inplace 调用不会覆盖。branch-only 在新目录中写 `validation-run.md`，并使用 `validation-run-{MV-N}-{snapshot|inplace}.json`。通过 Node `path.join(evidence-dir, filename)` 生成路径；将整条路径作为一个被当前 shell 正确引用的 `--evidence-file` 参数传入，不拆分含空格的路径。未执行的 scope 不生成文件。
+
+报告只写 evidence 相对文件名，不写绝对用户路径。branch-only 的完成结果另行提供 `{evidence-dir}` 取回路径；报告自身与全部 JSON 均在该目录中。
+
 ## 逐项执行
 
 1. 每个可执行项分别调用：
 
    ```bash
-   agent-infra-internal task-validate {task-ref|branch-ref} --scope snapshot --format json -- {command...}
+   agent-infra-internal task-validate {task-ref|branch-ref} --scope snapshot --format json --evidence-file "{evidence-file}" -- {command...}
    ```
 
-2. 仅当项目要求或首次证据证明依赖未提交内容、原挂载或原位权限时，再为该项显式调用一次 `--scope inplace`，并记录升级理由。
+2. 仅当项目要求或首次证据证明依赖未提交内容、原挂载或原位权限时，再为该项显式调用一次 `--scope inplace`，用该 scope 独立的 evidence 路径并记录升级理由。
 3. 单项失败不阻止其余独立项；分别记录退出状态、cleanup 和去敏 JSON allowlist。
 4. 清单非空但没有 `executable` 项时，仍在 started 后生成 validation-run 产物并完成 lifecycle，不运行占位或伪造命令。
 5. 输入非法时始终在 started 前停止。自动模式下，两来源可靠地确认无项，或唯一可能来源不可读且本地无项时，也在 started 前停止且不写产物；合法显式模式不适用这两个来源停止条件。
