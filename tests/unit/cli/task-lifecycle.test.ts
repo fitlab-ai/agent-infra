@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { applyTaskLifecycle, inspectTaskLifecycleProgress, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
@@ -10,7 +9,7 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
-import { supportsPosixModeBits } from '../../helpers.ts';
+import { createTempDir, supportsPosixModeBits } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {
@@ -19,7 +18,7 @@ const METADATA = {
 };
 
 function fixture(state: 'active' | 'blocked' = 'active') {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lifecycle-'));
+  const repoRoot = createTempDir('task-lifecycle-');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', state, TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', 'active'), { recursive: true });
@@ -314,7 +313,7 @@ test('security completion records the alert payload in its canonical done note',
 });
 
 test('restore validates staging before exposing active and allocates a short id', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-restore-'));
+  const repoRoot = createTempDir('task-restore-');
   const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
@@ -332,7 +331,7 @@ test('restore validates staging before exposing active and allocates a short id'
 });
 
 test('restore transports task receipts with artifacts without using mtime', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-restore-receipt-'));
+  const repoRoot = createTempDir('task-restore-receipt-');
   const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));

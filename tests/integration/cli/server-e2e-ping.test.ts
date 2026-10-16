@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { CLI_PATH, filePath, onPlatforms, gitSafeEnv, initIsolatedGitRepo } from '../../helpers.ts';
+import { createTempDir, CLI_PATH, filePath, onPlatforms, gitSafeEnv, initIsolatedGitRepo } from '../../helpers.ts';
 import { VERSION } from '../../../lib/version.ts';
 
 // End-to-end /ping → pong proof (HD-1 / PL-1). A real built daemon subprocess
@@ -18,7 +17,7 @@ const PROJECT = 'e2e-ping';
 const TEST_ADAPTERS_DIR = filePath('tests/fixtures/server-adapters');
 
 function makeRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-e2e-ping-'));
+  const dir = createTempDir('server-e2e-ping-');
   initIsolatedGitRepo(dir);
   fs.mkdirSync(path.join(dir, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.agents', '.airc.json'), JSON.stringify({ project: PROJECT }));

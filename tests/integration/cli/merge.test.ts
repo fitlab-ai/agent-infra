@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-import { cliArgs, filePath, onPlatforms } from '../../helpers.ts';
+import { createTempDir, cliArgs, filePath, onPlatforms } from '../../helpers.ts';
 import {
   detectSourceMode,
   extractField,
@@ -22,7 +21,7 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 
 function makeTempRepo() {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-merge-'));
+  const repoDir = createTempDir('agent-infra-merge-');
   for (const section of ['active', 'blocked', 'completed', 'archive']) {
     fs.mkdirSync(path.join(repoDir, '.agents', 'workspace', section), { recursive: true });
   }

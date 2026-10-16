@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
 import { inspectCompletionBackfillEligibility } from '../../../lib/platform/completion-backfill.ts';
 import {
@@ -30,7 +29,7 @@ const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-08-24 12:00:00+00:00', agentInfraVersion: 'v0.9.9' };
 
 function fixture(): { repoRoot: string; taskDir: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-'));
+  const repoRoot = createTempDir('task-finalization-');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));

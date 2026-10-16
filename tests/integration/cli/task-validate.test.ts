@@ -1,12 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { gitSafeEnv, initIsolatedGitRepo } from '../../helpers/git.ts';
-import { envWithPrependedPath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, envWithPrependedPath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 const internalCli = path.resolve('bin/internal-cli.ts');
@@ -25,7 +24,7 @@ function spawnTaskValidate(cwd: string, env: NodeJS.ProcessEnv, args: string[]) 
 }
 
 function fixture(linkedWorktree = false) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-validate-'));
+  const root = createTempDir('task-validate-');
   initIsolatedGitRepo(root);
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root, env: gitSafeEnv() });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, env: gitSafeEnv() });
@@ -92,7 +91,7 @@ test('snapshot validation runs at the task commit and removes its temporary work
 
 test('snapshot validation completes when global worktree pruning is unavailable', onPlatforms('linux', 'darwin'), (t) => {
   const f = fixture();
-  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-validate-git-guard-'));
+  const binDir = createTempDir('task-validate-git-guard-');
   t.after(() => {
     fs.rmSync(binDir, { recursive: true, force: true });
     fs.rmSync(f.root, { recursive: true, force: true });

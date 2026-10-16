@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import {
@@ -50,7 +49,7 @@ import { createLocalTask } from '../../../lib/task/create.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
 import { serializeTaskFinalizationEnvelope } from '../../../lib/task/finalization-envelope.ts';
 import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.ts';
 import { finalizeSandboxControlManifest, materializeSandboxControl, sandboxControlPaths } from '../../../lib/sandbox/workspace-view.ts';
 
@@ -469,7 +468,7 @@ function writeFinalizationTaskFixture(root: string, taskId: string): void {
 }
 
 test('sandbox control lifecycle fails closed when a manifest has no owner evidence', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-evidence-'));
+  const root = createTempDir('agent-infra-control-owner-evidence-');
   try {
     const branch = initializeRepository(root);
     const manifestPath = writeControlManifest(root, branch);
@@ -485,7 +484,7 @@ test('sandbox control lifecycle fails closed when a manifest has no owner eviden
 });
 
 test('sandbox-local completion validates identity through the mounted status namespace', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-complete-status-namespace-'));
+  const root = createTempDir('agent-infra-control-complete-status-namespace-');
   try {
     const branch = initializeRepository(root);
     const manifestPath = writeControlManifest(root, branch);
@@ -511,7 +510,7 @@ test('sandbox-local completion validates identity through the mounted status nam
 });
 
 test('host sandbox-control recovery resolves one accepted request from managed manifests and audit evidence', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-'));
+  const root = createTempDir('agent-infra-control-host-recover-');
   const managedRoot = path.join(root, 'demo');
   const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
   const requestId = '12121212-1212-4212-8212-121212121212';
@@ -591,7 +590,7 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
     ? 'requires a host without the sandbox status mount'
     : onPlatforms('linux', 'darwin').skip
 }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-task-recover-cli-'));
+  const root = createTempDir('agent-infra-control-task-recover-cli-');
   const homeAlias = path.join(root, 'home-alias');
   const taskId = 'TASK-20261012-010204';
   const requestId = '15151515-1515-4515-8515-151515151515';
@@ -674,7 +673,7 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
 });
 
 test('task-bound host recovery accepts a configured-base ancestor alias', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-task-alias-recover-'));
+  const root = createTempDir('agent-infra-control-task-alias-recover-');
   const homeAlias = path.join(root, 'home-alias');
   const taskId = 'TASK-20261012-010205';
   const requestId = '16161616-1616-4616-8616-161616161616';
@@ -728,7 +727,7 @@ test('task-bound host recovery accepts a configured-base ancestor alias', () => 
 });
 
 test('host sandbox-control recovery waits for an accepted response to become terminal', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-pending-'));
+  const root = createTempDir('agent-infra-control-host-recover-pending-');
   const managedRoot = path.join(root, 'demo');
   const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
   const requestId = '15151515-1515-4515-8515-151515151515';
@@ -779,7 +778,7 @@ test('host sandbox-control recover prints a request-scoped unknown error in the 
     ? 'requires a host without the sandbox status mount'
     : onPlatforms('linux', 'darwin').skip
 }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-host-recover-unknown-cli-'));
+  const root = createTempDir('agent-infra-control-host-recover-unknown-cli-');
   const requestId = '14141414-1414-4414-8414-141414141414';
   try {
     const branch = initializeRepository(root);
@@ -826,7 +825,7 @@ test('host sandbox-control recover prints a request-scoped unknown error in the 
 });
 
 test('sandbox control lifecycle accepts a stale broker when the manifest is missing', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-broker-'));
+  const root = createTempDir('agent-infra-control-stale-broker-');
   try {
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
       version: 3,
@@ -844,9 +843,9 @@ test('sandbox control lifecycle accepts a stale broker when the manifest is miss
 });
 
 test('ordinary sandbox control GC removes only a verified absent-container root', async () => {
-  const absentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-gc-absent-'));
-  const foundRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-gc-found-'));
-  const unknownRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-gc-unknown-'));
+  const absentRoot = createTempDir('agent-infra-control-gc-absent-');
+  const foundRoot = createTempDir('agent-infra-control-gc-found-');
+  const unknownRoot = createTempDir('agent-infra-control-gc-unknown-');
   try {
     writeControlManifest(absentRoot, initializeRepository(absentRoot), 'gc-absent-generation');
     await garbageCollectSandboxControlRoot(absentRoot, {
@@ -880,7 +879,7 @@ test('ordinary sandbox control GC removes only a verified absent-container root'
 });
 
 test('sandbox control removal gives container operations a bounded pre-force budget', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-deadline-'));
+  const root = createTempDir('agent-infra-control-remove-deadline-');
   let callbackTimeout = 0;
   const inspectionTimeouts: number[] = [];
   let manifestPath: string | undefined;
@@ -911,7 +910,7 @@ test('sandbox control removal gives container operations a bounded pre-force bud
 });
 
 test('sandbox control removal records pending evidence when the exact removal outlives the deadline', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-pending-'));
+  const root = createTempDir('agent-infra-control-remove-pending-');
   let manifestPath: string | undefined;
   try {
     manifestPath = writeControlManifest(root, initializeRepository(root), 'remove-pending-generation');
@@ -942,7 +941,7 @@ test('sandbox control removal records pending evidence when the exact removal ou
 });
 
 test('sandbox control removal resumes from carrier-finalizing without replaying container actions', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-carrier-retry-'));
+  const root = createTempDir('agent-infra-control-remove-carrier-retry-');
   let manifestPath: string | undefined;
   let manifest: ReturnType<typeof readSandboxControlManifest> | undefined;
   const originalRmSync = fs.rmSync;
@@ -991,7 +990,7 @@ test('sandbox control removal resumes from carrier-finalizing without replaying 
 });
 
 test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-removal-journal-'));
+  const root = createTempDir('agent-infra-control-removal-journal-');
   const canonicalRoot = fs.realpathSync.native(root);
   let manifest: ReturnType<typeof readSandboxControlManifest> | undefined;
   t.after(() => {
@@ -1040,7 +1039,7 @@ test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, 
   assert.equal(readSandboxRemovalJournal(manifest), null);
 });
 test('sandbox control removal retries a transient unknown owner through its journal', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-owner-retry-'));
+  const root = createTempDir('agent-infra-control-remove-owner-retry-');
   let probes = 0;
   try {
     const branch = initializeRepository(root);
@@ -1083,7 +1082,7 @@ test('sandbox control removal retries a transient unknown owner through its jour
 });
 
 test('sandbox control removal checks an absent startup transition after the pre-force budget expires', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-startup-budget-'));
+  const root = createTempDir('agent-infra-control-remove-startup-budget-');
   let removeCalled = false;
   try {
     writeControlManifest(root, initializeRepository(root), 'remove-startup-budget-generation');
@@ -1105,7 +1104,7 @@ test('sandbox control removal checks an absent startup transition after the pre-
 
 for (const removalFails of [false, true]) {
   test(`sandbox control removal ${removalFails ? 'cleans up stubborn children after failure' : 'completes all stages for stubborn broker and execution'}`, onPlatforms('linux', 'darwin'), async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-stages-'));
+    const root = createTempDir('agent-infra-control-remove-stages-');
     const brokerReadyPath = path.join(root, 'broker-ready');
     const executionReadyPath = path.join(root, 'execution-ready');
     const stubbornScript = "const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[1], 'ready'); setInterval(() => {}, 1000);";
@@ -1181,7 +1180,7 @@ for (const removalFails of [false, true]) {
 }
 
 test('sandbox control lifecycle terminates a live execution before accepting a stale broker', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-execution-'));
+  const root = createTempDir('agent-infra-control-stale-execution-');
   try {
     const manifestPath = writeControlManifest(root, 'main', 'stale-execution-generation');
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
@@ -1228,7 +1227,7 @@ test('sandbox control lifecycle terminates a live execution before accepting a s
 });
 
 test('sandbox control lifecycle excludes a concurrent broker recovery after quiescing begins', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-quiesce-'));
+  const root = createTempDir('agent-infra-control-recovery-quiesce-');
   let brokerPid: number | null = null;
   try {
     const branch = initializeRepository(root);
@@ -1266,7 +1265,7 @@ test('sandbox control lifecycle excludes a concurrent broker recovery after quie
 });
 
 test('sandbox control lifecycle waits for a live broker to finish its final writes', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-quiesce-'));
+  const root = createTempDir('agent-infra-control-quiesce-');
   let brokerPid: number | null = null;
   try {
     const branch = initializeRepository(root);
@@ -1288,7 +1287,7 @@ test('sandbox control lifecycle waits for a live broker to finish its final writ
 });
 
 test('sandbox control lifecycle terminates execution trees before forcing an unresponsive broker', onPlatforms('linux', 'darwin'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-forced-quiesce-'));
+  const root = createTempDir('agent-infra-control-forced-quiesce-');
   const brokerReadyPath = path.join(root, 'broker-ready');
   const executionReadyPath = path.join(root, 'execution-ready');
   const stubbornScript = "const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[1], 'ready'); setInterval(() => {}, 1000);";
@@ -1345,7 +1344,7 @@ test('sandbox broker uses configured idle heartbeat and parked binding backoff i
     quiesceDeadlineMs: 7_000
   });
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-timing-'));
+  const root = createTempDir('agent-infra-control-timing-');
   try {
     const manifestPath = writeControlManifest(root, initializeRepository(root), 'timing-generation');
     const statusDir = path.join(root, 'public');
@@ -1428,7 +1427,7 @@ test('sandbox broker uses configured idle heartbeat and parked binding backoff i
 });
 
 test('sandbox broker self-GCs its control root after an authoritative absent heartbeat', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-heartbeat-absent-'));
+  const root = createTempDir('agent-infra-control-heartbeat-absent-');
   const controller = new AbortController();
   let serving: Promise<void> | undefined;
   let heartbeatQueries = 0;
@@ -1462,7 +1461,7 @@ test('sandbox broker self-GCs its control root after an authoritative absent hea
 });
 
 test('sandbox broker retains ownership and backs off after an unknown heartbeat', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-heartbeat-unknown-'));
+  const root = createTempDir('agent-infra-control-heartbeat-unknown-');
   const controller = new AbortController();
   let heartbeatQueries = 0;
   try {
@@ -1503,7 +1502,7 @@ test('sandbox broker retains ownership and backs off after an unknown heartbeat'
 });
 
 test('sandbox broker startup resolves only after matching status is published', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-readiness-'));
+  const root = createTempDir('agent-infra-control-readiness-');
   const channelDir = path.join(root, 'channel');
   const statusDir = path.join(root, 'public');
   const processingDir = path.join(root, 'processing');
@@ -1539,7 +1538,7 @@ test('sandbox broker startup resolves only after matching status is published', 
 });
 
 test('sandbox broker startup replaces a stale owner without creating a concurrent live owner', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
+  const root = createTempDir('agent-infra-control-owner-');
   const channelDir = path.join(root, 'channel');
   const statusDir = path.join(root, 'public');
   const processingDir = path.join(root, 'processing');
@@ -1614,7 +1613,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
 });
 
 test('sandbox control client tolerates a transient torn response but rejects stable malformed data', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-response-'));
+  const root = createTempDir('agent-infra-control-response-');
   const channelDir = path.join(root, 'channel');
   const requestsDir = path.join(channelDir, 'requests');
   const responsesDir = path.join(channelDir, 'responses');
@@ -1712,7 +1711,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
 });
 
 test('sandbox control recovery reads the retained terminal response by request id', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-client-'));
+  const root = createTempDir('agent-infra-control-recover-client-');
   const responsesDir = path.join(root, 'responses');
   const requestId = '33333333-3333-3333-3333-333333333333';
   fs.mkdirSync(responsesDir, { recursive: true });
@@ -1730,7 +1729,7 @@ test('sandbox control recovery reads the retained terminal response by request i
 });
 
 test('sandbox control recovery waits for a published unknown response to become terminal', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-unknown-'));
+  const root = createTempDir('agent-infra-control-recover-unknown-');
   const responsesDir = path.join(root, 'responses');
   const readyPath = path.join(root, 'recover-ready');
   const requestId = '44444444-4444-4444-8444-444444444444';
@@ -1763,7 +1762,7 @@ test('sandbox control recovery waits for a published unknown response to become 
 });
 
 test('sandbox control recovery times out on a stable published unknown with identity intact', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-stable-unknown-'));
+  const root = createTempDir('agent-infra-control-recover-stable-unknown-');
   const responsesDir = path.join(root, 'responses');
   const readyPath = path.join(root, 'recover-ready');
   const requestId = '66666666-6666-4666-8666-666666666666';
@@ -1791,7 +1790,7 @@ test('sandbox control recovery times out on a stable published unknown with iden
 });
 
 test('sandbox control recovery polls a published unknown at the bounded cadence', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-cadence-'));
+  const root = createTempDir('agent-infra-control-recover-cadence-');
   const responsesDir = path.join(root, 'responses');
   const requestId = '77777777-7777-4777-8777-777777777777';
   const responsePath = path.join(responsesDir, `${requestId}.json`);
@@ -1833,7 +1832,7 @@ test('sandbox control recovery polls a published unknown at the bounded cadence'
 });
 
 test('broker recovery cleans up a normally published large-output terminal', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-large-terminal-recovery-'));
+  const root = createTempDir('agent-infra-large-terminal-recovery-');
   const requestId = '99999999-9999-4999-8999-999999999999';
   const output = 'x'.repeat(2 * 1024 * 1024);
   const childStderr = 'child warning\n';
@@ -1925,8 +1924,8 @@ test('broker recovery cleans up a normally published large-output terminal', asy
 });
 
 test('host recovery consumes the production publication audit after broker cleanup', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-host-recovery-writer-'));
-  const managedParent = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-managed-control-'));
+  const root = createTempDir('agent-infra-host-recovery-writer-');
+  const managedParent = createTempDir('agent-infra-managed-control-');
   const managedRoot = path.join(managedParent, 'demo');
   const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
   const requestId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
@@ -2009,7 +2008,7 @@ test('host recovery consumes the production publication audit after broker clean
 });
 
 test('sandbox-local complete leaves the same broker available for a real task-create request', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-direct-complete-'));
+  const root = createTempDir('agent-infra-direct-complete-');
   const taskId = 'TASK-20260809-010203';
   const controller = new AbortController();
   let server: Promise<void> | undefined;
@@ -2109,7 +2108,7 @@ test('sandbox-local complete rejects mismatched mounted task, root id, or genera
     ['controlRootId', 'b'.repeat(96), 1],
     ['generation', 'other-generation', 2]
   ] as const) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-local-control-identity-'));
+    const root = createTempDir('agent-infra-local-control-identity-');
     try {
       const branch = initializeRepository(root);
       writeFinalizationTaskFixture(root, 'TASK-20260809-010203');
@@ -2134,7 +2133,7 @@ test('sandbox-local complete rejects mismatched mounted task, root id, or genera
 for (const shortIdLength of [2, 3]) {
 test(`sandbox control broker enforces task binding with short-id width ${shortIdLength}`, async () => {
   const internalCliPath = path.resolve('bin/internal-cli.ts');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
+  const root = createTempDir('agent-infra-control-roundtrip-');
   const channelDir = path.join(root, 'channel');
   const manifestPath = path.join(root, 'manifest.json');
   const token = 'roundtrip-secret';
@@ -2254,7 +2253,7 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
 }
 
 test('broker recovery terminates a live started executor before retaining unknown', onPlatforms('linux'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-orphan-executor-recovery-'));
+  const root = createTempDir('agent-infra-orphan-executor-recovery-');
   const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   let server: Promise<void> | undefined;
   let controller: AbortController | undefined;
@@ -2311,7 +2310,7 @@ test('broker recovery terminates a live started executor before retaining unknow
 });
 
 test('branch-only broker persists a typed task-create request on the host', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-task-create-'));
+  const root = createTempDir('agent-infra-control-task-create-');
   const channelDir = path.join(root, 'control', 'channel');
   const manifestPath = path.join(root, 'control', 'manifest.json');
   const token = 'roundtrip-secret';
@@ -2406,7 +2405,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
 });
 
 test('broker recovery preserves terminal responses and marks unaccepted claims retryable', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-'));
+  const root = createTempDir('agent-infra-control-recovery-');
   const channelDir = path.join(root, 'channel');
   const responsesDir = path.join(channelDir, 'responses');
   const statusDir = path.join(root, 'public');
@@ -2488,7 +2487,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
 });
 
 test('broker recovery returns inspectable task-create output when the payload is unavailable', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-recovery-'));
+  const root = createTempDir('agent-infra-task-create-recovery-');
   const requestId = '99999999-9999-4999-8999-999999999999';
   try {
     const branch = initializeRepository(root);
@@ -2572,7 +2571,7 @@ test('broker recovery returns inspectable task-create output when the payload is
 });
 
 test('broker restart accepts an existing unavailable task-create terminal', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-terminal-recovery-'));
+  const root = createTempDir('agent-infra-task-create-terminal-recovery-');
   const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   try {
     const branch = initializeRepository(root);
@@ -2634,7 +2633,7 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
 });
 
 test('broker recovery accepts a task-create no-op for a non-active task', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-non-active-recovery-'));
+  const root = createTempDir('agent-infra-task-create-non-active-recovery-');
   const requestId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   let server: Promise<void> | undefined;
   let controller: AbortController | undefined;

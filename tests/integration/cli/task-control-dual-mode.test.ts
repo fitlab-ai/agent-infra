@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { CLI_PATH, INTERNAL_CLI_PATH, filePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, CLI_PATH, INTERNAL_CLI_PATH, filePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import {
   createDirectHostExecutionContext,
   createSandboxExecutorExecutionContext,
@@ -87,7 +87,7 @@ function runLauncher(command: string, args: string[], env: NodeJS.ProcessEnv): {
 }
 
 test('internal launcher resolves its package path when invoked through a symlink', onPlatforms('linux', 'darwin'), () => {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-launcher-link-'));
+  const temporaryRoot = createTempDir('task-control-launcher-link-');
   const launcherLink = path.join(temporaryRoot, 'agent-infra-internal');
   try {
     fs.symlinkSync(filePath('bin/internal-cli.sh'), launcherLink);
@@ -155,7 +155,7 @@ test('the launcher wrapper permits direct-host help without a sandbox identity',
     return;
   }
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
-  const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-launcher-home-'));
+  const isolatedHome = createTempDir('task-control-launcher-home-');
   try {
     for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
       const result = runLauncher(command, ['--help'], cleanEnv({
@@ -294,7 +294,7 @@ test('task-bound marker requires its runtime binding before entering the client'
 });
 
 test('shared sandbox control transport selection is fail-closed and distinguishes workspace modes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-transport-'));
+  const root = createTempDir('task-control-transport-');
   const statusDir = path.join(root, 'status');
   const generation = 'generation';
   const controlRootId = 'a'.repeat(96);
@@ -341,7 +341,7 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
 const TASK_ID = 'TASK-20260809-010203';
 
 function taskFixture(activityLog = true, repository = false): { root: string; taskDir: string } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-dual-mode-'));
+  const root = createTempDir('task-control-dual-mode-');
   const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));

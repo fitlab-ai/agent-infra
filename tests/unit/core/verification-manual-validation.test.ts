@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
@@ -9,6 +8,7 @@ import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { createTempDir } from '../../helpers.ts';
 
 // Branch matrix for the complete-task.preflight `manual-validation` check
 // (see plan-r6). Completion requires a committed receipt, transaction, artifact
@@ -23,7 +23,7 @@ const REVIEW_CODE_MV_1 = `# Code Review
 `;
 
 function fixture(activityEntries: string[]) {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-manual-validation-'));
+  const taskDir = createTempDir('verification-manual-validation-');
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---
 id: TASK-20260101-000001
 ---

@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
@@ -57,7 +56,7 @@ const qualificationCandidate: TaskCreateCandidateV1 = {
 };
 
 function fixture(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-'));
+  const root = createTempDir('agent-infra-task-create-');
   if (process.platform === 'win32') process.env.USERPROFILE = root;
   else process.env.HOME = root;
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
@@ -345,7 +344,7 @@ test('local task creation safely restores missing runtime workspace directories'
 
 test('local task creation rejects a symbolic-link workspace without writing outside the repository', onPlatforms('linux', 'darwin'), () => {
   const root = fixture();
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-outside-'));
+  const outside = createTempDir('agent-infra-task-create-outside-');
   try {
     fs.rmSync(path.join(root, '.agents', 'workspace'), { recursive: true });
     fs.symlinkSync(outside, path.join(root, '.agents', 'workspace'));
@@ -415,7 +414,7 @@ test('local task creation preserves a lock owned by the current process', () => 
 
 test('task-create explicit lock identity is shared across checkouts and isolated by project', () => {
   const left = fixture();
-  const right = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-checkout-'));
+  const right = createTempDir('agent-infra-task-create-checkout-');
   try {
     const sharedLeft = lockKey(left, 'task-create', 'task-create\0demo');
     const sharedRight = lockKey(right, 'task-create', 'task-create\0demo');

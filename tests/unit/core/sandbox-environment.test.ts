@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { isSandbox } from '../../../lib/sandbox/environment.ts';
 import { resolveSandboxControlTransport } from '../../../lib/sandbox/environment.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 test('isSandbox distinguishes direct host from a verified mounted sandbox', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-'));
+  const root = createTempDir('sandbox-environment-');
   const statusDir = path.join(root, 'status');
   const generation = 'sandbox-environment-generation';
   const controlRootId = 'a'.repeat(96);
@@ -34,7 +33,7 @@ test('isSandbox distinguishes direct host from a verified mounted sandbox', () =
 });
 
 test('isSandbox fails closed when sandbox configuration or its explicit marker is incomplete', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-incomplete-'));
+  const root = createTempDir('sandbox-environment-incomplete-');
   const statusDir = path.join(root, 'status');
   fs.mkdirSync(statusDir);
   writeSandboxControlIdentitySentinel(statusDir, {
@@ -64,7 +63,7 @@ test('isSandbox fails closed when sandbox configuration or its explicit marker i
 });
 
 test('task-bound sandbox requires the complete mounted control root while branch-only does not', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-task-root-'));
+  const root = createTempDir('sandbox-environment-task-root-');
   const statusDir = path.join(root, 'status');
   fs.mkdirSync(statusDir);
   const taskId = 'TASK-20261012-010203';
@@ -92,7 +91,7 @@ test('task-bound sandbox requires the complete mounted control root while branch
 });
 
 test('isSandbox does not treat a mounted status directory as absent when fs.lstatSync is replaced', onPlatforms('linux'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-environment-probe-'));
+  const root = createTempDir('sandbox-environment-probe-');
   const originalLstatSync = fs.lstatSync;
   const mutableFs = fs as unknown as { lstatSync: typeof fs.lstatSync };
   fs.mkdirSync(path.join(root, 'status'));

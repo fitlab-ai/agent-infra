@@ -13,6 +13,7 @@ import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.
 import { withRepositoryMutationLock } from "../../../lib/task/task-execution-lock.ts";
 
 import {
+  createTempDir,
   cliArgs,
   envWithPrependedPath,
   filePath,
@@ -246,7 +247,7 @@ test("sandbox create rejects invalid selinux disable environment before loading 
 });
 
 test("sandbox rm cleans per-branch shell config dir", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rm-shell-config-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rm-shell-config-");
   const project = "demo";
 
   try {
@@ -410,7 +411,7 @@ function hasDockerVerb(calls: string[][], verb: string): boolean {
 }
 
 test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanup", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-yes-"));
+  const tmpDir = createTempDir("agent-infra-rm-all-yes-");
   const project = "demo";
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -438,7 +439,7 @@ test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanu
 });
 
 test("sandbox rm --unbound acquires the repository mutation lock before listing rows", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-lock-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-lock-");
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
@@ -458,7 +459,7 @@ test("sandbox rm --unbound acquires the repository mutation lock before listing 
 });
 
 test("sandbox rm --unbound validates every target before deleting the first one", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-invalid-target-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-invalid-target-");
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
@@ -483,7 +484,7 @@ test("sandbox rm --unbound validates every target before deleting the first one"
 });
 
 test("sandbox rm removes only the matching task-bound container when its task record is missing", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-task-record-"));
+  const tmpDir = createTempDir("agent-infra-rm-missing-task-record-");
   const taskId = "TASK-20260101-000105";
   const branch = "feature/missing-task-record";
   const container = "demo-dev-feature..missing-task-record";
@@ -507,7 +508,7 @@ test("sandbox rm removes only the matching task-bound container when its task re
 });
 
 test("sandbox rm rejects a missing task record with multiple sandbox branches", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-ambiguous-task-record-"));
+  const tmpDir = createTempDir("agent-infra-rm-ambiguous-task-record-");
   const taskId = "TASK-20260101-000106";
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -529,7 +530,7 @@ test("sandbox rm rejects a missing task record with multiple sandbox branches", 
 });
 
 test("sandbox rm rejects an unmapped short id before sandbox cleanup side effects", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-short-id-"));
+  const tmpDir = createTempDir("agent-infra-rm-missing-short-id-");
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     const registeredTaskId = "TASK-20260101-000107";
@@ -550,7 +551,7 @@ test("sandbox rm rejects an unmapped short id before sandbox cleanup side effect
 });
 
 test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes task sandboxes with released short ids", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-task-states-");
   const tasks = [
     { state: "active", taskId: "TASK-20260101-000101", branch: "feature/remove-active", container: "sb-remove-active" },
     { state: "blocked", taskId: "TASK-20260101-000102", branch: "feature/remove-blocked", container: "sb-remove-blocked" },
@@ -590,7 +591,7 @@ test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes
 });
 
 test("sandbox rm --unbound --yes preserves a branch-only row tied to an active task", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-active-branch-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-active-branch-");
   const taskId = "TASK-20260101-000105";
   const branch = "feature/active-branch";
   const container = "sb-active-branch";
@@ -615,7 +616,7 @@ test("sandbox rm --unbound --yes preserves a branch-only row tied to an active t
 });
 
 test("sandbox rm --unbound --yes preserves branch state shared with a task-bound row", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-shared-branch-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-shared-branch-");
   const branch = "feature/shared-branch";
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -639,7 +640,7 @@ test("sandbox rm --unbound --yes preserves branch state shared with a task-bound
 });
 
 test("sandbox rm --unbound --yes preserves a task-bound row sharing a branch with an active task", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-terminal-active-branch-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-terminal-active-branch-");
   const branch = "feature/terminal-active-branch";
   const oldTaskId = "TASK-20260101-000107";
   const activeTaskId = "TASK-20260101-000108";
@@ -666,7 +667,7 @@ test("sandbox rm --unbound --yes preserves a task-bound row sharing a branch wit
 });
 
 test("sandbox rm --unbound --yes preserves a task-bound row when its branch label differs from the task record", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-mismatched-task-branch-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-mismatched-task-branch-");
   const taskId = "TASK-20260101-000109";
   const labeledBranch = "feature/container-label";
   const recordedBranch = "feature/task-record";
@@ -695,7 +696,7 @@ test("sandbox rm --unbound --yes preserves a task-bound row when its branch labe
 });
 
 test("sandbox rm --unbound --yes preserves rows with invalid identity or missing branch", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-invalid-identity-"));
+  const tmpDir = createTempDir("agent-infra-rm-unbound-invalid-identity-");
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
@@ -718,7 +719,7 @@ test("sandbox rm --unbound --yes preserves rows with invalid identity or missing
 });
 
 test("sandbox rm --all returns a migration error before loading project config", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-removed-"));
+  const tmpDir = createTempDir("agent-infra-rm-all-removed-");
   try {
     const result = spawnSync(process.execPath, cliArgs("sandbox", "rm", "--all"), {
       cwd: tmpDir,
@@ -735,7 +736,7 @@ test("sandbox rm --all returns a migration error before loading project config",
 
 test("managed sandbox fs helpers remove only paths under the managed root", async () => {
   const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-fs-"));
+  const tmpDir = createTempDir("agent-infra-managed-fs-");
   const root = path.join(tmpDir, "root");
   const inside = path.join(root, "feature..demo");
 
@@ -755,7 +756,7 @@ test("managed sandbox fs helpers remove only paths under the managed root", asyn
 });
 
 test("sandbox create warns and continues past missing Claude credentials", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-credentials-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-no-credentials-");
   const project = `sandbox-no-leak-${process.pid}-${Date.now()}`;
   const dockerfilePrefix = `${project}-sandbox-`;
   const existingEntries = new Set(
@@ -798,7 +799,7 @@ test("sandbox create warns and continues past missing Claude credentials", () =>
 });
 
 test("sandbox create keeps a clean runtime-only workspace and does not mount the host ssh directory", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-ssh-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-no-ssh-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -878,14 +879,21 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-test("sandbox create runs the configured project init command in the mounted workspace", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-"));
+test("sandbox create runs the configured project init command in the mounted workspace", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = createTempDir("agent-infra-sandbox-project-init-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       sandbox: { initCommand: "npm ci" }
     });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init",
+      identity: { mode: "branch-only" }
+    }).root;
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
     const result = spawnSandboxCli(
@@ -907,15 +915,23 @@ test("sandbox create runs the configured project init command in the mounted wor
     ]);
     assert.match(result.stdout, /Sandbox ready/);
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox create does not rerun project init for an existing worktree", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-existing-worktree-"));
+test("sandbox create does not rerun project init for an existing worktree", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = createTempDir("agent-infra-sandbox-project-init-existing-worktree-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", sandbox: { initCommand: "npm ci" } });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init-existing",
+      identity: { mode: "branch-only" }
+    }).root;
     fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json", ".gitignore"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
@@ -945,18 +961,26 @@ test("sandbox create does not rerun project init for an existing worktree", onPl
     assert.match(repeatedCreate.stdout, /Sandbox ready/);
     assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "exec" && call.at(-1) === "npm ci").length, 1);
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox create reports project init failure and preserves the failed sandbox for diagnosis", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-fail-"));
+test("sandbox create reports project init failure and preserves the failed sandbox for diagnosis", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = createTempDir("agent-infra-sandbox-project-init-fail-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       sandbox: { initCommand: "npm ci" }
     });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init-fail",
+      identity: { mode: "branch-only" }
+    }).root;
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
     const result = spawnSandboxCli(
@@ -982,18 +1006,26 @@ test("sandbox create reports project init failure and preserves the failed sandb
       true
     );
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox create retries project init after a failed create on the same worktree", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-retry-"));
+test("sandbox create retries project init after a failed create on the same worktree", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = createTempDir("agent-infra-sandbox-project-init-retry-");
+  let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       sandbox: { initCommand: "npm ci" }
     });
+    controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+      project: "demo",
+      container: "demo-dev-feature..project-init-retry",
+      identity: { mode: "branch-only" }
+    }).root;
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
 
@@ -1024,12 +1056,13 @@ test("sandbox create retries project init after a failed create on the same work
     assert.match(retried.stdout, /Sandbox ready/);
     assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "exec" && call.at(-1) === "npm ci").length, 2);
   } finally {
+    await quiesceSandboxControlRootForCleanup(controlRoot);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("task-bound sandbox create keeps Git clean and exposes only the scoped writable task", onPlatforms("linux", "darwin", "win32"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-task-bound-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-task-bound-");
   const taskId = "TASK-20260301-000001";
   const siblingTaskId = "TASK-20260301-000002";
   const branch = "registry-branch";
@@ -1199,7 +1232,7 @@ test(
 
 test("ensureSandboxAliasesFile creates the default aliases once", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-defaults-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-aliases-defaults-");
 
   try {
     const created = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
@@ -1225,7 +1258,7 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
 
 test("ensureSandboxAliasesFile creates parent directories for the consolidated alias path", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-nested-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-aliases-nested-");
 
   try {
     const { path: aliasesPath } = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
@@ -1239,7 +1272,7 @@ test("ensureSandboxAliasesFile creates parent directories for the consolidated a
 
 test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-upgrade-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-aliases-upgrade-");
   const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
   const legacyContent = [
     "alias claude-yolo='claude --dangerously-skip-permissions'",
@@ -1270,7 +1303,7 @@ test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () 
 
 test("ensureSandboxAliasesFile writes OpenCode full yolo permissions", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-opencode-full-yolo-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-aliases-opencode-full-yolo-");
 
   try {
     const { path: aliasesPath } = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
@@ -1287,7 +1320,7 @@ test("ensureSandboxAliasesFile writes OpenCode full yolo permissions", async () 
 
 test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo permissions", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-opencode-upgrade-full-yolo-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-aliases-opencode-upgrade-full-yolo-");
   const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
 
   try {
@@ -1345,7 +1378,7 @@ test("resolveTaskBranch returns plain branch names unchanged", async () => {
 
 test("resolveTaskBranch reads branch from task frontmatter", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-frontmatter-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-task-frontmatter-");
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180000");
 
   try {
@@ -1371,7 +1404,7 @@ test("resolveTaskBranch reads branch from task frontmatter", async () => {
 
 test("resolveTaskBranch strips matching quotes from task branch metadata", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-quotes-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-task-quotes-");
   const cases: Array<[string, string]> = [
     ["TASK-20260401-180010", "branch: \"agent-infra-feature-cli-generic-sandbox\""],
     ["TASK-20260401-180011", "branch: 'agent-infra-feature-cli-generic-sandbox'"]
@@ -1403,7 +1436,7 @@ test("resolveTaskBranch strips matching quotes from task branch metadata", async
 
 test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-task-context-");
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180001");
 
   try {
@@ -1430,7 +1463,7 @@ test("resolveTaskBranch falls back to the context branch for legacy tasks", asyn
 
 test("resolveTaskBranch strips matching quotes from legacy context branch metadata", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-quotes-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-task-context-quotes-");
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180012");
 
   try {
@@ -1458,7 +1491,7 @@ test("resolveTaskBranch strips matching quotes from legacy context branch metada
 for (const workspaceDir of ["completed", "blocked", "archive"]) {
   test(`resolveTaskBranch resolves tasks in ${workspaceDir} directory`, async () => {
     const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-sandbox-task-${workspaceDir}-`));
+    const tmpDir = createTempDir(`agent-infra-sandbox-task-${workspaceDir}-`);
     const taskDir = workspaceDir === "archive"
       ? path.join(tmpDir, ".agents", "workspace", workspaceDir, "2026", "04", "01", "TASK-20260401-180003", "local")
       : path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
@@ -1487,7 +1520,7 @@ for (const workspaceDir of ["completed", "blocked", "archive"]) {
 
 test("resolveTaskBranch prefers active over completed when both exist", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-priority-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-task-priority-");
   const activeDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180004");
   const completedDir = path.join(tmpDir, ".agents", "workspace", "completed", "TASK-20260401-180004");
 
@@ -1518,7 +1551,7 @@ test("resolveTaskBranch prefers active over completed when both exist", async ()
 
 test("resolveTaskBranch rejects missing task files and missing branch metadata", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-errors-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-task-errors-");
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180002");
 
   try {
@@ -1549,7 +1582,7 @@ test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
 });
 
 test("sandbox ls runtime hint explains active branch protection for SHORT '-'", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-ls-short-cleanup-hint-"));
+  const tmpDir = createTempDir("agent-infra-ls-short-cleanup-hint-");
   const taskId = "TASK-20260101-000107";
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -1689,7 +1722,7 @@ test("sandbox list-running isTaskShortRef matches bare numeric only", async () =
 
 test("sandbox list-running resolveTaskShortRef hits registry and returns task.md branch", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-hit-"));
+  const tmp = createTempDir("rtsr-hit-");
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
   fs.copyFileSync(
     path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
@@ -1716,7 +1749,7 @@ test("sandbox list-running resolveTaskShortRef hits registry and returns task.md
 
 test("sandbox list-running resolveTaskShortRef throws when registry hits but branch metadata missing (M-1)", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-corrupt-"));
+  const tmp = createTempDir("rtsr-corrupt-");
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
   fs.copyFileSync(
     path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
@@ -1746,7 +1779,7 @@ test("sandbox list-running resolveTaskShortRef throws when registry hits but bra
 
 test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4: no ls-index fallback)", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-miss-"));
+  const tmp = createTempDir("rtsr-miss-");
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
   fs.copyFileSync(
     path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
@@ -1775,7 +1808,7 @@ test("sandbox ls parseLabels parses docker label CSV", async () => {
 
 test("sandbox prune collects orphaned per-branch dirs while preserving active and shared dirs", async () => {
   const sandboxPrune = await loadFreshEsm<PruneModule>("lib/sandbox/commands/prune.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-prune-collect-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-prune-collect-");
   const project = "demo";
   const config = {
     project,
@@ -1857,7 +1890,7 @@ test("sandbox prune collects orphaned per-branch dirs while preserving active an
 });
 
 test("sandbox prune aborts without deleting when docker ps fails", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-prune-ps-fails-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-prune-ps-fails-");
   const project = "demo";
 
   try {
@@ -1886,7 +1919,7 @@ test("sandbox prune aborts without deleting when docker ps fails", onPlatforms("
 });
 
 test("sandbox prune --dry-run lists orphans without deleting them", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-prune-dry-run-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-prune-dry-run-");
   const project = "demo";
 
   try {
@@ -1956,7 +1989,7 @@ test("sandbox exec recognizes --recreate only before the target", async () => {
 });
 
 test("sandbox start boots a stopped container for the branch", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-exited-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-start-exited-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -1980,7 +2013,7 @@ test("sandbox start boots a stopped container for the branch", onPlatforms("linu
 });
 
 test("sandbox start reports a missing container and points to create", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-missing-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-start-missing-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: "" });
@@ -1997,7 +2030,7 @@ test("sandbox start reports a missing container and points to create", onPlatfor
 });
 
 test("sandbox start is a no-op when the container is already running", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-running-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-start-running-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -2020,7 +2053,7 @@ test("sandbox start is a no-op when the container is already running", onPlatfor
 });
 
 test("sandbox start --recreate does not rerun project init for an existing sandbox", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-recreate-init-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-recreate-init-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -2051,7 +2084,7 @@ test("sandbox start --recreate does not rerun project init for an existing sandb
 });
 
 test("sandbox exec --recreate does not rerun project init for an existing sandbox", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-exec-recreate-init-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-exec-recreate-init-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -2086,7 +2119,7 @@ test("sandbox exec --recreate does not rerun project init for an existing sandbo
 });
 
 test("sandbox start surfaces a distinct error when docker start fails", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-fail-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-start-fail-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -2108,7 +2141,7 @@ test("sandbox start surfaces a distinct error when docker start fails", onPlatfo
 });
 
 test("sandbox start resolves a task short id to its branch container", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-short-id-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-start-short-id-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -2164,7 +2197,7 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
 });
 
 test("sandbox create identity conflict recommends container-only task recovery", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-identity-conflict-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-identity-conflict-");
   const taskId = "TASK-20260301-000001";
   const branch = "registry-branch";
 

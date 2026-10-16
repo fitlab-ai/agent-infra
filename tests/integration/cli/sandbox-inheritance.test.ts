@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import * as toml from "smol-toml";
 
 import {
+  createTempDir,
   filePath,
   loadFreshEsm,
   onPlatforms,
@@ -95,7 +95,7 @@ async function loadSandboxCreate(): Promise<SandboxCreateModule> {
 
 test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-");
 
   try {
     (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir);
@@ -109,7 +109,7 @@ test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace 
 
 test("ensureClaudeOnboarding preserves existing fields", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-existing-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-existing-");
 
   try {
     fs.writeFileSync(path.join(tmpDir, ".claude.json"), JSON.stringify({ theme: "dark", userID: "abc" }), "utf8");
@@ -129,7 +129,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
   // map (e.g. if no project was opened). We must still preseed the workspace
   // trust entry and persist it to disk.
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-partial-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-partial-");
 
   try {
     fs.writeFileSync(
@@ -148,7 +148,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
 
 test("ensureClaudeOnboarding skips write when flag already set", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-noop-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-noop-");
   const filePath = path.join(tmpDir, ".claude.json");
 
   try {
@@ -167,8 +167,8 @@ test("ensureClaudeOnboarding skips write when flag already set", async () => {
 
 test("ensureClaudeOnboarding inherits host model when sandbox model is absent", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-model-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-model-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-model-");
+  const hostHome = createTempDir("agent-infra-claude-host-model-");
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ model: "claude-opus-4-7" }), "utf8");
@@ -184,8 +184,8 @@ test("ensureClaudeOnboarding inherits host model when sandbox model is absent", 
 
 test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-keep-model-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-keep-model-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-keep-model-");
+  const hostHome = createTempDir("agent-infra-claude-host-keep-model-");
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ model: "claude-opus-4-7" }), "utf8");
@@ -201,8 +201,8 @@ test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
 
 test("ensureClaudeOnboarding skips host model when it is missing", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-missing-model-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-missing-model-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-missing-model-");
+  const hostHome = createTempDir("agent-infra-claude-host-missing-model-");
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ theme: "dark" }), "utf8");
@@ -217,8 +217,8 @@ test("ensureClaudeOnboarding skips host model when it is missing", async () => {
 
 test("ensureClaudeOnboarding skips empty host model", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-empty-model-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-empty-model-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-empty-model-");
+  const hostHome = createTempDir("agent-infra-claude-host-empty-model-");
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ model: "" }), "utf8");
@@ -233,8 +233,8 @@ test("ensureClaudeOnboarding skips empty host model", async () => {
 
 test("ensureClaudeOnboarding ignores malformed host json", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-malformed-host-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-malformed-"));
+  const tmpDir = createTempDir("agent-infra-claude-onboarding-malformed-host-");
+  const hostHome = createTempDir("agent-infra-claude-host-malformed-");
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), "{", "utf8");
@@ -250,8 +250,8 @@ test("ensureClaudeOnboarding ignores malformed host json", async () => {
 
 test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absent", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-inherit-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-"));
+  const tmpDir = createTempDir("agent-infra-claude-launchpin-inherit-");
+  const hostHome = createTempDir("agent-infra-claude-launchpin-host-");
 
   try {
     fs.writeFileSync(
@@ -270,8 +270,8 @@ test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absen
 
 test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-preserve-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-preserve-"));
+  const tmpDir = createTempDir("agent-infra-claude-launchpin-preserve-");
+  const hostHome = createTempDir("agent-infra-claude-launchpin-host-preserve-");
 
   try {
     fs.writeFileSync(
@@ -295,8 +295,8 @@ test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", 
 
 test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-omit-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-omit-"));
+  const tmpDir = createTempDir("agent-infra-claude-launchpin-omit-");
+  const hostHome = createTempDir("agent-infra-claude-launchpin-host-omit-");
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ theme: "dark" }), "utf8");
@@ -311,8 +311,8 @@ test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async ()
 
 test("ensureClaudeOnboarding inherits all matching launch-pin flags for future models", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-future-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-future-"));
+  const tmpDir = createTempDir("agent-infra-claude-launchpin-future-");
+  const hostHome = createTempDir("agent-infra-claude-launchpin-host-future-");
 
   try {
     fs.writeFileSync(
@@ -335,8 +335,8 @@ test("ensureClaudeOnboarding inherits all matching launch-pin flags for future m
 
 test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly true", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-nonboolean-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-nonboolean-"));
+  const tmpDir = createTempDir("agent-infra-claude-launchpin-nonboolean-");
+  const hostHome = createTempDir("agent-infra-claude-launchpin-host-nonboolean-");
 
   try {
     fs.writeFileSync(
@@ -361,7 +361,7 @@ test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly 
 
 test("ensureClaudeSettings creates settings.json with skipDangerousModePermissionPrompt", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-");
 
   try {
     (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir);
@@ -374,7 +374,7 @@ test("ensureClaudeSettings creates settings.json with skipDangerousModePermissio
 
 test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is already set", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-noop-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-noop-");
   const settingsPath = path.join(tmpDir, "settings.json");
 
   try {
@@ -392,8 +392,8 @@ test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is
 
 test("ensureClaudeSettings inherits host effort level when sandbox field is absent", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-effort-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-effort-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-effort-");
+  const hostHome = createTempDir("agent-infra-claude-host-effort-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -414,8 +414,8 @@ test("ensureClaudeSettings inherits host effort level when sandbox field is abse
 
 test("ensureClaudeSettings preserves existing sandbox effort level", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-keep-effort-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-keep-effort-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-keep-effort-");
+  const hostHome = createTempDir("agent-infra-claude-host-keep-effort-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -440,8 +440,8 @@ test("ensureClaudeSettings preserves existing sandbox effort level", async () =>
 
 test("ensureClaudeSettings skips missing host effort level", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-missing-effort-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-missing-effort-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-missing-effort-");
+  const hostHome = createTempDir("agent-infra-claude-host-missing-effort-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -457,8 +457,8 @@ test("ensureClaudeSettings skips missing host effort level", async () => {
 
 test("ensureClaudeSettings skips empty host effort level", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-empty-effort-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-empty-effort-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-empty-effort-");
+  const hostHome = createTempDir("agent-infra-claude-host-empty-effort-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -474,8 +474,8 @@ test("ensureClaudeSettings skips empty host effort level", async () => {
 
 test("ensureClaudeSettings inherits host provider env and model settings", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-provider-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-provider-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-provider-");
+  const hostHome = createTempDir("agent-infra-claude-host-provider-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -543,8 +543,8 @@ test("ensureClaudeSettings inherits host provider env and model settings", async
 
 test("ensureClaudeSettings preserves sandbox provider fields and fills missing env", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-provider-keep-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-provider-keep-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-provider-keep-");
+  const hostHome = createTempDir("agent-infra-claude-host-provider-keep-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -588,8 +588,8 @@ test("ensureClaudeSettings preserves sandbox provider fields and fills missing e
 
 test("ensureClaudeSettings skips invalid host env values and non-object sandbox env", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-provider-invalid-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-provider-invalid-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-provider-invalid-");
+  const hostHome = createTempDir("agent-infra-claude-host-provider-invalid-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -625,8 +625,8 @@ test("ensureClaudeSettings skips invalid host env values and non-object sandbox 
 
 test("ensureClaudeSettings skips non-object host env without defaulting effort env", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-host-env-invalid-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-env-invalid-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-host-env-invalid-");
+  const hostHome = createTempDir("agent-infra-claude-host-env-invalid-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -642,8 +642,8 @@ test("ensureClaudeSettings skips non-object host env without defaulting effort e
 
 test("ensureClaudeSettings skips malformed host settings", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-malformed-host-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-malformed-settings-"));
+  const tmpDir = createTempDir("agent-infra-claude-settings-malformed-host-");
+  const hostHome = createTempDir("agent-infra-claude-host-malformed-settings-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
@@ -659,8 +659,8 @@ test("ensureClaudeSettings skips malformed host settings", async () => {
 
 test("ensureCodexModelInheritance creates config with host model fields", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-model-"));
+  const tmpDir = createTempDir("agent-infra-codex-model-");
+  const hostHome = createTempDir("agent-infra-codex-host-model-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -681,8 +681,8 @@ test("ensureCodexModelInheritance creates config with host model fields", async 
 
 test("ensureCodexModelInheritance projects current project hook trust into the sandbox path", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-"));
+  const tmpDir = createTempDir("agent-infra-codex-hook-trust-");
+  const hostHome = createTempDir("agent-infra-codex-host-hook-trust-");
   const hostProject = path.join(hostHome, "projects", "demo");
   const currentKey = `${path.join(hostProject, ".codex", "hooks.json")}:pre_tool_use:0:0`;
   const otherKey = `${path.join(hostHome, "projects", "other", ".codex", "hooks.json")}:pre_tool_use:0:0`;
@@ -722,8 +722,8 @@ test("ensureCodexModelInheritance projects current project hook trust into the s
 
 test("ensureCodexModelInheritance replaces stale sandbox hook trust and preserves unrelated state", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-refresh-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-refresh-"));
+  const tmpDir = createTempDir("agent-infra-codex-hook-trust-refresh-");
+  const hostHome = createTempDir("agent-infra-codex-host-hook-trust-refresh-");
   const hostProject = path.join(hostHome, "projects", "demo");
   const hostKey = `${path.join(hostProject, ".codex", "hooks.json")}:post_tool_use:0:0`;
   const trustedHash = `sha256:${"c".repeat(64)}`;
@@ -774,8 +774,8 @@ test("ensureCodexModelInheritance replaces stale sandbox hook trust and preserve
 
 test("ensureCodexModelInheritance removes sandbox hook trust revoked on the host", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-revoke-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-revoke-"));
+  const tmpDir = createTempDir("agent-infra-codex-hook-trust-revoke-");
+  const hostHome = createTempDir("agent-infra-codex-host-hook-trust-revoke-");
   const hostProject = path.join(hostHome, "projects", "demo");
   const configPath = path.join(tmpDir, "config.toml");
 
@@ -814,8 +814,8 @@ for (const hostConfig of [
 ] as const) {
   test(`ensureCodexModelInheritance removes stale sandbox hook trust when host config is ${hostConfig.name}`, async () => {
     const sandboxCreate = await loadSandboxCreate();
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-fail-closed-"));
-    const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-fail-closed-"));
+    const tmpDir = createTempDir("agent-infra-codex-hook-trust-fail-closed-");
+    const hostHome = createTempDir("agent-infra-codex-host-hook-trust-fail-closed-");
     const hostProject = path.join(hostHome, "projects", "demo");
     const configPath = path.join(tmpDir, "config.toml");
 
@@ -863,8 +863,8 @@ for (const hostConfig of [
 
 test("ensureCodexModelInheritance removes MCP servers and inherits only disabled Codex features", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-mcp-clean-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-mcp-clean-"));
+  const tmpDir = createTempDir("agent-infra-codex-mcp-clean-");
+  const hostHome = createTempDir("agent-infra-codex-host-mcp-clean-");
   const configPath = path.join(tmpDir, "config.toml");
 
   try {
@@ -919,8 +919,8 @@ test("ensureCodexModelInheritance removes MCP servers and inherits only disabled
 
 test("ensureCodexModelInheritance does not copy enabled Codex features", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-enabled-features-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-enabled-features-"));
+  const tmpDir = createTempDir("agent-infra-codex-enabled-features-");
+  const hostHome = createTempDir("agent-infra-codex-host-enabled-features-");
   const configPath = path.join(tmpDir, "config.toml");
 
   try {
@@ -951,8 +951,8 @@ test("ensureCodexModelInheritance does not copy enabled Codex features", async (
 
 test("ensureCodexModelInheritance keeps model fields before workspace trust section", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-order-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-order-"));
+  const tmpDir = createTempDir("agent-infra-codex-model-order-");
+  const hostHome = createTempDir("agent-infra-codex-host-order-");
   const configPath = path.join(tmpDir, "config.toml");
 
   try {
@@ -986,8 +986,8 @@ test("ensureCodexModelInheritance keeps model fields before workspace trust sect
 
 test("ensureCodexModelInheritance inherits model_auto_compact_token_limit", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-compact-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-compact-"));
+  const tmpDir = createTempDir("agent-infra-codex-compact-");
+  const hostHome = createTempDir("agent-infra-codex-host-compact-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1011,8 +1011,8 @@ test("ensureCodexModelInheritance inherits model_auto_compact_token_limit", asyn
 
 test("ensureCodexModelInheritance skips invalid numeric inherits", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-compact-invalid-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-compact-invalid-"));
+  const tmpDir = createTempDir("agent-infra-codex-compact-invalid-");
+  const hostHome = createTempDir("agent-infra-codex-host-compact-invalid-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1036,8 +1036,8 @@ test("ensureCodexModelInheritance skips invalid numeric inherits", async () => {
 
 test("ensureCodexModelInheritance preserves existing sandbox model_auto_compact_token_limit", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-compact-keep-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-compact-keep-"));
+  const tmpDir = createTempDir("agent-infra-codex-compact-keep-");
+  const hostHome = createTempDir("agent-infra-codex-host-compact-keep-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1060,8 +1060,8 @@ test("ensureCodexModelInheritance preserves existing sandbox model_auto_compact_
 
 test("ensureCodexModelInheritance ignores model fields outside the root table", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-section-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-section-"));
+  const tmpDir = createTempDir("agent-infra-codex-model-section-");
+  const hostHome = createTempDir("agent-infra-codex-host-section-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1080,8 +1080,8 @@ test("ensureCodexModelInheritance ignores model fields outside the root table", 
 
 test("ensureCodexModelInheritance preserves existing sandbox model field", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-keep-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-keep-"));
+  const tmpDir = createTempDir("agent-infra-codex-model-keep-");
+  const hostHome = createTempDir("agent-infra-codex-host-keep-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1103,8 +1103,8 @@ test("ensureCodexModelInheritance preserves existing sandbox model field", async
 
 test("ensureCodexModelInheritance ignores malformed host config", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-malformed-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-malformed-"));
+  const tmpDir = createTempDir("agent-infra-codex-model-malformed-");
+  const hostHome = createTempDir("agent-infra-codex-host-malformed-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1119,8 +1119,8 @@ test("ensureCodexModelInheritance ignores malformed host config", async () => {
 
 test("ensureCodexModelInheritance leaves malformed sandbox config alone", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-malformed-sandbox-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-valid-for-malformed-sandbox-"));
+  const tmpDir = createTempDir("agent-infra-codex-model-malformed-sandbox-");
+  const hostHome = createTempDir("agent-infra-codex-host-valid-for-malformed-sandbox-");
   const configPath = path.join(tmpDir, "config.toml");
 
   try {
@@ -1141,8 +1141,8 @@ test("ensureCodexModelInheritance leaves malformed sandbox config alone", async 
 
 test("ensureCodexModelInheritance copies a relative host catalog and rewrites to the container path", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-rel-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-rel-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-rel-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-rel-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
@@ -1171,8 +1171,8 @@ test("ensureCodexModelInheritance copies a relative host catalog and rewrites to
 
 test("ensureCodexModelInheritance copies an absolute host catalog", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-abs-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-abs-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-abs-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-abs-");
   const catalogFile = path.join(hostHome, "elsewhere", "custom.json");
 
   try {
@@ -1198,8 +1198,8 @@ test("ensureCodexModelInheritance copies an absolute host catalog", async () => 
 
 test("ensureCodexModelInheritance expands a tilde host catalog path", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-tilde-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-tilde-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-tilde-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-tilde-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
@@ -1223,8 +1223,8 @@ test("ensureCodexModelInheritance expands a tilde host catalog path", async () =
 
 test("ensureCodexModelInheritance preserves an existing sandbox model_catalog_json", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-keep-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-keep-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-keep-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-keep-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
@@ -1249,8 +1249,8 @@ test("ensureCodexModelInheritance preserves an existing sandbox model_catalog_js
 
 test("ensureCodexModelInheritance skips a missing host catalog file", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-missing-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-missing-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-missing-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-missing-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1275,8 +1275,8 @@ test("ensureCodexModelInheritance skips a missing host catalog file", async () =
 
 test("ensureCodexModelInheritance skips a host catalog path that is a directory", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-dir-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-dir-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-dir-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-dir-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
@@ -1296,8 +1296,8 @@ test("ensureCodexModelInheritance skips a host catalog path that is a directory"
 
 test("ensureCodexModelInheritance keeps catalog and model before the workspace trust section", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-order-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-order-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-order-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-order-");
   const configPath = path.join(tmpDir, "config.toml");
 
   try {
@@ -1324,8 +1324,8 @@ test("ensureCodexModelInheritance keeps catalog and model before the workspace t
 
 test("ensureCodexModelInheritance honors a non-default container codex dir", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-customdir-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-customdir-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-customdir-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-customdir-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
@@ -1349,8 +1349,8 @@ test("ensureCodexModelInheritance honors a non-default container codex dir", asy
 
 test("ensureCodexModelInheritance skips a non-string model_catalog_json", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-nonstring-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-nonstring-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-nonstring-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-nonstring-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1375,8 +1375,8 @@ test("ensureCodexModelInheritance skips a non-string model_catalog_json", async 
 
 test("ensureCodexModelInheritance skips an empty model_catalog_json", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-empty-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-empty-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-empty-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-empty-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
@@ -1396,8 +1396,8 @@ test("ensureCodexModelInheritance skips an empty model_catalog_json", async () =
 
 test("ensureCodexModelInheritance skips an unreadable host catalog file", onPlatforms("linux", "darwin"), async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-unreadable-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-unreadable-"));
+  const tmpDir = createTempDir("agent-infra-codex-catalog-unreadable-");
+  const hostHome = createTempDir("agent-infra-codex-host-catalog-unreadable-");
   const catalogFile = path.join(hostHome, ".codex", "catalogs", "gpt.json");
 
   try {
@@ -1435,8 +1435,8 @@ test("ensureCodexModelInheritance skips an unreadable host catalog file", onPlat
 
 test("ensureOpenCodeSandboxState creates config with host model fields", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-model-"));
+  const tmpDir = createTempDir("agent-infra-opencode-model-");
+  const hostHome = createTempDir("agent-infra-opencode-host-model-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1460,8 +1460,8 @@ test("ensureOpenCodeSandboxState creates config with host model fields", async (
 
 test("ensureOpenCodeSandboxState preserves existing sandbox model fields", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-keep-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-keep-"));
+  const tmpDir = createTempDir("agent-infra-opencode-model-keep-");
+  const hostHome = createTempDir("agent-infra-opencode-host-keep-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1499,8 +1499,8 @@ test("ensureOpenCodeSandboxState preserves existing sandbox model fields", async
 
 test("ensureOpenCodeSandboxState inherits small model when host model is missing", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-small-model-only-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-small-model-only-"));
+  const tmpDir = createTempDir("agent-infra-opencode-small-model-only-");
+  const hostHome = createTempDir("agent-infra-opencode-host-small-model-only-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1521,8 +1521,8 @@ test("ensureOpenCodeSandboxState inherits small model when host model is missing
 
 test("ensureOpenCodeSandboxState skips missing host model fields", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-missing-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-missing-"));
+  const tmpDir = createTempDir("agent-infra-opencode-model-missing-");
+  const hostHome = createTempDir("agent-infra-opencode-host-missing-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1537,8 +1537,8 @@ test("ensureOpenCodeSandboxState skips missing host model fields", async () => {
 
 test("ensureOpenCodeSandboxState skips empty host model fields", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-empty-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-empty-"));
+  const tmpDir = createTempDir("agent-infra-opencode-model-empty-");
+  const hostHome = createTempDir("agent-infra-opencode-host-empty-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1557,8 +1557,8 @@ test("ensureOpenCodeSandboxState skips empty host model fields", async () => {
 
 test("ensureOpenCodeSandboxState ignores malformed host json", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-malformed-"));
+  const tmpDir = createTempDir("agent-infra-opencode-model-malformed-");
+  const hostHome = createTempDir("agent-infra-opencode-host-malformed-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1573,8 +1573,8 @@ test("ensureOpenCodeSandboxState ignores malformed host json", async () => {
 
 test("ensureOpenCodeSandboxState ignores malformed tool-root config", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-sandbox-"));
-  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-valid-for-malformed-sandbox-"));
+  const tmpDir = createTempDir("agent-infra-opencode-model-malformed-sandbox-");
+  const hostHome = createTempDir("agent-infra-opencode-host-valid-for-malformed-sandbox-");
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
@@ -1597,7 +1597,7 @@ test("ensureOpenCodeSandboxState ignores malformed tool-root config", async () =
 
 test("ensureCodexWorkspaceTrust appends workspace trust to config.toml", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-trust-"));
+  const tmpDir = createTempDir("agent-infra-codex-trust-");
 
   try {
     fs.writeFileSync(path.join(tmpDir, "config.toml"), 'model = "o3"\n', "utf8");
@@ -1613,7 +1613,7 @@ test("ensureCodexWorkspaceTrust appends workspace trust to config.toml", async (
 
 test("ensureCodexWorkspaceTrust skips when workspace trust already exists", async () => {
   const sandboxCreate = await loadSandboxCreate();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-trust-noop-"));
+  const tmpDir = createTempDir("agent-infra-codex-trust-noop-");
   const configPath = path.join(tmpDir, "config.toml");
 
   try {

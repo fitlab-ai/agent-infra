@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -29,7 +28,7 @@ test('platform-checks CLI advertises inspect, watch, run resolution and logs', (
 });
 
 test('platform-checks inspect fails when a non-required check fails', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-checks-cli-'));
+  const root = createTempDir('platform-checks-cli-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
@@ -66,7 +65,7 @@ test('platform-checks inspect fails when a non-required check fails', () => {
 });
 
 test('platform-checks inspect fails closed for conflicting, unknown, and contradictory mergeability', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-readiness-cli-'));
+  const root = createTempDir('platform-readiness-cli-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
@@ -124,7 +123,7 @@ test('platform-checks CLI validates numeric bounds and required arguments before
 });
 
 test('platform-checks preserves deterministic check errors without degradation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-checks-cli-'));
+  const root = createTempDir('platform-checks-cli-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });

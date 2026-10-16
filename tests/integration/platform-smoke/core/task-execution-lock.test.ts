@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 
-import { onPlatforms } from '../../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../../helpers.ts';
 import {
   TaskExecutionLockError,
   lockKey,
@@ -32,15 +31,15 @@ test('link errors map to stable lifecycle lock results', () => {
 });
 
 test('canonical and symlinked repository roots share one lock key', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-root-'));
+  const root = createTempDir('task-lock-root-');
   const link = `${root}-link`;
   fs.symlinkSync(root, link, 'dir');
   assert.equal(lockKey(root, 'TASK-20260101-000001').key, lockKey(link, 'TASK-20260101-000001').key);
 });
 
 test('a live owner blocks nested acquisition and the outer lock is released', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
-  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  const root = createTempDir('task-lock-repo-');
+  const lockRoot = createTempDir('task-lock-state-');
   let nested: unknown;
   const value = withTaskExecutionLock(root, 'TASK-20260101-000001', 'outer', () => {
     try {
@@ -58,8 +57,8 @@ test('a live owner blocks nested acquisition and the outer lock is released', ()
 });
 
 test('unsupported hard links fail closed before the callback and clean the candidate', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
-  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  const root = createTempDir('task-lock-repo-');
+  const lockRoot = createTempDir('task-lock-state-');
   let called = false;
 
   assert.throws(
@@ -74,8 +73,8 @@ test('unsupported hard links fail closed before the callback and clean the candi
 });
 
 test('a stale fixed owner and stale candidates are reclaimed without leaving lock files', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
-  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  const root = createTempDir('task-lock-repo-');
+  const lockRoot = createTempDir('task-lock-state-');
   const taskId = 'TASK-20260101-000001';
   const identity = lockKey(root, taskId);
   const staleOwner = {
@@ -102,8 +101,8 @@ test('a stale fixed owner and stale candidates are reclaimed without leaving loc
 });
 
 test('a stale quarantine left by a crashed reclaimer does not permanently block acquisition', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
-  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  const root = createTempDir('task-lock-repo-');
+  const lockRoot = createTempDir('task-lock-state-');
   const taskId = 'TASK-20260101-000001';
   const identity = lockKey(root, taskId);
   const fixed = path.join(lockRoot, `${identity.key}.lock`);
@@ -132,8 +131,8 @@ test('a stale quarantine left by a crashed reclaimer does not permanently block 
 });
 
 test('two processes cannot overlap callbacks for the same task key', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
-  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  const root = createTempDir('task-lock-repo-');
+  const lockRoot = createTempDir('task-lock-state-');
   const ready = path.join(lockRoot, 'ready');
   const release = path.join(lockRoot, 'release');
   const moduleUrl = new URL('../../../../lib/task/task-execution-lock.ts', import.meta.url).href;
@@ -182,8 +181,8 @@ test(
   'the local temporary filesystem supports the lifecycle hard-link smoke path',
   onPlatforms('linux', 'darwin', 'win32'),
   () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
-    const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+    const root = createTempDir('task-lock-repo-');
+    const lockRoot = createTempDir('task-lock-state-');
     assert.equal(
       withTaskExecutionLock(root, 'TASK-20260101-000001', 'smoke', () => 'ok', { lockRoot }),
       'ok'

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { releaseNoteContext, publishReleaseNotes, stageReleaseNotes } from '../../../lib/platform/release-notes.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const unavailable: GitHubClient = {
   version() { throw new Error('GitHub client must not be probed'); },
@@ -36,7 +36,7 @@ test('unsupported platforms return a stable no-op without probing GitHub', async
   assert.equal(context.error?.code, 'PLATFORM_RELEASE_NOTES_UNSUPPORTED');
   assert.deepEqual(context.pullRequests, []);
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-unit-'));
+  const root = createTempDir('release-notes-unit-');
   const notesFile = path.join(root, 'notes.md');
   fs.writeFileSync(notesFile, 'Notes\n');
   try {
@@ -57,7 +57,7 @@ test('unsupported platforms return a stable no-op without probing GitHub', async
 });
 
 test('stage normalizes release notes and returns the digest of exact staged bytes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-stage-'));
+  const root = createTempDir('release-notes-stage-');
   const worktree = path.join(root, 'worktree');
   const notesFile = path.join(root, 'notes.md');
   fs.mkdirSync(worktree);
@@ -79,7 +79,7 @@ test('stage normalizes release notes and returns the digest of exact staged byte
 });
 
 test('stage rejects invalid UTF-8 without changing the source file', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-utf8-'));
+  const root = createTempDir('release-notes-utf8-');
   const worktree = path.join(root, 'worktree');
   const notesFile = path.join(root, 'notes.md');
   const bytes = Buffer.from([0xc3, 0x28]);
@@ -96,7 +96,7 @@ test('stage rejects invalid UTF-8 without changing the source file', () => {
 });
 
 test('stage rejects paths in the worktree, symlinks, and non-files', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-boundary-'));
+  const root = createTempDir('release-notes-boundary-');
   const worktree = path.join(root, 'worktree');
   const inside = path.join(worktree, 'notes.md');
   const outside = path.join(root, 'outside.md');
@@ -118,7 +118,7 @@ test('stage rejects paths in the worktree, symlinks, and non-files', () => {
 });
 
 test('publish rejects digest mismatches before platform access', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-publish-'));
+  const root = createTempDir('release-notes-publish-');
   const notesFile = path.join(root, 'notes.md');
   fs.writeFileSync(notesFile, 'Notes\n');
   try {
@@ -134,7 +134,7 @@ test('publish rejects digest mismatches before platform access', async () => {
 });
 
 test('publish accepts a matching digest and rejects unreadable files before platform access', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-match-'));
+  const root = createTempDir('release-notes-match-');
   const notesFile = path.join(root, 'notes.md');
   fs.writeFileSync(notesFile, 'Notes\n');
   const digest = `sha256:${createHash('sha256').update('Notes\n').digest('hex')}`;

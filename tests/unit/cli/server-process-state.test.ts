@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -14,6 +13,7 @@ import {
   removePidFileIfMatches,
   writePidRecord
 } from '../../../lib/server/process-state.ts';
+import { createTempDir } from '../../helpers.ts';
 
 test('parseDarwinStartTime accepts ps padding for single-digit days', () => {
   assert.equal(parseDarwinStartTime('Tue Sep  1 00:25:12 2026'), Date.UTC(2026, 8, 1, 0, 25, 12));
@@ -161,7 +161,7 @@ test('Linux identity state does not invoke injected macOS observers', () => {
 });
 
 test('readProcessState classifies missing, invalid, legacy, mismatch, and matching records', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-process-state-'));
+  const dir = createTempDir('server-process-state-');
   const pidFile = path.join(dir, 'server.pid');
   try {
     assert.equal(readProcessState(pidFile).kind, 'missing');
@@ -192,7 +192,7 @@ test('readProcessState classifies missing, invalid, legacy, mismatch, and matchi
 });
 
 test('conditional cleanup preserves a replaced pid record', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-process-state-race-'));
+  const dir = createTempDir('server-process-state-race-');
   const pidFile = path.join(dir, 'server.pid');
   try {
     fs.writeFileSync(pidFile, '123\n');

@@ -1,11 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import { materializeJson, materializeSnapshot } from '../../../lib/process-data/materialize.ts';
 import { createObjectStore, publishSnapshotV2, verifySnapshot } from '../../../lib/process-data/store.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function snapshotInput(root: string, content: string, identity: string) {
   const store = createObjectStore(root);
@@ -27,7 +25,7 @@ function snapshotInput(root: string, content: string, identity: string) {
 }
 
 test('materialize follows one verified v2 lineage and supports as-of observation views', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-materialize-'));
+  const root = createTempDir('process-data-materialize-');
   const baseObject = snapshotInput(root, '{"number":1}', 'issue:1');
   const base = publishSnapshotV2(root, {
     scope: 'github', repository: 'acme/demo', observedFrom: '2026-08-20T00:00:00.000Z', observedTo: '2026-08-20T00:00:01.000Z',
@@ -58,7 +56,7 @@ test('materialize follows one verified v2 lineage and supports as-of observation
 });
 
 test('materialize keeps unchanged ancestors when as-of is later than the head', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-materialize-late-asof-'));
+  const root = createTempDir('process-data-materialize-late-asof-');
   const baseObject = snapshotInput(root, '{"number":1}', 'issue:1');
   const base = publishSnapshotV2(root, {
     scope: 'github', repository: 'acme/demo', observedFrom: '2026-08-20T00:00:00.000Z', observedTo: '2026-08-20T00:00:01.000Z',

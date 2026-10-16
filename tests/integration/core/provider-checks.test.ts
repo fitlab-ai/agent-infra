@@ -1,15 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { inspectRequiredChecks } from '../../../lib/platform/pr-checks.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
-import { filePath } from '../../helpers.ts';
+import { createTempDir, filePath } from '../../helpers.ts';
 
 test('external provider checks preserve status classification and snapshot fields', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-checks-'));
+  const root = createTempDir('provider-checks-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   const identity = {

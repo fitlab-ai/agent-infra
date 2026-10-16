@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from "../../helpers.ts";
+import { createTempDir, INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv } from "../../helpers.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { upsertSection } from "../../../lib/task/sections.ts";
 
@@ -13,7 +12,7 @@ const TASK_ID = "TASK-20260101-000001";
 const FULL_ANALYSIS = "# Analysis\n\n## Flow Decision\n\n- **Path**: full.\n- **Basis**: The fixture covers the complete lifecycle.\n- **Unmet Higher-path Conditions**: There is no higher path.\n- **Upgrade Triggers**: Lifecycle facts change.\n";
 
 function makeFixture(files: Record<string, string>) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-detect-mode-"));
+  const root = createTempDir("agent-infra-detect-mode-");
   spawnSync("git", ["init", "-q"], { cwd: root });
   const taskDir = path.join(root, ".agents", "workspace", "active", TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });

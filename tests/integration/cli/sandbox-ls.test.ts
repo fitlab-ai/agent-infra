@@ -2,10 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { cliArgs, envWithPrependedPath, gitSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
+import { createTempDir, cliArgs, envWithPrependedPath, gitSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
 
 // clack renders section headers (p.log.step) on stdout prefixed with this glyph.
 const STEP_GLYPH = '◇'; // ◇
@@ -35,7 +34,7 @@ function spawnSandboxCli(
 }
 
 test('ai sandbox ls shows only the Containers section (no worktree/state sections)', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-ls-compact-'));
+  const tmpDir = createTempDir('sandbox-ls-compact-');
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: 'demo',
@@ -74,7 +73,7 @@ test('ai sandbox ls shows only the Containers section (no worktree/state section
 });
 
 test('ai sandbox ls reports an empty state with no extra sections', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-ls-empty-'));
+  const tmpDir = createTempDir('sandbox-ls-empty-');
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: 'demo', dockerStdoutForPs: '' });
 

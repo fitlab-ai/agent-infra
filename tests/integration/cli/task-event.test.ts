@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
@@ -98,13 +97,9 @@ function appendReviewContract(content: string, family: string): string {
   return result;
 }
 
-function makeTempDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), prefix));
-}
-
 function fixture(step = 'requirement-analysis-review') {
   const explicitStep = arguments.length > 0;
-  const root = makeTempDir('task-event-');
+  const root = createTempDir('task-event-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
@@ -519,7 +514,7 @@ test('internal task-event accepts the human manual-executor token', () => {
 });
 
 test('internal task-event keeps a blocked task state mismatch closed', () => {
-  const root = makeTempDir('task-event-override-');
+  const root = createTempDir('task-event-override-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000002';
   const dir = path.join(root, '.agents', 'workspace', 'blocked', id);

@@ -1,12 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -24,7 +23,7 @@ function runRecovery(args: string[], options: { cwd?: string; env?: NodeJS.Proce
 }
 
 test('task platform recovery rejects non-positive and non-integer retry budgets', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-recovery-cli-'));
+  const root = createTempDir('platform-recovery-cli-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
@@ -66,7 +65,7 @@ test('platform-issue CLI advertises the four intent operations', () => {
 });
 
 test('platform-issue requirements sync persists once and converges across CLI processes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-issue-cli-'));
+  const root = createTempDir('platform-issue-cli-');
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
@@ -133,7 +132,7 @@ test('platform-issue requirements sync persists once and converges across CLI pr
 });
 
 test('platform-issue in-label sync stays deferred until completion and dry-run is not recoverable', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-issue-in-labels-'));
+  const root = createTempDir('platform-issue-in-labels-');
   try {
     execFileSync('git', ['init', '-qb', 'main'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });

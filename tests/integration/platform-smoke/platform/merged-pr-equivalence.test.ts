@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { resolveReviewedHeadRelation } from "../../../../lib/platform/merged-pr-equivalence.ts";
 import { inspectPlatformPullRequestByNumber } from "../../../../lib/platform/pull-requests.ts";
 import type { PullRequestSnapshot } from "../../../../lib/platform/pull-requests.ts";
-import { filePath, gitSafeEnv } from "../../../helpers.ts";
+import { createTempDir, filePath, gitSafeEnv } from "../../../helpers.ts";
 
 function git(root: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8", env: gitSafeEnv() });
@@ -28,7 +27,7 @@ function commitTree(root: string, tree: string, parents: string[], message: stri
 }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "merged-pr-equivalence-"));
+  const root = createTempDir("merged-pr-equivalence-");
   git(root, ["init", "-q", "-b", "master"]);
   git(root, ["config", "user.name", "Test"]);
   git(root, ["config", "user.email", "test@example.com"]);
@@ -51,7 +50,7 @@ function fixture() {
 }
 
 function advancedTargetFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "merged-pr-equivalence-advanced-"));
+  const root = createTempDir("merged-pr-equivalence-advanced-");
   git(root, ["init", "-q", "-b", "master"]);
   git(root, ["config", "user.name", "Test"]);
   git(root, ["config", "user.email", "test@example.com"]);

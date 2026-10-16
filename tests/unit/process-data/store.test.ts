@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -13,7 +12,7 @@ import {
   verifySnapshot
 } from '../../../lib/process-data/store.ts';
 import { readAppliedOverlays, repairSnapshot } from '../../../lib/process-data/repair.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 function publishBoundaryBase(root: string) {
   return publishSnapshotV2(root, {
@@ -66,7 +65,7 @@ test('canonical JSON sorts object keys recursively and preserves array order', (
 });
 
 test('CAS is idempotent and snapshot verification detects tampering', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-'));
+  const root = createTempDir('process-data-store-');
   const store = createObjectStore(root);
   const first = store.put(Buffer.from('evidence'));
   const second = store.put(Buffer.from('evidence'));
@@ -106,7 +105,7 @@ test('CAS is idempotent and snapshot verification detects tampering', () => {
 });
 
 test('snapshot verification rejects an unknown manifest schema instead of treating it as v1', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-unknown-schema-'));
+  const root = createTempDir('process-data-store-unknown-schema-');
   const published = publishSnapshot(root, {
     scope: 'local', repository: 'example/repo', observedFrom: '2026-01-01T00:00:00.000Z', observedTo: '2026-01-01T00:00:01.000Z',
     objects: [], endpoints: [], excerptsEnabled: false, records: [], quality: [], repairs: []
@@ -121,7 +120,7 @@ test('snapshot verification rejects an unknown manifest schema instead of treati
 });
 
 test('v2 verification rejects an endpoint page without its page-evidence CAS object', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-page-'));
+  const root = createTempDir('process-data-store-v2-page-');
   const published = publishSnapshotV2(root, {
     scope: 'github', repository: 'acme/demo', observedFrom: '2026-08-20T00:00:00.000Z', observedTo: '2026-08-20T00:00:01.000Z',
     objects: [],
@@ -141,7 +140,7 @@ test('v2 verification rejects an endpoint page without its page-evidence CAS obj
 });
 
 test('v2 verification requires strict-since query boundary proof on incremental deltas', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-query-proof-'));
+  const root = createTempDir('process-data-store-v2-query-proof-');
   const base = publishBoundaryBase(root);
   const delta = publishBoundaryDelta(root, base.snapshotId, { queryAfter: null });
   const verified = verifySnapshot(root, delta.snapshotId);
@@ -150,7 +149,7 @@ test('v2 verification requires strict-since query boundary proof on incremental 
 });
 
 test('v2 verification rejects strict-since on full reconciliation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-query-mode-'));
+  const root = createTempDir('process-data-store-v2-query-mode-');
   const base = publishBoundaryBase(root);
   const queryAfter = '2026-08-20T00:00:00.000Z';
   const delta = publishBoundaryDelta(root, base.snapshotId, {
@@ -164,7 +163,7 @@ test('v2 verification rejects strict-since on full reconciliation', () => {
 });
 
 test('v2 verification rejects a strict-since endpoint with mismatched requestedSince', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-query-mismatch-'));
+  const root = createTempDir('process-data-store-v2-query-mismatch-');
   const base = publishBoundaryBase(root);
   const delta = publishBoundaryDelta(root, base.snapshotId, {
     queryAfter: '2026-08-20T00:00:00.000Z',
@@ -176,7 +175,7 @@ test('v2 verification rejects a strict-since endpoint with mismatched requestedS
 });
 
 test('v2 verification rejects an unknown query mode at the endpoint level', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-query-mode-endpoint-unknown-'));
+  const root = createTempDir('process-data-store-v2-query-mode-endpoint-unknown-');
   const base = publishBoundaryBase(root);
   const delta = publishBoundaryDelta(root, base.snapshotId, {
     queryAfter: null,
@@ -189,7 +188,7 @@ test('v2 verification rejects an unknown query mode at the endpoint level', () =
 });
 
 test('v2 verification rejects an unknown query mode at the page level', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-query-mode-page-unknown-'));
+  const root = createTempDir('process-data-store-v2-query-mode-page-unknown-');
   const base = publishBoundaryBase(root);
   const delta = publishBoundaryDelta(root, base.snapshotId, {
     queryAfter: null,
@@ -202,7 +201,7 @@ test('v2 verification rejects an unknown query mode at the page level', () => {
 });
 
 test('v2 verification rejects an unknown query mode at the page-evidence object level', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-query-mode-object-unknown-'));
+  const root = createTempDir('process-data-store-v2-query-mode-object-unknown-');
   const base = publishBoundaryBase(root);
   const delta = publishBoundaryDelta(root, base.snapshotId, {
     queryAfter: null,
@@ -215,7 +214,7 @@ test('v2 verification rejects an unknown query mode at the page-evidence object 
 });
 
 test('v2 verification requires evidence for every upsert resource', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-resource-evidence-'));
+  const root = createTempDir('process-data-store-v2-resource-evidence-');
   const store = createObjectStore(root);
   const bytes = Buffer.from('{"number":1}');
   const object = store.put(bytes);
@@ -236,7 +235,7 @@ test('v2 verification requires evidence for every upsert resource', () => {
 });
 
 test('v2 verification recursively verifies every snapshot ancestor', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-v2-ancestor-'));
+  const root = createTempDir('process-data-store-v2-ancestor-');
   const base = publishSnapshotV2(root, {
     scope: 'github', repository: 'acme/demo', observedFrom: '2026-08-20T00:00:00.000Z', observedTo: '2026-08-20T00:00:01.000Z',
     objects: [], endpoints: [], excerptsEnabled: false, records: [], quality: [], repairs: [], snapshotKind: 'base', parentSnapshotId: null, checkpointBefore: null,
@@ -258,7 +257,7 @@ test('v2 verification recursively verifies every snapshot ancestor', () => {
 });
 
 test('snapshot publication uses file and directory fsync barriers', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-store-fsync-'));
+  const root = createTempDir('process-data-store-fsync-');
   const originalFsync = fs.fsyncSync;
   const originalOpen = fs.openSync;
   let calls = 0;
@@ -298,7 +297,7 @@ test('snapshot publication uses file and directory fsync barriers', onPlatforms(
 });
 
 test('repair application is append-only and idempotent', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-repair-'));
+  const root = createTempDir('process-data-repair-');
   const localSha = 'b'.repeat(64);
   const remoteSha = 'c'.repeat(64);
   const published = publishSnapshot(root, {

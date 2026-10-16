@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { envWithPrependedPath, onPlatforms } from "../../../helpers.ts";
+import { createTempDir, envWithPrependedPath, onPlatforms } from "../../../helpers.ts";
 
 // auto-resume.sh is a POSIX sh StopFailure hook; the behavioural gates only run
 // on platforms with /bin/sh. Windows is skipped at the whole-test level.
@@ -31,7 +30,7 @@ interface Harness {
 // (e.g. "paste-buffer") so the WARN-on-failure path can be exercised; the
 // default empty value never matches a real subcommand, preserving prior behaviour.
 function setup(curlExit: number, failTmuxSubcommand = ""): Harness {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "auto-resume-"));
+  const root = createTempDir("auto-resume-");
   const home = path.join(root, "home");
   const bin = path.join(root, "bin");
   fs.mkdirSync(home, { recursive: true });

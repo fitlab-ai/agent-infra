@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const HEAD = 'a'.repeat(40);
 
 function fixtureRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-artifact-'));
+  const root = createTempDir('verify-artifact-');
   const configDir = path.join(root, '.agents', 'skills', 'review-pr', 'config');
   fs.mkdirSync(configDir, { recursive: true });
   fs.copyFileSync(path.resolve('templates/.agents/skills/review-pr/config/verify.zh-CN.json'), path.join(configDir, 'verify.json'));

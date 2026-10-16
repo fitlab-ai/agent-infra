@@ -1,19 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, gitSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, gitSafeEnv } from '../../helpers.ts';
 
 function run(root: string, args: string[]) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'git-workflow', ...args], { cwd: root, encoding: 'utf8', env: gitSafeEnv() });
 }
 
 test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-cli-'));
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-remote-'));
+  const root = createTempDir('git-workflow-cli-');
+  const remote = createTempDir('git-workflow-remote-');
   try {
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
     execFileSync('git', ['init', '-q', '-b', 'feature'], { cwd: root });
@@ -49,8 +48,8 @@ test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
 });
 
 test('git-workflow commit reports push failure and recovers through push-only commit retry', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-'));
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-remote-'));
+  const root = createTempDir('git-workflow-policy-');
+  const remote = createTempDir('git-workflow-policy-remote-');
   const missingRemote = path.join(remote, 'missing.git');
   try {
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
@@ -95,8 +94,8 @@ test('git-workflow commit reports push failure and recovers through push-only co
 });
 
 test('git-workflow commit rejects a branch/ref mismatch before pushing', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-mismatch-'));
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-mismatch-remote-'));
+  const root = createTempDir('git-workflow-policy-mismatch-');
+  const remote = createTempDir('git-workflow-policy-mismatch-remote-');
   try {
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
@@ -124,8 +123,8 @@ test('git-workflow commit rejects a branch/ref mismatch before pushing', () => {
 });
 
 test('git-workflow push-rebased ignores a retained REBASE_HEAD after a completed rewrite', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-cli-'));
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-remote-'));
+  const root = createTempDir('git-workflow-rebase-cli-');
+  const remote = createTempDir('git-workflow-rebase-remote-');
   try {
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });

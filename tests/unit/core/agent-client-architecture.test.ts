@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { API } from 'typescript/unstable/sync';
@@ -16,7 +15,7 @@ import {
   createAgentClientManifest,
   listAgentClientAdapters
 } from '../../../lib/agent-clients/registry.ts';
-import { filePath } from '../../helpers.ts';
+import { createTempDir, filePath } from '../../helpers.ts';
 
 type Finding = Readonly<{
   file: string;
@@ -294,7 +293,7 @@ test('generic runtime Dockerfiles contain no adapter-owned state paths', () => {
 });
 
 test('architecture scanner reports an exact source location', () => {
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-architecture-'));
+  const fixtureDir = createTempDir('agent-client-architecture-');
   const fixturePath = path.join(fixtureDir, 'fixture.ts');
   fs.writeFileSync(fixturePath, "const client =\n  'codex';\n", 'utf8');
   const api = new API({ cwd: fixtureDir });
@@ -320,7 +319,7 @@ test('architecture scanner reports an exact source location', () => {
 });
 
 test('architecture boundary scanners report exact source locations', () => {
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-boundaries-'));
+  const fixtureDir = createTempDir('agent-client-boundaries-');
   const fixturePath = path.join(fixtureDir, 'fixture.ts');
   fs.writeFileSync(fixturePath, "export * from '../agent-clients/adapters/codex-sandbox.ts';\n", 'utf8');
   const api = new API({ cwd: fixtureDir });

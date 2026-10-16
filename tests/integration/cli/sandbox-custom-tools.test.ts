@@ -11,6 +11,7 @@ import {
 import { createSandboxCapabilityPlan } from "../../../lib/sandbox/agent-client-reconciler.ts";
 
 import {
+  createTempDir,
   gitSafeEnv,
   loadFreshEsm,
   withGitSafeProcessEnv
@@ -41,7 +42,7 @@ const NO_AGENT_CLIENTS = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
 
 test("sandbox recovery does not replay custom postSetupCmds or versionCmd", async () => {
   const recovery = await loadFreshEsm<SandboxRecoveryModule>("lib/sandbox/recovery.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-recovery-"));
+  const tmpDir = createTempDir("agent-infra-custom-recovery-");
   const probes: string[][] = [];
   const branchDir = "feature..demo";
   const config = {
@@ -152,7 +153,7 @@ function writeAirc(repoRoot: string, body: Record<string, unknown>): void {
 
 test("loadConfig parses an id-keyed sandbox.tools definition and fills optional fields with defaults", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tools-minimal-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-tools-minimal-");
   const previousCwd = process.cwd();
 
   try {
@@ -204,7 +205,7 @@ test("loadConfig parses an id-keyed sandbox.tools definition and fills optional 
 
 test("loadConfig preserves custom tool invocation without a command directory", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tool-command-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-tool-command-");
   const previousCwd = process.cwd();
 
   try {
@@ -235,7 +236,7 @@ test("loadConfig preserves custom tool invocation without a command directory", 
 
 test("loadConfig reports invalid sandbox.tools ids and definitions with precise paths", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-invalid-shape-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tools-invalid-shape-");
   const previousCwd = process.cwd();
 
   try {
@@ -263,7 +264,7 @@ test("loadConfig reports invalid sandbox.tools ids and definitions with precise 
 
 test("loadConfig honours user-supplied versionCmd to support binary names that differ from the tool id", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tools-versioncmd-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-tools-versioncmd-");
   const previousCwd = process.cwd();
 
   try {
@@ -305,7 +306,7 @@ test("loadConfig honours user-supplied versionCmd to support binary names that d
 
 test("loadConfig rejects an explicit relative containerMount even though the field is now optional", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-bad-mount-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-bad-mount-");
   const previousCwd = process.cwd();
 
   try {
@@ -338,7 +339,7 @@ test("loadConfig rejects an explicit relative containerMount even though the fie
 
 test("loadConfig rejects an explicit empty versionCmd to prevent bash -lc '' from silently passing", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-empty-version-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-empty-version-");
   const previousCwd = process.cwd();
 
   try {
@@ -374,7 +375,7 @@ test("loadConfig rejects an explicit empty versionCmd to prevent bash -lc '' fro
 
 test("loadConfig rejects an explicit empty setupHint while accepting omission", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-empty-hint-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-empty-hint-");
   const previousCwd = process.cwd();
 
   try {
@@ -407,7 +408,7 @@ test("loadConfig rejects an explicit empty setupHint while accepting omission", 
 
 test("loadConfig always assigns the default sandboxBase and ignores user-supplied overrides", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-base-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-base-");
   const previousCwd = process.cwd();
 
   try {
@@ -443,7 +444,7 @@ test("loadConfig always assigns the default sandboxBase and ignores user-supplie
 
 test("loadConfig rejects customTools entries with empty install.cmd", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-empty-cmd-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-custom-empty-cmd-");
   const previousCwd = process.cwd();
 
   try {

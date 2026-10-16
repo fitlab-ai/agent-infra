@@ -2,16 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH } from '../../helpers.ts';
 import { gitSafeEnv, initIsolatedGitRepo } from '../../helpers/git.ts';
 
 const SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
 function mkFixture(): { repoRoot: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-'));
+  const repoRoot = createTempDir('task-status-');
   // Isolated repo so the command's git subcommands operate on the fixture, not
   // agent-infra's own repo (see tests/helpers/git.ts).
   initIsolatedGitRepo(repoRoot);

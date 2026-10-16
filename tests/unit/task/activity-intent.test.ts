@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -9,11 +8,12 @@ import {
   inspectPrReviewActivity
 } from '../../../lib/task/activity-intent.ts';
 import { VERSION } from '../../../lib/version.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const HEAD = 'a'.repeat(40);
 
 function fixtureTask() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activity-intent-'));
+  const root = createTempDir('activity-intent-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -322,7 +322,7 @@ test('PR review dry-run validates without writing and lock failures fail closed'
 });
 
 test('PR review intents reject a task that is not active', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activity-intent-'));
+  const root = createTempDir('activity-intent-');
   try {
     const taskId = 'TASK-20260101-000001';
     const taskDir = path.join(root, '.agents', 'workspace', 'completed', taskId);

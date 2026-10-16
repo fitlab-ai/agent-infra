@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 
-import { filePath, loadFreshEsm, read } from "../../helpers.ts";
+import { createTempDir, filePath, loadFreshEsm, read } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
@@ -27,7 +26,7 @@ function writeJson(root: string, relativePath: string, value: unknown) {
 
 test("custom platforms fall back to generic platform templates", async () => {
   const originalExecSync = childProcess.execSync;
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-custom-platform-"));
+  const tmpDir = createTempDir("ai-collab-custom-platform-");
 
   const expectedTargets = [
     ".agents/rules/create-issue.md",

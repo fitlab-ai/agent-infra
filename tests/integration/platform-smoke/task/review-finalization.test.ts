@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -15,6 +14,7 @@ import {
   parseVerdict,
   resolveCanonicalVerdict
 } from '../../../../lib/task/review-artifacts.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 const counts = { blocker: 1, major: 2, minor: 3 };
 const TASK_ID = 'TASK-20260101-000001';
@@ -98,7 +98,7 @@ function filledOfficialReviewSample(
 }
 
 function officialTemplateDomainFixture(stage: 'analysis' | 'plan' | 'code', artifact: string, report: string) {
-  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'official-review-template-')));
+  const root = createTempDir('official-review-template-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
@@ -126,7 +126,7 @@ status: active
 }
 
 function domainFixture() {
-  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'review-finalization-')));
+  const root = createTempDir('review-finalization-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
@@ -263,7 +263,7 @@ test('canonical verdict rejects approved non-zero findings and unresolved placeh
 });
 
 test('path verdict resolver preserves artifact and summary diagnostics', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-verdict-'));
+  const root = createTempDir('review-verdict-');
   try {
     const missing = parseVerdict(path.join(root, 'missing.md'));
     assert.equal(missing.ok, false);

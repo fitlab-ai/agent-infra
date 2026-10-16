@@ -2,15 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH } from '../../helpers.ts';
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
 function fixture(rows: string[], implementationRows: string[] = []): { repoRoot: string; taskId: string; taskMd: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'decide-cli-'));
+  const repoRoot = createTempDir('decide-cli-');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);

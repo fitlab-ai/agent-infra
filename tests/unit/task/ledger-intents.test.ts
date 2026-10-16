@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -9,11 +8,12 @@ import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const METADATA = { timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' };
 
 function fixture(rows: string[] = []) {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-intents-'));
+  const repoRoot = createTempDir('ledger-intents-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });

@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { resolveBranchWorktree } from '../../../../lib/git/branch-worktree.ts';
-import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
+import { createTempDir, gitSafeEnv, initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
 
 function git(root: string, args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', env: gitSafeEnv() }).trim();
 }
 
 test('resolves the current branch worktree after its registered path becomes unavailable', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-worktree-'));
+  const root = createTempDir('branch-worktree-');
   const repositoryRoot = path.join(root, 'repository');
   const registeredWorktree = path.join(root, 'registered-worktree');
   const sandboxWorktree = path.join(root, 'sandbox-worktree');
@@ -32,7 +31,7 @@ test('resolves the current branch worktree after its registered path becomes una
 });
 
 test('rejects a registered path reused by an unrelated repository on the same branch', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-worktree-unrelated-'));
+  const root = createTempDir('branch-worktree-unrelated-');
   const repositoryRoot = path.join(root, 'repository');
   const registeredWorktree = path.join(root, 'registered-worktree');
   const sandboxWorktree = path.join(root, 'sandbox-worktree');

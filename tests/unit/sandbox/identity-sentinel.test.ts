@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
@@ -10,7 +9,7 @@ import {
   validateSandboxControlIdentity,
   writeSandboxControlIdentitySentinel
 } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../helpers.ts';
 
 test('identity sentinel has only non-sensitive topology fields and a stable digest', () => {
   const sentinel = createSandboxControlIdentitySentinel({
@@ -26,7 +25,7 @@ test('identity sentinel has only non-sensitive topology fields and a stable dige
 });
 
 test('identity sentinel is written atomically and host validation distinguishes missing and conflicts', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-identity-sentinel-'));
+  const root = createTempDir('sandbox-identity-sentinel-');
   const publicStatusDir = path.join(root, 'public');
   try {
     const sentinel = createSandboxControlIdentitySentinel({

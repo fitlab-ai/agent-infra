@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   loadFreshEsm,
   onPlatforms
 } from "../../helpers.ts";
@@ -102,7 +102,7 @@ function captureStdoutWrite(fn: () => void): string {
 }
 
 function withFakeStty<T>(exitCode: number, fn: () => T): T {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fake-stty-"));
+  const tmpDir = createTempDir("agent-infra-fake-stty-");
   const sttyPath = path.join(tmpDir, "stty");
   const previousPath = process.env.PATH;
 

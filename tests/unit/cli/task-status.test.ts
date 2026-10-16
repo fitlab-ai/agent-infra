@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -19,6 +18,7 @@ import {
 } from '../../../lib/task/commands/status.ts';
 import type { Artifact } from '../../../lib/task/artifacts.ts';
 import { prepareDelegation } from '../../../lib/task/delegation-receipts.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function artifact(name: string, mtimeMs: number): Artifact {
   return { index: mtimeMs, name, path: `/tmp/${name}`, size: 1, mtimeMs };
@@ -203,7 +203,7 @@ test('collectWorkflow marks in-progress rows stale after 60 minutes', () => {
 // --- collectRuntime --------------------------------------------------------
 
 test('collectRuntime reports unmanaged when workflow is in-progress without a run record', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-runtime-'));
+  const taskDir = createTempDir('task-status-runtime-');
   const runtime = collectRuntime(
     taskDir,
     {
@@ -221,7 +221,7 @@ test('collectRuntime reports unmanaged when workflow is in-progress without a ru
 });
 
 test('collectRuntime reads the latest managed tmux run through docker exec', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-runtime-'));
+  const taskDir = createTempDir('task-status-runtime-');
   const runsDir = path.join(taskDir, 'runs');
   fs.mkdirSync(runsDir);
   fs.writeFileSync(
@@ -271,7 +271,7 @@ test('collectRuntime reads the latest managed tmux run through docker exec', () 
 });
 
 test('collectOrchestration projects persisted pause and pending delegation state', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-orchestration-'));
+  const taskDir = createTempDir('task-status-orchestration-');
   const taskId = path.basename(taskDir);
   fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   const pending = prepareDelegation({
@@ -322,7 +322,7 @@ test('collectOrchestration projects persisted pause and pending delegation state
 });
 
 test('collectOrchestration distinguishes absent state from invalid persisted state', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-orchestration-'));
+  const taskDir = createTempDir('task-status-orchestration-');
   assert.equal(collectOrchestration(taskDir).status, 'absent');
   fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), '{"status":"paused"}\n');
@@ -331,7 +331,7 @@ test('collectOrchestration distinguishes absent state from invalid persisted sta
 
 test('persisted running and completed orchestration states override stale workflow and runtime tone', () => {
   for (const status of ['running', 'completed'] as const) {
-    const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-authority-'));
+    const taskDir = createTempDir('task-status-authority-');
     const taskId = path.basename(taskDir);
     const taskMdPath = path.join(taskDir, 'task.md');
     fs.writeFileSync(taskMdPath, [
@@ -502,8 +502,8 @@ test('statusModelToDisplay maps status model to a structured status card', () =>
 });
 
 test('buildStatusModel constructs the model without parsing rendered stdout', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-build-'));
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-repo-'));
+  const taskDir = createTempDir('task-status-build-');
+  const repoRoot = createTempDir('task-status-repo-');
   const taskId = 'TASK-20260101-000001';
   const taskMdPath = path.join(taskDir, 'task.md');
   fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# analysis\n', 'utf8');

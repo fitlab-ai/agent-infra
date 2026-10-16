@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { loadFreshEsm } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 const AGENT_CLIENTS = ["claude-code", "codex", "antigravity-cli", "opencode", "traecli"]
@@ -21,7 +20,7 @@ function writeJson(root: string, relativePath: string, value: unknown) {
 }
 
 test("syncTemplates generates built-in commands for custom skills", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-skill-commands-"));
+  const tmpDir = createTempDir("agent-infra-custom-skill-commands-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");

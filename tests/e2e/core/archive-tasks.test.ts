@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { onPlatforms, read } from "../../helpers.ts";
+import { createTempDir, onPlatforms, read } from "../../helpers.ts";
 
 type CompletedTaskOptions = {
   completedAt: string;
@@ -38,7 +37,7 @@ function runArchiveScript(repoDir: string, ...args: string[]): string {
 }
 
 function setupRepo() {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "archive-tasks-"));
+  const repoDir = createTempDir("archive-tasks-");
 
   fs.mkdirSync(path.join(repoDir, ".agents/skills/archive-tasks/scripts"), { recursive: true });
   fs.mkdirSync(path.join(repoDir, ".agents/workspace/completed"), { recursive: true });

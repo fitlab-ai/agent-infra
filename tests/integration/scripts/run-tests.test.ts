@@ -1,12 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
-import { filePath, onPlatforms } from '../../helpers.ts';
+import { createTempDir, filePath, onPlatforms } from '../../helpers.ts';
 import { sandboxControlSafeEnv } from '../../../lib/sandbox/control/server.ts';
 import { terminateProcessTree } from '../../../scripts/process-tree.js';
 import {
@@ -57,7 +56,7 @@ test('fast smoke skips the build without changing the unit-test selection', () =
 });
 
 test('test runner forwards the configured concurrency to node test', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-concurrency-'));
+  const root = createTempDir('agent-infra-test-runner-concurrency-');
   const fixture = path.join(root, 'concurrency.test.mjs');
   const observed = path.join(root, 'observed.json');
   fs.writeFileSync(fixture, [
@@ -87,7 +86,7 @@ test('test runner forwards the configured concurrency to node test', () => {
 });
 
 test('invalid test concurrency fails before the build starts', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-invalid-concurrency-'));
+  const root = createTempDir('agent-infra-test-runner-invalid-concurrency-');
   const npm = path.join(root, 'npm');
   const marker = path.join(root, 'build-started');
   fs.writeFileSync(npm, [
@@ -116,7 +115,7 @@ test('invalid test concurrency fails before the build starts', () => {
 });
 
 test('test runner lock serializes independent runs and permits inherited reentry', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-lock-'));
+  const root = createTempDir('agent-infra-test-runner-lock-');
   let first: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
   let second: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
   try {
@@ -148,7 +147,7 @@ test('test runner lock serializes independent runs and permits inherited reentry
 });
 
 test('test runner lock recovers ownership left by a dead process', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-stale-lock-'));
+  const root = createTempDir('agent-infra-test-runner-stale-lock-');
   const lockPath = testRunLockPath(root);
   let recovered: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
   try {
@@ -170,7 +169,7 @@ test('test runner lock recovers ownership left by a dead process', async () => {
 });
 
 test('test runner strips inherited sandbox control authority before loading tests', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-'));
+  const root = createTempDir('agent-infra-test-runner-');
   const fixture = path.join(root, 'environment.test.mjs');
   fs.writeFileSync(fixture, [
     "import test from 'node:test';",
@@ -210,7 +209,7 @@ test('test runner strips inherited sandbox control authority before loading test
 });
 
 test('test runner strips inherited sandbox control authority before building', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-build-'));
+  const root = createTempDir('agent-infra-test-runner-build-');
   const npm = path.join(root, 'npm');
   const observed = path.join(root, 'observed.json');
   fs.writeFileSync(npm, [
@@ -245,7 +244,7 @@ test('test runner strips inherited sandbox control authority before building', o
 });
 
 test('test runner preserves a failing test exit code', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-failure-'));
+  const root = createTempDir('agent-infra-test-runner-failure-');
   const fixture = path.join(root, 'failure.test.mjs');
   fs.writeFileSync(fixture, [
     "import test from 'node:test';",
@@ -264,7 +263,7 @@ test('test runner preserves a failing test exit code', () => {
 });
 
 test('test runner forwards termination signals', onPlatforms('linux', 'darwin'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-signal-'));
+  const root = createTempDir('agent-infra-test-runner-signal-');
   const fixture = path.join(root, 'signal.test.mjs');
   const ready = path.join(root, 'ready');
   fs.writeFileSync(fixture, [
@@ -298,7 +297,7 @@ test('test runner forwards termination signals', onPlatforms('linux', 'darwin'),
 });
 
 test('test runner terminates the complete build process group', onPlatforms('linux', 'darwin'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-tree-'));
+  const root = createTempDir('agent-infra-test-runner-tree-');
   const npm = path.join(root, 'npm');
   const ready = path.join(root, 'grandchild.pid');
   const terminated = path.join(root, 'grandchild.terminated');
@@ -398,7 +397,7 @@ test('Windows process tree termination falls back when taskkill fails', async ()
 });
 
 test('Windows process tree termination kills the complete build tree', onPlatforms('win32'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-win-tree-'));
+  const root = createTempDir('agent-infra-test-runner-win-tree-');
   const build = path.join(root, 'build.mjs');
   const ready = path.join(root, 'processes.json');
   fs.writeFileSync(build, [

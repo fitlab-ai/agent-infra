@@ -1,7 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -9,6 +8,7 @@ import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { deliverTaskBranch } from '../../../lib/task/delivery.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260831-000001';
 const BRANCH = 'agent-infra-feature-delivery';
@@ -57,8 +57,8 @@ function updateReviewedHead(taskPath: string, reviewedHead: string): void {
 }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-delivery-'));
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'task-delivery-remote-'));
+  const root = createTempDir('task-delivery-');
+  const remote = createTempDir('task-delivery-remote-');
   roots.add(root);
   roots.add(remote);
   git(remote, ['init', '--bare', '-q']);
@@ -141,7 +141,7 @@ test('task delivery creates, reuses, and safely updates a task branch', () => {
 test('task delivery refuses an unknown remote branch drift', () => {
   const f = fixture();
   assert.equal(deliverTaskBranch(TASK_ID, { repoRoot: f.root, agent: 'codex' }).status, 'applied');
-  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'task-delivery-external-'));
+  const external = createTempDir('task-delivery-external-');
   roots.add(external);
   git(external, ['clone', '-q', f.remote, '.']);
   git(external, ['checkout', '-qb', BRANCH, `origin/${BRANCH}`]);

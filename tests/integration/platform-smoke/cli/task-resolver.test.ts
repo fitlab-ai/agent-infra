@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { resolveTaskBranch } from "../../../../lib/sandbox/task-resolver.ts";
 import {
+  createTempDir,
   INTERNAL_CLI_PATH,
   envWithPrependedPath,
   writeNodeCommandShim
@@ -18,7 +18,7 @@ const SCRIPT = path.resolve(
 );
 
 function withInternalCliPath<T>(operation: () => T): T {
-  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "task-resolver-bin-"));
+  const binDir = createTempDir("task-resolver-bin-");
   writeNodeCommandShim(path.join(binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
   const original = process.env.PATH;
   Object.assign(process.env, envWithPrependedPath(process.env, binDir));
@@ -31,7 +31,7 @@ function withInternalCliPath<T>(operation: () => T): T {
 }
 
 function mkFixtureRepo(shortIdLength: number = 1): { repoRoot: string; activeDir: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tr-"));
+  const repoRoot = createTempDir("tr-");
   const agentsDir = path.join(repoRoot, ".agents");
   const scriptsDir = path.join(agentsDir, "scripts");
   fs.mkdirSync(scriptsDir, { recursive: true });

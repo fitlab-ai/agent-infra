@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { resolvePrimaryWorktreeRoot } from '../../../../lib/git/primary-worktree.ts';
-import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
+import { createTempDir, gitSafeEnv, initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', env: gitSafeEnv() }).trim();
@@ -24,7 +23,7 @@ function makeRepository(root: string): string {
 }
 
 test('resolves the primary worktree from primary, linked, and detached worktrees without using branch names', onPlatforms('linux', 'darwin', 'win32'), () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'primary-worktree-'));
+  const tempRoot = createTempDir('primary-worktree-');
   const primaryRoot = path.join(tempRoot, 'primary checkout');
   const linkedRoot = path.join(tempRoot, 'linked checkout');
   const detachedRoot = path.join(tempRoot, 'detached checkout');
@@ -45,7 +44,7 @@ test('resolves the primary worktree from primary, linked, and detached worktrees
 });
 
 test('fails closed when Git metadata cannot identify a primary worktree', onPlatforms('linux', 'darwin', 'win32'), () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'primary-worktree-missing-'));
+  const tempRoot = createTempDir('primary-worktree-missing-');
   const primaryRoot = path.join(tempRoot, 'primary');
   const linkedRoot = path.join(tempRoot, 'linked');
 
@@ -64,7 +63,7 @@ test('fails closed when Git metadata cannot identify a primary worktree', onPlat
 });
 
 test('fails when called outside a Git worktree', onPlatforms('linux', 'darwin', 'win32'), () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'primary-worktree-outside-'));
+  const dir = createTempDir('primary-worktree-outside-');
   try {
     assert.throws(
       () => resolvePrimaryWorktreeRoot(dir),

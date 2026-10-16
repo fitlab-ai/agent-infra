@@ -1,17 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, filePath, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, filePath, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'complete-task-preflight-'));
+  const root = createTempDir('complete-task-preflight-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const activeDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(activeDir, { recursive: true });

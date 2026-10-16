@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { applyWorkflowWarningIntent } from '../../../lib/task/workflow-warning-intents.ts';
 import { parseWorkflowWarnings, WORKFLOW_WARNING_COLUMNS } from '../../../lib/task/workflow-warnings.ts';
 import { VERSION } from '../../../lib/version.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const row = ['WW-1', '2026-09-09 16:00:00', 'probe', 'IMPORTANT', 'PROBE', 'open', 'task', 'message', 'retry', '', ''];
 const tableRow = (cells: readonly string[]) => '| ' + cells.join(' | ') + ' |';
@@ -25,7 +25,7 @@ for (const [name, body, code] of [
   ['ambiguous sections', table([row]) + table([row], '工作流告警'), 'TASK_DOCUMENT_INVALID']
 ] as const) {
   test(`warning readers and verification reject ${name}`, async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'warning-contract-'));
+    const root = createTempDir('warning-contract-');
     const taskId = 'TASK-20260909-160000';
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
     const configDir = path.join(root, '.agents', 'skills', 'probe', 'config');

@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { parseLedgerDocument, validateLedgerRows } from '../../../lib/task/ledger.ts';
 import { locateActivityLog } from '../../../lib/task/activity-log.ts';
+import { createTempDir } from '../../helpers.ts';
 
 async function verify(content: string, check: string, config = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-activity-contract-'));
+  const root = createTempDir('ledger-activity-contract-');
   try {
     const configDir = path.join(root, '.agents/skills/probe/config');
     fs.mkdirSync(configDir, { recursive: true });

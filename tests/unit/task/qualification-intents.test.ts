@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { applyQualificationProposal } from '../../../lib/task/qualification-intents.ts';
@@ -13,6 +12,7 @@ import {
   renderQualificationAudit,
   validateQualificationAudit
 } from '../../../lib/task/qualification-audit.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const VERSION = 'v0.9.13-alpha.0';
@@ -61,7 +61,7 @@ agent_infra_version: ${VERSION}
 }
 
 function fixture(): { repoRoot: string; taskMd: string } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'qualification-intents-'));
+  const repoRoot = createTempDir('qualification-intents-');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), taskContent());

@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   assertModeBits,
   gitSafeEnv,
   loadFreshEsm,
@@ -76,7 +76,7 @@ function required<T>(value: T | undefined, message = "expected value"): T {
 
 test("syncGpgKeys returns false when the host has no public keys to import", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-no-public-"));
+  const tmpDir = createTempDir("agent-infra-gpg-no-public-");
   const calls: CommandCall[] = [];
 
   try {
@@ -161,7 +161,7 @@ test("getGitSigningKey returns the configured signing key", async () => {
 
 test("getGitSigningKey reads repo-local signingKey when a worktree path is provided", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-signing-key-local-"));
+  const tmpDir = createTempDir("agent-infra-signing-key-local-");
   const repoDir = path.join(tmpDir, "repo");
   const homeDir = path.join(tmpDir, "home");
 
@@ -211,7 +211,7 @@ test("getGitSigningKey returns null for empty output", async () => {
 
 test("readGpgCache returns null when the cache does not exist", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-missing-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-missing-");
 
   try {
     const cache = sandboxCreate.readGpgCache(tmpDir, "demo", () => {
@@ -226,7 +226,7 @@ test("readGpgCache returns null when the cache does not exist", async () => {
 
 test("readGpgCache returns null when the cache is missing state metadata", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-missing-state-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-missing-state-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
@@ -246,7 +246,7 @@ test("readGpgCache returns null when the cache is missing state metadata", async
 
 test("readGpgCache returns cached key material when the keyring fingerprint matches", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-hit-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-hit-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
@@ -274,7 +274,7 @@ test("readGpgCache returns cached key material when the keyring fingerprint matc
 
 test("readGpgCache returns null when the keyring fingerprint changed", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-stale-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-stale-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
@@ -293,7 +293,7 @@ test("readGpgCache returns null when the keyring fingerprint changed", async () 
 
 test("readGpgCache returns null when the cached signingKey no longer matches", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-signing-key-stale-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-signing-key-stale-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
@@ -318,7 +318,7 @@ test("readGpgCache returns null when the cached signingKey no longer matches", a
 
 test("writeGpgCache creates cache files with secure permissions", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-write-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
@@ -343,7 +343,7 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
 
 test("writeGpgCache stores the signingKey used to build the cache", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-signing-key-"));
+  const tmpDir = createTempDir("agent-infra-gpg-cache-write-signing-key-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
@@ -413,7 +413,7 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or
 
 test("syncGpgKeys invalidates cache when the effective signing key changed", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-changed-"));
+  const tmpDir = createTempDir("agent-infra-gpg-sync-signing-key-changed-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
@@ -484,7 +484,7 @@ test("syncGpgKeys invalidates cache when the effective signing key changed", asy
 
 test("syncGpgKeys uses the cache when the keyring fingerprint matches", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-hit-"));
+  const tmpDir = createTempDir("agent-infra-gpg-sync-cache-hit-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
@@ -539,7 +539,7 @@ test("syncGpgKeys uses the cache when the keyring fingerprint matches", async ()
 
 test("syncGpgKeys exports host keys and writes the cache on a cache miss", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-miss-"));
+  const tmpDir = createTempDir("agent-infra-gpg-sync-cache-miss-");
   const calls: CommandCall[] = [];
 
   try {
@@ -587,7 +587,7 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
 
 test("syncGpgKeys exports only the configured signing key on a cache miss", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-"));
+  const tmpDir = createTempDir("agent-infra-gpg-sync-signing-key-");
   const calls: CommandCall[] = [];
 
   try {
@@ -627,7 +627,7 @@ test("syncGpgKeys exports only the configured signing key on a cache miss", asyn
 
 test("syncGpgKeys still succeeds when writing the cache fails", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-write-fails-"));
+  const tmpDir = createTempDir("agent-infra-gpg-sync-cache-write-fails-");
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const calls: CommandCall[] = [];
   const writes: Array<string | Uint8Array> = [];
@@ -681,7 +681,7 @@ test("syncGpgKeys still succeeds when writing the cache fails", async () => {
 
 test("syncGpgKeys returns false when the host has no secret keys to import", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-no-secret-"));
+  const tmpDir = createTempDir("agent-infra-gpg-no-secret-");
   const calls: CommandCall[] = [];
 
   try {
@@ -717,7 +717,7 @@ test("syncGpgKeys returns false when the host has no secret keys to import", asy
 
 test("syncGpgKeys imports host public and secret keys into the container", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-import-"));
+  const tmpDir = createTempDir("agent-infra-gpg-import-");
   const calls: CommandCall[] = [];
   const runSafeCalls: Array<[string, string[]]> = [];
 
@@ -777,7 +777,7 @@ test("syncGpgKeys imports host public and secret keys into the container", async
 
 test("syncGpgKeys can use separate host gpg and engine docker runners", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-engine-docker-"));
+  const tmpDir = createTempDir("agent-infra-gpg-engine-docker-");
   const hostCalls: Array<{ cmd: string; args: string[]; options: CommandOptions }> = [];
   const dockerExecCalls: Array<{ cmd: string; args: string[]; input: string }> = [];
   const dockerSafeCalls: Array<{ cmd: string; args: string[] }> = [];

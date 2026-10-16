@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { filePath } from "../../../helpers.ts";
+import { createTempDir, filePath } from "../../../helpers.ts";
 import defaults from "../../../../lib/defaults.json" with { type: "json" };
 import {
   createAgentClientManifest
@@ -48,7 +47,7 @@ test("canonical defaults keep client installation state outside sandbox tools", 
 });
 
 test("inline build staging leaves existing targets untouched when preparation fails", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inline-failure-"));
+  const root = createTempDir("agent-infra-inline-failure-");
   const write = (relativePath: string, content: string | Buffer) => {
     const target = path.join(root, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });

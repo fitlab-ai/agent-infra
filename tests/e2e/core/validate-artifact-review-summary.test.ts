@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const scenarios = [
   { skill: 'review-analysis', stage: 'analysis', artifact: 'review-analysis.md', findingId: 'AN-1' },
@@ -13,7 +13,7 @@ const scenarios = [
 ] as const;
 
 function fixture(scenario: (typeof scenarios)[number], summary: string, withFinding = false) {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-summary-gate-'));
+  const taskDir = createTempDir('review-summary-gate-');
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---
 id: TASK-20260101-000001
 ---

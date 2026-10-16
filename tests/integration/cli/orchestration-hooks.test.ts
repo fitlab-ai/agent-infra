@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test, { after } from 'node:test';
 
-import { envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
+import { createTempDir, envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
 
 const HOOK = path.resolve('.agents/hooks/lifecycle-delegation.js');
 const FIXTURES = path.resolve('tests/fixtures/lifecycle-hooks');
@@ -43,7 +42,7 @@ function run(input: string, options: RunOptions = {}) {
 
 function createHookFixture(localCliState: LocalCliState, options: HookFixtureOptions = {}) {
   const { pathCli: pathCliEnabled = true, pathSource = 'path' } = options;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-'));
+  const root = createTempDir('lifecycle-hook-');
   fixtureRoots.add(root);
   const repoDir = path.join(root, 'repo');
   const hook = path.join(repoDir, '.agents', 'hooks', 'lifecycle-delegation.js');

@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
@@ -278,7 +278,7 @@ function spawnSandboxCli(
 }
 
 test("sandbox exec '#abc' fails branch validation without triggering docker IO", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-bad-shortref-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-enter-bad-shortref-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -309,7 +309,7 @@ test("sandbox exec '#abc' fails branch validation without triggering docker IO",
 });
 
 test("sandbox exec rejects removed '#1' syntax without docker IO", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-shortref-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-enter-shortref-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -346,7 +346,7 @@ test("sandbox exec rejects removed '#1' syntax without docker IO", onPlatforms("
 });
 
 test("sandbox exec enters tmux automatically for interactive shells", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-enter-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -402,7 +402,7 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
 
 test("sandbox exec redacts tokens from dotfiles snapshot rebuild errors", onPlatforms("linux", "darwin", "win32"), () => {
   const token = "ghp_123456789012345678901234567890123456";
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-${token}-`));
+  const tmpDir = createTempDir(`agent-infra-${token}-`);
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -438,7 +438,7 @@ test("sandbox exec redacts tokens from dotfiles snapshot rebuild errors", onPlat
 });
 
 test("sandbox exec rejects a relative Claude credentials override", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-relative-credentials-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-enter-relative-credentials-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -477,7 +477,7 @@ test("sandbox exec rejects a relative Claude credentials override", onPlatforms(
 });
 
 test("sandbox exec reconciles newer Claude credentials from a neighbouring project", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-credentials-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-enter-credentials-");
   const fakeKeychainPath = path.join(tmpDir, "fake-keychain.json");
   const hostCredentialsPath = path.join(tmpDir, ".claude", ".credentials.json");
   const alphaCredentialsPath = path.join(
@@ -575,7 +575,7 @@ exit 2
 });
 
 test("sandbox ls resolves to configured engine", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-ls-engine-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-ls-engine-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -604,7 +604,7 @@ test("sandbox ls resolves to configured engine", onPlatforms("linux", "darwin", 
 });
 
 test("sandbox rebuild resolves to configured engine", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-engine-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-engine-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -632,7 +632,7 @@ test("sandbox rebuild resolves to configured engine", onPlatforms("linux", "darw
 });
 
 test("sandbox rebuild fails before build when BuildKit is unavailable", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-buildkit-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-buildkit-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -652,7 +652,7 @@ test("sandbox rebuild fails before build when BuildKit is unavailable", onPlatfo
 });
 
 test("sandbox rebuild build failure omits build-proxy guidance without -B", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-fail-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-fail-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -676,7 +676,7 @@ test("sandbox rebuild build failure omits build-proxy guidance without -B", onPl
 });
 
 test("sandbox rebuild forwards refresh flags to docker build", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-refresh-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-refresh-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -698,7 +698,7 @@ test("sandbox rebuild forwards refresh flags to docker build", onPlatforms("linu
 });
 
 test("sandbox rebuild preserves last refresh label without refresh", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-preserve-refresh-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-preserve-refresh-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -724,7 +724,7 @@ test("sandbox rebuild preserves last refresh label without refresh", onPlatforms
 });
 
 test("sandbox rebuild succeeds when an old image exists and rmi would fail", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-no-rmi-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-no-rmi-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -756,7 +756,7 @@ test("sandbox rebuild succeeds when an old image exists and rmi would fail", onP
 });
 
 test("sandbox rebuild prunes project-scoped dangling images after build", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-prune-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-rebuild-prune-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -790,7 +790,7 @@ test("sandbox rebuild prunes project-scoped dangling images after build", onPlat
 });
 
 test("sandbox create resolves to configured engine", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-engine-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-engine-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -816,7 +816,7 @@ test("sandbox create resolves to configured engine", onPlatforms("linux", "darwi
 });
 
 test("sandbox create fails before image inspection when BuildKit is unavailable", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-buildkit-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-buildkit-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -843,7 +843,7 @@ test("sandbox create fails before image inspection when BuildKit is unavailable"
 });
 
 test("sandbox create refreshes stale image before docker run", onPlatforms("linux", "darwin", "win32"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-refresh-due-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-refresh-due-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -882,7 +882,7 @@ test("sandbox create refreshes stale image before docker run", onPlatforms("linu
 });
 
 test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "darwin", "win32"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-refresh-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-no-refresh-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -916,7 +916,7 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
 });
 
 test("sandbox create continues when due refresh build fails", onPlatforms("linux", "darwin", "win32"), async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-refresh-fail-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-refresh-fail-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -962,7 +962,7 @@ test("sandbox create continues when due refresh build fails", onPlatforms("linux
 
 test("sandbox create builds clipboard mount as read-only container path", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-clipboard-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-clipboard-");
 
   try {
     assert.deepEqual(

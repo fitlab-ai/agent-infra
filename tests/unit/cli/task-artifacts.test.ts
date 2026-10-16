@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { enumerateArtifacts, resolveArtifact } from '../../../lib/task/artifacts.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function mkTaskDir(files: string[], subdirs: string[] = []): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-artifacts-'));
+  const dir = createTempDir('task-artifacts-');
   for (const name of files) {
     fs.writeFileSync(path.join(dir, name), `content of ${name}\n`);
   }

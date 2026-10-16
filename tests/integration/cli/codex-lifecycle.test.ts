@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import test, { after } from 'node:test';
 
 import {
+  createTempDir,
   envWithPrependedPath,
   INTERNAL_CLI_PATH,
   sandboxControlSafeEnv,
@@ -29,7 +29,7 @@ after(() => {
 });
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-cli-'));
+  const root = createTempDir('codex-lifecycle-cli-');
   fixtureRoots.add(root);
   assert.equal(spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' }).status, 0);
   assert.equal(spawnSync('git', ['branch', '-M', 'agent-infra-feature-test'], { cwd: root, encoding: 'utf8' }).status, 0);
@@ -172,7 +172,7 @@ function run(root: string, env: NodeJS.ProcessEnv, args: string[], input = '', c
 }
 
 function runBuildFixture(launcherShebang: Record<string, unknown>, executableFiles: readonly string[] = ['bin/internal-cli.ts']) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-build-'));
+  const root = createTempDir('codex-lifecycle-build-');
   fixtureRoots.add(root);
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   fs.copyFileSync(path.join(process.cwd(), 'scripts', 'build.js'), path.join(root, 'scripts', 'build.js'));

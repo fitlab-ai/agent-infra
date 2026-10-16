@@ -1,8 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL("../..", import.meta.url));
+
+// Ordinary fixtures share a real directory identity with Git and child processes.
+function createTempDir(prefix: string): string {
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+}
 
 function filePath(relativePath: string): string {
   const directPath = path.join(rootDir, relativePath);
@@ -46,6 +52,7 @@ function listSkillNames(): string[] {
 }
 
 export {
+  createTempDir,
   exists,
   filePath,
   listFilesRecursive,

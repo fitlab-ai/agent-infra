@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { gitSafeEnv, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, gitSafeEnv, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 const TASK_ID = 'TASK-20260919-010101';
 
 test('sandbox workflow and orchestration commands execute locally without publishing a broker request', onPlatforms('linux', 'darwin'), () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-local-execution-'));
+  const root = createTempDir('task-local-execution-');
   const controlRoot = path.join(root, 'control');
   const statusDir = path.join(controlRoot, 'public');
   const channelDir = path.join(controlRoot, 'channel');

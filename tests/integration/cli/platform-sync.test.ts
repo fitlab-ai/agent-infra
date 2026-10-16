@@ -1,19 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
-import { filePath, gitSafeEnv, withGitSafeProcessEnv } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, withGitSafeProcessEnv } from '../../helpers.ts';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', env: gitSafeEnv() }).trim();
 }
 
 test('platform-sync obtains computed in-label repository metadata from the selected provider', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-sync-provider-'));
+  const root = createTempDir('platform-sync-provider-');
   const taskId = 'TASK-20260906-000001';
   const calls = path.join(root, 'provider-calls.txt');
   try {

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
@@ -10,6 +9,7 @@ import { inspectGitHubIssueClosingChangeRequests, normalizePullRequest } from '.
 import type { GitHubClient, RequestOptions } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
 import { resolveGitHubChangeRequestGitEvidence } from '../../../../lib/platform/github-provider.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 const remote = (number: number, head = 'feature', base = 'main') => ({
   number,
@@ -72,7 +72,7 @@ test('PR mergeability normalization fails closed on missing and contradictory fa
 });
 
 function prByNumberFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-by-number-'));
+  const root = createTempDir('pr-by-number-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:o/r.git'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
@@ -585,7 +585,7 @@ test('GitHub closing PR inspection exhausts cursor pagination and fails closed o
 });
 
 test('GitHub evidence prefers an exact upstream remote', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'github-evidence-'));
+  const root = createTempDir('github-evidence-');
   try {
     assert.equal(spawnSync('git', ['init', '-q'], { cwd: root }).status, 0);
     assert.equal(spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fork/r.git'], { cwd: root }).status, 0);
@@ -608,7 +608,7 @@ test('GitHub evidence prefers an exact upstream remote', () => {
 });
 
 test('GitHub evidence preserves origin transport when rewriting a fork remote', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'github-evidence-'));
+  const root = createTempDir('github-evidence-');
   try {
     assert.equal(spawnSync('git', ['init', '-q'], { cwd: root }).status, 0);
     assert.equal(spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fork/r.git'], { cwd: root }).status, 0);

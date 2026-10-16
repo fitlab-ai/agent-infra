@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -10,6 +9,7 @@ import {
   normalizeCanonicalPath,
   sameFilesystemEntry
 } from '../../../../lib/git/worktree-identity.ts';
+import { createTempDir } from '../../../helpers.ts';
 
 function git(root: string, args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
@@ -27,12 +27,12 @@ test('platform path fallback normalizes Windows identity without folding POSIX c
 });
 
 test('filesystem identity recognizes two canonical names for the same directory', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-identity-'));
+  const root = createTempDir('worktree-identity-');
   assert.equal(sameFilesystemEntry(root, path.join(root, '.')), true);
 });
 
 test('linked worktree binding accepts the same common directory and rejects another repository', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-binding-'));
+  const root = createTempDir('worktree-binding-');
   const main = path.join(root, 'main');
   const linked = path.join(root, 'linked');
   const unrelated = path.join(root, 'unrelated');

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { getAgentClientAdapter } from '../../../lib/agent-clients/registry.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function hookContext(home: string, toolDir: string, hostEnv: NodeJS.ProcessEnv = {}) {
   return {
@@ -48,7 +48,7 @@ test('OpenCode adapter declares its single-volume XDG, install, credential, and 
 });
 
 test('OpenCode hook uses host XDG config and ignores the tool root config', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-adapter-'));
+  const root = createTempDir('opencode-adapter-');
   const home = path.join(root, 'home');
   const toolDir = path.join(root, 'tool');
   const configHome = path.join(root, 'xdg-config');
@@ -74,7 +74,7 @@ test('OpenCode hook uses host XDG config and ignores the tool root config', asyn
 });
 
 test('OpenCode hook preserves canonical config and safely ignores invalid host inputs', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-adapter-invalid-'));
+  const root = createTempDir('opencode-adapter-invalid-');
   const home = path.join(root, 'home');
   const toolDir = path.join(root, 'tool');
   const canonical = path.join(toolDir, '.xdg', 'config', 'opencode', 'opencode.json');

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createLogger } from '../../../lib/server/logger.ts';
+import { createTempDir } from '../../helpers.ts';
 
 function tmpLog(): { dir: string; logPath: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-logger-'));
+  const dir = createTempDir('server-logger-');
   return { dir, logPath: path.join(dir, 'nested', 'server.log') };
 }
 

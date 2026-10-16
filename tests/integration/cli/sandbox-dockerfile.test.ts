@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   filePath,
   loadFreshEsm,
   onPlatforms
@@ -104,7 +104,7 @@ function required<T>(value: T | undefined, message = "expected value"): T {
 
 test("composeDockerfile joins runtime fragments in order", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-dockerfile-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-dockerfile-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -131,7 +131,7 @@ test("composeDockerfile applies selected adapter image contributions after the g
     config: Record<string, unknown>,
     image: { dockerfileFragments: string[]; dotfilesExclusions: string[] }
   ) => string;
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-adapter-image-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-adapter-image-");
 
   try {
     const dockerfilePath = compose({
@@ -165,7 +165,7 @@ test("composeDockerfile applies selected adapter image contributions after the g
 
 test("node runtime setup fails fast on NodeSource download errors", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-node-runtime-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-node-runtime-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -191,8 +191,8 @@ test("node runtime setup fails fast on NodeSource download errors", async () => 
 // `xargs -n1`, or any equivalent rewrite that preserves the semantic.
 test("composeDockerfile installs each AI tool package separately", onPlatforms("linux", "darwin"), async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-ai-tools-loop-"));
-  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-npm-stub-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-ai-tools-loop-");
+  const stubDir = createTempDir("agent-infra-sandbox-npm-stub-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -248,7 +248,7 @@ test("composeDockerfile installs each AI tool package separately", onPlatforms("
 
 test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-gh-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-gh-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -272,7 +272,7 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
 
 test("composeDockerfile installs tmux for in-container session recovery", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tmux-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -293,7 +293,7 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
 
 test("composeDockerfile installs tzdata for runtime TZ resolution", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tzdata-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tzdata-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -312,7 +312,7 @@ test("composeDockerfile installs tzdata for runtime TZ resolution", async () => 
 
 test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-entry-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tmux-entry-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -340,7 +340,7 @@ test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
 
 test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-dotfiles-link-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-dotfiles-link-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -373,7 +373,7 @@ test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
 
 test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-dotfiles-entry-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-dotfiles-entry-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -444,7 +444,7 @@ test("built-in Dockerfile signature covers the runtime script validation", async
 
 test("composeDockerfile configures tmux extended keys and terminal env forwarding", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-config-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-tmux-config-");
 
   try {
     const dockerfilePath = sandboxDockerfile.composeDockerfile({
@@ -672,7 +672,7 @@ test("base.dockerfile handles the preinstalled ubuntu UID conflict", onPlatforms
   assert.ok(runBlock, "expected a RUN block creating devuser");
 
   const shellBody = runBlock.replace(/^RUN\s+/, "").replace(/\\\n\s*/g, " ").trim();
-  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-user-stubs-"));
+  const stubDir = createTempDir("agent-infra-sandbox-user-stubs-");
   const logFile = path.join(stubDir, "invocations.log");
   const stubs = {
     id: [

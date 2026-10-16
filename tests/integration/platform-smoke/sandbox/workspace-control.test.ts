@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { getProcessStartTime } from '../../../../lib/server/process-state.ts';
@@ -57,11 +56,7 @@ import { createTask } from '../../../../lib/task/create-service.ts';
 import { SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import { finalizeSandboxControlManifest } from '../../../../lib/sandbox/workspace-view.ts';
-import { onPlatforms } from '../../../helpers.ts';
-
-function testRoot(prefix: string): string {
-  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-}
+import { createTempDir, onPlatforms } from '../../../helpers.ts';
 
 const manifest: SandboxControlManifest = {
   engine: 'docker',
@@ -95,7 +90,7 @@ const manifest: SandboxControlManifest = {
 };
 
 test('sandbox result evidence is strict, durable, and metadata-only', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-result-evidence-'));
+  const root = createTempDir('sandbox-result-evidence-');
   const boundManifest = {
     ...manifest,
     processingDir: path.join(root, 'processing')
@@ -127,7 +122,7 @@ test('sandbox result evidence is strict, durable, and metadata-only', () => {
 });
 
 test('sandbox payload and reservation records enforce generation accounting and output redaction', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-capacity-'));
+  const root = createTempDir('sandbox-capacity-');
   const boundManifest = {
     ...manifest,
     token: 'capacity-secret',
@@ -166,7 +161,7 @@ test('sandbox payload and reservation records enforce generation accounting and 
 });
 
 test('sandbox terminal publication redacts output before durable write', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-terminal-redaction-'));
+  const root = createTempDir('sandbox-terminal-redaction-');
   const boundManifest = {
     ...manifest,
     token: 'terminal-secret',
@@ -189,7 +184,7 @@ test('sandbox terminal publication redacts output before durable write', () => {
 });
 
 test('sandbox terminal duplicate is accepted only after strict read-back', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-terminal-duplicate-'));
+  const root = createTempDir('sandbox-terminal-duplicate-');
   const boundManifest = {
     ...manifest,
     channelDir: path.join(root, 'channel')
@@ -217,7 +212,7 @@ test('sandbox terminal duplicate is accepted only after strict read-back', () =>
 });
 
 test('sandbox terminal size includes the persisted newline at the exact boundary', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-terminal-boundary-'));
+  const root = createTempDir('sandbox-terminal-boundary-');
   const boundManifest = {
     ...manifest,
     channelDir: path.join(root, 'channel')
@@ -243,7 +238,7 @@ test('sandbox terminal size includes the persisted newline at the exact boundary
 });
 
 test('sandbox generation quota counts retained records once and rejects byte overflow after restart scan', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-generation-quota-'));
+  const root = createTempDir('sandbox-generation-quota-');
   const boundManifest = {
     ...manifest,
     channelDir: path.join(root, 'channel'),
@@ -265,7 +260,7 @@ test('sandbox generation quota counts retained records once and rejects byte ove
       /SANDBOX_CONTROL_CAPACITY_EXHAUSTED/
     );
 
-    const byteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-byte-quota-'));
+    const byteRoot = createTempDir('sandbox-byte-quota-');
     const byteManifest = {
       ...manifest,
       channelDir: path.join(byteRoot, 'channel'),
@@ -298,7 +293,7 @@ test('sandbox generation quota counts retained records once and rejects byte ove
 });
 
 test('sandbox executor authority revalidates the gate-bound broker owner and handoff lease', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-executor-authority-'));
+  const root = createTempDir('sandbox-executor-authority-');
   const publicStatusDir = path.join(root, 'public');
   fs.mkdirSync(publicStatusDir);
   const startTime = getProcessStartTime(process.pid);
@@ -477,7 +472,7 @@ test('task-create executor preserves request identity when the host service thro
 });
 
 test('task-create executor preserves accepted terminal status when the host service returns a qualification failure', async () => {
-  const root = testRoot('task-create-terminal-failure-');
+  const root = createTempDir('task-create-terminal-failure-');
   const requestId = '12345678-1234-4234-8234-123456789abc';
   const taskTemplateDir = path.join(root, '.agents', 'templates');
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
@@ -543,7 +538,7 @@ test('task-create executor preserves accepted terminal status when the host serv
 });
 
 test('control broker ownership is acquired exclusively', onPlatforms('linux', 'darwin'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
+  const root = createTempDir('agent-infra-control-owner-');
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
   const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   git(['init', '-q']);
@@ -581,7 +576,7 @@ test('control broker ownership is acquired exclusively', onPlatforms('linux', 'd
 });
 
 test('control broker rejects manifests missing required fields', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-invalid-manifest-'));
+  const root = createTempDir('agent-infra-control-invalid-manifest-');
   const manifestPath = path.join(root, 'manifest.json');
   fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, worktreeRoot: undefined })}\n`);
   try {
@@ -595,8 +590,8 @@ test('control broker rejects manifests missing required fields', async () => {
 });
 
 test('manifest writer persists control directory names and reader resolves them from each manifest root', () => {
-  const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-manifest-root-a-'));
-  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-manifest-root-b-'));
+  const firstRoot = createTempDir('agent-infra-control-manifest-root-a-');
+  const secondRoot = createTempDir('agent-infra-control-manifest-root-b-');
   const directoryNames = {
     channelDir: 'channel',
     publicStatusDir: 'public',
@@ -649,7 +644,7 @@ test('manifest reader rejects absolute, traversing, and symbolic-link control pa
   const names = { channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime' } as const;
   for (const field of fields) {
     for (const invalidPath of ['absolute', 'traversal', 'symlink'] as const) {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-control-manifest-${field}-${invalidPath}-`));
+      const root = createTempDir(`agent-infra-control-manifest-${field}-${invalidPath}-`);
       const outside = path.join(root, 'outside');
       fs.mkdirSync(outside);
       const values: Record<string, string> = { ...names };
@@ -673,7 +668,7 @@ test('manifest reader rejects absolute, traversing, and symbolic-link control pa
 });
 
 test('manifest reader rejects fields outside the current structure', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-extra-field-'));
+  const root = createTempDir('agent-infra-control-extra-field-');
   const manifestPath = path.join(root, 'manifest.json');
   const stored = {
     ...manifest,
@@ -701,7 +696,7 @@ test('manifest reader rejects fields outside the current structure', () => {
 });
 
 test('replacement owner lookup failures fail closed instead of reclaiming the lease', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-unknown-'));
+  const root = createTempDir('agent-infra-control-owner-unknown-');
   const lease = acquireSandboxControlReplacement(root);
   try {
     assert.throws(
@@ -715,7 +710,7 @@ test('replacement owner lookup failures fail closed instead of reclaiming the le
 });
 
 test('replacement cutover restores the previous root after materialization failure', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-'));
+  const root = createTempDir('agent-infra-control-recovery-');
   const manifestPath = path.join(root, 'manifest.json');
   const oldManifest = {
     ...manifest,
@@ -745,7 +740,7 @@ test('replacement cutover restores the previous root after materialization failu
 });
 
 test('replacement recovery restores a root that disappeared after the snapshot was prepared', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-window-'));
+  const root = createTempDir('agent-infra-control-recovery-window-');
   const manifestPath = path.join(root, 'manifest.json');
   const oldManifest = {
     ...manifest,
@@ -775,7 +770,7 @@ test('replacement recovery restores a root that disappeared after the snapshot w
 });
 
 test('control quiesce fails closed when broker identity is unknown', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-quiesce-unknown-'));
+  const root = createTempDir('agent-infra-control-quiesce-unknown-');
   const controlManifest = {
     ...manifest,
     repoRoot: root,
@@ -809,7 +804,7 @@ test('control quiesce fails closed when broker identity is unknown', async () =>
 });
 
 test('cutover snapshot detects replaced generation evidence before materialization', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-snapshot-'));
+  const root = createTempDir('agent-infra-control-snapshot-');
   try {
     const snapshot = captureSandboxControlCutoverSnapshot(root);
     fs.writeFileSync(path.join(root, 'broker.json'), 'changed\n');
@@ -842,7 +837,7 @@ test('pre-acceptance state errors expose the explicit retry contract', () => {
 });
 
 test('control audit rotates at its fixed bound without recording manifest authority', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-audit-'));
+  const root = createTempDir('agent-infra-control-audit-');
   const auditManifest = {
     ...manifest,
     publicStatusDir: path.join(root, 'public'),
@@ -864,7 +859,7 @@ test('control audit rotates at its fixed bound without recording manifest author
 });
 
 test('stale lease cleanup removes only a matching expired lease', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-lease-'));
+  const root = createTempDir('agent-infra-control-lease-');
   const leaseManifest = {
     ...manifest,
     publicStatusDir: path.join(root, 'public'),
@@ -910,7 +905,7 @@ test('stale lease cleanup removes only a matching expired lease', () => {
 });
 
 test('stale lease cleanup retains evidence when owner identity is unknown', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-lease-unknown-'));
+  const root = createTempDir('agent-infra-control-lease-unknown-');
   const leaseManifest = {
     ...manifest,
     publicStatusDir: path.join(root, 'public'),

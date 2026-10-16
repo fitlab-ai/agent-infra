@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { CLI_PATH, cliArgs } from "../../helpers.ts";
+import { createTempDir, CLI_PATH, cliArgs } from "../../helpers.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 function canonical(enabled: readonly string[]) {
@@ -54,7 +54,7 @@ function makeInput(parts: {
 }
 
 test("ai init default-selects all built-in TUIs on bare Enter", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-default-"));
+  const tmpDir = createTempDir("ai-init-tuis-default-");
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -73,7 +73,7 @@ test("ai init default-selects all built-in TUIs on bare Enter", () => {
 });
 
 test("ai init persists subset selection and skips seed for disabled TUIs", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-subset-"));
+  const tmpDir = createTempDir("ai-init-tuis-subset-");
   try {
     const output = execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -105,7 +105,7 @@ test("ai init persists subset selection and skips seed for disabled TUIs", () =>
 });
 
 test("ai init persists tuis: [] when user types 'none' and skips all built-in seed installs", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-none-"));
+  const tmpDir = createTempDir("ai-init-tuis-none-");
   try {
     const output = execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -132,7 +132,7 @@ test("ai init persists tuis: [] when user types 'none' and skips all built-in se
 });
 
 test("ai init persists tuis in canonical prompt order even when user types reversed", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-order-"));
+  const tmpDir = createTempDir("ai-init-tuis-order-");
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -150,7 +150,7 @@ test("ai init persists tuis in canonical prompt order even when user types rever
 });
 
 test("ai init rejects duplicate selection (1,1) with non-zero exit", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-dup-"));
+  const tmpDir = createTempDir("ai-init-tuis-dup-");
   try {
     const result = spawnSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -168,7 +168,7 @@ test("ai init rejects duplicate selection (1,1) with non-zero exit", () => {
 });
 
 test("ai init rejects whitespace-only TUI input with non-zero exit", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-blank-"));
+  const tmpDir = createTempDir("ai-init-tuis-blank-");
   try {
     const result = spawnSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -186,7 +186,7 @@ test("ai init rejects whitespace-only TUI input with non-zero exit", () => {
 });
 
 test("ai init rejects out-of-range selection (6) with non-zero exit", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-oor-"));
+  const tmpDir = createTempDir("ai-init-tuis-oor-");
   try {
     const result = spawnSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,

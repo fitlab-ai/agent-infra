@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
+  createTempDir,
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
@@ -46,7 +46,7 @@ function spawnSandboxCli(
 }
 
 test("sandbox create injects the detected host timezone into docker run", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-tz-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-create-tz-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -75,7 +75,7 @@ test("sandbox create injects the detected host timezone into docker run", onPlat
 });
 
 test("sandbox exec injects the detected host timezone into docker exec", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-exec-tz-"));
+  const tmpDir = createTempDir("agent-infra-sandbox-exec-tz-");
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {

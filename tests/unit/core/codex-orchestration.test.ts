@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
@@ -22,6 +21,7 @@ import {
   dispatchOrchestrationDelegation,
   readRun
 } from '../../../lib/task/orchestration.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const taskId = 'TASK-20260101-000001';
 const policy = {
@@ -259,7 +259,7 @@ test('Codex child seal pauses when terminal evidence is not terminal', async () 
 });
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-orchestration-'));
+  const root = createTempDir('codex-orchestration-');
   fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });

@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { cliArgs } from '../../helpers.ts';
+import { createTempDir, cliArgs } from '../../helpers.ts';
 import { AGENT_CLIENT_IDS } from '../../../lib/agent-clients/types.ts';
 
 function canonical(enabled: readonly string[], installed: readonly string[]) {
@@ -26,7 +25,7 @@ function writeConfig(root: string, config: Record<string, unknown>): void {
 }
 
 test('agent-client list is registry-backed and does not require a project', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-list-'));
+  const root = createTempDir('agent-client-list-');
   try {
     const output = execFileSync(process.execPath, cliArgs('agent-client', 'list'), {
       cwd: root,
@@ -40,7 +39,7 @@ test('agent-client list is registry-backed and does not require a project', () =
 });
 
 test('enable changes only enabled in canonical state', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-enable-'));
+  const root = createTempDir('agent-client-enable-');
   try {
     writeConfig(root, {
       project: 'demo',
@@ -78,7 +77,7 @@ test('agent-client writes fail without changing a config that uses unsupported s
     [{ tools: ['agent-infra', 'codex'] }, 'sandbox.tools'],
     [{ tools: { ids: ['agent-infra'], definitions: {} }, customTools: [] }, 'sandbox.customTools']
   ] as const) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-invalid-sandbox-tools-'));
+    const root = createTempDir('agent-client-invalid-sandbox-tools-');
     try {
       const initial = {
         project: 'demo',
@@ -107,7 +106,7 @@ test('agent-client writes fail without changing a config that uses unsupported s
 });
 
 test('disable preserves installInSandbox and unknown ids fail without writes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-disable-'));
+  const root = createTempDir('agent-client-disable-');
   try {
     const initial = {
       project: 'demo',
@@ -142,7 +141,7 @@ test('disable preserves installInSandbox and unknown ids fail without writes', (
 });
 
 test('status is read-only and configure edits both independent dimensions', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-configure-'));
+  const root = createTempDir('agent-client-configure-');
   try {
     writeConfig(root, {
       project: 'demo',

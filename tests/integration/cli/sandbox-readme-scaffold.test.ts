@@ -1,17 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { loadFreshEsm } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm } from "../../helpers.ts";
 
 type ReadmeScaffoldModule = typeof import("../../../lib/sandbox/readme-scaffold.ts");
 type ScaffoldFs = Pick<typeof fs, "mkdirSync" | "writeFileSync">;
-
-function makeTempDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
 
 function makeError(code: string): Error & { code: string } {
   return Object.assign(new Error(`simulated ${code}`), { code });
@@ -41,7 +36,7 @@ function readmeFragments(markdown: string, filename: string): string[] {
 
 test("ensureDotfilesReadme creates dotfiles directory and README", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-dotfiles-readme-create-");
+  const tmpDir = createTempDir("agent-infra-dotfiles-readme-create-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
 
   try {
@@ -59,7 +54,7 @@ test("ensureDotfilesReadme creates dotfiles directory and README", async () => {
 
 test("ensureDotfilesReadme preserves an existing README byte-for-byte", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-dotfiles-readme-existing-");
+  const tmpDir = createTempDir("agent-infra-dotfiles-readme-existing-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
   const readmePath = path.join(dotfilesDir, "README.md");
   const userContent = "USER EDIT\n";
@@ -80,7 +75,7 @@ test("ensureDotfilesReadme preserves an existing README byte-for-byte", async ()
 
 test("ensureDotfilesReadme writes README when directory exists and README is missing", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-dotfiles-readme-missing-");
+  const tmpDir = createTempDir("agent-infra-dotfiles-readme-missing-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
 
   try {
@@ -137,7 +132,7 @@ test("ensureDotfilesReadme treats EEXIST during write as an idempotent skip", as
 
 test("ensureShareCommonReadme creates README under the common share directory", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-share-common-readme-create-");
+  const tmpDir = createTempDir("agent-infra-share-common-readme-create-");
 
   try {
     const result = scaffold.ensureShareCommonReadme({ shareBase: tmpDir });
@@ -153,7 +148,7 @@ test("ensureShareCommonReadme creates README under the common share directory", 
 
 test("ensureShareCommonReadme preserves an existing README byte-for-byte", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-share-common-readme-existing-");
+  const tmpDir = createTempDir("agent-infra-share-common-readme-existing-");
   const readmePath = path.join(tmpDir, "common", "README.md");
   const userContent = "USER EDIT\n";
 
@@ -197,7 +192,7 @@ test("ensureShareCommonReadme warns and skips writing when mkdir fails", async (
 
 test("ensureShareBranchReadme uses the sanitized branch share directory", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-share-branch-readme-create-");
+  const tmpDir = createTempDir("agent-infra-share-branch-readme-create-");
 
   try {
     const result = scaffold.ensureShareBranchReadme({ shareBase: tmpDir }, "feat/x");
@@ -213,7 +208,7 @@ test("ensureShareBranchReadme uses the sanitized branch share directory", async 
 
 test("ensureShareBranchReadme preserves an existing README byte-for-byte", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-share-branch-readme-existing-");
+  const tmpDir = createTempDir("agent-infra-share-branch-readme-existing-");
   const readmePath = path.join(tmpDir, "branches", "feat..x", "README.md");
   const userContent = "USER EDIT\n";
 
@@ -254,7 +249,7 @@ test("ensureShareBranchReadme warns and continues when writing fails", async () 
 
 test("ensureSandboxDiscoveryReadmes returns dotfiles common and branch results in order", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-discovery-readmes-order-");
+  const tmpDir = createTempDir("agent-infra-discovery-readmes-order-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
   const shareBase = path.join(tmpDir, "share");
 
@@ -274,7 +269,7 @@ test("ensureSandboxDiscoveryReadmes returns dotfiles common and branch results i
 
 test("ensureSandboxDiscoveryReadmes continues after one scaffold write fails", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-discovery-readmes-failure-");
+  const tmpDir = createTempDir("agent-infra-discovery-readmes-failure-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
   const shareBase = path.join(tmpDir, "share");
   const warnings: string[] = [];
@@ -306,7 +301,7 @@ test("ensureSandboxDiscoveryReadmes continues after one scaffold write fails", a
 
 test("scaffold README links point to headings that exist in the docs sandbox pages", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
-  const tmpDir = makeTempDir("agent-infra-readme-anchor-check-");
+  const tmpDir = createTempDir("agent-infra-readme-anchor-check-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
   const shareBase = path.join(tmpDir, "share");
 

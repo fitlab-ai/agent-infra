@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -12,6 +11,7 @@ import { createTask } from '../../../lib/task/create-service.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
@@ -26,7 +26,7 @@ function homeEnvironment(root: string): NodeJS.ProcessEnv {
 }
 
 function fixture(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-cli-'));
+  const root = createTempDir('agent-infra-task-create-cli-');
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });

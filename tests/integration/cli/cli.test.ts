@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
-import { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
+import { createTempDir, CLI_PATH, INTERNAL_CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
@@ -193,7 +193,7 @@ test("cli does not intercept --version after a subcommand", () => {
 });
 
 test("agent-infra init generates seed files in a temp directory", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const tmpDir = createTempDir("ai-collab-test-");
   const cli = CLI_PATH;
 
   try {
@@ -312,7 +312,7 @@ test("agent-infra init prompts with platform-specific sandbox engine choices", (
 });
 
 test("agent-infra init accepts the canonical demo platform context at the CLI boundary", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-demo-platform-"));
+  const tmpDir = createTempDir("ai-collab-demo-platform-");
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
@@ -328,7 +328,7 @@ test("agent-infra init accepts the canonical demo platform context at the CLI bo
 });
 
 test("agent-infra init accepts a custom platform selected from the menu", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const tmpDir = createTempDir("ai-collab-test-");
   const cli = CLI_PATH;
 
   try {
@@ -354,7 +354,7 @@ test("agent-infra init accepts a custom platform selected from the menu", () => 
 });
 
 test("agent-infra init supports a first-class platform-free strategy", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-none-platform-"));
+  const tmpDir = createTempDir("ai-collab-none-platform-");
   const cli = CLI_PATH;
 
   try {
@@ -375,7 +375,7 @@ test("agent-infra init supports a first-class platform-free strategy", () => {
 });
 
 test("agent-infra init remains compatible with direct platform input", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const tmpDir = createTempDir("ai-collab-test-");
   const cli = CLI_PATH;
 
   try {
@@ -395,7 +395,7 @@ test("agent-infra init remains compatible with direct platform input", () => {
 });
 
 test("agent-infra init warns when a custom platform is entered directly", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const tmpDir = createTempDir("ai-collab-test-");
   const cli = CLI_PATH;
 
   try {
@@ -421,7 +421,7 @@ test("agent-infra init warns when a custom platform is entered directly", () => 
 });
 
 test("agent-infra init records an optional external template source for any platform", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-template-source-"));
+  const tmpDir = createTempDir("ai-collab-init-template-source-");
   const cli = CLI_PATH;
 
   try {
@@ -446,7 +446,7 @@ test("agent-infra init records an optional external template source for any plat
 });
 
 test("agent-infra init omits optional source config when source prompts are blank", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-template-source-blank-"));
+  const tmpDir = createTempDir("ai-collab-init-template-source-blank-");
   const cli = CLI_PATH;
 
   try {
@@ -469,7 +469,7 @@ test("agent-infra init omits optional source config when source prompts are blan
 });
 
 test("agent-infra init records optional external skill sources", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-skill-source-"));
+  const tmpDir = createTempDir("ai-collab-init-skill-source-");
   const cli = CLI_PATH;
 
   try {
@@ -496,7 +496,7 @@ test("agent-infra init records optional external skill sources", () => {
 });
 
 test("installed sync-templates.js executes inside a type=module project", () => {
-  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-")));
+  const tmpDir = createTempDir("ai-collab-esm-");
   const cli = CLI_PATH;
 
   try {
@@ -581,7 +581,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
 });
 
 test("installed package helper executes inside a CommonJS project", () => {
-  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-cjs-helper-")));
+  const tmpDir = createTempDir("ai-collab-cjs-helper-");
 
   try {
     execFileSync(process.execPath, cliArgs("init"), {
@@ -609,7 +609,7 @@ test("installed package helper executes inside a CommonJS project", () => {
 });
 
 test("GitHub init full sync installs lifecycle workflows in the downstream project", async () => {
-  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-github-lifecycle-init-")));
+  const tmpDir = createTempDir("ai-collab-github-lifecycle-init-");
 
   try {
     execFileSync(process.execPath, cliArgs("init"), {
@@ -644,7 +644,7 @@ test("GitHub init full sync installs lifecycle workflows in the downstream proje
 });
 
 test("non-GitHub init full sync excludes GitHub lifecycle workflows", async () => {
-  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-custom-lifecycle-init-")));
+  const tmpDir = createTempDir("ai-collab-custom-lifecycle-init-");
 
   try {
     execFileSync(process.execPath, cliArgs("init"), {
@@ -688,7 +688,7 @@ test("agent-infra init rejects invalid input", () => {
   ];
 
   cases.forEach(({ input, desc }) => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+    const tmpDir = createTempDir("ai-collab-test-");
 
     try {
       assert.throws(() => {
@@ -705,7 +705,7 @@ test("agent-infra init rejects invalid input", () => {
 });
 
 test("agent-infra sync refreshes seed files and syncs file registry", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
+  const tmpDir = createTempDir("ai-collab-update-");
   const cli = CLI_PATH;
   const config = {
     version: "0.1.0",
@@ -814,7 +814,7 @@ test("agent-infra sync refreshes seed files and syncs file registry", async () =
 });
 
 test("agent-infra sync rejects legacy sandbox client tools without rewriting config", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-sandbox-tools-"));
+  const tmpDir = createTempDir("ai-collab-update-sandbox-tools-");
   const config = {
     project: "seedproj",
     org: "seedorg",
@@ -857,7 +857,7 @@ test("agent-infra sync rejects legacy sandbox client tools without rewriting con
 });
 
 test("agent-infra sync requires .agents/.airc.json", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
+  const tmpDir = createTempDir("ai-collab-update-");
   const cli = CLI_PATH;
 
   try {
