@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +43,7 @@ function diagnosticAt(source, line, token, { ruleId = 'complexity', metric = 16,
 }
 
 function createLintFixture() {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'task05-lint-cli-'));
+  const root = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'task05-lint-cli-')));
   const toolDir = path.join(root, 'tools/eslint');
   mkdirSync(toolDir, { recursive: true });
   for (const file of ['run-lint.mjs', 'eslint.config.mjs', 'package.json']) {
