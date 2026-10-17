@@ -4,12 +4,12 @@ commit、push、结果映射和任务收尾使用同一个 `commit-operation.exe
 
 ## 入口模式
 
-- `mode=direct`：用户显式调用授权。task-bound direct 可读取 task facts，但不要求 delegation receipt；taskless direct 只在 `TASK_CONTEXT_NOT_FOUND` 时允许，并跳过 task facts、review、task lock、checkpoint 和 task.md 收尾。
+- `mode=direct`：用户显式调用授权。task-bound direct 可读取 task facts，但不要求 delegation receipt；taskless direct 只在 `TASK_CONTEXT_NOT_FOUND` 时允许，并跳过 task facts、review、checkpoint 和 task.md 收尾。
 - `mode=orchestrated` 已移除：独立 commit 不再是生命周期 delegation stage；调用该模式返回 `ORCHESTRATED_COMMIT_REMOVED`，不写 Git。生命周期 code 阶段完成后由 local checkpoint 直接收口。
 
 ## 共享执行顺序
 
-1. taskless direct 使用 repository/worktree mutation lock；task-bound direct 不获取应用层 repository 或 task lifecycle lock，遵循任务阶段串行约定。
+1. direct commit 按调用方串行执行。
 2. 验证 repository、当前 branch、明确 paths、敏感路径、staged scope、expected HEAD/tree、remote 和 full heads ref。
 3. 完成 direct 模式授权校验。
 4. 最多创建一个本地 commit；无修改时只允许 push-only，不创建空 commit。

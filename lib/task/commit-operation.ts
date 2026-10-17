@@ -7,7 +7,6 @@ import { checkpointCommitMatches } from './commit-identity.ts';
 import { resolveTaskContext, resolveTaskRef } from './resolve-ref.ts';
 import { commitPushDecision } from './commit-policy.ts';
 import { mergeOperationWarnings, type OperationWarning } from './operation-outcome.ts';
-import { TaskExecutionLockError, withRepositoryMutationLock } from './task-execution-lock.ts';
 import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation } from './write.ts';
@@ -516,11 +515,9 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
   const task = resolved.kind === 'bound' ? resolved.task : null;
   if (mode === 'orchestrated' && !task) return failure(normalizedInput, mode, null, 'ORCHESTRATION_TASK_REQUIRED', 'orchestrated commit requires a task context', 'blocked');
   try {
-    return task
-      ? executeUnlocked(normalizedInput, task, mode)
-      : withRepositoryMutationLock(normalizedInput.cwd, () => executeUnlocked(normalizedInput, null, mode));
+    return executeUnlocked(normalizedInput, task, mode);
   } catch (error) {
-    const code = error instanceof TaskExecutionLockError ? error.code : 'COMMIT_OPERATION_FAILED';
+    const code = 'COMMIT_OPERATION_FAILED';
     return failure(normalizedInput, mode, task?.taskId ?? null, code, error instanceof Error ? error.message : String(error), 'blocked');
   }
 }

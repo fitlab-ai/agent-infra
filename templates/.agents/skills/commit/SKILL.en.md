@@ -71,7 +71,7 @@ Example:
 }
 ```
 
-Taskless direct mode omits `taskRef`; direct task-bound commits use push delivery. Taskless direct mode uses the repository/worktree mutation lock; task-bound commits follow sequential lifecycle stages and do not acquire an application task lock or outer repository mutation lock. The core still owns path and sensitive-file checks, staged scope, HEAD/tree, branch/ref, commit, push, protected-branch policy, warnings, and idempotency.
+Taskless direct mode omits `taskRef`; direct task-bound commits use push delivery. Both modes execute serially at the caller boundary; the core still owns path and sensitive-file checks, staged scope, HEAD/tree, branch/ref, commit, push, protected-branch policy, warnings, and idempotency.
 
 - Create at most one local commit for explicit changes.
 - If there are no changes but HEAD is ahead and delivery is requested, perform push-only and do not create an empty commit.
