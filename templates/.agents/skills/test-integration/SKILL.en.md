@@ -67,6 +67,3 @@ Next step - commit changes:
 2. **Environment**: Integration tests may require external services (databases, APIs, etc.)
 3. **Timeouts**: Integration tests typically take longer; be patient
 4. **Cleanup**: Ensure test environment is cleaned up after tests complete
-
-
-For an in-scope, diagnosable failure, inspect the error evidence, identify the cause, fix it, and retry with the same verifier; do not stop or ask merely because an ordinary attempt failed. Preserve a blocked state for user data/template conflicts, design choices beyond approved scope, required human validation/authorization, or unsafe recovery, and continue independent work.

@@ -120,6 +120,3 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 Next step - commit changes:
 {next-step-commands}
 ```
-
-
-For an in-scope, diagnosable failure, inspect the error evidence, identify the cause, fix it, and retry with the same verifier; do not stop or ask merely because an ordinary attempt failed. Preserve a blocked state for user data/template conflicts, design choices beyond approved scope, required human validation/authorization, or unsafe recovery, and continue independent work.

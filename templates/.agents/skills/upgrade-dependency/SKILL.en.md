@@ -85,6 +85,3 @@ Next step - commit changes:
 - Package not found: Prompt "Package {name} not found in dependency files"
 - Build failure: Output errors and suggest checking for breaking changes
 - Test failure: Diagnose and fix recoverable in-scope issues, then rerun the same verifier; report migration-guide risks when relevant
-
-
-For an in-scope, diagnosable failure, inspect the error evidence, identify the cause, fix it, and retry with the same verifier; do not stop or ask merely because an ordinary attempt failed. Preserve a blocked state for user data/template conflicts, design choices beyond approved scope, required human validation/authorization, or unsafe recovery, and continue independent work.
