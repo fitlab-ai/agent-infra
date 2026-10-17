@@ -118,10 +118,10 @@ If no historical release notes exist, use the following default Markdown format:
      - Issue reporters from typed `closingIssues[].author`
    - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
    - **`@login` mapping**: follow the identity safety boundary in `.agents/rules/release-commands.md`
-     - For `platform-user` or `platform-noreply` with a non-empty `login`, use the lowercased `login`
+     - For `platform-user` or `platform-noreply` with a non-empty `login`, follow the mention mapping in `.agents/rules/release-commands.md`
      - Exclude `unresolved` identities from the contributor list; never infer a login from a name, email address, domain, brand, or same-named platform account
      - Merge all Name variants carrying the same typed login before counting and sorting
-     - Preserve bot identities as-is, for example `dependabot[bot]`
+     - Use plain-text `@login` mentions in Release notes, without Markdown links; map Dependabot typed logins to `@dependabot` according to the rule
      - Do not add unresolved identity emails, placeholder mentions, or identity-verification TODOs to publishable notes
    - **Sorting**: descending by contribution count, then lexicographically by login for ties
    - **Deduplication**: use the final mapped `@login` as the key

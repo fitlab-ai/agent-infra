@@ -118,10 +118,10 @@ agent-infra-internal platform-release-notes context \
      - Issue reporters：来自步骤 3 typed context 的 `closingIssues[].author`
    - **贡献数定义**：`该人的 PR 数 + 该人作为 co-author 的 commit 数`（同一身份跨来源合并计数）
    - **`@login` 映射**：遵循 `.agents/rules/release-commands.md` 的身份安全边界
-     - `resolution` 为 `platform-user` 或 `platform-noreply` 且 `login` 非空时，采用小写 `login`
+     - `resolution` 为 `platform-user` 或 `platform-noreply` 且 `login` 非空时，遵循 `.agents/rules/release-commands.md` 的 mention 映射
      - `resolution` 为 `unresolved` 时从贡献者列表中排除；不得从 Name、邮箱、域名、品牌或同名平台账号推断 login
      - 同一 typed login 的所有 Name 变体必须归并后再计数与排序
-     - Bot 身份保留原样（如 `dependabot[bot]`）
+     - Release notes 的 `@login` 一律使用纯文本，不用 Markdown 链接包装；Dependabot typed login 按规则映射为 `@dependabot`
      - 不得在可发布 notes 中加入未解析身份的邮箱、占位 mention 或身份确认 TODO
    - **排序**：按贡献数降序；贡献数相同时按 login 字典序
    - **去重**：以最终映射后的 `@login` 为键

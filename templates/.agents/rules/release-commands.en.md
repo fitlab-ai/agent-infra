@@ -19,6 +19,9 @@ The result contains `history`, `pullRequests`, `closingIssues`, and commit `auth
 - Render an identity as `@login` only when `resolution` is `platform-user` or `platform-noreply` and `login` is non-empty.
 - Exclude `resolution: unresolved` identities from the release-note contributor list. Never infer a login from a name, email address, domain, brand, or same-named platform account, and never substitute a guessed personal or organization account.
 - Do not publish unresolved identity emails or identity-verification TODOs in Release notes. Record any required investigation outside the release workflow without creating a platform mention.
+- Use plain-text `@login` mentions in Release notes; do not wrap mentions in Markdown links.
+- **Dependabot-specific normalization**: Typed context may return the same Dependabot automation account as `app/dependabot` or `dependabot[bot]`. For these resolved identities, render release-note items and Contributors as plain-text `@dependabot`, and merge counts under the normalized `@dependabot`. Do not output `@app/dependabot` or `@dependabot[bot]`, and do not turn `@dependabot` into a Markdown link.
+- This Dependabot mapping is an explicit exception for this project's Release notes. Use the typed `login` for all other identities; do not infer mappings from brands or similar names.
 
 ## Stage Release Notes
 

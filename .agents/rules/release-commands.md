@@ -19,6 +19,9 @@ agent-infra-internal platform-release-notes context \
 - 只有 `resolution` 为 `platform-user` 或 `platform-noreply` 且 `login` 非空的身份可以渲染为 `@login`。
 - `resolution: unresolved` 的身份不得进入发布说明的贡献者列表；不得从 Name、邮箱、域名、品牌或同名平台账号推断 login，也不得替换成推测的个人或组织账号。
 - 不得把未解析身份的邮箱或身份确认 TODO 写入可发布的 Release notes。需要调查时仅在发布流程外记录，不得产生平台 mention。
+- Release notes 中的 mention 使用纯文本 `@login`，不要用 Markdown 链接包装 mention。
+- **Dependabot 专用规范化**：typed context 可能将同一 Dependabot 自动化账号返回为 `app/dependabot` 或 `dependabot[bot]`。对于 `resolution` 已解析的这些身份，发布说明条目和 Contributors 统一使用纯文本 `@dependabot`；按规范化后的 `@dependabot` 合并计数。不要输出 `@app/dependabot` 或 `@dependabot[bot]`，也不要把 `@dependabot` 改成 Markdown 链接。
+- 该 Dependabot 映射是本项目发布说明的明确例外；其他身份继续使用 typed `login`，不得按品牌或相似名称类推。
 
 ## Stage Release notes
 
