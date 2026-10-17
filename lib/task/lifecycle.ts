@@ -628,7 +628,7 @@ export function inspectTaskLifecycleProgress(
   }
 }
 
-function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
+function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
   if (requestInput.intent === 'recover-started') {
     return failed(requestInput, { code: 'LIFECYCLE_RECOVERY_REQUIRES_AUTHORITY', message: 'recover-started must be dispatched through task control authority' });
   }
@@ -922,10 +922,6 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
     timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
     journalPath, completedSteps: [...completed], pendingSteps: []
   };
-}
-
-function applyTaskLifecycle(request: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
-  return applyTaskLifecycleUnlocked(request, options);
 }
 
 export {

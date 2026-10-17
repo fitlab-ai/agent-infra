@@ -859,7 +859,7 @@ function preparedResult(
   };
 }
 
-async function prepareTaskFinalizationUnlocked(
+async function prepareTaskFinalizationCore(
   request: TaskFinalizationRequest,
   taskId: string,
   options: TaskFinalizationOptions
@@ -1138,7 +1138,7 @@ async function prepareTaskFinalization(request: TaskFinalizationRequest, options
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await prepareTaskFinalizationUnlocked(request, resolved.taskId, options);
+    return await prepareTaskFinalizationCore(request, resolved.taskId, options);
   } catch (error) {
     const detail = errorOf(error, 'TASK_FINALIZATION_FAILED');
     return failed(resolved.taskId, detail);

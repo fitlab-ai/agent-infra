@@ -279,7 +279,7 @@ function checkpointTimestamp(): string {
   return new Date().toISOString();
 }
 
-function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
+function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
   if (mode === 'orchestrated') return failure(
@@ -515,7 +515,7 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
   const task = resolved.kind === 'bound' ? resolved.task : null;
   if (mode === 'orchestrated' && !task) return failure(normalizedInput, mode, null, 'ORCHESTRATION_TASK_REQUIRED', 'orchestrated commit requires a task context', 'blocked');
   try {
-    return executeUnlocked(normalizedInput, task, mode);
+    return executeCommitOperationCore(normalizedInput, task, mode);
   } catch (error) {
     const code = 'COMMIT_OPERATION_FAILED';
     return failure(normalizedInput, mode, task?.taskId ?? null, code, error instanceof Error ? error.message : String(error), 'blocked');

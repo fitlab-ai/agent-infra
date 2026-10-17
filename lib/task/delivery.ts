@@ -49,7 +49,7 @@ function failure(taskId: string | null, code: string, message: string, retryable
   return { status, changed: false, taskId, remoteHead: null, localHead: null, state: null, error: { code, message, retryable } };
 }
 
-function deliverUnlocked(
+function deliverTaskBranchCore(
   taskId: string,
   taskDir: string,
   repoRoot: string,
@@ -107,7 +107,7 @@ function deliverUnlocked(
 function deliverTaskBranch(taskRef: string, options: { repoRoot?: string; agent: string; remote?: string; baseRef?: string; dryRun?: boolean }): TaskBranchDeliveryResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(resolved.taskId, resolved.code, resolved.message);
-  return deliverUnlocked(resolved.taskId, resolved.taskDir, resolved.repoRoot, options);
+  return deliverTaskBranchCore(resolved.taskId, resolved.taskDir, resolved.repoRoot, options);
 }
 
 export { classifyDeliveryState, deliverTaskBranch };

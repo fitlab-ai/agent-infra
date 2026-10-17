@@ -1589,7 +1589,7 @@ function readProjectPrFlow(repoRoot: string): 'required' | 'disabled' | undefine
   }
 }
 
-function skipPlatformPullRequestFactUnlocked(
+function applySkippedPullRequestFact(
   resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
   options: SkipFactOptions
 ): PullRequestResult {
@@ -1661,7 +1661,7 @@ async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOpt
     error: { code: 'TASK_STATE_INVALID', message: 'platform-pr skip requires an active task', retryable: false }
   });
   try {
-    return await skipPlatformPullRequestFactUnlocked(resolved, options);
+    return await applySkippedPullRequestFact(resolved, options);
   } catch (error) {
     return result('failed', resolved.taskId, null, null, {
       error: { code: 'PR_SKIP_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }

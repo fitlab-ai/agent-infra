@@ -625,7 +625,7 @@ function replaceCompletionFact(facts: readonly CompletionFact[], next: Completio
   return [...facts.filter((fact) => !(fact.event === next.event && fact.output === next.output)), next];
 }
 
-function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
+function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
@@ -974,12 +974,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     artifactContext, timestamp: result.timestamp,
     agentInfraVersion: result.agentInfraVersion, operations: result.operations, error: null
   };
-}
-
-function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
-  const invalid = validateTaskEventRequest(request);
-  if (invalid) return failed(request, invalid);
-  return applyTaskEventUnlocked(request, options);
 }
 
 function successNoOp(

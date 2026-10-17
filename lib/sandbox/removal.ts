@@ -1057,14 +1057,6 @@ async function rmPurge(
   tools: SandboxTool[],
   prompt: PromptDependencies = {}
 ): Promise<void> {
-  return rmPurgeCore(config, tools, prompt);
-}
-
-async function rmPurgeCore(
-  config: SandboxConfig,
-  tools: SandboxTool[],
-  prompt: PromptDependencies = {}
-): Promise<void> {
   const engine = detectEngine(config);
   const confirm = prompt.confirm ?? p.confirm;
   const isCancel = prompt.isCancel ?? p.isCancel;
@@ -1135,14 +1127,6 @@ async function rmPurgeCore(
 }
 
 async function rmUnbound(
-  config: SandboxConfig,
-  tools: SandboxTool[],
-  options: { dryRun: boolean; assumeYes: boolean }
-): Promise<void> {
-  return rmUnboundCore(config, tools, options);
-}
-
-async function rmUnboundCore(
   config: SandboxConfig,
   tools: SandboxTool[],
   options: { dryRun: boolean; assumeYes: boolean }

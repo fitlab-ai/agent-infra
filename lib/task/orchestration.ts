@@ -936,7 +936,7 @@ function validateDelegationRun(
   return null;
 }
 
-function prepareOrchestrationDelegationUnlocked(
+function prepareOrchestrationDelegation(
   taskRef: string,
   input: Readonly<{
     client: AgentClientId;
@@ -994,21 +994,7 @@ function prepareOrchestrationDelegationUnlocked(
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next, error: null };
 }
 
-function prepareOrchestrationDelegation(
-  taskRef: string,
-  input: Readonly<{
-    client: AgentClientId;
-    requestedModel?: string;
-    requestedReasoningEffort?: string;
-  }>,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  return prepareOrchestrationDelegationUnlocked(taskRef, input, options);
-}
-
-function dispatchOrchestrationDelegationUnlocked(
+function dispatchOrchestrationDelegation(
   taskRef: string,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
@@ -1027,15 +1013,6 @@ function dispatchOrchestrationDelegationUnlocked(
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
-}
-
-function dispatchOrchestrationDelegation(
-  taskRef: string,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  return dispatchOrchestrationDelegationUnlocked(taskRef, options);
 }
 
 type MatchingDelegationsResult =

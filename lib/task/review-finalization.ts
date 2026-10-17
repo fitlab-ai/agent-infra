@@ -121,7 +121,7 @@ function preflightFailed(
 }
 
 /** Validate the current review draft before any finding-ledger write. */
-function preflightReviewSummaryUnlocked(
+function preflightReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewPreflightResult {
@@ -174,13 +174,6 @@ function preflightReviewSummaryUnlocked(
     ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
     status: 'passed', changed: false, error: null
   };
-}
-
-function preflightReviewSummary(
-  request: ReviewFinalizationRequest,
-  options: ReviewFinalizationOptions = {}
-): ReviewPreflightResult {
-  return preflightReviewSummaryUnlocked(request, options);
 }
 
 type ReviewSummaryCandidatePreparation = Readonly<{
@@ -286,7 +279,7 @@ function replaceCurrentArtifactAtomically(file: string, content: string): void {
   }
 }
 
-function finalizeReviewSummaryUnlocked(
+function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
@@ -321,13 +314,6 @@ function finalizeReviewSummaryUnlocked(
       resolved.taskId
     );
   }
-}
-
-function finalizeReviewSummary(
-  request: ReviewFinalizationRequest,
-  options: ReviewFinalizationOptions = {}
-): ReviewFinalizationResult {
-  return finalizeReviewSummaryUnlocked(request, options);
 }
 
 export { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate, commitReviewSummaryProvenance };
