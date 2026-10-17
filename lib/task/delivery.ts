@@ -6,7 +6,6 @@ import { parseTaskFrontmatter } from './frontmatter.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { resolveDeliveryTarget, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
-import { withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 
 export type DeliveryState = 'absent' | 'same' | 'known-old' | 'unknown-drift';
 
@@ -108,14 +107,7 @@ function deliverUnlocked(
 function deliverTaskBranch(taskRef: string, options: { repoRoot?: string; agent: string; remote?: string; baseRef?: string; dryRun?: boolean }): TaskBranchDeliveryResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(resolved.taskId, resolved.code, resolved.message);
-  try {
-    return withRepositoryMutationLock(resolved.repoRoot, () => withTaskExecutionLock(
-      resolved.repoRoot, resolved.taskId, 'task-delivery',
-      () => deliverUnlocked(resolved.taskId, resolved.taskDir, resolved.repoRoot, options)
-    ));
-  } catch (error) {
-    return failure(resolved.taskId, 'DELIVERY_LOCK_FAILED', error instanceof Error ? error.message : String(error), true, 'blocked');
-  }
+  return deliverUnlocked(resolved.taskId, resolved.taskDir, resolved.repoRoot, options);
 }
 
 export { classifyDeliveryState, deliverTaskBranch };

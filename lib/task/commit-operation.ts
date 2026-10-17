@@ -7,7 +7,7 @@ import { checkpointCommitMatches } from './commit-identity.ts';
 import { resolveTaskContext, resolveTaskRef } from './resolve-ref.ts';
 import { commitPushDecision } from './commit-policy.ts';
 import { mergeOperationWarnings, type OperationWarning } from './operation-outcome.ts';
-import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, withRepositoryMutationLock } from './task-execution-lock.ts';
 import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation } from './write.ts';
@@ -517,7 +517,7 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
   if (mode === 'orchestrated' && !task) return failure(normalizedInput, mode, null, 'ORCHESTRATION_TASK_REQUIRED', 'orchestrated commit requires a task context', 'blocked');
   try {
     return task
-      ? withRepositoryMutationLock(normalizedInput.cwd, () => withTaskExecutionLock(normalizedInput.cwd, task.taskId, 'commit-operation', () => executeUnlocked(normalizedInput, task, mode)))
+      ? executeUnlocked(normalizedInput, task, mode)
       : withRepositoryMutationLock(normalizedInput.cwd, () => executeUnlocked(normalizedInput, null, mode));
   } catch (error) {
     const code = error instanceof TaskExecutionLockError ? error.code : 'COMMIT_OPERATION_FAILED';

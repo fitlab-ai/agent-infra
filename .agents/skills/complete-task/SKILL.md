@@ -101,7 +101,7 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 ```
 
 生命周期前只验证硬门禁：
-- [ ] task 身份、active 状态、并发锁和本地原子生命周期操作可用
+- [ ] task 身份、active 状态校验和本地原子生命周期操作可用
 - [ ] `prFlow=required` 时已满足 required-PR delivery
 - [ ] 其余业务证据（工作流、审查、提交、测试、分歧账本、人工校验和平台同步）已记录或可在生命周期后校验；人工验证只能由 committed transaction、receipt、当前 artifact 摘要和带 identity 的通过日志满足
 
@@ -173,11 +173,11 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 按 `.agents/rules/validation-output.md` 展示当次校验摘要；失败、阻塞和软警告保留必要诊断。
 
-该事件只执行 required-PR delivery hard preflight；身份、并发和本地原子性仍由宿主 finalization 强制执行。外围 review/manual/platform 检查在 lifecycle 后由 `complete-task.completed` 处理，并投影为 warning/pending steps。硬门禁退出码非 0（fail/blocked）时，任务继续留在 active，记录稳定 code/target 后停止。
+该事件只执行 required-PR delivery hard preflight；身份校验和本地原子性仍由宿主 finalization 强制执行。外围 review/manual/platform 检查在 lifecycle 后由 `complete-task.completed` 处理，并投影为 warning/pending steps。硬门禁退出码非 0（fail/blocked）时，任务继续留在 active，记录稳定 code/target 后停止。
 
 若需要在摘要中镜像 `post-review-commit` 的 human-decided exemption，在步骤 4 尽力同步原始 failure code/message、PRC id/evidence 和裁决信息；同步失败只记录 `SUMMARY_SYNC_FAILED` warning，仍继续生命周期。最终是否完成由生命周期后的 terminal verification 决定。
 
-`--force` 不能解除身份、并发、本地原子性或 required-PR hard gate；这些能力失败时必须停止。其余审查、人工校验和平台证据由 terminal verification 记录为 warning/pending，并通过后续重试恢复。
+`--force` 不能解除身份校验、本地原子性或 required-PR hard gate；这些能力失败时必须停止。其余审查、人工校验和平台证据由 terminal verification 记录为 warning/pending，并通过后续重试恢复。
 
 ### 6. 执行宿主 finalization 入口
 

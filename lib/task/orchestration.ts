@@ -48,7 +48,6 @@ import {
 import type { RepositorySnapshot } from './workspace-snapshot.ts';
 import type { WorkspaceSnapshotContext } from './workspace-snapshot.ts';
 import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
@@ -441,19 +440,7 @@ function mutateDelegationAdapterEvidence(
 ): unknown {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
-  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options, false);
-}
-
-function mutateDelegationAdapterEvidenceWithinTaskLock(
-  taskRef: string,
-  receiptId: string,
-  adapterId: AgentClientId,
-  mutate: (current: unknown) => unknown,
-  options: OrchestrationOptions = {}
-): unknown {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
-  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options, true);
+  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options);
 }
 
 function mutateDelegationAdapterEvidenceAtResolved(
@@ -461,8 +448,7 @@ function mutateDelegationAdapterEvidenceAtResolved(
   receiptId: string,
   adapterId: AgentClientId,
   mutate: (current: unknown) => unknown,
-  options: OrchestrationOptions,
-  taskLockHeld: boolean
+  options: OrchestrationOptions
 ): unknown {
   const update = () => {
     try {
@@ -494,9 +480,7 @@ function mutateDelegationAdapterEvidenceAtResolved(
     }
   };
   let mutationError: unknown;
-  const result = taskLockHeld
-    ? update()
-    : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `agent-adapter.${adapterId}.evidence`, update);
+  const result = update();
   if (mutationError) throw mutationError;
   return result;
 }
@@ -1021,17 +1005,7 @@ function prepareOrchestrationDelegation(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'task-orchestration.prepare.task',
-      () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
-    );
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
-    throw error;
-  }
+  return prepareOrchestrationDelegationUnlocked(taskRef, input, options);
 }
 
 function dispatchOrchestrationDelegationUnlocked(
@@ -1061,17 +1035,7 @@ function dispatchOrchestrationDelegation(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'task-orchestration.dispatch.task',
-      () => dispatchOrchestrationDelegationUnlocked(taskRef, options)
-    );
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
-    throw error;
-  }
+  return dispatchOrchestrationDelegationUnlocked(taskRef, options);
 }
 
 type MatchingDelegationsResult =
@@ -1385,7 +1349,7 @@ function recoverPreparedOrchestrationDelegation(
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   try {
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-orchestration.recover-prepared', () => {
+    return (() => {
       const run = readRun(resolved.taskDir, options);
       const receipt = run?.pendingDelegation;
       if (!run || !receipt) {
@@ -1430,9 +1394,8 @@ function recoverPreparedOrchestrationDelegation(
       }, options.now);
       saveRun(resolved.taskDir, updated);
       return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
-    });
+    })();
   } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
     return failed(
       'ORCHESTRATION_PREPARED_RECOVERY_FAILED',
       error instanceof Error ? error.message : String(error),
@@ -1462,7 +1425,7 @@ function recoveryReceiptMatches(
     && normalizeAgentToken(event.startedAgent) === normalizeAgentToken(receipt.client);
 }
 
-function recoverActivatedOrchestrationDelegationUnderLock(
+function recoverActivatedOrchestrationDelegation(
   taskRef: string,
   event: ActivatedRecoveryEvent,
   options: OrchestrationOptions = {}
@@ -1598,7 +1561,7 @@ function sealOrchestrationDelegation(
   const orchestrationOptions = options;
   const resolved = resolveTaskRef(taskRef, { repoRoot: orchestrationOptions.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-orchestration.seal', () => {
+  return (() => {
     const run = readRun(resolved.taskDir, orchestrationOptions);
     if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
     if (expected && (run.runId !== expected.runId || run.pendingDelegation.id !== expected.receiptId)) {
@@ -1616,7 +1579,7 @@ function sealOrchestrationDelegation(
     const updated = withUpdatedRun(current, { pendingDelegation: result.receipt });
     saveRun(resolved.taskDir, updated);
     return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
-  });
+  })();
 }
 
 function advanceOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -1672,7 +1635,6 @@ export {
   orchestrationPath,
   readDelegationAdapterEvidence,
   mutateDelegationAdapterEvidence,
-  mutateDelegationAdapterEvidenceWithinTaskLock,
   pauseMatchingOrchestrationDelegation,
   pauseOrchestration,
   planOrchestrationStageCompletion,
@@ -1680,7 +1642,7 @@ export {
   readRun,
   reconcileMatchingOrchestrationDelegation,
   recoverPreparedOrchestrationDelegation,
-  recoverActivatedOrchestrationDelegationUnderLock,
+  recoverActivatedOrchestrationDelegation,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,

@@ -9,7 +9,7 @@ import {
   TaskExecutionLockError,
   lockKey,
   mapLinkError,
-  withTaskExecutionLock
+  withRepositoryMutationLock
 } from '../../../../lib/task/task-execution-lock.ts';
 
 function errno(code: string): NodeJS.ErrnoException {
@@ -30,20 +30,20 @@ test('link errors map to stable lifecycle lock results', () => {
   assert.equal(failed.code, 'ORCHESTRATION_LOCK_FAILED');
 });
 
-test('canonical and symlinked repository roots share one lock key', () => {
+test('canonical and symlinked repository roots share one repository mutation key', () => {
   const root = createTempDir('task-lock-root-');
   const link = `${root}-link`;
   fs.symlinkSync(root, link, 'dir');
-  assert.equal(lockKey(root, 'TASK-20260101-000001').key, lockKey(link, 'TASK-20260101-000001').key);
+  assert.equal(lockKey(root, '__repository_mutation__').key, lockKey(link, '__repository_mutation__').key);
 });
 
-test('a live owner blocks nested acquisition and the outer lock is released', () => {
+test('a live repository mutation owner blocks nested acquisition and is released', () => {
   const root = createTempDir('task-lock-repo-');
   const lockRoot = createTempDir('task-lock-state-');
   let nested: unknown;
-  const value = withTaskExecutionLock(root, 'TASK-20260101-000001', 'outer', () => {
+  const value = withRepositoryMutationLock(root, () => {
     try {
-      withTaskExecutionLock(root, 'TASK-20260101-000001', 'inner', () => undefined, { lockRoot });
+      withRepositoryMutationLock(root, () => undefined, { lockRoot });
     } catch (error) {
       nested = error;
     }
@@ -62,7 +62,7 @@ test('unsupported hard links fail closed before the callback and clean the candi
   let called = false;
 
   assert.throws(
-    () => withTaskExecutionLock(root, 'TASK-20260101-000001', 'unsupported', () => {
+    () => withRepositoryMutationLock(root, () => {
       called = true;
     }, { lockRoot, linkSync: () => { throw errno('EPERM'); } }),
     (error: unknown) => error instanceof TaskExecutionLockError
@@ -75,7 +75,7 @@ test('unsupported hard links fail closed before the callback and clean the candi
 test('a stale fixed owner and stale candidates are reclaimed without leaving lock files', () => {
   const root = createTempDir('task-lock-repo-');
   const lockRoot = createTempDir('task-lock-state-');
-  const taskId = 'TASK-20260101-000001';
+  const taskId = '__repository_mutation__';
   const identity = lockKey(root, taskId);
   const staleOwner = {
     version: 2,
@@ -91,7 +91,7 @@ test('a stale fixed owner and stale candidates are reclaimed without leaving loc
   fs.writeFileSync(path.join(lockRoot, `${identity.key}.candidate.999999.stale-token`), `${JSON.stringify(staleOwner)}\n`);
 
   assert.equal(
-    withTaskExecutionLock(root, taskId, 'reclaimer', () => 'reclaimed', {
+    withRepositoryMutationLock(root, () => 'reclaimed', {
       lockRoot,
       identityMatches: (record) => record.pid === process.pid
     }),
@@ -103,7 +103,7 @@ test('a stale fixed owner and stale candidates are reclaimed without leaving loc
 test('a stale quarantine left by a crashed reclaimer does not permanently block acquisition', () => {
   const root = createTempDir('task-lock-repo-');
   const lockRoot = createTempDir('task-lock-state-');
-  const taskId = 'TASK-20260101-000001';
+  const taskId = '__repository_mutation__';
   const identity = lockKey(root, taskId);
   const fixed = path.join(lockRoot, `${identity.key}.lock`);
   const quarantine = `${fixed}.quarantine.stale-token`;
@@ -121,7 +121,7 @@ test('a stale quarantine left by a crashed reclaimer does not permanently block 
   fs.linkSync(fixed, quarantine);
 
   assert.equal(
-    withTaskExecutionLock(root, taskId, 'reclaimer', () => 'reclaimed', {
+    withRepositoryMutationLock(root, () => 'reclaimed', {
       lockRoot,
       identityMatches: () => false
     }),
@@ -130,7 +130,7 @@ test('a stale quarantine left by a crashed reclaimer does not permanently block 
   assert.deepEqual(fs.readdirSync(lockRoot), []);
 });
 
-test('two processes cannot overlap callbacks for the same task key', async () => {
+test('two processes cannot overlap callbacks for the same repository mutation key', async () => {
   const root = createTempDir('task-lock-repo-');
   const lockRoot = createTempDir('task-lock-state-');
   const ready = path.join(lockRoot, 'ready');
@@ -138,9 +138,9 @@ test('two processes cannot overlap callbacks for the same task key', async () =>
   const moduleUrl = new URL('../../../../lib/task/task-execution-lock.ts', import.meta.url).href;
   const childCode = `
     import fs from 'node:fs';
-    import { withTaskExecutionLock } from ${JSON.stringify(moduleUrl)};
+    import { withRepositoryMutationLock } from ${JSON.stringify(moduleUrl)};
     const [root, lockRoot, ready, release] = process.argv.slice(1);
-    withTaskExecutionLock(root, 'TASK-20260101-000001', 'child', () => {
+    withRepositoryMutationLock(root, () => {
       fs.writeFileSync(ready, 'ready');
       const deadline = Date.now() + 5_000;
       while (!fs.existsSync(release) && Date.now() < deadline) {
@@ -161,7 +161,7 @@ test('two processes cannot overlap callbacks for the same task key', async () =>
     }
     assert.equal(fs.existsSync(ready), true);
     assert.throws(
-      () => withTaskExecutionLock(root, 'TASK-20260101-000001', 'parent', () => undefined, { lockRoot }),
+      () => withRepositoryMutationLock(root, () => undefined, { lockRoot }),
       (error: unknown) => error instanceof TaskExecutionLockError
         && error.code === 'ORCHESTRATION_LOCK_BUSY'
     );
@@ -184,7 +184,7 @@ test(
     const root = createTempDir('task-lock-repo-');
     const lockRoot = createTempDir('task-lock-state-');
     assert.equal(
-      withTaskExecutionLock(root, 'TASK-20260101-000001', 'smoke', () => 'ok', { lockRoot }),
+      withRepositoryMutationLock(root, () => 'ok', { lockRoot }),
       'ok'
     );
     assert.deepEqual(fs.readdirSync(lockRoot), []);

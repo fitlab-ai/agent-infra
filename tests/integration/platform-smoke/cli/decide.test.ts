@@ -5,7 +5,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { decide } from '../../../../lib/decide.ts';
-import { withTaskExecutionLock } from '../../../../lib/task/task-execution-lock.ts';
 import { createTempDir } from '../../../helpers.ts';
 
 function makeTask(rows: string[] = [
@@ -26,23 +25,6 @@ function makeTask(rows: string[] = [
   );
   return { repoRoot, taskId, taskMd };
 }
-
-test('explicit and implicit decisions both honor the task execution lock without writes', async () => {
-  for (const scopeArgs of [[], ['--task', 'TASK-20260101-000001']] as const) {
-    const { repoRoot, taskId, taskMd } = makeTask();
-    try {
-      const before = fs.readFileSync(taskMd);
-      let pending: Promise<number> | undefined;
-      withTaskExecutionLock(repoRoot, taskId, 'test-holder', () => {
-        pending = decide([...scopeArgs, '--item', 'HD-1', 'locked choice'], { repoRoot });
-      });
-      assert.equal(await pending, 1);
-      assert.deepEqual(fs.readFileSync(taskMd), before);
-    } finally {
-      fs.rmSync(repoRoot, { recursive: true, force: true });
-    }
-  }
-});
 
 test('decide marks a legal pending row and records an independent HDR id', async () => {
   const { repoRoot, taskId, taskMd } = makeTask();

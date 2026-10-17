@@ -10,8 +10,6 @@ import {
 } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import type { ArtifactIdentity } from './artifact-lifecycle.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
-import type { TaskExecutionLockOptions } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
 
@@ -95,7 +93,7 @@ export type PrReviewInspectionResult = {
   error: { code: string; message: string } | null;
 };
 
-type ActivityIntentOptions = TaskWriteOptions & { lockOptions?: TaskExecutionLockOptions; lockAlreadyHeld?: boolean };
+type ActivityIntentOptions = TaskWriteOptions;
 type ArtifactRecord = { identity: ArtifactIdentity; head: string; status: PrReviewArtifactStatus };
 type RoundState = ArtifactRecord & {
   startedAgent: string | null;
@@ -299,7 +297,7 @@ function terminalNote(intent: PrReviewCompleteIntent | PrReviewTerminateIntent):
   return `Outcome: ${outcomeLabel(intent.outcome)}, reason: ${intent.reason} → ${intent.artifact}`;
 }
 
-function applyLocked(intent: PrReviewActivityIntent, normalizedAgent: string, options: ActivityIntentOptions): PrReviewActivityResult {
+function applyActivityIntent(intent: PrReviewActivityIntent, normalizedAgent: string, options: ActivityIntentOptions): PrReviewActivityResult {
   const state = readSnapshot(intent.taskRef, options.repoRoot);
   if (!state.ok) return failed(intent, state.code, state.message, state.taskId);
   const parsed = parseArtifactName(intent.artifact)!;
@@ -401,19 +399,7 @@ export function applyPrReviewActivityIntent(intent: PrReviewActivityIntent, opti
   if (resolved.state !== 'active') {
     return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   }
-  if (options.lockAlreadyHeld) return applyLocked(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      `task-activity:${intent.kind}`,
-      () => applyLocked(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot }),
-      options.lockOptions
-    );
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(intent, error.code, error.message, resolved.taskId);
-    return failed(intent, 'ACTIVITY_LOCK_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
-  }
+  return applyActivityIntent(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
 }
 
 export type { ActivityIntentOptions };

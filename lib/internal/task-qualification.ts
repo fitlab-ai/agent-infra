@@ -5,7 +5,6 @@ import type { QualificationConfirmationRequest } from '../task/qualification-con
 import { applyQualificationProposal } from '../task/qualification-intents.ts';
 import type { QualificationProposalRequest } from '../task/qualification-intents.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-qualification <task-ref> <proposal|confirm|supersede|revoke> --input <json-file> [--dry-run]\n`;
@@ -46,16 +45,11 @@ async function taskQualification(args: string[] = []): Promise<void> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) { fail('qualification input must be an object'); return; }
   const resolved = resolveTaskRef(taskRef);
   if (!resolved.ok) { fail(resolved.message, resolved.code); return; }
-  try {
-    const result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-qualification.${operation}`, () => operation === 'proposal'
-      ? applyQualificationProposal({ ...(payload as Record<string, unknown>), taskRef: resolved.taskId, dryRun } as QualificationProposalRequest, { repoRoot: resolved.repoRoot })
-      : applyQualificationConfirmation({ ...(payload as Record<string, unknown>), taskRef: resolved.taskId, operation, dryRun } as QualificationConfirmationRequest, { repoRoot: resolved.repoRoot }));
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    if (result.status === 'failed') process.exitCode = 1;
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) fail(`${error.code}: ${error.message}`, error.code);
-    else throw error;
-  }
+  const result = await (operation === 'proposal'
+    ? applyQualificationProposal({ ...(payload as Record<string, unknown>), taskRef: resolved.taskId, dryRun } as QualificationProposalRequest, { repoRoot: resolved.repoRoot })
+    : applyQualificationConfirmation({ ...(payload as Record<string, unknown>), taskRef: resolved.taskId, operation, dryRun } as QualificationConfirmationRequest, { repoRoot: resolved.repoRoot }));
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (result.status === 'failed') process.exitCode = 1;
 }
 
 export { taskQualification };

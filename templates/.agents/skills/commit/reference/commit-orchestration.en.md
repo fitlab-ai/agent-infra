@@ -9,7 +9,7 @@ Commit, push, result mapping, and task finalization use one `commit-operation.ex
 
 ## Shared order
 
-1. Acquire the repository/worktree mutation lock; task-bound execution also acquires the task lock.
+1. Taskless direct operations use the repository/worktree mutation lock; task-bound direct operations acquire neither an application repository lock nor a task lifecycle lock and follow sequential lifecycle stages.
 2. Validate the repository, current branch, explicit paths, sensitive paths, staged scope, expected HEAD/tree, remote, and full heads ref.
 3. Validate direct-mode authorization.
 4. Create at most one local commit; with no changes, allow push-only and never create an empty commit.

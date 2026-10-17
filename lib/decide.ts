@@ -3,7 +3,6 @@ import { parseTaskScope } from './task/command-options.ts';
 import { applyHumanDecision } from './task/decision-intents.ts';
 import { canonicalTimestamp } from './task/write.ts';
 import { resolveTaskContext } from './task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task/task-execution-lock.ts';
 
 type DecideOptions = {
   repoRoot?: string;
@@ -70,15 +69,11 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       repoRoot: resolved.repoRoot,
       metadataProvider: () => ({ timestamp: now, agentInfraVersion: options.version ?? VERSION })
     };
-    let result;
-    const execute = async () => applyHumanDecision(request, writeOptions);
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-decision', execute);
+    const result = await applyHumanDecision(request, writeOptions);
     if (result.error) throw new Error(result.error.message);
     return 0;
   } catch (error) {
-    const message = error instanceof TaskExecutionLockError
-      ? `${error.code}: ${error.message}`
-      : error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`Error: ${message}\n`);
     return 1;
   }

@@ -68,7 +68,7 @@ Run `agent-infra-internal task-delivery {task-id} deliver --agent {standard-agen
 
 ### 5. Create or Recover the PR
 
-Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. Under the task lock, core uses remote branch and exact head/base/PR identity facts: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Review artifacts and task sync records are not create-pr prerequisites, and replays must not create duplicate PRs.
+Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. Core uses remote branch and exact head/base/PR identity facts: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Review artifacts and task sync records are not create-pr prerequisites, and replays must not create duplicate PRs.
 
 If `{task-id}` is available and the related task provides `platform_issue_identity`, keep `Closes #{issue-number}` or the provider-equivalent closing keyword in the PR body when supported.
 

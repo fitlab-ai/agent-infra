@@ -5,7 +5,6 @@ import { createHash } from 'node:crypto';
 import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
@@ -433,7 +432,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ...context, report: null };
   let knownPrNumber: number | null = null;
   try {
-    return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
+    return await (async () => {
       const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
       if (factError) return {
         ...basePlatformResult('failed', context, resolved.taskId, null, { code: factError.code, message: factError.message, retryable: false }),
@@ -502,18 +501,15 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
         operations: [{ name: 'change-report:write', status: 'applied', reasonCode: null }],
         report: { ...reportInfo, status: 'written' }
       };
-    });
+    })();
   } catch (error) {
-    const lockError = error instanceof TaskExecutionLockError
-      ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
-      : { code: 'PR_CHANGE_REPORT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false };
-    return { ...basePlatformResult(lockError.retryable ? 'blocked' : 'failed', context, resolved.taskId, knownPrNumber, lockError), report: null };
+    return { ...basePlatformResult('failed', context, resolved.taskId, knownPrNumber, { code: 'PR_CHANGE_REPORT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }), report: null };
   }
 }
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean; skipQueue?: boolean }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; skipQueue?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -780,14 +776,9 @@ async function syncPullRequestSummary(
         persistenceFailure: (error) => fail('failed', context, error, prNumber)
       });
     };
-    return await (options.lockAlreadyHeld
-      ? execute()
-      : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, execute));
+    return await execute();
   } catch (error) {
-    const lockError = error instanceof TaskExecutionLockError
-      ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
-      : { code: 'PR_SUMMARY_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false };
-    return fail(lockError.retryable ? 'blocked' : 'failed', context, lockError);
+    return fail('failed', context, { code: 'PR_SUMMARY_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false });
   }
 }
 

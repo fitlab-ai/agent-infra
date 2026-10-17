@@ -1,6 +1,5 @@
 import { renderTaskVerification, verifyTaskEvent } from '../task/verification.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-verify <N | TASK-id> <verification-event> [--artifact <canonical.md>] [--format json|text]\n';
@@ -34,14 +33,7 @@ async function taskVerify(args: string[] = []): Promise<void> {
   }
   const resolved = resolveTaskRef(taskRef);
   if (!resolved.ok) { fail(resolved.message); return; }
-  let result;
-  try {
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-verify.${event}`, async () => verifyTaskEvent({ taskRef, event, ...(artifact ? { artifact } : {}) }));
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    fail(`${error.code}: ${error.message}`);
-    return;
-  }
+  const result = await verifyTaskEvent({ taskRef, event, ...(artifact ? { artifact } : {}) });
   process.stdout.write(format === 'text' ? renderTaskVerification(result) : `${JSON.stringify(result)}\n`);
   process.exitCode = result.status === 'pass' ? 0 : result.status === 'blocked' ? 2 : 1;
 }

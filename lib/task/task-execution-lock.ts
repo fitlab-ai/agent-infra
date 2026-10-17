@@ -274,7 +274,7 @@ function withTaskExecutionLock<T>(
         if ((options.identityMatches ?? processIdentityMatches)(current)) {
           throw new TaskExecutionLockError(
             'ORCHESTRATION_LOCK_BUSY',
-            'another lifecycle operation holds the task lock',
+            'another lifecycle operation holds the mutation lock',
             { operation: 'acquire', errno: 'EEXIST', key }
           );
         }
@@ -284,7 +284,7 @@ function withTaskExecutionLock<T>(
     if (!ownsFixed) {
       throw new TaskExecutionLockError(
         'ORCHESTRATION_LOCK_BUSY',
-        'lifecycle task lock could not be acquired after stale recovery',
+        'lifecycle mutation lock could not be acquired after stale recovery',
         { operation: 'acquire', errno: 'EEXIST', key }
       );
     }
@@ -300,7 +300,7 @@ function withTaskExecutionLock<T>(
     if (error instanceof Error && ['OrchestrationStateError', 'ArtifactRecoveryError'].includes(error.name)) throw error;
     throw new TaskExecutionLockError(
       'ORCHESTRATION_LOCK_FAILED',
-      'lifecycle task lock operation failed',
+      'lifecycle mutation lock operation failed',
       { operation: ownsFixed ? 'callback' : 'acquire', errno: errno(error), key }
     );
   } finally {

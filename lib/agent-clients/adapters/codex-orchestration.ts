@@ -481,7 +481,7 @@ async function sealCodexOrchestrationDelegation(
       coreOptions(options),
       () => {
         try {
-          const consumed = store.consumeWithinTaskLock(
+          const consumed = store.consume(
             childThreadId,
             current.receipt.id,
             existing.state.spawn?.hookDefinitionHash,
