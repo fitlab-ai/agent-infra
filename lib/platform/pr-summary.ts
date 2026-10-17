@@ -557,7 +557,7 @@ async function syncPullRequestSummary(
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) {
-    // This diagnostic-only read preserves the known PR target when context resolution fails before the execution lock.
+    // Preserve the known PR target for diagnostics when provider context resolution fails.
     knownPrNumber = boundPrNumberForWarning(resolved.taskMdPath);
     return preserveFailure(context);
   }
