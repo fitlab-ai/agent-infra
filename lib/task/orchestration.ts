@@ -54,7 +54,7 @@ import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts'
 import { hasOpenLifecycleExecution } from './activity-log.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
-import { resolveArtifactContext } from './artifact-lifecycle.ts';
+import { resolveArtifactContextForResolvedTask } from './artifact-lifecycle.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -852,7 +852,7 @@ function routeResolvedTask(
   }
   const action = routed.stage as LifecycleAction;
   const family = action === 'analysis' ? 'analysis' : action;
-  const artifactContext = resolveArtifactContext(taskRef, family, {
+  const artifactContext = resolveArtifactContextForResolvedTask(resolved, family, {
     repoRoot: resolved.repoRoot
   });
   if (artifactContext.status !== 'ready' || !artifactContext.selection) {
