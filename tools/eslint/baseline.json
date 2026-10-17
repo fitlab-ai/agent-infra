@@ -927,15 +927,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commit-operation.ts",
-      "ruleId": "complexity",
-      "stableId": "b0c89f85eeef27730357a7b0345d4fe676627c0a02e5e09b026a088d52be0906",
-      "displayName": "executeCommitOperation",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/internal/manual-validation.ts",
       "ruleId": "complexity",
       "stableId": "6624a961de8cc335287ff34b350a48db5429d70ee60fc13bc7063f3957478e7e",
@@ -1536,15 +1527,6 @@
       "displayName": "parseJournal",
       "metric": 111,
       "normalizedMessage": "complexity=111",
-      "count": 1
-    },
-    {
-      "file": "lib/task/task-execution-lock.ts",
-      "ruleId": "complexity",
-      "stableId": "9cccba6ab3810d91ba286b0c81292692c5988d7d3e920a51fe58e0b1f7f87f84",
-      "displayName": "parseOwner",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {
@@ -3192,24 +3174,6 @@
       "displayName": "watchPullRequestReadiness",
       "metric": 16,
       "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
-      "file": "lib/task/task-execution-lock.ts",
-      "ruleId": "complexity",
-      "stableId": "e2543b1983c41a9c2b4a7efa7d07d2e16c480ebc01996ddb1f5a51b14d8d139a",
-      "displayName": "withTaskExecutionLock",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/task/task-execution-lock.ts",
-      "ruleId": "max-depth",
-      "stableId": "e2543b1983c41a9c2b4a7efa7d07d2e16c480ebc01996ddb1f5a51b14d8d139a",
-      "displayName": "withTaskExecutionLock",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
       "count": 1
     },
     {
