@@ -717,9 +717,13 @@ function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'request
   return { action: command, role, stage: action };
 }
 
-function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+type ResolvedTaskRef = Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+
+function routeResolvedTask(
+  taskRef: string,
+  resolved: ResolvedTaskRef,
+  options: OrchestrationOptions
+): OrchestrationResult {
   let gitRoot: string;
   try {
     gitRoot = gitRootFor(resolved.repoRoot, options);
@@ -882,6 +886,12 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 
+function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  return routeResolvedTask(taskRef, resolved, options);
+}
+
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
@@ -962,7 +972,7 @@ function prepareOrchestrationDelegation(
   const runFailure = validateDelegationRun(taskRef, resolved.taskId, run, options);
   if (runFailure) return runFailure;
   const activeRun = run!;
-  const routed = routeOrchestration(taskRef, options);
+  const routed = routeResolvedTask(taskRef, resolved, options);
   if (!routed.next) return routed;
   const next = routed.next;
   const policyFailure = validatePreparedModelPolicy(resolved.taskId, activeRun, next, input);
