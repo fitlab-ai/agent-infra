@@ -68,7 +68,7 @@ description: >
 
 ### 5. 创建或恢复 PR
 
-执行前先读取 `.agents/rules/issue-pr-commands.md`，把标题和正文写入临时文件，并调用其中的 `platform-pr create` intent。core 在任务锁内按 remote branch、head/base 和 PR 身份事实执行：唯一既有 PR 会复用并绑定，零个才创建，多个稳定失败；review 或 task sync 记录不作为创建 PR 的前置门禁，重放不得产生重复 PR。
+执行前先读取 `.agents/rules/issue-pr-commands.md`，把标题和正文写入临时文件，并调用其中的 `platform-pr create` intent。core 按 remote branch、head/base 和 PR 身份事实执行：唯一既有 PR 会复用并绑定，零个才创建，多个稳定失败；review 或 task sync 记录不作为创建 PR 的前置门禁，重放不得产生重复 PR。
 
 如果获取到 `{task-id}` 且对应任务提供了 `platform_issue_identity`，在 provider 支持 numeric closing reference 时必须在 PR 正文中保留 `Closes #{issue-number}` 或 provider 等价关闭关键字。
 

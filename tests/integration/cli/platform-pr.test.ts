@@ -5,7 +5,6 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
-import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -821,12 +820,6 @@ test('platform-pr create does not require commit finalization evidence before re
     assert.equal(task.includes('Create PR [started]'), false);
     assert.equal(JSON.parse(JSON.parse((task.match(/^pr_delivery_fact: (.+)$/m) || [])[1] || '"{}"')).state, 'unbound');
 
-    const lockBusy = withTaskExecutionLock(root, taskId, 'test-holder', () => run([
-      'create', taskId, '--agent', 'codex', '--base', 'main', '--head', 'feature',
-      '--title-file', title, '--body-file', body
-    ], { cwd: root, env }));
-    assert.equal(lockBusy.status, 2, lockBusy.stderr || lockBusy.stdout);
-    assert.equal(JSON.parse(lockBusy.stdout).error.code, 'ORCHESTRATION_LOCK_BUSY');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

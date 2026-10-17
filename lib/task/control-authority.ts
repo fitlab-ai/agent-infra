@@ -29,8 +29,6 @@ import {
 } from './finalization.ts';
 import {
   applyTaskLifecycle,
-  applyTaskLifecycleWithinTaskLock,
-  taskLifecycleFailure,
   type TaskLifecycleRequest,
   type TaskLifecycleResult
 } from './lifecycle.ts';
@@ -39,7 +37,6 @@ import type {
   AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult
 } from '../agent-clients/adapter.ts';
 import { resolveTaskContext, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 
 export type TaskControlExecutionContext =
@@ -215,7 +212,7 @@ async function applyLifecycleWithAuthority(
 ): Promise<TaskLifecycleResult | LifecycleRecoveryResult> {
   const taskId = lifecycleTaskId(request, context.repoRoot);
   const controlRoot = taskId ? controlRootForTask(context, taskId) : undefined;
-  const execute = async (underTaskLock = false): Promise<TaskLifecycleResult | LifecycleRecoveryResult> => {
+  const execute = async (): Promise<TaskLifecycleResult | LifecycleRecoveryResult> => {
     if (request.intent === 'recover-started') {
       const adapter = isAgentClientId(request.agent)
         ? getAgentClientAdapter(request.agent).orchestrationAdapter
@@ -229,38 +226,13 @@ async function applyLifecycleWithAuthority(
       }
       return adapter.recoverStarted(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
     }
-    return underTaskLock
-      ? applyTaskLifecycleWithinTaskLock(request, {
-        repoRoot: context.repoRoot,
-        ...(controlRoot ? { controlRoot } : {}),
-        ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {})
-      }, taskId!)
-      : applyTaskLifecycle(request, {
-        repoRoot: context.repoRoot,
-        ...(controlRoot ? { controlRoot } : {}),
-        ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {})
-      });
+    return applyTaskLifecycle(request, {
+      repoRoot: context.repoRoot,
+      ...(controlRoot ? { controlRoot } : {}),
+      ...(context.source === 'direct-host' && context.project ? { controlProject: context.project } : {})
+    });
   };
-  if (!taskId) return await execute();
-  try {
-    return await withTaskExecutionLock(
-      context.repoRoot,
-      taskId,
-      `task-lifecycle.${request.intent}`,
-      () => execute(true)
-    );
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    if (request.intent === 'recover-started') {
-      return {
-        status: 'owner-unknown', changed: false, targetState: 'active',
-        requestRef: request.taskRef, intent: 'recover-started', taskId,
-        receiptId: null, childId: null,
-        error: { code: error.code, message: error.message }
-      };
-    }
-    return taskLifecycleFailure(request, { code: error.code, message: error.message }, taskId);
-  }
+  return await execute();
 }
 
 function controlRootForTask(context: TaskControlExecutionContext, taskId: string): string | undefined {

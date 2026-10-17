@@ -71,7 +71,7 @@ agent-infra-internal git-workflow commit --input {commit-operation.json}
 }
 ```
 
-taskless direct 省略 `taskRef`；direct task-bound commit 使用 push delivery。core 统一负责 repository/worktree mutation lock、task lock（仅 task-bound）、路径和敏感文件、staged scope、HEAD/tree、branch/ref、commit、push、保护分支、warning 和幂等校验。
+taskless direct 省略 `taskRef`；direct task-bound commit 使用 push delivery。两种模式都按调用方串行执行；core 仍负责路径和敏感文件、staged scope、HEAD/tree、branch/ref、commit、push、保护分支、warning 和幂等校验。
 
 - 有明确修改时最多创建一个本地 commit。
 - 无修改但需要交付本地领先的 HEAD 时只执行 push-only，不创建空 commit。

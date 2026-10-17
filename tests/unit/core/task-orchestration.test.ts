@@ -26,7 +26,6 @@ import {
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
-import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
 import { createTempDir, recordArtifactCompletions } from '../../helpers.ts';
@@ -119,19 +118,14 @@ function seedCompletionEvidence(taskDir: string) {
   recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
 }
 
-test('dispatch uses the task lock without depending on a repository-wide lock', () => {
+test('dispatch records the pending delegation as dispatched', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, { repoRoot: f.root, captureWorkspace: snapshot });
 
-  const result = withTaskExecutionLock(
-    f.root,
-    '__repository__',
-    'test.dispatch.repository',
-    () => dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root })
-  );
+  const result = dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
 
   assert.equal(result.status, 'running');
   assert.notEqual(readRun(f.taskDir)?.pendingDelegation?.spawnDispatchedAt, null);

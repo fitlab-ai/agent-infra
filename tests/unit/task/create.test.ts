@@ -4,7 +4,6 @@ import path from 'node:path';
 import test from 'node:test';
 import { createTempDir, onPlatforms } from '../../helpers.ts';
 
-import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
 import {
   canonicalTaskCreateCandidate,
@@ -20,7 +19,6 @@ import {
   taskCreateExitCode,
   taskCreateOutputUnavailableResult
 } from '../../../lib/task/create-service.ts';
-import { lockKey, withRepositoryMutationLock } from '../../../lib/task/task-execution-lock.ts';
 
 const candidate: TaskCreateCandidateV1 = {
   version: 1,
@@ -77,24 +75,6 @@ function cleanupFixture(root: string): void {
     else process.env.HOME = originalHome;
   }
   fs.rmSync(root, { recursive: true, force: true });
-}
-
-function writeCreateLockOwner(root: string, owner: Readonly<{ pid: number; startTime: number }>): string {
-  const lockRoot = path.join(root, '.agent-infra', 'run', 'demo', 'task-create-locks');
-  fs.mkdirSync(lockRoot, { recursive: true });
-  const { canonicalRepoRoot, key } = lockKey(root, 'task-create', 'task-create\0demo');
-  const fixed = path.join(lockRoot, `${key}.lock`);
-  fs.writeFileSync(fixed, `${JSON.stringify({
-    version: 2,
-    pid: owner.pid,
-    startTime: owner.startTime,
-    token: 'test-owner',
-    owner: 'task-create',
-    canonicalRepoRoot,
-    taskId: 'task-create',
-    acquiredAt: '2026-08-13T00:00:00.000Z'
-  })}\n`);
-  return fixed;
 }
 
 test('task-create candidate validation rejects unknown fields and invalid slugs', () => {
@@ -175,49 +155,6 @@ test('local task creation is idempotent and rejects key reuse with changed conte
       () => createLocalTask({ ...candidate, title: 'Changed title' }, options),
       /TASK_CREATE_IDEMPOTENCY_CONFLICT/
     );
-  } finally {
-    cleanupFixture(root);
-  }
-});
-
-test('local task creation joins the repository mutation lock before publishing an active task', () => {
-  const root = fixture();
-  try {
-    withRepositoryMutationLock(root, () => {
-      assert.throws(
-        () => createLocalTask(candidate, { repoRoot: root, agentInfraVersion: 'v0.9.5' }),
-        (error: { code?: string }) => error.code === 'ORCHESTRATION_LOCK_BUSY'
-      );
-    });
-    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
-  } finally {
-    cleanupFixture(root);
-  }
-});
-
-test('task creation reports repository lock contention as retryable without publishing a task', async () => {
-  const root = fixture();
-  let platformCalls = 0;
-  let resultPromise: ReturnType<typeof createTask> | undefined;
-  try {
-    withRepositoryMutationLock(root, () => {
-      resultPromise = createTask(candidate, {
-        repoRoot: root,
-        agentInfraVersion: 'v0.9.5',
-        dependencies: {
-          createIssue: (() => { platformCalls += 1; throw new Error('platform work must not start'); }) as never
-        }
-      });
-    });
-
-    assert.ok(resultPromise);
-    const result = await resultPromise;
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.error?.code, 'ORCHESTRATION_LOCK_BUSY');
-    assert.equal(result.error?.retryable, true);
-    assert.equal(result.task.id, null);
-    assert.equal(platformCalls, 0);
-    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
   } finally {
     cleanupFixture(root);
   }
@@ -373,85 +310,6 @@ test('same-second task creation advances to the next free TASK-id', () => {
     assert.equal(first.task.id, 'TASK-20260813-010203');
     assert.equal(second.task.id, 'TASK-20260813-010204');
   } finally {
-    cleanupFixture(root);
-  }
-});
-
-test('local task creation reclaims a lock whose process identity is stale', () => {
-  const root = fixture();
-  try {
-    const fixed = writeCreateLockOwner(root, { pid: 999_999_999, startTime: 0 });
-    const result = createLocalTask(candidate, {
-      repoRoot: root,
-      now: () => new Date(2026, 7, 13, 1, 2, 3),
-      agentInfraVersion: 'v0.9.5'
-    });
-    assert.equal(result.status, 'applied');
-    assert.equal(fs.existsSync(fixed), false);
-  } finally {
-    cleanupFixture(root);
-  }
-});
-
-test('local task creation preserves a lock owned by the current process', () => {
-  const root = fixture();
-  const startTime = getProcessStartTime(process.pid);
-  assert.ok(startTime);
-  try {
-    const fixed = writeCreateLockOwner(root, { pid: process.pid, startTime });
-    assert.throws(
-      () => createLocalTask(candidate, {
-        repoRoot: root,
-        agentInfraVersion: 'v0.9.5'
-      }),
-      /TASK_CREATE_LOCK_TIMEOUT/
-    );
-    assert.equal(fs.existsSync(fixed), true);
-  } finally {
-    cleanupFixture(root);
-  }
-});
-
-test('task-create explicit lock identity is shared across checkouts and isolated by project', () => {
-  const left = fixture();
-  const right = createTempDir('agent-infra-task-create-checkout-');
-  try {
-    const sharedLeft = lockKey(left, 'task-create', 'task-create\0demo');
-    const sharedRight = lockKey(right, 'task-create', 'task-create\0demo');
-    const otherProject = lockKey(right, 'task-create', 'task-create\0other');
-    assert.equal(sharedLeft.key, sharedRight.key);
-    assert.notEqual(sharedRight.key, otherProject.key);
-  } finally {
-    cleanupFixture(left);
-    fs.rmSync(right, { recursive: true, force: true });
-  }
-});
-
-test('project lock initialization tolerates another creator winning the directory race', () => {
-  const root = fixture();
-  const originalExistsSync = fs.existsSync;
-  const contested = path.join(root, '.agent-infra');
-  let interleaved = false;
-  try {
-    fs.existsSync = ((file: fs.PathLike) => {
-      const exists = originalExistsSync(file);
-      if (!interleaved && file === contested && !exists) {
-        interleaved = true;
-        fs.mkdirSync(contested, { mode: 0o700 });
-      }
-      return exists;
-    }) as typeof fs.existsSync;
-
-    const created = createLocalTask(candidate, {
-      repoRoot: root,
-      now: () => new Date(2026, 7, 13, 1, 2, 3),
-      agentInfraVersion: 'v0.9.5'
-    });
-    assert.equal(interleaved, true);
-    assert.equal(created.status, 'applied');
-    assert.equal(fs.existsSync(path.join(root, '.agent-infra', 'run', 'demo', 'task-create-locks')), true);
-  } finally {
-    fs.existsSync = originalExistsSync;
     cleanupFixture(root);
   }
 });

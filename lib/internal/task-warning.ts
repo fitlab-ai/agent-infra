@@ -1,7 +1,6 @@
 import { applyWorkflowWarningIntent } from '../task/workflow-warning-intents.ts';
 import type { WorkflowWarningIntent } from '../task/workflow-warning-intents.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-warning <task-ref> <add|set-status|list> [intent flags] [--dry-run]\n`;
@@ -52,15 +51,7 @@ async function taskWarning(args: string[] = []): Promise<void> {
   if (missing) { usageFailure(`${kind} requires '${missing}'`); return; }
   const resolved = resolveTaskRef(taskRef);
   if (!resolved.ok) { usageFailure(resolved.message); return; }
-  let result;
-  try {
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-warning.${kind}`, async () => applyWorkflowWarningIntent(values as WorkflowWarningIntent));
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const result = await applyWorkflowWarningIntent(values as WorkflowWarningIntent);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

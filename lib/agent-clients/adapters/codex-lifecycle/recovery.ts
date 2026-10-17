@@ -11,7 +11,7 @@ import { captureTaskWriteMetadata, writeTask } from '../../../task/write.ts';
 import { parseTypedTaskFrontmatter } from '../../../task/frontmatter.ts';
 import { resolveTaskRef } from '../../../task/resolve-ref.ts';
 import {
-  recoverActivatedOrchestrationDelegationUnderLock,
+  recoverActivatedOrchestrationDelegation,
   readRun
 } from '../../../task/orchestration.ts';
 import type { OrchestrationOptions, OrchestrationRun } from '../../../task/orchestration.ts';
@@ -265,7 +265,7 @@ function appendRecoveryLog(
   });
 }
 
-function recoverStartedLifecycleUnderLock(
+function recoverStartedLifecycle(
   request: LifecycleRecoveryRequest,
   options: LifecycleRecoveryOptions = {}
 ): LifecycleRecoveryResult {
@@ -372,7 +372,7 @@ function consumeRecoveryEvidence(
   let consumed = stored;
   if (stored.consumer === null) {
     try {
-      consumed = store.consumeWithinTaskLock(pending.childId!, pending.id, stored.state.startEvidence?.hookDefinitionHash, {
+      consumed = store.consume(pending.childId!, pending.id, stored.state.startEvidence?.hookDefinitionHash, {
         taskId: pending.taskId, runId: pending.runId, receiptId: pending.id
       });
     } catch (error) {
@@ -393,7 +393,7 @@ function finishActiveRecovery(
   row: StepRow,
   options: LifecycleRecoveryOptions
 ): LifecycleRecoveryResult {
-  const recovered = recoverActivatedOrchestrationDelegationUnderLock(taskId, {
+  const recovered = recoverActivatedOrchestrationDelegation(taskId, {
     receiptId: pending.id,
     stage: pending.stage,
     round: pending.round,
@@ -411,8 +411,8 @@ function recoverStartedLifecycleFromAdapter(
   request: LifecycleRecoveryRequest,
   options: LifecycleRecoveryOptions = {}
 ): LifecycleRecoveryResult {
-  return recoverStartedLifecycleUnderLock(request, options);
+  return recoverStartedLifecycle(request, options);
 }
 
-export { recoverStartedLifecycleFromAdapter, recoverStartedLifecycleUnderLock };
+export { recoverStartedLifecycle, recoverStartedLifecycleFromAdapter };
 export type { LifecycleRecoveryOptions, LifecycleRecoveryRequest, LifecycleRecoveryResult };

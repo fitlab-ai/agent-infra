@@ -10,7 +10,6 @@ import { finalizeReviewSummaryContent } from './review-artifacts.ts';
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { validateQualificationAudit } from './qualification-audit.ts';
@@ -69,7 +68,6 @@ type ReviewFileSystem = {
 type ReviewFinalizationOptions = {
   repoRoot?: string;
   fileSystem?: Partial<ReviewFileSystem>;
-  lockAlreadyHeld?: boolean;
 };
 
 const STAGES: Record<ReviewStage, { family: 'review-analysis' | 'review-plan' | 'review-code' }> = {
@@ -182,26 +180,12 @@ function preflightReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewPreflightResult {
-  if (request.dryRun || options.lockAlreadyHeld) return preflightReviewSummaryUnlocked(request, options);
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return preflightReviewSummaryUnlocked(request, options);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'task-review.preflight',
-      () => preflightReviewSummaryUnlocked(request, { ...options, lockAlreadyHeld: true })
-    );
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', `${error.code}: ${error.message}`, resolved.taskId);
-  }
+  return preflightReviewSummaryUnlocked(request, options);
 }
 
 type ReviewSummaryCandidatePreparation = Readonly<{
   result: ReviewFinalizationResult;
   content: string;
-  lockAlreadyHeld?: boolean;
 }>;
 
 /** Prepare domain validation, summary bytes and provenance before any publication. */
@@ -279,7 +263,6 @@ function prepareReviewSummaryCandidate(
       operations: transformed.changed ? [{ kind: 'artifact', artifact: request.artifact, operation: 'update' }] : [],
       error: null
     },
-    lockAlreadyHeld: options.lockAlreadyHeld
   };
 }
 
@@ -344,26 +327,7 @@ function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  const effectiveOptions = options;
-  if (request.dryRun || options.lockAlreadyHeld) return finalizeReviewSummaryUnlocked(request, effectiveOptions);
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return finalizeReviewSummaryUnlocked(request, effectiveOptions);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'task-review.finalize-summary',
-      () => finalizeReviewSummaryUnlocked(request, { ...effectiveOptions, lockAlreadyHeld: true })
-    );
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    return failed(
-      request,
-      'REVIEW_PROVENANCE_INVALID',
-      `${error.code}: ${error.message}`,
-      resolved.taskId
-    );
-  }
+  return finalizeReviewSummaryUnlocked(request, options);
 }
 
 export { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate, commitReviewSummaryProvenance };

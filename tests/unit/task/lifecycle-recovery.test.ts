@@ -13,10 +13,9 @@ import {
   readRun
 } from '../../../lib/task/orchestration.ts';
 import {
-  recoverStartedLifecycleUnderLock
+  recoverStartedLifecycle
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/recovery.ts';
 import type { LifecycleRecoveryOptions } from '../../../lib/agent-clients/adapters/codex-lifecycle/recovery.ts';
-import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeTask } from '../../../lib/task/write.ts';
 import { createTempDir } from '../../helpers.ts';
 
@@ -88,10 +87,10 @@ function fixture(stopReady = true) {
 const request = { taskRef: TASK_ID, intent: 'recover-started' as const, agent: 'codex', auto: true as const };
 
 function recover(f: ReturnType<typeof fixture>, options: LifecycleRecoveryOptions = {}) {
-  return withTaskExecutionLock(f.root, TASK_ID, 'test.recover-started', () => recoverStartedLifecycleUnderLock(
+  return recoverStartedLifecycle(
     request,
     { repoRoot: f.root, lifecycleStore: f.store, ...options }
-  ));
+  );
 }
 
 function cleanup(f: ReturnType<typeof fixture>) {

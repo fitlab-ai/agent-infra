@@ -12,7 +12,6 @@ import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation
 } from '../../../lib/task/control-authority.ts';
-import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { resolveSandboxControlTransport } from '../../../lib/internal/task-operation-registry.ts';
 import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.ts';
@@ -590,21 +589,6 @@ test('direct-host and sandbox executor protect the same task-bound control root 
     fs.rmSync(directFixture.root, { recursive: true, force: true });
     fs.rmSync(sandboxFixture.root, { recursive: true, force: true });
   }
-});
-
-test('sandbox lifecycle uses the shared task lock', async () => {
-  const lockFixture = taskFixture();
-  try {
-    const sandbox = contexts(lockFixture.root).sandbox;
-    await withTaskExecutionLock(lockFixture.root, TASK_ID, 'test-holder', async () => {
-      const result = await dispatchTaskControlOperation(sandbox, lifecycleOperation());
-      assert.equal((result as { error?: { code?: string } }).error?.code, 'ORCHESTRATION_LOCK_BUSY');
-      assert.equal((result as { status?: string }).status, 'failed');
-    });
-  } finally {
-    fs.rmSync(lockFixture.root, { recursive: true, force: true });
-  }
-
 });
 
 test('direct-host and sandbox client transport preserve lifecycle results', async () => {

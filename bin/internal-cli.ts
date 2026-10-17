@@ -69,7 +69,7 @@ if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkfl
     }
     case 'direct-host':
       // The host CLI is the direct-host authority. Domain handlers retain their
-      // task locks, atomic writes, and operation-specific recovery facts.
+      // atomic writes and operation-specific recovery facts.
       break;
     case 'sandbox-local': {
       break;
