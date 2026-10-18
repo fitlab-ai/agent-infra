@@ -67,7 +67,7 @@
 
 ### 适用范围
 
-该 profile 注入所有任务沙箱，不依赖具体客户端。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新 profile。
+该 profile 注入所有任务沙箱，不依赖具体客户端。
 
 同一注入点还会添加 `--security-opt apparmor=unconfined`。在启用 AppArmor 的 Linux 主机上，Docker 默认 AppArmor 策略会拒绝 bubblewrap 的 mount 操作；容器仍保留 seccomp、capabilities 和 namespace 隔离。
 

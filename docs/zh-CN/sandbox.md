@@ -186,7 +186,7 @@ Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs �
 
 该策略以 Docker 默认 seccomp 为基础，只放开 `clone` 的 namespace flags、`unshare`、mount 家族和 `pivot_root`，继续拦截 `bpf`、`perf_event_open`、`syslog`、`quotactl` 等调用。容器 capabilities、挂载清单和 namespace 配置不变，也不使用 `--privileged`。
 
-安全配置对所有任务沙箱生效，不依赖具体客户端。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新配置。
+安全配置对所有任务沙箱生效，不依赖具体客户端。
 
 profile 的来源和更新条件记录在 `lib/sandbox/security/README.md`。
 

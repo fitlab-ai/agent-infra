@@ -195,7 +195,7 @@ Every task sandbox loads a controlled seccomp policy through `--security-opt sec
 
 The policy starts from Docker's default seccomp profile and only relaxes the `clone` namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls blocked. Container capabilities, mounts, and namespace configuration are unchanged, and `--privileged` is not used.
 
-The security options apply to every task sandbox and do not depend on a specific client. Existing sandboxes must be recreated with `ai sandbox start --recreate <target>` or `ai sandbox exec --recreate <target>` before the new options take effect.
+The security options apply to every task sandbox and do not depend on a specific client.
 
 The profile source and update conditions are documented in `lib/sandbox/security/README.md`.
 
