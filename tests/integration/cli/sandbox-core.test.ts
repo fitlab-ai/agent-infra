@@ -829,6 +829,9 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     const runCall = calls.find((call) => call[0] === "run");
     assert.ok(runCall, "expected sandbox create to invoke docker run");
     assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
+    const seccompIndex = runCall.indexOf("--security-opt");
+    assert.notEqual(seccompIndex, -1, "expected Codex-enabled sandbox to load a seccomp profile");
+    assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*codex-bwrap\.json$/);
     assert.equal(
       runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
       false,
@@ -858,6 +861,65 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("sandbox create omits the Codex seccomp profile when Codex is disabled", () => {
+  const tmpDir = createTempDir("agent-infra-sandbox-create-no-codex-seccomp-");
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      agentClients: CANONICAL_AGENT_CLIENTS.map((client) => ({
+        ...client,
+        installInSandbox: client.id !== "codex"
+      }))
+    });
+    fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
+    fs.writeFileSync(path.join(fixture.repoDir, ".agents", "README.md"), "# collaboration guide\n", "utf8");
+    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
+    const addResult = spawnSync("git", ["add", "README.md", ".gitignore", ".agents/README.md"], {
+      cwd: fixture.repoDir,
+      env: gitSafeEnv()
+    });
+    assert.equal(addResult.status, 0, addResult.stderr?.toString());
+    const commitResult = spawnSync("git", [
+      "-c",
+      "user.name=Sandbox Test",
+      "-c",
+      "user.email=sandbox-test@example.com",
+      "commit",
+      "-m",
+      "initial"
+    ], {
+      cwd: fixture.repoDir,
+      env: gitSafeEnv()
+    });
+    assert.equal(commitResult.status, 0, commitResult.stderr?.toString());
+
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/no-codex-seccomp"],
+      {
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json"),
+        DOCKER_EXIT_FOR_RUN: "1"
+      }
+    );
+
+    assert.equal(result.signal, null);
+    assert.notEqual(result.status, 0);
+
+    const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
+    assert.ok(runCall, "expected sandbox create to invoke docker run");
+    assert.equal(
+      runCall.includes("--security-opt"),
+      false,
+      "sandbox create must keep Docker's default seccomp when Codex is disabled"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox create runs the configured project init command in the mounted workspace", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = createTempDir("agent-infra-sandbox-project-init-");
   let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");

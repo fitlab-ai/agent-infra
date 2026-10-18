@@ -180,6 +180,16 @@ Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs �
 
 启用 Claude Code 时，`ai sandbox create` 还会把宿主机 `~/.claude/settings.json` 中的模型和 API provider 设置合并到沙箱内的 Claude Code settings。已有的沙箱值优先，因此沙箱内的本地覆盖会被保留。凭证仍使用上面的专用 credentials 通道；provider 环境设置只会作为 Claude Code settings 值复制。
 
+## Codex 内层沙箱与 seccomp
+
+启用 Codex 的沙箱会通过 `--security-opt seccomp=<profile>` 加载一份受控 seccomp profile。Codex 在 Linux 上使用 bubblewrap 创建 user、mount、PID、network 等 namespace；Docker 默认 seccomp 在没有 `CAP_SYS_ADMIN` 时限制这些调用，导致 `bwrap: No permissions to create a new namespace`。
+
+该 profile 以 Docker 默认 seccomp 为基础，只放开 `clone` 的 namespace flags、`unshare`、mount 家族和 `pivot_root`，继续拦截 `bpf`、`perf_event_open`、`syslog`、`quotactl` 等调用。容器 capabilities、挂载清单和 namespace 配置不变，也不使用 `--privileged`。
+
+profile 只影响启用 Codex 的沙箱。未启用 Codex 的沙箱继续使用 Docker 默认 seccomp。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新 profile。
+
+profile 的来源和更新条件记录在 `lib/sandbox/seccomp/README.md`。
+
 ## 宿主-沙箱文件交换
 
 `ai sandbox create` 会自动挂载两个可读写目录，方便宿主与容器之间互相 drop 文件，不污染 git 工作树：
