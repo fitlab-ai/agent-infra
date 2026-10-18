@@ -195,6 +195,8 @@ Sandboxes with Codex enabled load a controlled seccomp profile through `--securi
 
 The profile starts from Docker's default seccomp policy and only relaxes the `clone` namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls blocked. Container capabilities, mounts, and namespace configuration are unchanged, and `--privileged` is not used.
 
+On Linux hosts with AppArmor enabled, the same sandbox also sets `--security-opt apparmor=unconfined` because Docker's default AppArmor policy denies bubblewrap's mount operations. The container still keeps seccomp, capabilities, and namespace isolation.
+
 The profile applies only to sandboxes with Codex enabled. Sandboxes without Codex keep Docker's default seccomp filter. Existing sandboxes must be recreated with `ai sandbox start --recreate <target>` or `ai sandbox exec --recreate <target>` before the profile takes effect.
 
 The profile source and update conditions are documented in `lib/sandbox/seccomp/README.md`.

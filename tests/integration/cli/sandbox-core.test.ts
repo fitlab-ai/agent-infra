@@ -832,6 +832,7 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     const seccompIndex = runCall.indexOf("--security-opt");
     assert.notEqual(seccompIndex, -1, "expected Codex-enabled sandbox to load a seccomp profile");
     assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*codex-bwrap\.json$/);
+    assert.ok(runCall.includes("apparmor=unconfined"));
     assert.equal(
       runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
       false,

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {
+  sandboxAppArmorArgs,
   sandboxSeccompArgs,
   sandboxSeccompProfilePath
 } from '../../../lib/sandbox/seccomp.ts';
@@ -111,4 +112,10 @@ test('sandboxSeccompArgs selects a profile only for Codex', () => {
   assert.match(args[1] ?? '', /^seccomp=.*codex-bwrap\.json$/);
 
   assert.deepEqual(sandboxSeccompArgs('docker-desktop', ['codex', 'codex']), args);
+});
+
+test('sandboxAppArmorArgs relaxes AppArmor only for bubblewrap tools', () => {
+  assert.deepEqual(sandboxAppArmorArgs(['codex']), ['--security-opt', 'apparmor=unconfined']);
+  assert.deepEqual(sandboxAppArmorArgs(['claude-code']), []);
+  assert.deepEqual(sandboxAppArmorArgs([]), []);
 });

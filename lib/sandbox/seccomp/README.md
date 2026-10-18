@@ -69,4 +69,6 @@
 
 该 profile 只注入启用 Codex 的沙箱。未启用 Codex 的沙箱继续使用 Docker 默认 seccomp。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新 profile。
 
+在启用 AppArmor 的 Linux 主机上，同一注入点还会添加 `--security-opt apparmor=unconfined`。Docker 默认 AppArmor 策略会拒绝 bubblewrap 的 mount 操作；该设置只影响启用 Codex 的沙箱，容器仍保留 seccomp、capabilities 和 namespace 隔离。
+
 Ubuntu 24.04 等启用 `kernel.apparmor_restrict_unprivileged_userns=1` 的主机，可能还需要在宿主机放行 unprivileged user namespace；项目 Linux E2E 已把该 sysctl 设为 0。

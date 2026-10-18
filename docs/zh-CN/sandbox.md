@@ -186,6 +186,8 @@ Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs �
 
 该 profile 以 Docker 默认 seccomp 为基础，只放开 `clone` 的 namespace flags、`unshare`、mount 家族和 `pivot_root`，继续拦截 `bpf`、`perf_event_open`、`syslog`、`quotactl` 等调用。容器 capabilities、挂载清单和 namespace 配置不变，也不使用 `--privileged`。
 
+在启用 AppArmor 的 Linux 主机上，同一个沙箱还会设置 `--security-opt apparmor=unconfined`；Docker 默认 AppArmor 策略会拒绝 bubblewrap 的 mount 操作。容器仍保留 seccomp、capabilities 和 namespace 隔离。
+
 profile 只影响启用 Codex 的沙箱。未启用 Codex 的沙箱继续使用 Docker 默认 seccomp。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新 profile。
 
 profile 的来源和更新条件记录在 `lib/sandbox/seccomp/README.md`。

@@ -15,6 +15,15 @@ export function sandboxSeccompProfilePath(toolId: string): string | null {
   return profile ? path.join(SECCOMP_DIR, profile) : null;
 }
 
+// Docker's default AppArmor profile denies the mount operations bubblewrap
+// needs, even when the seccomp profile allows them. Relax AppArmor only for
+// the same tools that need the bubblewrap seccomp profile.
+export function sandboxAppArmorArgs(toolIds: readonly string[]): string[] {
+  return toolIds.some((toolId) => SANDBOX_SECCOMP_PROFILES[toolId] !== undefined)
+    ? ['--security-opt', 'apparmor=unconfined']
+    : [];
+}
+
 export function sandboxSeccompArgs(engine: string, toolIds: readonly string[]): string[] {
   const profiles = [...new Set(
     toolIds
