@@ -21,7 +21,6 @@ import {
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import { inspectCompletionArtifacts } from '../task/finalization-artifacts.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { resolveDeliveryTarget } from '../task/delivery-target.ts';
 import { mergeOperationWarnings, type OperationWarning } from '../task/operation-outcome.ts';
 import {
@@ -1174,20 +1173,8 @@ async function createPlatformPullRequestImpl(taskRef: string, options: CreateOpt
     }), PRECONDITION_NOT_CREATED);
   }
   try {
-    return withTaskExecutionLock(
-      base.resolved.repoRoot,
-      base.resolved.taskId,
-      'platform-pr.create',
-      () => createExternalPullRequest(taskRef, options, base)
-    );
+    return await createExternalPullRequest(taskRef, options, base);
   } catch (error) {
-    if (error instanceof TaskExecutionLockError) {
-      return withCreation(result('blocked', base.resolved.taskId, base.issueNumber, null, {
-        platform: base.context.platform,
-        capabilities: base.context.capabilities,
-        error: { code: error.code, message: error.message, retryable: true }
-      }), PRECONDITION_NOT_CREATED);
-    }
     return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
       platform: base.context.platform,
       capabilities: base.context.capabilities,
@@ -1602,7 +1589,7 @@ function readProjectPrFlow(repoRoot: string): 'required' | 'disabled' | undefine
   }
 }
 
-function skipPlatformPullRequestFactUnlocked(
+function applySkippedPullRequestFact(
   resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
   options: SkipFactOptions
 ): PullRequestResult {
@@ -1674,16 +1661,8 @@ async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOpt
     error: { code: 'TASK_STATE_INVALID', message: 'platform-pr skip requires an active task', retryable: false }
   });
   try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'platform-pr.skip',
-      () => skipPlatformPullRequestFactUnlocked(resolved, options)
-    );
+    return await applySkippedPullRequestFact(resolved, options);
   } catch (error) {
-    if (error instanceof TaskExecutionLockError) return result('blocked', resolved.taskId, null, null, {
-      error: { code: error.code, message: error.message, retryable: true }
-    });
     return result('failed', resolved.taskId, null, null, {
       error: { code: 'PR_SKIP_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
     });

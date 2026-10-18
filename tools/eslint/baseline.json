@@ -110,8 +110,8 @@
     {
       "file": "lib/task/activity-intent.ts",
       "ruleId": "complexity",
-      "stableId": "3aa09787886db842a2430e5148b6ad879fe3d8da8d22bb4fbd3656a99adfead7",
-      "displayName": "applyLocked",
+      "stableId": "dc5a6cbc97a4348b51a3ea5cc711fe5c0e0e613e297442742c8136b8a8b4668a",
+      "displayName": "applyActivityIntent",
       "metric": 22,
       "normalizedMessage": "complexity=22",
       "count": 1
@@ -137,8 +137,8 @@
     {
       "file": "lib/task/events.ts",
       "ruleId": "complexity",
-      "stableId": "df28c9378518ced44591641fb40a7be42e4821b01674d5c6fe155d69aa8f4d07",
-      "displayName": "applyTaskEventUnlocked",
+      "stableId": "bcab53c92ea4cee21a68902cd5051898e62ad1d0fd0c70405346d7a89c5e5f0e",
+      "displayName": "applyTaskEvent",
       "metric": 160,
       "normalizedMessage": "complexity=160",
       "count": 1
@@ -146,10 +146,10 @@
     {
       "file": "lib/task/lifecycle.ts",
       "ruleId": "complexity",
-      "stableId": "29324ec44324bd0ad71b7b94d95b13f4b4f5e77ceaab21bdb118332b920b4cf5",
-      "displayName": "applyTaskLifecycleUnlocked",
-      "metric": 103,
-      "normalizedMessage": "complexity=103",
+      "stableId": "8a3f112aa4593a045b5bc3bc97a1f4db045f4a76e9a627fa2e54053cf9256d29",
+      "displayName": "applyTaskLifecycle",
+      "metric": 130,
+      "normalizedMessage": "complexity=130",
       "count": 1
     },
     {
@@ -623,10 +623,10 @@
     {
       "file": "lib/task/finalization.ts",
       "ruleId": "complexity",
-      "stableId": "71e757d5211f1afe9b1faeed6d79881453acf2292a8c608debf967d20391af33",
-      "displayName": "commitPreparedTaskFinalization.withTaskExecutionLock callback[3]#1",
-      "metric": 35,
-      "normalizedMessage": "complexity=35",
+      "stableId": "932c508688f8d114366f93b1bf4a7b67eb804f5524cd6d9aa7a0b72d6d9bc73f",
+      "displayName": "commitPreparedTaskFinalization.<anonymous ArrowFunctionExpression#1>",
+      "metric": 37,
+      "normalizedMessage": "complexity=37",
       "count": 1
     },
     {
@@ -812,8 +812,8 @@
     {
       "file": "lib/task/delivery.ts",
       "ruleId": "complexity",
-      "stableId": "930a7875e725a967e03689bda2b2ebd3835ef558af42a44932a9921813c4d5f4",
-      "displayName": "deliverUnlocked",
+      "stableId": "a4d17bb7dcc6099c4579e0e52b14a5ac0d7527b038646f4ec0b1084a58d703ea",
+      "displayName": "deliverTaskBranchCore",
       "metric": 35,
       "normalizedMessage": "complexity=35",
       "count": 1
@@ -927,19 +927,10 @@
       "count": 1
     },
     {
-      "file": "lib/task/commit-operation.ts",
-      "ruleId": "complexity",
-      "stableId": "b0c89f85eeef27730357a7b0345d4fe676627c0a02e5e09b026a088d52be0906",
-      "displayName": "executeCommitOperation",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/internal/manual-validation.ts",
       "ruleId": "complexity",
-      "stableId": "b95133e468646863c3e08d82dfa9c5a259a0e74d4cfe7fc01199ea71bb85ad39",
-      "displayName": "executeManualValidationTransactionLocked",
+      "stableId": "6624a961de8cc335287ff34b350a48db5429d70ee60fc13bc7063f3957478e7e",
+      "displayName": "executeManualValidationTransactionAtResolvedTask",
       "metric": 67,
       "normalizedMessage": "complexity=67",
       "count": 1
@@ -956,8 +947,8 @@
     {
       "file": "lib/task/commit-operation.ts",
       "ruleId": "complexity",
-      "stableId": "f879f4054c5ec27765c0bd98f7a516d930d2b85c5e2db1f70eeba644011a9310",
-      "displayName": "executeUnlocked",
+      "stableId": "a08f68a1f1e47cf643864c99eb6b121a5f7f9ed29b8bd37ada90abce355173e0",
+      "displayName": "executeCommitOperationCore",
       "metric": 45,
       "normalizedMessage": "complexity=45",
       "count": 1
@@ -965,8 +956,8 @@
     {
       "file": "lib/task/commit-operation.ts",
       "ruleId": "complexity",
-      "stableId": "86368357310f4381c4a5c7dc98cdbc9bc9f45e5f5336fcb5d8c1be76f280b725",
-      "displayName": "executeUnlocked.<anonymous ArrowFunctionExpression#1>",
+      "stableId": "84757b01c47297f786b08e7499293ef28bd26a2887b186d030c4725296e6944c",
+      "displayName": "executeCommitOperationCore.<anonymous ArrowFunctionExpression#1>",
       "metric": 23,
       "normalizedMessage": "complexity=23",
       "count": 1
@@ -1539,15 +1530,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/task-execution-lock.ts",
-      "ruleId": "complexity",
-      "stableId": "9cccba6ab3810d91ba286b0c81292692c5988d7d3e920a51fe58e0b1f7f87f84",
-      "displayName": "parseOwner",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/server/process-state.ts",
       "ruleId": "complexity",
       "stableId": "e0904684f1f32ab7b4fade1a248861f4fca36d5894620c3f3ba2316e169544ae",
@@ -1802,8 +1784,8 @@
     {
       "file": "lib/task/review-finalization.ts",
       "ruleId": "complexity",
-      "stableId": "e61fdabb8805357a6ca4d0463a074e8c261a728ab31f6aef0fee5b688f6e8598",
-      "displayName": "preflightReviewSummaryUnlocked",
+      "stableId": "0762fe291e9745935411396c7ac06778c025f3015c563653900ac6e984ca52b1",
+      "displayName": "preflightReviewSummary",
       "metric": 25,
       "normalizedMessage": "complexity=25",
       "count": 1
@@ -1838,10 +1820,10 @@
     {
       "file": "lib/task/finalization.ts",
       "ruleId": "complexity",
-      "stableId": "f3fa57303c0322aa5755a42e321adc1900230c549dc701b94a8f2199e8d1590d",
-      "displayName": "prepareUnderLock",
-      "metric": 98,
-      "normalizedMessage": "complexity=98",
+      "stableId": "544866d94d74e767783e50ce7f3f431567a4aeeb181b226f119b410ebf9f1745",
+      "displayName": "prepareTaskFinalizationCore",
+      "metric": 100,
+      "normalizedMessage": "complexity=100",
       "count": 1
     },
     {
@@ -2054,8 +2036,8 @@
     {
       "file": "lib/task/orchestration.ts",
       "ruleId": "complexity",
-      "stableId": "1704ce49629b7c1d6dd17ed44899948be9602523c1c79ed79a0d2884a462da9b",
-      "displayName": "recoverActivatedOrchestrationDelegationUnderLock",
+      "stableId": "b23cee0106a78f87662e9d98a5f23d1ea71d06ebdf7ae8c27bacc0140f84b5b9",
+      "displayName": "recoverActivatedOrchestrationDelegation",
       "metric": 16,
       "normalizedMessage": "complexity=16",
       "count": 1
@@ -2090,8 +2072,8 @@
     {
       "file": "lib/task/orchestration.ts",
       "ruleId": "complexity",
-      "stableId": "02c058f90a22af47d309e9863644824d1679a86c2491b21a6033065d473f01d6",
-      "displayName": "recoverPreparedOrchestrationDelegation.withTaskExecutionLock callback[3]#1",
+      "stableId": "4c3945152a48b5599d6d8f10bcae961880860a45a5aaca66a4d7dca6ed05fd85",
+      "displayName": "recoverPreparedOrchestrationDelegation.<anonymous ArrowFunctionExpression#1>",
       "metric": 17,
       "normalizedMessage": "complexity=17",
       "count": 1
@@ -2198,8 +2180,8 @@
     {
       "file": "lib/platform/pr-summary.ts",
       "ruleId": "complexity",
-      "stableId": "f53ba1a0b601e5e57fab7d87397d1962addf2f7c937739fc154c79810ff53171",
-      "displayName": "reportWrite.withTaskExecutionLock callback[3]#1",
+      "stableId": "8cf638f301a90033027f383fef6bcc662d3c1c7869e4afde3b30b96f1f79fbc3",
+      "displayName": "reportWrite.<anonymous ArrowFunctionExpression#1>",
       "metric": 20,
       "normalizedMessage": "complexity=20",
       "count": 1
@@ -2207,10 +2189,10 @@
     {
       "file": "lib/task/artifact-lifecycle.ts",
       "ruleId": "complexity",
-      "stableId": "093b337e1e75815126084c260ca3baf325469f73f579bb51d02c9705bd65ad0a",
-      "displayName": "resolveArtifactContext",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
+      "stableId": "428233e572a5e5e699b93429a5f2e0e9be6ff6e5cc1c817db7d4c20d97673a6b",
+      "displayName": "resolveArtifactContextFromTask",
+      "metric": 23,
+      "normalizedMessage": "complexity=23",
       "count": 1
     },
     {
@@ -2333,19 +2315,19 @@
     {
       "file": "lib/sandbox/removal.ts",
       "ruleId": "complexity",
-      "stableId": "d0cc6d23ec6004be1c344ee07966de5c80d0f43676dce1a039f01d052caa22ed",
-      "displayName": "rmPurgeCore",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
+      "stableId": "449251fb597b02115c885e2d886a773e9b15779960256f350ac87af2a75c181c",
+      "displayName": "rmPurge",
+      "metric": 23,
+      "normalizedMessage": "complexity=23",
       "count": 1
     },
     {
       "file": "lib/task/orchestration.ts",
       "ruleId": "complexity",
-      "stableId": "ceebd9d39a5ec8c35e8d1fd47cc958e224e99a12cb81334e737d56743c34f3f4",
-      "displayName": "routeOrchestration",
-      "metric": 60,
-      "normalizedMessage": "complexity=60",
+      "stableId": "74ed217bb7dcc19e8d413dfddd1a6a2b9b4d400b4c106dfc3430af7e9baa9d54",
+      "displayName": "routeResolvedTask",
+      "metric": 58,
+      "normalizedMessage": "complexity=58",
       "count": 1
     },
     {
@@ -3195,24 +3177,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/task-execution-lock.ts",
-      "ruleId": "complexity",
-      "stableId": "e2543b1983c41a9c2b4a7efa7d07d2e16c480ebc01996ddb1f5a51b14d8d139a",
-      "displayName": "withTaskExecutionLock",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/task/task-execution-lock.ts",
-      "ruleId": "max-depth",
-      "stableId": "e2543b1983c41a9c2b4a7efa7d07d2e16c480ebc01996ddb1f5a51b14d8d139a",
-      "displayName": "withTaskExecutionLock",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "stableId": "9e56f331256291cfb3babf82b3ed9194e0cf0b78eb5ffb942e920a794aa72d58",
@@ -3269,8 +3233,8 @@
     {
       "file": "lib/sandbox/removal.ts",
       "ruleId": "max-depth",
-      "stableId": "2e1684746bb8d131c233626046a73bcebff2691f54bc604dc09b374e11dea8e7",
-      "displayName": "rmUnboundCore.discovered.map callback[0]#1",
+      "stableId": "e3cefdc6bc17605f6c093d4b2b4ced6a3873e4fc41c68e6a2b028dd5d3507ff6",
+      "displayName": "rmUnbound.discovered.map callback[0]#1",
       "metric": 5,
       "normalizedMessage": "depth=5",
       "count": 2
@@ -3296,8 +3260,8 @@
     {
       "file": "lib/task/finalization.ts",
       "ruleId": "max-depth",
-      "stableId": "f3fa57303c0322aa5755a42e321adc1900230c549dc701b94a8f2199e8d1590d",
-      "displayName": "prepareUnderLock",
+      "stableId": "544866d94d74e767783e50ce7f3f431567a4aeeb181b226f119b410ebf9f1745",
+      "displayName": "prepareTaskFinalizationCore",
       "metric": 5,
       "normalizedMessage": "depth=5",
       "count": 3

@@ -1,7 +1,6 @@
 import { parseReviewCommand } from '../task/review-command.ts';
 import { finalizeReviewSummary, preflightReviewSummary } from '../task/review-finalization.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run]\n';
@@ -30,19 +29,9 @@ async function taskReview(args: string[] = []): Promise<void> {
   const operation = args[1]!;
   const resolved = resolveTaskRef(args[0]!);
   if (!resolved.ok) { failUsage(resolved.message); return; }
-  let result;
-  try {
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-review.${operation}`, async () => {
-      return operation === 'preflight'
-        ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun }, { lockAlreadyHeld: true })
-        : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun }, { lockAlreadyHeld: true });
-    });
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const result = operation === 'preflight'
+    ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun })
+    : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

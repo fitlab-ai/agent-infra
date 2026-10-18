@@ -31,7 +31,6 @@ import { findSectionHeading } from './sections.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { commitOrchestrationStageCompletion } from './orchestration.ts';
 import type { OrchestrationStageCompletion } from './orchestration.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { validateLocalArtifact } from './local-artifact-finalization.ts';
@@ -86,7 +85,6 @@ type TaskEventRequest = {
 type TaskEventError = { code: TaskEventErrorCode; message: string };
 type TaskEventOptions = TaskWriteOptions & {
   commitOrchestrationCompletion?: (plan: OrchestrationStageCompletion) => void;
-  lockAlreadyHeld?: boolean;
 };
 type TaskEventResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed'; changed: boolean;
@@ -627,7 +625,7 @@ function replaceCompletionFact(facts: readonly CompletionFact[], next: Completio
   return [...facts.filter((fact) => !(fact.event === next.event && fact.output === next.output)), next];
 }
 
-function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
+function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
@@ -976,32 +974,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     artifactContext, timestamp: result.timestamp,
     agentInfraVersion: result.agentInfraVersion, operations: result.operations, error: null
   };
-}
-
-function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
-  const invalid = validateTaskEventRequest(request);
-  if (invalid) return failed(request, invalid);
-  const parts = eventParts(request.event);
-  if (options.lockAlreadyHeld) return applyTaskEventUnlocked(request, options);
-  if (request.dryRun || !['started', 'completed'].includes(parts.phase)) {
-    return applyTaskEventUnlocked(request, options);
-  }
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return applyTaskEventUnlocked(request, options);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      `task-event.${request.event}`,
-      () => applyTaskEventUnlocked(request, { ...options, lockAlreadyHeld: true })
-    );
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    return failed(request, {
-      code: 'EVENT_TRANSITION_INVALID',
-      message: `${error.code}: ${error.message}`
-    }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  }
 }
 
 function successNoOp(

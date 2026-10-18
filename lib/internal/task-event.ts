@@ -2,7 +2,6 @@ import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.t
 import { applyTaskEvent, eventCatalog } from '../task/events.ts';
 import type { TaskEventRequest, Verdict } from '../task/events.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
@@ -73,15 +72,7 @@ async function taskEvent(args: string[] = []): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  let result;
-  try {
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-event.${request.event}`, async () => applyTaskEvent(request, { lockAlreadyHeld: true }));
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const result = await applyTaskEvent(request);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

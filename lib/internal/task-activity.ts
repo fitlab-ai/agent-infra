@@ -7,7 +7,6 @@ import type {
   PrReviewInspectIntent
 } from '../task/activity-intent.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-activity <task-ref> pr-review-inspect
@@ -95,15 +94,7 @@ async function taskActivity(args: string[] = []): Promise<void> {
   }
   const resolved = resolveTaskRef(taskRef);
   if (!resolved.ok) { usageFailure(resolved.message); return; }
-  let result;
-  try {
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-activity.${kind}`, async () => applyPrReviewActivityIntent(values as PrReviewActivityIntent, { lockAlreadyHeld: true }));
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const result = await applyPrReviewActivityIntent(values as PrReviewActivityIntent);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

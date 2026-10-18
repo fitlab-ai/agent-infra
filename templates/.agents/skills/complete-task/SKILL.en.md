@@ -102,7 +102,7 @@ Run /create-pr --task {task-ref} first, then complete; --skip-pr is not accepted
 ```
 
 Before lifecycle, verify only the hard gates:
-- [ ] Task identity, active state, concurrency locks, and local atomic lifecycle operations are available
+- [ ] Task identity, active-state validation, and local atomic lifecycle operations are available
 - [ ] Required-PR delivery is satisfied when `prFlow=required`
 - [ ] Other business evidence (workflow, review, commit, tests, disagreement ledger, manual validation, and platform sync) is recorded or can be checked after lifecycle; manual validation requires a committed transaction, receipt, current artifact digest, and an identity-bearing completion log
 
@@ -174,11 +174,11 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
 
-This event runs only the required-PR delivery hard preflight; host finalization still enforces identity, concurrency, and local atomicity before lifecycle. Peripheral review/manual/platform checks run through `complete-task.completed` after lifecycle and are projected as warning/pending steps. On a hard-gate non-zero exit (fail/blocked), keep the task active, record the stable code/target, and stop.
+This event runs only the required-PR delivery hard preflight; host finalization still enforces identity validation and local atomicity before lifecycle. Peripheral review/manual/platform checks run through `complete-task.completed` after lifecycle and are projected as warning/pending steps. On a hard-gate non-zero exit (fail/blocked), keep the task active, record the stable code/target, and stop.
 
 If a summary must mirror a human-decided `post-review-commit` exemption, make a best-effort sync in Step 4 with the original failure code/message, PRC id/evidence, and ruling details. A sync failure records `SUMMARY_SYNC_FAILED` and still allows lifecycle; terminal verification decides the final state.
 
-`--force` cannot lift identity, concurrency, local atomicity, or required-PR hard gates; failures there must stop. Other review, manual-validation, and platform evidence is recorded by terminal verification as warning/pending and can be repaired by retrying.
+`--force` cannot lift identity validation, local atomicity, or required-PR hard gates; failures there must stop. Other review, manual-validation, and platform evidence is recorded by terminal verification as warning/pending and can be repaired by retrying.
 
 ### 6. Run the Host Finalization Entry Point
 

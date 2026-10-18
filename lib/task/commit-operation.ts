@@ -7,7 +7,6 @@ import { checkpointCommitMatches } from './commit-identity.ts';
 import { resolveTaskContext, resolveTaskRef } from './resolve-ref.ts';
 import { commitPushDecision } from './commit-policy.ts';
 import { mergeOperationWarnings, type OperationWarning } from './operation-outcome.ts';
-import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation } from './write.ts';
@@ -280,7 +279,7 @@ function checkpointTimestamp(): string {
   return new Date().toISOString();
 }
 
-function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
+function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
   if (mode === 'orchestrated') return failure(
@@ -516,11 +515,9 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
   const task = resolved.kind === 'bound' ? resolved.task : null;
   if (mode === 'orchestrated' && !task) return failure(normalizedInput, mode, null, 'ORCHESTRATION_TASK_REQUIRED', 'orchestrated commit requires a task context', 'blocked');
   try {
-    return task
-      ? withRepositoryMutationLock(normalizedInput.cwd, () => withTaskExecutionLock(normalizedInput.cwd, task.taskId, 'commit-operation', () => executeUnlocked(normalizedInput, task, mode)))
-      : withRepositoryMutationLock(normalizedInput.cwd, () => executeUnlocked(normalizedInput, null, mode));
+    return executeCommitOperationCore(normalizedInput, task, mode);
   } catch (error) {
-    const code = error instanceof TaskExecutionLockError ? error.code : 'COMMIT_OPERATION_FAILED';
+    const code = 'COMMIT_OPERATION_FAILED';
     return failure(normalizedInput, mode, task?.taskId ?? null, code, error instanceof Error ? error.message : String(error), 'blocked');
   }
 }

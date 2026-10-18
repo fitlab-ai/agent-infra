@@ -4,7 +4,6 @@ import { applyLedgerIntent } from '../task/ledger-intents.ts';
 import type { LedgerIntent } from '../task/ledger-intents.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from '../task/ledger.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, rework-intent-upsert, rework-intent-rebuild, stage-status\n`;
@@ -116,15 +115,7 @@ async function taskLedger(args: string[] = []): Promise<void> {
   }
   const lockResolved = resolveTaskRef(taskRef);
   if (!lockResolved.ok) { usageFailure(lockResolved.message); return; }
-  let result;
-  try {
-    result = await withTaskExecutionLock(lockResolved.repoRoot, lockResolved.taskId, `task-ledger.${kind}`, async () => applyLedgerIntent(values as LedgerIntent));
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const result = await applyLedgerIntent(values as LedgerIntent);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

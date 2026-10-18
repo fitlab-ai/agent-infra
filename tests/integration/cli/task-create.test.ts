@@ -203,7 +203,6 @@ test('task-create internal CLI persists a task and replays as no-op', () => {
     assert.equal(replayed.status, 'no-op');
     assert.equal(replayed.task.id, applied.task.id);
     assert.equal(replayed.task.state, 'active');
-    assert.equal(fs.existsSync(path.join(root, '.agent-infra', 'run', 'demo', 'task-create-locks')), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

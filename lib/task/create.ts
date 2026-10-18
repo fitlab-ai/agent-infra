@@ -1,11 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
-import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
@@ -348,42 +346,6 @@ function ensureRealDirectory(directory: string, code: string): void {
   fs.mkdirSync(directory, { mode: 0o700 });
 }
 
-function createLockRoot(project: string): string {
-  const root = path.join(os.homedir(), '.agent-infra');
-  const directories = [root, path.join(root, 'run'), path.join(root, 'run', project), path.join(root, 'run', project, 'task-create-locks')];
-  for (const directory of directories) {
-    if (fs.existsSync(directory)) {
-      assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
-      continue;
-    }
-    try {
-      fs.mkdirSync(directory, { mode: 0o700 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
-    }
-  }
-  return directories.at(-1)!;
-}
-
-function withCreateLock<T>(repoRoot: string, project: string, operation: () => T): T {
-  const lockRoot = createLockRoot(project);
-  let callbackError: unknown;
-  try {
-    return withTaskExecutionLock(repoRoot, 'task-create', 'task-create', () => {
-      try { return operation(); }
-      catch (error) { callbackError = error; throw error; }
-    }, { lockRoot, identityScope: `task-create\0${project}` });
-  } catch (error) {
-    if (callbackError !== undefined) throw callbackError;
-    if (error instanceof TaskExecutionLockError && error.code === 'ORCHESTRATION_LOCK_BUSY') {
-      throw new Error('TASK_CREATE_LOCK_TIMEOUT');
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`TASK_CREATE_LOCK_FAILED: ${message}`);
-  }
-}
-
 function recoverPublishedTask(repoRoot: string, keyDigest: string, candidateDigest: string): { taskId: string; shortId: string | null; state: 'active' | 'blocked' | 'completed' | 'archive' } | null {
   for (const task of enumerateAllTaskDirs(repoRoot)) {
     const taskMd = path.join(task.taskDir, 'task.md');
@@ -419,7 +381,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
   const canonical = canonicalTaskCreateCandidate(candidate);
   const candidateDigest = sha256(canonical);
   const keyDigest = sha256(candidate.idempotencyKey);
-  function createUnderRepositoryLock(): LocalTaskCreateResult {
+  function createOnce(): LocalTaskCreateResult {
     const recovered = recoverPublishedTask(repoRoot, keyDigest, candidateDigest);
     if (recovered) {
       return { status: 'no-op', changed: false, task: { id: recovered.taskId, shortId: recovered.shortId, state: recovered.state } };
@@ -451,18 +413,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
     return { status: 'applied', changed: true, task: { id: taskId, shortId: allocated.shortId, state: 'active' } };
   }
 
-  return withCreateLock(repoRoot, projectConfig.project, () => {
-    let callbackError: unknown;
-    try {
-      return withRepositoryMutationLock(repoRoot, () => {
-        try { return createUnderRepositoryLock(); }
-        catch (error) { callbackError = error; throw error; }
-      });
-    } catch (error) {
-      if (callbackError !== undefined) throw callbackError;
-      throw error;
-    }
-  });
+  return createOnce();
 
 }
 

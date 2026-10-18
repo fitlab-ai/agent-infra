@@ -11,7 +11,6 @@ import {
   dispatchOrchestrationDelegation,
   prepareOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
-import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { createTempDir } from '../../helpers.ts';
 
 const fixtureRoots = new Set<string>();
@@ -103,14 +102,13 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.throws(() => store.consume('child', 'receipt-2'), /already consumed/);
 });
 
-test('Codex lock-held consume matches unlocked success and idempotence contract', () => {
+test('Codex consume preserves receipt identity and idempotence', () => {
   let now = '2026-08-14T00:00:00.500Z';
   const f = preparedTask(() => now);
   stopReadyChild(f);
   const before = f.store.read('child');
   now = '2026-08-14T00:00:01.000Z';
-  const locked = withTaskExecutionLock(f.root, f.taskId, 'test.codex-lifecycle.consume', () =>
-    f.store.consumeWithinTaskLock('child', 'receipt-1', 'hash'));
+  const locked = f.store.consume('child', 'receipt-1', 'hash');
   assert.equal(locked.consumer, 'receipt-1');
   assert.equal(locked.revision, before.revision + 1);
   assert.equal(locked.consumedAt, now);

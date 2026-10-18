@@ -52,7 +52,6 @@ type LocalArtifactFinalizationRequest = {
   artifact: string;
   repoRoot?: string;
   requiredSections?: readonly string[];
-  lockAlreadyHeld?: boolean;
 };
 
 type LocalArtifactFinalizationResult = {
@@ -129,7 +128,6 @@ type LocalArtifactPreparation = Readonly<{
   result: LocalArtifactFinalizationResult;
   content: string;
   repoRoot?: string;
-  lockAlreadyHeld?: boolean;
 }>;
 
 function prepareLocalArtifact(
@@ -180,8 +178,7 @@ function prepareLocalArtifact(
   return {
     result: validation.ok && !qualificationError ? { ...result, status: 'passed', error: null } : result,
     content,
-    repoRoot: resolved.repoRoot,
-    lockAlreadyHeld: request.lockAlreadyHeld
+    repoRoot: resolved.repoRoot
   };
 
 }

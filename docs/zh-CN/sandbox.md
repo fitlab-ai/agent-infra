@@ -154,7 +154,7 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 控制时序集中在可注入的 policy 中：生产默认 control tick 为 250ms，慢速检查和容器 heartbeat 为 5s，parked 退避从 1s 增长到 5s，quiesce deadline 为 7s。测试可以注入更短的值，不需要改变安全状态机。canonical control manifest 只有一份 current、无 version 的 schema，包含精确 container identity、受控 labels 和 root-relative `runtimeDir`；request、response、status、lease、execution、broker owner 与 controller 记录继续保留各自独立的协议版本。materialize 阶段只创建 control 目录并保留内存 draft；完成 container identity 和 labels 检查后，finalize 才通过原子写入发布完整 manifest，随后才能启动 broker。缺失、带 version、字段不完整或未知的 manifest 会 fail closed，并给出 container-only recreation/rebuild 指引；不会按兼容格式解析或迁移。task-bound 容器会把 `runtimeDir` 以读写方式挂载到 `/run/agent-infra/runtime`，客户端状态位于 `runtime/clients/<client>/<store>`。替换失败或结果不确定时保留 control root 和证据。
 
-CLI 与 broker 是 task-control 入口边界。direct-host 命令保留 operation 的 task lock、原子写入、durable receipt 与原生恢复规则。broker 只会在授权后启动一次性 executor，不传递可复用的宿主凭据。系统没有固定宿主端点、用户服务或 fallback 路径。
+CLI 与 broker 是 task-control 入口边界。direct-host 命令保留 operation 的任务身份/状态校验、原子写入、durable receipt 与原生恢复规则；同一任务的生命周期阶段按序调用。broker 只会在授权后启动一次性 executor，不传递可复用的宿主凭据。系统没有固定宿主端点、用户服务或 fallback 路径。
 
 task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作，其他 workflow 命令使用一次性 CLI worker。worker 只在 broker 授权后创建，且不会得到可复用的宿主凭据。响应直接携带业务退出码，失败审计也使用该退出码。执行前拒绝表示未执行；执行失败表示结果未知，不得自动重试。
 

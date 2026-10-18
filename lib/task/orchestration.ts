@@ -48,14 +48,13 @@ import {
 import type { RepositorySnapshot } from './workspace-snapshot.ts';
 import type { WorkspaceSnapshotContext } from './workspace-snapshot.ts';
 import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
-import { resolveArtifactContext } from './artifact-lifecycle.ts';
+import { resolveArtifactContextForResolvedTask } from './artifact-lifecycle.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -441,19 +440,7 @@ function mutateDelegationAdapterEvidence(
 ): unknown {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
-  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options, false);
-}
-
-function mutateDelegationAdapterEvidenceWithinTaskLock(
-  taskRef: string,
-  receiptId: string,
-  adapterId: AgentClientId,
-  mutate: (current: unknown) => unknown,
-  options: OrchestrationOptions = {}
-): unknown {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
-  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options, true);
+  return mutateDelegationAdapterEvidenceAtResolved(resolved, receiptId, adapterId, mutate, options);
 }
 
 function mutateDelegationAdapterEvidenceAtResolved(
@@ -461,8 +448,7 @@ function mutateDelegationAdapterEvidenceAtResolved(
   receiptId: string,
   adapterId: AgentClientId,
   mutate: (current: unknown) => unknown,
-  options: OrchestrationOptions,
-  taskLockHeld: boolean
+  options: OrchestrationOptions
 ): unknown {
   const update = () => {
     try {
@@ -494,9 +480,7 @@ function mutateDelegationAdapterEvidenceAtResolved(
     }
   };
   let mutationError: unknown;
-  const result = taskLockHeld
-    ? update()
-    : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `agent-adapter.${adapterId}.evidence`, update);
+  const result = update();
   if (mutationError) throw mutationError;
   return result;
 }
@@ -733,9 +717,13 @@ function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'request
   return { action: command, role, stage: action };
 }
 
-function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+type ResolvedTaskRef = Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+
+function routeResolvedTask(
+  taskRef: string,
+  resolved: ResolvedTaskRef,
+  options: OrchestrationOptions
+): OrchestrationResult {
   let gitRoot: string;
   try {
     gitRoot = gitRootFor(resolved.repoRoot, options);
@@ -864,7 +852,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   }
   const action = routed.stage as LifecycleAction;
   const family = action === 'analysis' ? 'analysis' : action;
-  const artifactContext = resolveArtifactContext(taskRef, family, {
+  const artifactContext = resolveArtifactContextForResolvedTask(resolved, family, {
     repoRoot: resolved.repoRoot
   });
   if (artifactContext.status !== 'ready' || !artifactContext.selection) {
@@ -896,6 +884,12 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     requestedReasoningEffort: policy?.reasoningEffort ?? null
   };
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+}
+
+function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  return routeResolvedTask(taskRef, resolved, options);
 }
 
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -952,7 +946,7 @@ function validateDelegationRun(
   return null;
 }
 
-function prepareOrchestrationDelegationUnlocked(
+function prepareOrchestrationDelegation(
   taskRef: string,
   input: Readonly<{
     client: AgentClientId;
@@ -978,7 +972,7 @@ function prepareOrchestrationDelegationUnlocked(
   const runFailure = validateDelegationRun(taskRef, resolved.taskId, run, options);
   if (runFailure) return runFailure;
   const activeRun = run!;
-  const routed = routeOrchestration(taskRef, options);
+  const routed = routeResolvedTask(taskRef, resolved, options);
   if (!routed.next) return routed;
   const next = routed.next;
   const policyFailure = validatePreparedModelPolicy(resolved.taskId, activeRun, next, input);
@@ -1010,31 +1004,7 @@ function prepareOrchestrationDelegationUnlocked(
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next, error: null };
 }
 
-function prepareOrchestrationDelegation(
-  taskRef: string,
-  input: Readonly<{
-    client: AgentClientId;
-    requestedModel?: string;
-    requestedReasoningEffort?: string;
-  }>,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'task-orchestration.prepare.task',
-      () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
-    );
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
-    throw error;
-  }
-}
-
-function dispatchOrchestrationDelegationUnlocked(
+function dispatchOrchestrationDelegation(
   taskRef: string,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
@@ -1053,25 +1023,6 @@ function dispatchOrchestrationDelegationUnlocked(
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
-}
-
-function dispatchOrchestrationDelegation(
-  taskRef: string,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    return withTaskExecutionLock(
-      resolved.repoRoot,
-      resolved.taskId,
-      'task-orchestration.dispatch.task',
-      () => dispatchOrchestrationDelegationUnlocked(taskRef, options)
-    );
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
-    throw error;
-  }
 }
 
 type MatchingDelegationsResult =
@@ -1385,7 +1336,7 @@ function recoverPreparedOrchestrationDelegation(
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   try {
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-orchestration.recover-prepared', () => {
+    return (() => {
       const run = readRun(resolved.taskDir, options);
       const receipt = run?.pendingDelegation;
       if (!run || !receipt) {
@@ -1430,9 +1381,8 @@ function recoverPreparedOrchestrationDelegation(
       }, options.now);
       saveRun(resolved.taskDir, updated);
       return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
-    });
+    })();
   } catch (error) {
-    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
     return failed(
       'ORCHESTRATION_PREPARED_RECOVERY_FAILED',
       error instanceof Error ? error.message : String(error),
@@ -1462,7 +1412,7 @@ function recoveryReceiptMatches(
     && normalizeAgentToken(event.startedAgent) === normalizeAgentToken(receipt.client);
 }
 
-function recoverActivatedOrchestrationDelegationUnderLock(
+function recoverActivatedOrchestrationDelegation(
   taskRef: string,
   event: ActivatedRecoveryEvent,
   options: OrchestrationOptions = {}
@@ -1598,7 +1548,7 @@ function sealOrchestrationDelegation(
   const orchestrationOptions = options;
   const resolved = resolveTaskRef(taskRef, { repoRoot: orchestrationOptions.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-orchestration.seal', () => {
+  return (() => {
     const run = readRun(resolved.taskDir, orchestrationOptions);
     if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
     if (expected && (run.runId !== expected.runId || run.pendingDelegation.id !== expected.receiptId)) {
@@ -1616,7 +1566,7 @@ function sealOrchestrationDelegation(
     const updated = withUpdatedRun(current, { pendingDelegation: result.receipt });
     saveRun(resolved.taskDir, updated);
     return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
-  });
+  })();
 }
 
 function advanceOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -1672,7 +1622,6 @@ export {
   orchestrationPath,
   readDelegationAdapterEvidence,
   mutateDelegationAdapterEvidence,
-  mutateDelegationAdapterEvidenceWithinTaskLock,
   pauseMatchingOrchestrationDelegation,
   pauseOrchestration,
   planOrchestrationStageCompletion,
@@ -1680,7 +1629,7 @@ export {
   readRun,
   reconcileMatchingOrchestrationDelegation,
   recoverPreparedOrchestrationDelegation,
-  recoverActivatedOrchestrationDelegationUnderLock,
+  recoverActivatedOrchestrationDelegation,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,

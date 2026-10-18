@@ -10,7 +10,7 @@
 
 ## Current Execution Records
 
-`orchestration.json` records stages, model policy, child identity, and actual outcomes. Records use the current structure; trusted local operators may correct them and rerun validation. Existing task write locks and atomic writes protect updates.
+`orchestration.json` records stages, model policy, child identity, and actual outcomes. Records use the current structure; trusted local operators may correct them and rerun validation. Stages for one task run sequentially; atomic writes and identity/state validation continue to protect state updates.
 
 ## Current Host
 

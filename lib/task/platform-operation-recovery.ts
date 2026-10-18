@@ -222,8 +222,7 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
     ...(summary.manualValidation ? { manualValidation: summary.manualValidation } : {}),
     primaryResult: 'no_op',
     strict: true,
-    skipQueue: true,
-    lockAlreadyHeld: true
+    skipQueue: true
   });
   if ((replayed.status === 'applied' || replayed.status === 'no-op') && !replayed.error && replayed.warnings.length === 0) {
     return platformResult(replayed.status, { changed: replayed.changed });

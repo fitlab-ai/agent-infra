@@ -134,6 +134,8 @@ type InspectOptions = {
   sourceSha256?: string;
 };
 
+type ResolvedTaskRef = Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+
 const BLOCKING_DIAGNOSTICS = new Set<ArtifactDiagnosticCode>([
   'NONCANONICAL_NAME', 'ROUND_OUT_OF_RANGE', 'MISSING_BASE', 'ROUND_GAP',
   'DUPLICATE_LOGICAL_ROUND', 'NON_REGULAR_FILE', 'SYMBOLIC_LINK',
@@ -160,10 +162,15 @@ function diagnostic(code: ArtifactDiagnosticCode, family: ArtifactFamily, name: 
   return { code, family, name, message };
 }
 
-function inspectTaskArtifacts(taskRef: string, family: string, options: InspectOptions = {}): ArtifactInventoryResult {
+function inspectTaskArtifacts(
+  taskRef: string,
+  family: string,
+  options: InspectOptions = {},
+  resolvedTask?: ResolvedTaskRef
+): ArtifactInventoryResult {
   const spec = familySpec(family);
   if (!spec) return failure(taskRef, family, { code: 'ARTIFACT_FAMILY_UNKNOWN', message: `unknown artifact family '${family}'` });
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  const resolved = resolvedTask ?? resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(taskRef, family, { code: resolved.code, message: resolved.message }, { taskId: resolved.taskId });
   return inspectArtifactDirectory(resolved.taskDir, spec.family, {
     requestRef: taskRef, taskId: resolved.taskId, taskState: resolved.state
@@ -452,8 +459,13 @@ function attachArtifactSelection(
   }
 }
 
-function resolveArtifactContext(taskRef: string, family: string, options: InspectOptions = {}): ArtifactContextResult {
-  const inventory = inspectTaskArtifacts(taskRef, family, options);
+function resolveArtifactContextFromTask(
+  taskRef: string,
+  family: string,
+  options: InspectOptions,
+  resolvedTask?: ResolvedTaskRef
+): ArtifactContextResult {
+  const inventory = inspectTaskArtifacts(taskRef, family, options, resolvedTask);
   if (inventory.status === 'failed') return { ...inventory, inputs: [], codeMode: null };
   const writableError = assertWritableInventory(inventory);
   if (writableError) return { ...inventory, status: 'failed', inputs: [], codeMode: null, error: writableError };
@@ -462,7 +474,7 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     return contextFailure(inventory, 'LIFECYCLE_PATH_INVALID', pathState.message);
   }
   if (inventory.family === 'code') {
-    const code = resolveCodeContext(inventory, options);
+    const code = resolveCodeContext(inventory, options, resolvedTask);
     const selected = attachArtifactSelection(code, pathState, options);
     if (selected.status !== 'ready' || !selected.selection) return selected;
     if (selected.selection.disposition === 'reuse') return selected;
@@ -496,7 +508,7 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
   const required = REQUIRED_INPUT[inventory.family as ArtifactFamily];
   const inputs: ArtifactIdentity[] = [];
   if (required) {
-    const input = inspectTaskArtifacts(taskRef, required, options);
+    const input = inspectTaskArtifacts(taskRef, required, options, resolvedTask);
     if (input.status === 'failed' || !input.latest) {
       return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_INPUT_MISSING', message: `latest ${required} artifact is required` } };
     }
@@ -505,7 +517,7 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
   const optional = OPTIONAL_CONTEXT[inventory.family as ArtifactFamily];
   if (optional) {
     for (const family of optional) {
-      const context = inspectTaskArtifacts(taskRef, family, options);
+      const context = inspectTaskArtifacts(taskRef, family, options, resolvedTask);
       if (context.status === 'ready' && context.latest) inputs.push(context.latest);
     }
   }
@@ -515,14 +527,30 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
   return attachArtifactSelection({ ...inventory, inputs, codeMode: null }, pathState, options);
 }
 
-function resolveCodeContext(inventory: ArtifactInventoryResult, options: InspectOptions): ArtifactContextResult {
+function resolveArtifactContext(taskRef: string, family: string, options: InspectOptions = {}): ArtifactContextResult {
+  return resolveArtifactContextFromTask(taskRef, family, options);
+}
+
+export function resolveArtifactContextForResolvedTask(
+  resolvedTask: ResolvedTaskRef,
+  family: string,
+  options: InspectOptions = {}
+): ArtifactContextResult {
+  return resolveArtifactContextFromTask(resolvedTask.taskId, family, options, resolvedTask);
+}
+
+function resolveCodeContext(
+  inventory: ArtifactInventoryResult,
+  options: InspectOptions,
+  resolvedTask?: ResolvedTaskRef
+): ArtifactContextResult {
   const taskRef = inventory.requestRef;
   const pathState = lifecyclePathState(inventory.taskDir!);
   if (pathState.status !== 'valid') return contextFailure(inventory, 'LIFECYCLE_PATH_INVALID', pathState.message);
   const inputFamily = pathState.decision.path === 'streamlined' ? 'analysis' : 'plan';
-  const source = inspectTaskArtifacts(taskRef, inputFamily, options);
+  const source = inspectTaskArtifacts(taskRef, inputFamily, options, resolvedTask);
   if (source.status === 'failed' || !source.latest) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `latest ${inputFamily} artifact is required`);
-  const reviewCode = inspectTaskArtifacts(taskRef, 'review-code', options);
+  const reviewCode = inspectTaskArtifacts(taskRef, 'review-code', options, resolvedTask);
   try {
     const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
     const hasPendingImplementation = parseImplementationInputs(taskContent).rows.some((input) => input.needsImplementation && input.status === 'pending');
@@ -538,7 +566,7 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const reviewMax = reviewCode.latest?.round ?? 0;
   const inputs = [source.latest];
   const sourceReviewFamily = inputFamily === 'analysis' ? 'review-analysis' : 'review-plan';
-  const sourceReview = inspectTaskArtifacts(taskRef, sourceReviewFamily, options);
+  const sourceReview = inspectTaskArtifacts(taskRef, sourceReviewFamily, options, resolvedTask);
   if (sourceReview.status === 'ready' && sourceReview.latest && sourceReview.reviewedInput?.name === source.latest.name) inputs.push(sourceReview.latest);
   if (inventory.openRounds.length > 0) {
     try {

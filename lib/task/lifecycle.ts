@@ -18,7 +18,6 @@ import { validateCurrentTaskContract } from './current-contract.ts';
 import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -629,7 +628,7 @@ export function inspectTaskLifecycleProgress(
   }
 }
 
-function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
+function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
   if (requestInput.intent === 'recover-started') {
     return failed(requestInput, { code: 'LIFECYCLE_RECOVERY_REQUIRES_AUTHORITY', message: 'recover-started must be dispatched through task control authority' });
   }
@@ -925,50 +924,9 @@ function applyTaskLifecycleUnlocked(requestInput: TaskLifecycleRequest, options:
   };
 }
 
-function applyTaskLifecycle(request: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
-  const normalized = normalizedRequest(request);
-  if ('code' in normalized) return applyTaskLifecycleUnlocked(request, options);
-  const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
-  const taskId = normalized.intent === 'restore'
-    ? normalized.taskRef
-    : (() => {
-      const resolved = resolveTaskRef(normalized.taskRef, { repoRoot });
-      return resolved.ok ? resolved.taskId : null;
-    })();
-  if (!taskId) return applyTaskLifecycleUnlocked(request, options);
-  try {
-    return withTaskExecutionLock(repoRoot, taskId, 'task-lifecycle.move', () => applyTaskLifecycleUnlocked(request, options));
-  } catch (error) {
-    if (error instanceof TaskExecutionLockError) {
-      return failed(request, { code: error.code, message: error.message }, { taskId });
-    }
-    throw error;
-  }
-}
-
-function applyTaskLifecycleWithinTaskLock(
-  request: TaskLifecycleRequest,
-  options: TaskLifecycleOptions,
-  lockedTaskId: string
-): TaskLifecycleResult {
-  const normalized = normalizedRequest(request);
-  if ('code' in normalized) return failed(request, normalized);
-  const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
-  const resolved = normalized.intent === 'restore'
-    ? { ok: true as const, taskId: normalized.taskRef }
-    : resolveTaskRef(normalized.taskRef, { repoRoot });
-  if (!resolved.ok || resolved.taskId !== lockedTaskId) {
-    return failed(request, {
-      code: 'LIFECYCLE_LOCK_SCOPE_MISMATCH',
-      message: 'task lifecycle request does not match the held task lock'
-    }, { taskId: resolved.ok ? resolved.taskId : resolved.taskId });
-  }
-  return applyTaskLifecycleUnlocked(request, options);
-}
-
 export {
   lifecycleIntentCatalog, lifecycleFailureCatalog, lifecycleProducerCatalog,
-  applyTaskLifecycle, applyTaskLifecycleWithinTaskLock, previewTaskCompletion
+  applyTaskLifecycle, previewTaskCompletion
 };
 export type {
   TaskLifecycleIntent, TaskLifecycleRequest, TaskLifecycleResult, TaskLifecycleOptions,

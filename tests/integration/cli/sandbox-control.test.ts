@@ -738,6 +738,7 @@ test('host sandbox-control recovery waits for an accepted response to become ter
     const manifest = readSandboxControlManifest(manifestPath);
     const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'recovered after wait\n', stderr: '' });
     const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    const acceptedResponsePath = path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`);
     const terminalResponse = {
       version: 2, id: requestId, phase: 'completed', exitCode: 0, stdout: '', stderr: '', error: null,
       outputState: 'available', payload: {
@@ -746,7 +747,7 @@ test('host sandbox-control recovery waits for an accepted response to become ter
         stdoutSha256: payload.stdoutSha256, stderrSha256: payload.stderrSha256
       }
     };
-    fs.writeFileSync(responsePath, `${JSON.stringify({ version: 2, id: requestId, phase: 'accepted' })}\n`);
+    fs.writeFileSync(acceptedResponsePath, `${JSON.stringify({ version: 2, id: requestId, phase: 'accepted' })}\n`);
     appendCriticalAudit(manifest, createSandboxControlAuditContext(manifest, {
       requestId, family: 'task-lifecycle', phase: 'accepted-authorized', outcome: 'in-progress'
     }));
@@ -756,7 +757,7 @@ test('host sandbox-control recovery waits for an accepted response to become ter
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
     publisher = spawn(process.execPath, ['-e',
-      'setTimeout(() => require("node:fs").writeFileSync(process.argv[1], process.argv[2]), 75)',
+      'setTimeout(() => { const fs = require("node:fs"); const temporary = `${process.argv[1]}.${process.pid}.tmp`; try { fs.writeFileSync(temporary, `${process.argv[2]}\\n`, { flag: "wx" }); fs.linkSync(temporary, process.argv[1]); } finally { fs.rmSync(temporary, { force: true }); } }, 75)',
       responsePath, JSON.stringify(terminalResponse)
     ], { stdio: 'ignore' });
 

@@ -293,7 +293,7 @@ test('PR review intents reject missing starts, identity mismatches and invalid p
   }
 });
 
-test('PR review dry-run validates without writing and lock failures fail closed', () => {
+test('PR review dry-run validates without writing', () => {
   const fixture = fixtureTask();
   try {
     writeArtifact(fixture.taskDir);
@@ -305,17 +305,6 @@ test('PR review dry-run validates without writing and lock failures fail closed'
     assert.equal(planned.status, 'planned');
     assert.equal(fs.readFileSync(path.join(fixture.taskDir, 'task.md'), 'utf8'), before);
 
-    const unsupported = Object.assign(new Error('unsupported'), { code: 'EPERM' });
-    const failed = applyPrReviewActivityIntent({
-      kind: 'pr-review-start', taskRef: fixture.taskId,
-      agent: 'codex', artifact: 'pr-review.md', head: HEAD
-    }, {
-      repoRoot: fixture.root,
-      lockOptions: { lockRoot: path.join(fixture.root, 'locks'), linkSync: () => { throw unsupported; } }
-    });
-    assert.equal(failed.status, 'failed');
-    assert.equal(failed.error?.code, 'ORCHESTRATION_LOCK_UNSUPPORTED');
-    assert.equal(fs.readFileSync(path.join(fixture.taskDir, 'task.md'), 'utf8'), before);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

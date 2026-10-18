@@ -3,7 +3,6 @@ import path from 'node:path';
 
 import {
   mutateDelegationAdapterEvidence,
-  mutateDelegationAdapterEvidenceWithinTaskLock,
   readRun
 } from '../../../task/orchestration.ts';
 import type { DelegationReceipt } from '../../../task/delegation-receipts.ts';
@@ -195,12 +194,10 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
   function update(
     binding: CodexLifecycleTaskBinding,
     key: string,
-    mutate: (current: StoredCodexLifecycle | null) => StoredCodexLifecycle,
-    taskLockHeld = false
+    mutate: (current: StoredCodexLifecycle | null) => StoredCodexLifecycle
   ): StoredCodexLifecycle {
     let result: StoredCodexLifecycle | null = null;
-    const updateState = taskLockHeld ? mutateDelegationAdapterEvidenceWithinTaskLock : mutateDelegationAdapterEvidence;
-    updateState(options.taskId, binding.receiptId, 'codex', (value) => {
+    mutateDelegationAdapterEvidence(options.taskId, binding.receiptId, 'codex', (value) => {
       const currentState = storedEvidence(value);
       const current = currentState.records[key] ?? null;
       result = mutate(current);
@@ -304,23 +301,18 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     return matches[0]!;
   }
 
-  function consumeWithLockMode(
+  function consume(
     childThreadId: string,
     consumer: string,
-    expectedHookDefinitionHash: string | undefined,
-    expectedTaskBinding: CodexLifecycleTaskBinding | undefined,
-    taskLockHeld: boolean
+    expectedHookDefinitionHash?: string,
+    expectedTaskBinding?: CodexLifecycleTaskBinding
   ): StoredCodexLifecycle {
     if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
     const current = read(childThreadId);
     const binding = expectedTaskBinding ?? current.taskBinding;
     if (!binding) throw new Error('Codex lifecycle task receipt binding is missing');
     const spawn = current.state.spawn;
-    if (!spawn) {
-      throw new Error(taskLockHeld
-        ? 'Codex lifecycle task receipt binding is missing'
-        : 'Codex lifecycle spawn evidence is missing');
-    }
+    if (!spawn) throw new Error('Codex lifecycle spawn evidence is missing');
     const key = recordKey(spawn.sessionId, spawn.turnId, spawn.toolUseId);
     return update(binding, key, (latest) => {
       if (!latest || expectedTaskBinding && JSON.stringify(latest.taskBinding) !== JSON.stringify(expectedTaskBinding)) {
@@ -335,25 +327,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       }
       if (latest.consumer) return latest;
       return Object.freeze({ ...latest, revision: latest.revision + 1, consumer, consumedAt: now(), updatedAt: now() });
-    }, taskLockHeld);
-  }
-
-  function consume(
-    childThreadId: string,
-    consumer: string,
-    expectedHookDefinitionHash?: string,
-    expectedTaskBinding?: CodexLifecycleTaskBinding
-  ): StoredCodexLifecycle {
-    return consumeWithLockMode(childThreadId, consumer, expectedHookDefinitionHash, expectedTaskBinding, false);
-  }
-
-  function consumeWithinTaskLock(
-    childThreadId: string,
-    consumer: string,
-    expectedHookDefinitionHash?: string,
-    expectedTaskBinding?: CodexLifecycleTaskBinding
-  ): StoredCodexLifecycle {
-    return consumeWithLockMode(childThreadId, consumer, expectedHookDefinitionHash, expectedTaskBinding, true);
+    });
   }
 
   function expireBefore(cutoff: string): number {
@@ -373,7 +347,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     return changed;
   }
 
-  return Object.freeze({ taskId: options.taskId, root: path.join(taskDir, '.runtime'), apply, applyToSpawn, consume, consumeWithinTaskLock, expireBefore, findByParent, findByTaskBinding, read });
+  return Object.freeze({ taskId: options.taskId, root: path.join(taskDir, '.runtime'), apply, applyToSpawn, consume, expireBefore, findByParent, findByTaskBinding, read });
 }
 
 export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence, readCodexLifecycleActivationEvidence };

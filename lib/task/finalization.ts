@@ -14,7 +14,6 @@ import { parseTaskFrontmatter } from './frontmatter.ts';
 import { recoverPlatformOperations } from './platform-operation-recovery.ts';
 import {
   applyTaskLifecycle,
-  applyTaskLifecycleWithinTaskLock,
   inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
   type TaskLifecycleRequest,
@@ -24,7 +23,6 @@ import {
 } from './lifecycle.ts';
 import { enumerateAllTaskDirs, resolveTaskRef } from './resolve-ref.ts';
 import { inspectShortIdRegistry } from './short-id.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 import type { TaskVerificationResult } from './verification.ts';
 import { projectFinalizationWarning } from './workflow-warning-intents.ts';
@@ -586,7 +584,7 @@ function mutationPatch(current: TaskFinalizationReceipt, mutation: FinalizationM
     : { warningProjection: 'pending', lastError: mutation.error };
 }
 
-function applyFinalizationReceiptMutationUnderLock(
+function mutateFinalizationReceipt(
   repoRoot: string,
   receipt: TaskFinalizationReceipt,
   capability: FinalizationCapability,
@@ -615,9 +613,7 @@ function applyFinalizationReceiptMutation(
   if (!hasFinalizationTaskDocument(repoRoot, receipt.taskId)) {
     throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active task or a completed task');
   }
-  return withTaskExecutionLock(repoRoot, receipt.taskId, 'task-finalization.receipt-mutation', () =>
-    applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, mutation, new Set<string>())
-  );
+  return mutateFinalizationReceipt(repoRoot, receipt, capability, mutation, new Set<string>());
 }
 
 function warningKey(warning: Pick<FinalizationWarning, 'step' | 'code' | 'target'>): string {
@@ -640,20 +636,20 @@ function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: T
           retryable: true
         };
         const capability = issueCapability(receipt, 'warning-projection');
-        return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
+        return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
       }
     } catch (error) {
       const detail = errorOf(error, 'FINALIZATION_WARNING_PROJECTION_FAILED', true);
       try {
         const capability = issueCapability(receipt, 'warning-projection');
-        return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
+        return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
       }
       catch { return receipt; }
     }
   }
   try {
     const capability = issueCapability(receipt, 'warning-projection');
-    return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'succeeded' }, consumed);
+    return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'succeeded' }, consumed);
   }
   catch { return receipt; }
 }
@@ -692,7 +688,7 @@ async function syncPendingTaskComment(input: {
     if (result.status === 'applied' || result.status === 'no-op') {
       const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
       const capability = issueCapability(receipt, 'task-comment');
-      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+      receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
         scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
       }, consumedCapabilities);
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
@@ -708,7 +704,7 @@ async function syncPendingTaskComment(input: {
     }
     const detail = step.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
     const capability = issueCapability(receipt, 'task-comment');
-    receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+    receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
       scope: 'task-comment', operation: 'failed', error: detail
     }, consumedCapabilities);
     receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
@@ -717,7 +713,7 @@ async function syncPendingTaskComment(input: {
     const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
     try {
       const capability = issueCapability(receipt, 'task-comment');
-      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+      receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
         scope: 'task-comment', operation: 'failed', error: detail
       }, consumedCapabilities);
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
@@ -863,14 +859,14 @@ function preparedResult(
   };
 }
 
-async function prepareUnderLock(
+async function prepareTaskFinalizationCore(
   request: TaskFinalizationRequest,
   taskId: string,
   options: TaskFinalizationOptions
 ): Promise<TaskFinalizationResult> {
   const repoRoot = path.resolve(options.repoRoot);
   const lifecycle = options.lifecycle ?? ((lifecycleRequest, lifecycleOptions) => (
-    applyTaskLifecycleWithinTaskLock(lifecycleRequest, lifecycleOptions ?? { repoRoot }, taskId)
+    applyTaskLifecycle(lifecycleRequest, lifecycleOptions ?? { repoRoot })
   ));
   const backfill = options.backfill ?? backfillCompletionComments;
   const commentSync = options.commentSync ?? syncPlatformComment;
@@ -1142,11 +1138,9 @@ async function prepareTaskFinalization(request: TaskFinalizationRequest, options
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.prepare', () => prepareUnderLock(request, resolved.taskId, options));
+    return await prepareTaskFinalizationCore(request, resolved.taskId, options);
   } catch (error) {
-    const detail = error instanceof TaskExecutionLockError
-      ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
-      : errorOf(error, 'TASK_FINALIZATION_FAILED');
+    const detail = errorOf(error, 'TASK_FINALIZATION_FAILED');
     return failed(resolved.taskId, detail);
   }
 }
@@ -1159,7 +1153,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
+    return await (async () => {
       if (options.controlBinding && options.manifestPath) {
         try {
           const manifest = readSandboxControlManifest(options.manifestPath);
@@ -1223,7 +1217,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       };
       const result = options.lifecycle
         ? options.lifecycle(lifecycleRequest, lifecycleOptions)
-        : applyTaskLifecycleWithinTaskLock(lifecycleRequest, lifecycleOptions, resolved.taskId);
+        : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
       const step = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
@@ -1305,11 +1299,9 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         });
       }
       return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
-    });
+    })();
   } catch (error) {
-    const detail = error instanceof TaskExecutionLockError
-      ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
-      : errorOf(error, 'TASK_FINALIZATION_FAILED');
+    const detail = errorOf(error, 'TASK_FINALIZATION_FAILED');
     return failed(resolved.taskId, detail);
   }
 }

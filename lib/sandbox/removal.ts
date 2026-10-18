@@ -48,7 +48,6 @@ import { toolConfigDirCandidates, toolProjectDirCandidates } from './tools.ts';
 import type { SandboxTool } from './tools.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
 import { releaseStaleShortIdRegistry } from '../task/short-id.ts';
-import { withRepositoryMutationLock } from '../task/task-execution-lock.ts';
 import { fetchSandboxRows, type SandboxRow } from './commands/list-running.ts';
 import { createSandboxControlBindingEvidence } from './task-cleanup.ts';
 import {
@@ -933,7 +932,7 @@ async function authorizeWorktrees(
   return permits;
 }
 
-async function runRmOneUnderRepositoryLock(
+async function runRmOne(
   config: SandboxConfig,
   tools: SandboxTool[],
   branch: string,
@@ -953,10 +952,7 @@ async function rmOne(
   branch: string,
   options: RmOneOptions = {}
 ): Promise<void> {
-  await withRepositoryMutationLock(
-    config.repoRoot,
-    () => runRmOneUnderRepositoryLock(config, tools, branch, options)
-  );
+  await runRmOne(config, tools, branch, options);
 }
 
 async function removeUncheckedSandbox(
@@ -1061,14 +1057,6 @@ async function rmPurge(
   tools: SandboxTool[],
   prompt: PromptDependencies = {}
 ): Promise<void> {
-  return withRepositoryMutationLock(config.repoRoot, () => rmPurgeCore(config, tools, prompt));
-}
-
-async function rmPurgeCore(
-  config: SandboxConfig,
-  tools: SandboxTool[],
-  prompt: PromptDependencies = {}
-): Promise<void> {
   const engine = detectEngine(config);
   const confirm = prompt.confirm ?? p.confirm;
   const isCancel = prompt.isCancel ?? p.isCancel;
@@ -1143,17 +1131,6 @@ async function rmUnbound(
   tools: SandboxTool[],
   options: { dryRun: boolean; assumeYes: boolean }
 ): Promise<void> {
-  return withRepositoryMutationLock(
-    config.repoRoot,
-    () => rmUnboundCore(config, tools, options)
-  );
-}
-
-async function rmUnboundCore(
-  config: SandboxConfig,
-  tools: SandboxTool[],
-  options: { dryRun: boolean; assumeYes: boolean }
-): Promise<void> {
   const engine = detectEngine(config);
   const listed = fetchSandboxRows(
     engine,
@@ -1215,7 +1192,7 @@ async function rmUnboundCore(
     return;
   }
   for (const { row, cleanupTarget, target } of targets) {
-    await runRmOneUnderRepositoryLock(config, tools, cleanupTarget.branch, {
+    await runRmOne(config, tools, cleanupTarget.branch, {
       assumeYes: options.assumeYes,
       target,
       cleanupTarget

@@ -636,7 +636,7 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
   }
 });
 
-test('change-report reads task semantics inside the execution lock', async () => {
+test('change-report reads task semantics after provider context resolution', async () => {
   const fixture = summaryFixture();
   try {
     const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
@@ -872,7 +872,7 @@ test('summary-sync rechecks the PR head before returning no-op', async () => {
   }
 });
 
-test('summary-sync re-reads task semantics inside the execution lock', async () => {
+test('summary-sync re-reads task semantics after provider context resolution', async () => {
   const fixture = summaryFixture();
   try {
     const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');

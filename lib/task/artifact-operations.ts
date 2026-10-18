@@ -9,7 +9,6 @@ import {
   getArtifactSchema,
   renderArtifactSkeleton
 } from './artifact-schema.ts';
-import { withTaskExecutionLock } from './task-execution-lock.ts';
 import type {
   ArtifactSchema,
   ArtifactSchemaFamily,
@@ -352,42 +351,36 @@ function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileR
   const target = path.join(request.taskDir, request.artifact);
   if (path.dirname(path.resolve(target)) !== path.resolve(request.taskDir)) return resultFailure('ARTIFACT_INIT_TARGET_INVALID', 'artifact must be inside the current task directory');
   try {
-    return withTaskExecutionLock(request.repoRoot, request.taskId, 'task-artifact.init', () => {
-      try {
-        const existing = fs.lstatSync(target);
-        if (existing.isSymbolicLink() || !existing.isFile()) return resultFailure('ARTIFACT_INIT_TARGET_INVALID', 'artifact target is not a regular file');
-        return resultNoOp(readStableFileSync(target, { maxBytes: 1024 * 1024 }).bytes.toString('utf8'));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return resultFailure('ARTIFACT_INIT_TARGET_INVALID', String(error));
-      }
-      const skeleton = renderArtifactSkeleton({
-        taskId: request.taskId,
-        family: request.family,
-        artifact: request.artifact,
-        ...(request.locale ? { locale: request.locale } : {})
-      });
-      const content = skeleton.trimEnd();
-      const tempPath = path.join(request.taskDir, `.${request.artifact}.init-${process.pid}-${Date.now()}.tmp`);
-      try {
-        fs.writeFileSync(tempPath, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-        try { fs.lstatSync(target); fs.unlinkSync(tempPath); return resultFailure('ARTIFACT_INIT_TARGET_EXISTS', 'artifact was created concurrently'); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-        fs.renameSync(tempPath, target);
-      } catch (error) {
-        try { fs.unlinkSync(tempPath); } catch { /* preserve primary error */ }
-        return resultFailure('ARTIFACT_INIT_WRITE_FAILED', String(error));
-      }
-      return {
-        status: 'applied',
-        changed: true,
-        artifactSha256: sha256Content(content),
-        semanticDigest: canonicalSemanticDigest(content),
-        error: null
-      };
-    });
+    const existing = fs.lstatSync(target);
+    if (existing.isSymbolicLink() || !existing.isFile()) return resultFailure('ARTIFACT_INIT_TARGET_INVALID', 'artifact target is not a regular file');
+    return resultNoOp(readStableFileSync(target, { maxBytes: 1024 * 1024 }).bytes.toString('utf8'));
   } catch (error) {
-    return resultFailure('ARTIFACT_INIT_LOCK_FAILED', String(error));
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return resultFailure('ARTIFACT_INIT_TARGET_INVALID', String(error));
   }
+  const skeleton = renderArtifactSkeleton({
+    taskId: request.taskId,
+    family: request.family,
+    artifact: request.artifact,
+    ...(request.locale ? { locale: request.locale } : {})
+  });
+  const content = skeleton.trimEnd();
+  const tempPath = path.join(request.taskDir, `.${request.artifact}.init-${process.pid}-${Date.now()}.tmp`);
+  try {
+    fs.writeFileSync(tempPath, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    try { fs.lstatSync(target); fs.unlinkSync(tempPath); return resultFailure('ARTIFACT_INIT_TARGET_EXISTS', 'artifact was created concurrently'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    fs.renameSync(tempPath, target);
+  } catch (error) {
+    try { fs.unlinkSync(tempPath); } catch { /* preserve primary error */ }
+    return resultFailure('ARTIFACT_INIT_WRITE_FAILED', String(error));
+  }
+  return {
+    status: 'applied',
+    changed: true,
+    artifactSha256: sha256Content(content),
+    semanticDigest: canonicalSemanticDigest(content),
+    error: null
+  };
 }
 
 export {
