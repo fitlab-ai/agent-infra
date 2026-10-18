@@ -84,7 +84,6 @@ import { atomicWriteJson } from '../control/state.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
-import { sandboxSecurityArgs } from '../security.ts';
 import { materializeSandboxGitMetadata } from '../git-metadata.ts';
 import {
   assertSandboxTaskSource,
@@ -1604,10 +1603,10 @@ export async function create(
                 : []),
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
-              // Every task sandbox loads the controlled seccomp policy and sets
-              // apparmor=unconfined. Capabilities and namespace isolation remain
-              // unchanged.
-              ...sandboxSecurityArgs(engine),
+              // Every task sandbox runs without seccomp and AppArmor filtering;
+              // capabilities and namespace isolation remain unchanged.
+              '--security-opt', 'seccomp=unconfined',
+              '--security-opt', 'apparmor=unconfined',
               ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
               ...dotfilesMount,

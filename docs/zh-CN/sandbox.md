@@ -182,11 +182,9 @@ Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs �
 
 ## 嵌套 bubblewrap 沙箱与安全配置
 
-每个任务沙箱都会通过 `--security-opt seccomp=<profile>` 加载受控 seccomp 策略，并设置 `--security-opt apparmor=unconfined`。
+每个任务沙箱都会设置 `--security-opt seccomp=unconfined` 和 `--security-opt apparmor=unconfined`。
 
-该策略允许 `clone` 的 namespace flags、`unshare`、mount 家族和 `pivot_root`，并将 `bpf`、`perf_event_open`、`syslog`、`quotactl` 等调用保持在 `CAP_SYS_ADMIN` 门控下。默认动作仍是 `SCMP_ACT_ERRNO`；容器 capabilities、挂载清单和 namespace 隔离不变，不使用 `--privileged`。
-
-策略文件为 `lib/sandbox/security/nested-bubblewrap.json`。
+容器仍保留 namespaces、capabilities 和 cgroup 限制；不使用 `--privileged`。
 
 ## 宿主-沙箱文件交换
 

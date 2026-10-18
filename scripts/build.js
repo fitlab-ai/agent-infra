@@ -153,14 +153,6 @@ for (const file of fs.readdirSync(runtimesSrc)) {
   }
 }
 
-const securitySrc = path.join(rootDir, "lib", "sandbox", "security");
-const securityDst = path.join(distLib, "sandbox", "security");
-for (const file of fs.readdirSync(securitySrc)) {
-  if (file.endsWith(".json")) {
-    copyFile(path.join(securitySrc, file), path.join(securityDst, file));
-  }
-}
-
 const agentClientRuntimesSrc = path.join(rootDir, "lib", "agent-clients", "adapters", "runtimes");
 const agentClientRuntimesDst = path.join(distLib, "agent-clients", "adapters", "runtimes");
 for (const file of fs.readdirSync(agentClientRuntimesSrc)) {

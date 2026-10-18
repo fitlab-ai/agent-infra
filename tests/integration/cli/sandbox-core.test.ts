@@ -830,8 +830,8 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     assert.ok(runCall, "expected sandbox create to invoke docker run");
     assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
     const seccompIndex = runCall.indexOf("--security-opt");
-    assert.notEqual(seccompIndex, -1, "expected Codex-enabled sandbox to load a seccomp profile");
-    assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*nested-bubblewrap\.json$/);
+    assert.notEqual(seccompIndex, -1, "expected sandbox to load security options");
+    assert.equal(runCall[seccompIndex + 1] ?? "", "seccomp=unconfined");
     assert.ok(runCall.includes("apparmor=unconfined"));
     assert.equal(
       runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
@@ -858,63 +858,6 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
       }),
       ""
     );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("sandbox create loads nested-bubblewrap security options for every sandbox", () => {
-  const tmpDir = createTempDir("agent-infra-sandbox-create-no-codex-seccomp-");
-
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, {
-      project: "demo",
-      agentClients: CANONICAL_AGENT_CLIENTS.map((client) => ({
-        ...client,
-        installInSandbox: client.id !== "codex"
-      }))
-    });
-    fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
-    fs.writeFileSync(path.join(fixture.repoDir, ".agents", "README.md"), "# collaboration guide\n", "utf8");
-    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
-    const addResult = spawnSync("git", ["add", "README.md", ".gitignore", ".agents/README.md"], {
-      cwd: fixture.repoDir,
-      env: gitSafeEnv()
-    });
-    assert.equal(addResult.status, 0, addResult.stderr?.toString());
-    const commitResult = spawnSync("git", [
-      "-c",
-      "user.name=Sandbox Test",
-      "-c",
-      "user.email=sandbox-test@example.com",
-      "commit",
-      "-m",
-      "initial"
-    ], {
-      cwd: fixture.repoDir,
-      env: gitSafeEnv()
-    });
-    assert.equal(commitResult.status, 0, commitResult.stderr?.toString());
-
-    const result = spawnSandboxCli(
-      fixture,
-      tmpDir,
-      ["create", "feature/no-codex-seccomp"],
-      {
-        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json"),
-        DOCKER_EXIT_FOR_RUN: "1"
-      }
-    );
-
-    assert.equal(result.signal, null);
-    assert.notEqual(result.status, 0);
-
-    const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
-    assert.ok(runCall, "expected sandbox create to invoke docker run");
-    const seccompIndex = runCall.indexOf("--security-opt");
-    assert.notEqual(seccompIndex, -1, "expected every sandbox to load the security profile");
-    assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*nested-bubblewrap\.json$/);
-    assert.ok(runCall.includes("apparmor=unconfined"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

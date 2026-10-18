@@ -191,11 +191,9 @@ When Claude Code is enabled, `ai sandbox create` also merges model and API provi
 
 ## Nested bubblewrap sandbox and security options
 
-Every task sandbox loads a controlled seccomp policy through `--security-opt seccomp=<profile>` and sets `--security-opt apparmor=unconfined`.
+Every task sandbox sets `--security-opt seccomp=unconfined` and `--security-opt apparmor=unconfined`.
 
-The policy allows `clone` with namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls behind `CAP_SYS_ADMIN`. The default action remains `SCMP_ACT_ERRNO`; container capabilities, mounts, and namespace isolation are unchanged, and `--privileged` is not used.
-
-The profile file is `lib/sandbox/security/nested-bubblewrap.json`.
+The container still keeps namespaces, capabilities, and cgroup limits; `--privileged` is not used.
 
 ## Host-sandbox file exchange
 
