@@ -157,7 +157,7 @@ jobs:
           security_opts="$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$container")"
           # Docker stores the resolved profile JSON in SecurityOpt; the file path
           # is not preserved. pivot_root is only present in the Codex profile.
-          echo "$security_opts" | grep -q '"pivot_root"'
+          echo "$security_opts" | grep -q 'pivot_root'
           docker exec "$container" sh -lc 'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true'
           docker exec "$container" sh -lc 'codex --version'
           docker exec "$container" sh -lc 'unshare -Ur true; echo "userns_probe_exit=$?"' || true
@@ -330,7 +330,7 @@ jobs:
           security_opts="$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$container")"
           # Docker stores the resolved profile JSON in SecurityOpt; the file path
           # is not preserved. pivot_root is only present in the Codex profile.
-          echo "$security_opts" | grep -q '"pivot_root"'
+          echo "$security_opts" | grep -q 'pivot_root'
           docker exec "$container" sh -lc 'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true'
           docker exec "$container" sh -lc 'codex --version'
           docker exec "$container" sh -lc 'unshare -Ur true; echo "userns_probe_exit=$?"' || true
