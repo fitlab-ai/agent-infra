@@ -11,10 +11,9 @@ export function sandboxSecurityProfilePath(): string {
   return SECURITY_PROFILE;
 }
 
-// Every task sandbox loads the controlled seccomp policy and relaxes AppArmor
-// so clients such as Codex can run bubblewrap inside the container. Docker's
-// default seccomp filter blocks the required namespace syscalls, and its
-// default AppArmor profile blocks the required mount operations.
+// Every task sandbox loads the controlled seccomp policy and sets
+// apparmor=unconfined. The policy allows nested namespace creation and mount
+// operations while keeping the remaining syscalls gated.
 export function sandboxSecurityArgs(engine: string): string[] {
   if (!fs.existsSync(SECURITY_PROFILE)) {
     throw new Error(`Sandbox security profile is missing: ${SECURITY_PROFILE}`);

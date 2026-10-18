@@ -191,13 +191,11 @@ When Claude Code is enabled, `ai sandbox create` also merges model and API provi
 
 ## Nested bubblewrap sandbox and security options
 
-Every task sandbox loads a controlled seccomp policy through `--security-opt seccomp=<profile>` and sets `--security-opt apparmor=unconfined`. Clients that run bubblewrap inside the sandbox, such as Codex, need to create user, mount, PID, and network namespaces. Docker's default seccomp filter blocks those calls when the container lacks `CAP_SYS_ADMIN`, and its default AppArmor policy denies the required mount operations.
+Every task sandbox loads a controlled seccomp policy through `--security-opt seccomp=<profile>` and sets `--security-opt apparmor=unconfined`.
 
-The policy starts from Docker's default seccomp profile and only relaxes the `clone` namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls blocked. Container capabilities, mounts, and namespace configuration are unchanged, and `--privileged` is not used.
+The policy allows `clone` with namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls behind `CAP_SYS_ADMIN`. The default action remains `SCMP_ACT_ERRNO`; container capabilities, mounts, and namespace isolation are unchanged, and `--privileged` is not used.
 
-The security options apply to every task sandbox and do not depend on a specific client.
-
-The profile source and update conditions are documented in `lib/sandbox/security/README.md`.
+The profile file is `lib/sandbox/security/nested-bubblewrap.json`.
 
 ## Host-sandbox file exchange
 

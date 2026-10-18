@@ -1604,9 +1604,9 @@ export async function create(
                 : []),
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
-              // Every task sandbox gets the controlled seccomp policy and the
-              // AppArmor relaxation needed by nested bubblewrap sandboxes. The
-              // container still keeps its capabilities and namespace isolation.
+              // Every task sandbox loads the controlled seccomp policy and sets
+              // apparmor=unconfined. Capabilities and namespace isolation remain
+              // unchanged.
               ...sandboxSecurityArgs(engine),
               ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
