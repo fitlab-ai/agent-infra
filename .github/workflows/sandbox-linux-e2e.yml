@@ -51,6 +51,10 @@ jobs:
       - name: Link local CLI
         run: npm link
 
+      - name: Allow unprivileged user namespaces
+        if: matrix.mode == 'rootful'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Setup rootless Docker
         if: matrix.mode == 'rootless'
         run: |
@@ -154,7 +158,10 @@ jobs:
           # Docker stores the resolved profile JSON in SecurityOpt; the file path
           # is not preserved. pivot_root is only present in the Codex profile.
           echo "$security_opts" | grep -q '"pivot_root"'
-          docker exec "$container" sh -lc 'codex sandbox true'
+          docker exec "$container" sh -lc 'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true'
+          docker exec "$container" sh -lc 'codex --version'
+          docker exec "$container" sh -lc 'unshare -Ur true; echo "userns_probe_exit=$?"' || true
+          docker exec "$container" sh -lc 'codex sandbox true; rc=$?; echo "codex_sandbox_exit=$rc"; exit $rc'
           docker exec "$container" sh -lc 'codex sandbox sh -c "echo SANDBOX_OK"'
           zombie_count() {
             docker exec "$container" sh -lc 'count=0; for stat in /proc/[0-9]*/stat; do if [ -r "$stat" ]; then state="$(awk '\''{print $3}'\'' "$stat" 2>/dev/null || true)"; [ "$state" = Z ] && count=$((count + 1)); fi; done; printf "%s\n" "$count"'
@@ -259,6 +266,9 @@ jobs:
       - name: Link local CLI
         run: npm link
 
+      - name: Allow unprivileged user namespaces
+        run: docker run --rm --privileged --pid=host debian:12-slim sh -c 'if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then echo 0 > /proc/sys/kernel/apparmor_restrict_unprivileged_userns; fi'
+
       - name: Prepare host state
         # Keep in sync with sandbox-linux job lifecycle.
         run: |
@@ -321,7 +331,10 @@ jobs:
           # Docker stores the resolved profile JSON in SecurityOpt; the file path
           # is not preserved. pivot_root is only present in the Codex profile.
           echo "$security_opts" | grep -q '"pivot_root"'
-          docker exec "$container" sh -lc 'codex sandbox true'
+          docker exec "$container" sh -lc 'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true'
+          docker exec "$container" sh -lc 'codex --version'
+          docker exec "$container" sh -lc 'unshare -Ur true; echo "userns_probe_exit=$?"' || true
+          docker exec "$container" sh -lc 'codex sandbox true; rc=$?; echo "codex_sandbox_exit=$rc"; exit $rc'
           docker exec "$container" sh -lc 'codex sandbox sh -c "echo SANDBOX_OK"'
           zombie_count() {
             docker exec "$container" sh -lc 'count=0; for stat in /proc/[0-9]*/stat; do if [ -r "$stat" ]; then state="$(awk '\''{print $3}'\'' "$stat" 2>/dev/null || true)"; [ "$state" = Z ] && count=$((count + 1)); fi; done; printf "%s\n" "$count"'
