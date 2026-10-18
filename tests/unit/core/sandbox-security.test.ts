@@ -3,10 +3,9 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {
-  sandboxAppArmorArgs,
-  sandboxSeccompArgs,
-  sandboxSeccompProfilePath
-} from '../../../lib/sandbox/seccomp.ts';
+  sandboxSecurityArgs,
+  sandboxSecurityProfilePath
+} from '../../../lib/sandbox/security.ts';
 
 type SeccompRule = {
   names: string[];
@@ -22,21 +21,19 @@ type SeccompProfile = {
   syscalls: SeccompRule[];
 };
 
-function codexProfile(): SeccompProfile {
-  const profilePath = sandboxSeccompProfilePath('codex');
-  assert.ok(profilePath);
-  return JSON.parse(fs.readFileSync(profilePath, 'utf8')) as SeccompProfile;
+function securityProfile(): SeccompProfile {
+  return JSON.parse(fs.readFileSync(sandboxSecurityProfilePath(), 'utf8')) as SeccompProfile;
 }
 
-test('Codex seccomp profile keeps the Docker deny-by-default policy', () => {
-  const profile = codexProfile();
+test('sandbox security profile keeps the Docker deny-by-default policy', () => {
+  const profile = securityProfile();
 
   assert.equal(profile.defaultAction, 'SCMP_ACT_ERRNO');
   assert.ok(profile.syscalls.length > 0);
 });
 
-test('Codex seccomp profile relaxes only namespace and mount syscalls', () => {
-  const profile = codexProfile();
+test('sandbox security profile relaxes only namespace and mount syscalls', () => {
+  const profile = securityProfile();
   const unconditional = profile.syscalls.find((rule) => (
     rule.action === 'SCMP_ACT_ALLOW'
     && rule.includes === undefined
@@ -103,19 +100,14 @@ test('Codex seccomp profile relaxes only namespace and mount syscalls', () => {
   assert.equal(clone3Fallback.errnoRet, 38);
 });
 
-test('sandboxSeccompArgs selects a profile only for Codex', () => {
-  assert.deepEqual(sandboxSeccompArgs('docker-desktop', ['claude-code']), []);
+test('sandboxSecurityArgs loads the profile and relaxes AppArmor', () => {
+  const args = sandboxSecurityArgs('docker-desktop');
 
-  const args = sandboxSeccompArgs('docker-desktop', ['codex']);
-  assert.equal(args.length, 2);
-  assert.equal(args[0], '--security-opt');
-  assert.match(args[1] ?? '', /^seccomp=.*codex-bwrap\.json$/);
-
-  assert.deepEqual(sandboxSeccompArgs('docker-desktop', ['codex', 'codex']), args);
-});
-
-test('sandboxAppArmorArgs relaxes AppArmor only for bubblewrap tools', () => {
-  assert.deepEqual(sandboxAppArmorArgs(['codex']), ['--security-opt', 'apparmor=unconfined']);
-  assert.deepEqual(sandboxAppArmorArgs(['claude-code']), []);
-  assert.deepEqual(sandboxAppArmorArgs([]), []);
+  assert.deepEqual(args, [
+    '--security-opt',
+    `seccomp=${sandboxSecurityProfilePath()}`,
+    '--security-opt',
+    'apparmor=unconfined'
+  ]);
+  assert.match(args[1] ?? '', /^seccomp=.*nested-bubblewrap\.json$/);
 });

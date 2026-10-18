@@ -1,8 +1,8 @@
-# Sandbox seccomp profiles
+# Sandbox security profile
 
-## `codex-bwrap.json`
+## `nested-bubblewrap.json`
 
-这个 profile 供启用 Codex 的任务沙箱使用。Codex 在 Linux 上通过 bubblewrap 创建 user、mount、PID、network 等 namespace；Docker 默认 seccomp 在没有 `CAP_SYS_ADMIN` 时限制 `clone` 的 namespace flags，并拒绝 `unshare`。该 profile 在保留 Docker 默认 allowlist 的前提下放开这些调用。
+这个 profile 供所有任务沙箱使用。沙箱内运行 bubblewrap 的客户端（例如 Codex）需要创建 user、mount、PID、network 等 namespace；Docker 默认 seccomp 在没有 `CAP_SYS_ADMIN` 时限制 `clone` 的 namespace flags，并拒绝 `unshare`。该 profile 在保留 Docker 默认 allowlist 的前提下放开这些调用。
 
 ### 来源
 
@@ -13,7 +13,7 @@
 - 源文件 SHA-256：`785b2429264afba4d594320337cb17f144f3c7d51585f9805eef72e28f4f9334`
 - 许可证：Apache-2.0
 
-生成文件 `codex-bwrap.json` 的 SHA-256：`7a3aff20cc207cb7031e784413f17b0144fed203131e85b3de4709b2b9bfe98e`。
+生成文件 `nested-bubblewrap.json` 的 SHA-256：`7a3aff20cc207cb7031e784413f17b0144fed203131e85b3de4709b2b9bfe98e`。
 
 ### 相对默认 profile 的 delta
 
@@ -60,15 +60,15 @@
 出现以下任一情况时重新生成并复核本文件：
 
 - Docker Engine 的默认 seccomp profile 升级到新的 `moby/profiles` 版本。
-- Codex 或 bubblewrap 改用新的 namespace 系统调用（例如 `clone3`）。
+- bubblewrap 客户端改用新的 namespace 系统调用（例如 `clone3`）。
 - Linux E2E 或真实 Dots 验证出现新的 `EPERM`。
 
-更新后必须重新运行 `tests/unit/core/sandbox-seccomp.test.ts`、`tests/integration/cli/sandbox-core.test.ts` 和 Linux sandbox E2E，并更新本文件的 SHA-256。
+更新后必须重新运行 `tests/unit/core/sandbox-security.test.ts`、`tests/integration/cli/sandbox-core.test.ts` 和 Linux sandbox E2E，并更新本文件的 SHA-256。
 
 ### 适用范围
 
-该 profile 只注入启用 Codex 的沙箱。未启用 Codex 的沙箱继续使用 Docker 默认 seccomp。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新 profile。
+该 profile 注入所有任务沙箱，不依赖具体客户端。已有沙箱需要执行 `ai sandbox start --recreate <target>` 或 `ai sandbox exec --recreate <target>` 后才会加载新 profile。
 
-在启用 AppArmor 的 Linux 主机上，同一注入点还会添加 `--security-opt apparmor=unconfined`。Docker 默认 AppArmor 策略会拒绝 bubblewrap 的 mount 操作；该设置只影响启用 Codex 的沙箱，容器仍保留 seccomp、capabilities 和 namespace 隔离。
+同一注入点还会添加 `--security-opt apparmor=unconfined`。在启用 AppArmor 的 Linux 主机上，Docker 默认 AppArmor 策略会拒绝 bubblewrap 的 mount 操作；容器仍保留 seccomp、capabilities 和 namespace 隔离。
 
 Ubuntu 24.04 等启用 `kernel.apparmor_restrict_unprivileged_userns=1` 的主机，可能还需要在宿主机放行 unprivileged user namespace；项目 Linux E2E 已把该 sysctl 设为 0。

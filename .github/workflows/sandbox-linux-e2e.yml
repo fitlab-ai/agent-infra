@@ -156,7 +156,7 @@ jobs:
           test "$(docker inspect --format '{{.HostConfig.Init}}' "$container")" = true
           security_opts="$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$container")"
           # Docker stores the resolved profile JSON in SecurityOpt; the file path
-          # is not preserved. pivot_root is only present in the Codex profile.
+          # is not preserved. pivot_root is only present in the nested-bubblewrap profile.
           echo "$security_opts" | grep -q 'pivot_root'
           echo "$security_opts" | grep -q 'apparmor=unconfined'
           docker exec "$container" sh -lc 'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true'
@@ -330,7 +330,7 @@ jobs:
           test "$(docker inspect --format '{{.HostConfig.Init}}' "$container")" = true
           security_opts="$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$container")"
           # Docker stores the resolved profile JSON in SecurityOpt; the file path
-          # is not preserved. pivot_root is only present in the Codex profile.
+          # is not preserved. pivot_root is only present in the nested-bubblewrap profile.
           echo "$security_opts" | grep -q 'pivot_root'
           echo "$security_opts" | grep -q 'apparmor=unconfined'
           docker exec "$container" sh -lc 'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true'

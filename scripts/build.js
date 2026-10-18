@@ -153,11 +153,11 @@ for (const file of fs.readdirSync(runtimesSrc)) {
   }
 }
 
-const seccompSrc = path.join(rootDir, "lib", "sandbox", "seccomp");
-const seccompDst = path.join(distLib, "sandbox", "seccomp");
-for (const file of fs.readdirSync(seccompSrc)) {
+const securitySrc = path.join(rootDir, "lib", "sandbox", "security");
+const securityDst = path.join(distLib, "sandbox", "security");
+for (const file of fs.readdirSync(securitySrc)) {
   if (file.endsWith(".json")) {
-    copyFile(path.join(seccompSrc, file), path.join(seccompDst, file));
+    copyFile(path.join(securitySrc, file), path.join(securityDst, file));
   }
 }
 

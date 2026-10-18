@@ -189,17 +189,15 @@ When you run the sandbox over SSH, use `ai cp <ssh-alias>` on the Mac in front o
 
 When Claude Code is enabled, `ai sandbox create` also merges model and API provider settings from the host `~/.claude/settings.json` into the sandbox Claude Code settings. Existing sandbox values take precedence, so local sandbox overrides are preserved. Credentials still use the dedicated credentials channel above; provider environment settings are copied only as Claude Code settings values.
 
-## Codex inner sandbox and seccomp
+## Nested bubblewrap sandbox and security options
 
-Sandboxes with Codex enabled load a controlled seccomp profile through `--security-opt seccomp=<profile>`. On Linux, Codex uses bubblewrap to create user, mount, PID, and network namespaces. Docker's default seccomp filter blocks those calls when the container lacks `CAP_SYS_ADMIN`, which produces `bwrap: No permissions to create a new namespace`.
+Every task sandbox loads a controlled seccomp policy through `--security-opt seccomp=<profile>` and sets `--security-opt apparmor=unconfined`. Clients that run bubblewrap inside the sandbox, such as Codex, need to create user, mount, PID, and network namespaces. Docker's default seccomp filter blocks those calls when the container lacks `CAP_SYS_ADMIN`, and its default AppArmor policy denies the required mount operations.
 
-The profile starts from Docker's default seccomp policy and only relaxes the `clone` namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls blocked. Container capabilities, mounts, and namespace configuration are unchanged, and `--privileged` is not used.
+The policy starts from Docker's default seccomp profile and only relaxes the `clone` namespace flags, `unshare`, the mount family, and `pivot_root`. It keeps `bpf`, `perf_event_open`, `syslog`, `quotactl`, and the other gated calls blocked. Container capabilities, mounts, and namespace configuration are unchanged, and `--privileged` is not used.
 
-On Linux hosts with AppArmor enabled, the same sandbox also sets `--security-opt apparmor=unconfined` because Docker's default AppArmor policy denies bubblewrap's mount operations. The container still keeps seccomp, capabilities, and namespace isolation.
+The security options apply to every task sandbox and do not depend on a specific client. Existing sandboxes must be recreated with `ai sandbox start --recreate <target>` or `ai sandbox exec --recreate <target>` before the new options take effect.
 
-The profile applies only to sandboxes with Codex enabled. Sandboxes without Codex keep Docker's default seccomp filter. Existing sandboxes must be recreated with `ai sandbox start --recreate <target>` or `ai sandbox exec --recreate <target>` before the profile takes effect.
-
-The profile source and update conditions are documented in `lib/sandbox/seccomp/README.md`.
+The profile source and update conditions are documented in `lib/sandbox/security/README.md`.
 
 ## Host-sandbox file exchange
 

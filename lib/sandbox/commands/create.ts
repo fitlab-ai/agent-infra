@@ -84,7 +84,7 @@ import { atomicWriteJson } from '../control/state.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
-import { sandboxAppArmorArgs, sandboxSeccompArgs } from '../seccomp.ts';
+import { sandboxSecurityArgs } from '../security.ts';
 import { materializeSandboxGitMetadata } from '../git-metadata.ts';
 import {
   assertSandboxTaskSource,
@@ -1604,11 +1604,10 @@ export async function create(
                 : []),
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
-              // Codex's bubblewrap sandbox needs namespace syscalls that Docker's
-              // default seccomp filter blocks. Only Codex-enabled sandboxes get
-              // the relaxed profile; every other sandbox keeps the default filter.
-              ...sandboxSeccompArgs(engine, effectiveResolvedTools.map(({ tool }) => tool.id)),
-              ...sandboxAppArmorArgs(effectiveResolvedTools.map(({ tool }) => tool.id)),
+              // Every task sandbox gets the controlled seccomp policy and the
+              // AppArmor relaxation needed by nested bubblewrap sandboxes. The
+              // container still keeps its capabilities and namespace isolation.
+              ...sandboxSecurityArgs(engine),
               ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
               ...dotfilesMount,

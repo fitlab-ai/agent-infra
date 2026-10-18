@@ -831,7 +831,7 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
     const seccompIndex = runCall.indexOf("--security-opt");
     assert.notEqual(seccompIndex, -1, "expected Codex-enabled sandbox to load a seccomp profile");
-    assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*codex-bwrap\.json$/);
+    assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*nested-bubblewrap\.json$/);
     assert.ok(runCall.includes("apparmor=unconfined"));
     assert.equal(
       runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
@@ -863,7 +863,7 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
   }
 });
 
-test("sandbox create omits the Codex seccomp profile when Codex is disabled", () => {
+test("sandbox create loads nested-bubblewrap security options for every sandbox", () => {
   const tmpDir = createTempDir("agent-infra-sandbox-create-no-codex-seccomp-");
 
   try {
@@ -911,11 +911,10 @@ test("sandbox create omits the Codex seccomp profile when Codex is disabled", ()
 
     const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
     assert.ok(runCall, "expected sandbox create to invoke docker run");
-    assert.equal(
-      runCall.includes("--security-opt"),
-      false,
-      "sandbox create must keep Docker's default seccomp when Codex is disabled"
-    );
+    const seccompIndex = runCall.indexOf("--security-opt");
+    assert.notEqual(seccompIndex, -1, "expected every sandbox to load the security profile");
+    assert.match(runCall[seccompIndex + 1] ?? "", /^seccomp=.*nested-bubblewrap\.json$/);
+    assert.ok(runCall.includes("apparmor=unconfined"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
