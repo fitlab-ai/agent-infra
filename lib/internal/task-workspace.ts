@@ -20,7 +20,7 @@ function taskWorkspace(args: string[] = []): void {
   let boundary: ExecutionBoundary = 'host';
   const options = args.slice(1);
   if (options.length !== 0) {
-    if (options.length !== 2 || options[0] !== '--boundary' || !options[1] || options[1]!.startsWith('--')) {
+    if (options.length !== 2 || options[0] !== '--boundary') {
       fail('TASK_WORKSPACE_PAYLOAD_INVALID', 'invalid or duplicate task-workspace option');
       return;
     }
