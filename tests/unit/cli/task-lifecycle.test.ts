@@ -152,7 +152,7 @@ test('complete fills the empty completed mount, preserves task data, and retains
 test('complete preserves an empty virtiofs source mount and resolves the task from completed state', () => {
   const f = fixture();
   let rmdirCalls = 0;
-  const mountPoint = fs.realpathSync(f.taskDir).replaceAll('\\', '\\\\').replaceAll(' ', '\\040');
+  const mountPoint = fs.realpathSync.native(f.taskDir).replaceAll('\\', '\\\\').replaceAll(' ', '\\040');
   const result = applyTaskLifecycle(
     { taskRef: TASK_ID, intent: 'complete', agent: 'codex' },
     {

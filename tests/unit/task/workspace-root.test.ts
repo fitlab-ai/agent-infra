@@ -98,7 +98,7 @@ test('verified sandbox markers select the container boundary for both permission
 
     const resolved = resolveTaskRef(taskId, { repoRoot: fixture.repoRoot });
     assert.equal(resolved.ok, true);
-    if (resolved.ok) assert.equal(resolved.taskMdPath, `/task-workspace/active/${taskId}/task.md`);
+    if (resolved.ok) assert.equal(resolved.taskMdPath, path.join('/task-workspace', 'active', taskId, 'task.md'));
     assert.deepEqual(resolveShortIdReadOnly('01', fixture.repoRoot, { shortIdLength: 2 }), { ok: true, taskId });
     assert.equal(taskViewForManifest({ repoRoot: fixture.repoRoot, mode, taskId: mode === 'task-bound' ? taskId : null, generation: 'generation-test' }).state,
       mode === 'task-bound' ? 'current' : 'not-applicable');
