@@ -5,7 +5,19 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { onPlatforms } from '../../helpers.ts';
-import { discoverTaskWorkspaceSources, migrateTaskWorkspace } from '../../../lib/task/workspace-migration.ts';
+import { discoverTaskWorkspaceSources, migrateTaskWorkspace, splitDestinationPath } from '../../../lib/task/workspace-migration.ts';
+
+test('destination path segmentation keeps Windows drive and UNC roots separate', () => {
+  const drive = splitDestinationPath('C:\\Users\\fixture\\.agent-infra\\task-workspaces\\demo', path.win32);
+  assert.equal(drive.root, 'C:\\');
+  assert.deepEqual(drive.segments, ['Users', 'fixture', '.agent-infra', 'task-workspaces', 'demo']);
+  assert.equal(path.win32.join(drive.root, ...drive.segments.slice(0, 2)), 'C:\\Users\\fixture');
+
+  const unc = splitDestinationPath('\\\\server\\share\\Users\\fixture\\.agent-infra\\task-workspaces\\demo', path.win32);
+  assert.equal(unc.root, '\\\\server\\share\\');
+  assert.deepEqual(unc.segments, ['Users', 'fixture', '.agent-infra', 'task-workspaces', 'demo']);
+  assert.equal(path.win32.join(unc.root, ...unc.segments.slice(0, 2)), '\\\\server\\share\\Users\\fixture');
+});
 
 test('migration unions distinct task data and preserves raw bytes and symlink text', onPlatforms('linux', 'darwin'), (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'task-workspace-migration-'));
@@ -142,6 +154,59 @@ test('migration resumes after interruption at every durable copy and cleanup bou
     assert.deepEqual(fs.readFileSync(path.join(target, 'active', 'TASK-A', 'task.md')), bytes);
     assert.equal(fs.existsSync(path.join(source, 'active', 'TASK-A', 'task.md')), false);
   }
+});
+
+test('migration stops source cleanup when the committed destination changes between deletions', onPlatforms('linux', 'darwin'), (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'task-workspace-target-change-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const source = path.join(temp, 'repo', '.agents', 'workspace');
+  const target = path.join(temp, 'home', '.agent-infra', 'task-workspaces', 'demo');
+  fs.mkdirSync(path.join(source, 'active'), { recursive: true });
+  fs.writeFileSync(path.join(source, 'active', 'a'), 'original-a');
+  fs.writeFileSync(path.join(source, 'active', 'b'), 'original-b');
+
+  assert.throws(() => migrateTaskWorkspace({ sources: [source], destination: target, migrationId: 'target-change' }, {
+    onStep: (step, relativePath) => {
+      if (step === 'source-item-removed' && relativePath === 'active/b') {
+        fs.writeFileSync(path.join(target, 'active', 'a'), 'corrupted-a');
+      }
+    }
+  }), /destination differs from frozen manifest/u);
+  assert.equal(fs.existsSync(path.join(source, 'active', 'a')), true);
+  assert.equal(fs.readFileSync(path.join(source, 'active', 'a'), 'utf8'), 'original-a');
+  assert.equal(fs.readFileSync(path.join(target, 'active', 'a'), 'utf8'), 'corrupted-a');
+});
+
+test('migration rejects symlinked destination ancestors and replaced roots before source cleanup', onPlatforms('linux', 'darwin'), (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'task-workspace-destination-link-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const source = path.join(temp, 'repo', '.agents', 'workspace');
+  fs.mkdirSync(path.join(source, 'active'), { recursive: true });
+  const originalBytes = Buffer.from([0, 255, 10, 128]);
+  fs.writeFileSync(path.join(source, 'active', 'bytes'), originalBytes);
+
+  const home = path.join(temp, 'home');
+  const outside = path.join(temp, 'outside');
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(path.join(outside, 'task-workspaces'), { recursive: true });
+  fs.symlinkSync(outside, path.join(home, '.agent-infra'));
+  const aliasedDestination = path.join(home, '.agent-infra', 'task-workspaces', 'demo');
+  assert.throws(() => migrateTaskWorkspace({
+    sources: [source], destination: aliasedDestination, migrationId: 'ancestor-link'
+  }), /symlink|canonical/u);
+  assert.deepEqual(fs.readFileSync(path.join(source, 'active', 'bytes')), originalBytes);
+  assert.equal(fs.existsSync(path.join(outside, 'task-workspaces', 'demo')), false);
+
+  const target = path.join(temp, 'home-two', '.agent-infra', 'task-workspaces', 'resume');
+  assert.throws(() => migrateTaskWorkspace({ sources: [source], destination: target, migrationId: 'root-link' }, {
+    onStep: (step) => { if (step === 'destination-committed') throw new Error('simulated interruption'); }
+  }), /simulated interruption/u);
+  const moved = `${target}.moved`;
+  fs.renameSync(target, moved);
+  fs.symlinkSync(moved, target);
+  assert.throws(() => migrateTaskWorkspace({ sources: [source], destination: target, migrationId: 'root-link' }), /symlink|canonical/u);
+  assert.deepEqual(fs.readFileSync(path.join(source, 'active', 'bytes')), originalBytes);
+  assert.deepEqual(fs.readFileSync(path.join(moved, 'active', 'bytes')), originalBytes);
 });
 
 test('migration rejects a changed source set or source tree before destination commit', (t) => {

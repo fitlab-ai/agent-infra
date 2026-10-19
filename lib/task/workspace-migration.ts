@@ -25,6 +25,13 @@ type MigrationOptions = {
 
 const TASK_STATES = ['active', 'blocked', 'completed', 'archive'] as const;
 
+export function splitDestinationPath(destination: string, pathApi: typeof path = path): { resolved: string; root: string; segments: string[] } {
+  const resolved = pathApi.resolve(destination);
+  const root = pathApi.parse(resolved).root;
+  const segments = pathApi.relative(root, resolved).split(pathApi.sep).filter(Boolean);
+  return { resolved, root, segments };
+}
+
 function fsyncDirectory(directoryPath: string): void {
   if (process.platform === 'win32') return;
   const fd = fs.openSync(directoryPath, 'r');
@@ -113,7 +120,35 @@ function ensureRealDirectory(directory: string): void {
   }
 }
 
+function assertSafeDestination(destination: string): void {
+  const { resolved, root, segments: parts } = splitDestinationPath(destination);
+  const managedIndex = parts.lastIndexOf('.agent-infra');
+  let anchor = managedIndex >= 0
+    ? path.join(root, ...parts.slice(0, managedIndex))
+    : path.dirname(resolved);
+  if (!anchor) anchor = root;
+  while (!fs.existsSync(anchor)) {
+    const parent = path.dirname(anchor);
+    if (parent === anchor) throw new Error(`migration destination parent is unavailable: ${anchor}`);
+    anchor = parent;
+  }
+  let current = fs.realpathSync.native(anchor);
+  const start = managedIndex >= 0 ? managedIndex : parts.length - 1;
+  for (const part of parts.slice(start)) {
+    current = path.join(current, part);
+    const stat = fs.lstatSync(current, { throwIfNoEntry: false });
+    if (!stat) break;
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(`migration destination path contains a symlink or non-directory: ${current}`);
+    }
+    if (fs.realpathSync.native(current) !== current) {
+      throw new Error(`migration destination path is not canonical: ${current}`);
+    }
+  }
+}
+
 function ensureDestinationParent(destination: string): void {
+  assertSafeDestination(destination);
   const missing: string[] = [];
   let current = path.dirname(destination);
   while (!fs.existsSync(current)) {
@@ -249,6 +284,7 @@ function validateSourceSet(actual: Source[], frozen: Source[], committed: boolea
   if (actual.length !== frozen.length || actual.some((source, index) => source.root !== frozen[index]?.root)) {
     throw new Error('migration source set changed');
   }
+  assertSafeDestination(destination);
   const target = new Map(scanSource(destination).map((entry) => [entry.path, entry]));
   for (let index = 0; index < frozen.length; index += 1) {
     const current = actual[index]!.entries;
@@ -275,15 +311,26 @@ function removeEntry(sourceRoot: string, entry: Entry): void {
   fsyncDirectory(path.dirname(sourcePath));
 }
 
+function verifiedDestinationEntries(destination: string, expected: Entry[]): Map<string, Entry> {
+  assertSafeDestination(destination);
+  const entries = scanSource(destination);
+  if (digest(entries) !== digest(expected)) throw new Error('migration destination differs from frozen manifest');
+  return new Map(entries.map((entry) => [entry.path, entry]));
+}
+
+function verifyDestinationEntry(destination: string, expected: Entry[], entry: Entry): Map<string, Entry> {
+  const target = verifiedDestinationEntries(destination, expected);
+  if (!equalEntry(target.get(entry.path)!, entry)) throw new Error(`migration target no longer proves source item ${entry.path}`);
+  return target;
+}
+
 function clearSources(
   journalPath: string,
   journal: Journal,
   destination: string,
   onStep?: (step: 'source-item-removing' | 'source-item-deleted-before-journal' | 'source-item-removed', path: string) => void
 ): void {
-  const targetEntries = scanSource(destination);
-  const target = new Map(targetEntries.map((entry) => [entry.path, entry]));
-  if (digest(targetEntries) !== digest(journal.entries)) throw new Error('migration destination differs from frozen manifest');
+  let target = verifiedDestinationEntries(destination, journal.entries);
   for (const source of journal.sources) {
     for (const entry of [...source.entries].reverse()) {
       const current = scanSource(source.root);
@@ -302,6 +349,7 @@ function clearSources(
       journal.deleting = entry.path;
       writeJournal(journalPath, journal);
       onStep?.('source-item-removing', entry.path);
+      target = verifyDestinationEntry(destination, journal.entries, entry);
       removeEntry(source.root, entry);
       onStep?.('source-item-deleted-before-journal', entry.path);
       journal.cleaned = [...new Set([...journal.cleaned, entry.path])].sort();
@@ -309,6 +357,10 @@ function clearSources(
       writeJournal(journalPath, journal);
       onStep?.('source-item-removed', entry.path);
     }
+    if (scanSource(source.root).length) throw new Error(`migration source was not fully cleared: ${source.root}`);
+  }
+  verifiedDestinationEntries(destination, journal.entries);
+  for (const source of journal.sources) {
     if (scanSource(source.root).length) throw new Error(`migration source was not fully cleared: ${source.root}`);
   }
 }
@@ -360,6 +412,7 @@ function stageEntries(
 }
 
 function commitStaging(staging: string, destination: string): void {
+  assertSafeDestination(destination);
   if (fs.existsSync(destination)) fs.rmdirSync(destination);
   fs.renameSync(staging, destination);
   fsyncDirectory(path.dirname(destination));
@@ -376,6 +429,7 @@ function validateJournalIdentity(journal: Journal, sources: string[], migrationI
 }
 
 function destinationMatches(destination: string, entries: Entry[]): boolean {
+  assertSafeDestination(destination);
   return fs.existsSync(destination) && digest(scanSource(destination)) === digest(entries);
 }
 
@@ -401,6 +455,7 @@ function resumeMigration(
   sources: string[],
   options: MigrationOptions
 ) {
+  assertSafeDestination(destination);
   validateJournalIdentity(journal, sources, migrationId);
   const actual = journal.sources.map((source) => sourceManifest(source.root));
   const hasCommittedDestination = destinationMatches(destination, journal.entries);
@@ -421,6 +476,7 @@ function createMigration(
   journalPath: string,
   options: MigrationOptions
 ) {
+  ensureDestinationParent(destination);
   const manifests = sources.map(sourceManifest);
   const entries = mergeManifests(manifests);
   const manifestDigest = digest({ migrationId, sources: manifests, entries });
