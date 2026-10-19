@@ -617,6 +617,11 @@ test('manifest writer persists control directory names and reader resolves them 
   };
   try {
     const firstSetup = makeSetup(firstRoot);
+    for (const root of [firstRoot, secondRoot]) {
+      const activeWorkspace = path.join(root, '.agents', 'workspace', 'active');
+      fs.mkdirSync(activeWorkspace, { recursive: true });
+      fs.writeFileSync(path.join(activeWorkspace, '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': manifest.taskId } })}\n`);
+    }
     finalizeSandboxControlManifest(firstSetup, {
       engine: manifest.engine,
       id: manifest.containerIdentity.id,
