@@ -63,7 +63,7 @@ example-single-layer: "feat: add A: B" => "add A: B"
 
 ### 2. 检查已有任务
 
-2.1 搜索 `.agents/workspace/active/` 中是否已有链接到此 Issue 的任务。
+2.1 搜索 `<task-workspace>/active/` 中是否已有链接到此 Issue 的任务。
 - 如果找到，**默认复用现有任务**（场景 A），不询问用户；在最终告知中明确「已复用现有任务 `{task-id}`，未重新导入」。若用户希望重新导入，需要先手动归档/删除已有任务再次执行本技能
 - 如果未找到，继续执行 2.2
 
@@ -93,7 +93,7 @@ date +%Y%m%d-%H%M%S
 
 3.2 写入任务目录和 `task.md`。
 
-- 创建目录：`.agents/workspace/active/{task-id}/`
+- 创建目录：`<task-workspace>/active/{task-id}/`
 - 使用 `.agents/templates/task.md` 模板创建 `task.md`
 - 场景 C 优先沿用远端 frontmatter 中的 `type`、`workflow`、`branch`、`milestone`；缺失或损坏字段按 Issue 标签和当前规则重新推断
 - `current_step` 始终写入 `requirement-analysis`，不要恢复为远端原 `current_step`
@@ -132,7 +132,7 @@ assigned_to: {当前 AI 代理}
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
+更新 `<task-workspace>/active/{task-id}/task.md`：
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
@@ -191,7 +191,7 @@ Issue #{number} 已导入。
 - 工作流：{workflow}
 
 产出文件：
-- 任务文件：.agents/workspace/active/{task-id}/task.md
+- 任务文件：<task-workspace>/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
 {next-step-commands}
@@ -201,7 +201,7 @@ Issue #{number} 已导入。
 
 ## 完成检查清单
 
-- [ ] 创建了任务文件 `.agents/workspace/active/{task-id}/task.md`
+- [ ] 创建了任务文件 `<task-workspace>/active/{task-id}/task.md`
 - [ ] 已由 provider 将 Issue identity 写入 task.md 的 `platform_issue_identity`
 - [ ] 更新了 `current_step` 为 requirement-analysis
 - [ ] 更新了 `updated_at` 为当前时间

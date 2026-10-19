@@ -52,6 +52,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'pr-review-grade': ['decide', 'resolve-host', 'verify-artifact'],
   'platform-checks': ['inspect', 'watch', 'resolve-run', 'logs'],
   'task-context': ['resolve'],
+  'task-workspace': ['resolve', 'migrate'],
   'task-ledger': ['decision-next-id', 'stage-status', 'finding-upsert', 'finding-respond', 'finding-review', 'decision-upsert', 'rework-intent-upsert', 'rework-intent-rebuild'],
   'task-warning': ['list', 'add', 'set-status'],
   'task-activity': ['pr-review-inspect', 'pr-review-start', 'pr-review-complete', 'pr-review-terminate'],
@@ -104,6 +105,7 @@ export function internalRouteSelector(command: string, args: readonly string[]):
   if (['task-ledger', 'task-warning', 'task-activity'].includes(command)) return args[1] ?? '';
   if (command === 'task-delivery') return args[1] ?? '';
   if (command === 'task-context') return first(args);
+  if (command === 'task-workspace') return first(args);
   return first(args);
 }
 

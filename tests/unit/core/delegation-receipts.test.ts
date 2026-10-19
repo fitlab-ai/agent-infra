@@ -108,7 +108,7 @@ test('persisted delegation receipts bind lifecycle fields to their status', () =
   const stageCompleted = completedResult.receipt;
   const sealedResult = sealDelegation(stageCompleted, {
     childId: 'child-status-current', exitCode: 0, afterFingerprint: 'after',
-    changedPaths: ['.agents/workspace/active/TASK-20260101-000001/review-code.md']
+    changedPaths: ['task-workspace/active/TASK-20260101-000001/review-code.md']
   }, { now: () => '2026-01-01T00:00:02.000Z' });
   assert.equal(sealedResult.ok, true);
   if (!sealedResult.ok) return;
@@ -250,7 +250,7 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
   assert.equal(completed.ok, true);
   if (!completed.ok) return;
   const sealed = sealDelegation(completed.receipt, {
-    childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: ['.agents/workspace/active/TASK-20260101-000001/review-code.md']
+    childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: ['task-workspace/active/TASK-20260101-000001/review-code.md']
   }, { now: () => '2026-01-01T00:00:02.000Z' });
   assert.equal(sealed.ok, true);
   if (!sealed.ok) return;
@@ -465,7 +465,7 @@ test('claude-code seal folds blank actual model/effort into null instead of reco
   if (!completed.ok) return;
   const sealed = sealDelegation(completed.receipt, {
     childId: 'child-cc-seal-blank', exitCode: 0, afterFingerprint: 'after',
-    changedPaths: ['.agents/workspace/active/TASK-20260101-000001/review-code.md'],
+    changedPaths: ['task-workspace/active/TASK-20260101-000001/review-code.md'],
     actualModel: '   ', actualReasoningEffort: '  '
   });
   assert.equal(sealed.ok, true);
@@ -589,8 +589,8 @@ test('reviewer write gate rejects shared, non-allowlisted task, and cross-task p
 
   for (const changedPath of [
     'lib/task/orchestration.ts',
-    '.agents/workspace/active/TASK-20260101-000001/analysis.md',
-    '.agents/workspace/active/TASK-20260101-999999/review-code.md'
+    'task-workspace/active/TASK-20260101-000001/analysis.md',
+    'task-workspace/active/TASK-20260101-999999/review-code.md'
   ]) {
     const result = sealDelegation(completed.receipt, {
       childId: 'child-3', exitCode: 0, afterFingerprint: 'after', changedPaths: [changedPath]

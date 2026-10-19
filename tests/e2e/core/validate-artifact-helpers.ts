@@ -19,6 +19,9 @@ import {
   gitSafeEnv,
   initIsolatedGitRepo,
   pathWithPrependedBin,
+  taskWorkspaceProject,
+  taskWorkspaceRoot,
+  taskWorkspaceRepoRoot,
   read,
   writeNodeCommandShim
 } from "../../helpers.ts";
@@ -320,7 +323,16 @@ async function runValidator(args: string[], options: ValidatorOptions = {}): Pro
     const skillName = mode === "gate" ? args[1]! : args[args.indexOf("--skill") + 1]!;
     const taskDir = mode === "gate" ? args[2]! : args[2]!;
     const artifactFile = mode === "gate" ? args[3] && !args[3]!.startsWith("--") ? args[3] : undefined : args[3] && !args[3]!.startsWith("--") ? args[3] : undefined;
-    const payload = await verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: mode === "checks" ? [args[1]!] : [], repositoryRoot: options.repositoryRoot ?? filePath(".") });
+    const repositoryRoot = options.repositoryRoot ?? taskWorkspaceRepoRoot(taskDir);
+    if (!repositoryRoot) throw new Error(`validator fixture must resolve an owning repository for ${taskDir}`);
+    const verifyConfig = path.join(repositoryRoot, ".agents", "skills", skillName, "config", "verify.json");
+    if (!fs.existsSync(verifyConfig)) {
+      const sourceConfig = filePath(`.agents/skills/${skillName}/config/verify.json`);
+      if (!fs.existsSync(sourceConfig)) throw new Error(`validator fixture has no verification config for ${skillName}`);
+      fs.mkdirSync(path.dirname(verifyConfig), { recursive: true });
+      fs.copyFileSync(sourceConfig, verifyConfig);
+    }
+    const payload = await verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: mode === "checks" ? [args[1]!] : [], repositoryRoot });
     const statusName = mode === "gate" ? payload.gate : payload.status;
     const status = ({ pass: 0, fail: 1, blocked: 2 } as Record<string, number>)[statusName] ?? 1;
     return { pid: 0, output: [null, `${JSON.stringify(payload)}\n`, ""], stdout: `${JSON.stringify(payload)}\n`, stderr: "", status, signal: null, error: undefined } as SpawnSyncReturns<string>;
@@ -669,7 +681,7 @@ async function withProjectTempRoot<T>(prefix: string, fn: (tempRoot: string) => 
 }
 
 function setupPlatformSyncEnv(tempRoot: string): PlatformSyncEnv {
-  const taskDir = path.join(tempRoot, ".agents", "workspace", "active", "TASK-20260328-000001");
+  const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = writeFakeGh(path.join(binDir, "gh"));
   const issuePath = path.join(tempRoot, "issue.json");
@@ -680,6 +692,15 @@ function setupPlatformSyncEnv(tempRoot: string): PlatformSyncEnv {
   const labelsPath = path.join(tempRoot, "labels.json");
 
   initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+  for (const skill of ["code-task", "commit", "complete-task", "create-pr", "create-task", "complete-manual-validation", "review-code"]) {
+    const configDir = path.join(tempRoot, ".agents", "skills", skill, "config");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.copyFileSync(filePath(`.agents/skills/${skill}/config/verify.json`), path.join(configDir, "verify.json"));
+  }
+  write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+    project: taskWorkspaceProject(tempRoot),
+    platform: { type: "github" }
+  }) + "\n");
   const configName = spawnSync("git", ["config", "user.name", "Test"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
   const configEmail = spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
   assert.equal(configName.status, 0, configName.stderr);

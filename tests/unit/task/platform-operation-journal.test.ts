@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,12 +10,12 @@ import {
   readPlatformOperationJournal,
   recordPlatformOperation
 } from '../../../lib/task/platform-operation-journal.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 function fixture() {
-  const repoRoot = createTempDir('platform-operation-journal-');
+  const { repoRoot } = createTaskWorkspaceFixture('platform-operation-journal-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   return { repoRoot, taskId, taskDir };

@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -255,7 +256,7 @@ function boundPullRequestFixture(options: {
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
   }));
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   const fact = buildBoundFact({
     identity: {

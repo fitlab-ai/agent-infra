@@ -4,6 +4,7 @@ import { loadServerConfig } from '../server/config.ts';
 import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from '../sandbox/workspace-identity.ts';
 import { createRunId, runInSandbox, type SandboxRunMetadata } from '../sandbox/capture.ts';
 import { loadShortIdByTaskId, normalizeShortIdInput } from '../task/short-id.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { buildTuiCommand, renderPrompt, selectTui } from './tui.ts';
 import { getSkillRunSpec } from './skills.ts';
 import { runHostCommand, type RunProcessResult } from './host.ts';
@@ -157,7 +158,7 @@ function readShortIdLength(repoRoot: string): number {
 }
 
 function readActiveShortIdRegistry(repoRoot: string): Record<string, string> {
-  const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registryPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', '.short-ids.json');
   try {
     const data = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
     return data && typeof data === 'object' && data.ids && typeof data.ids === 'object' ? data.ids : {};
@@ -186,7 +187,7 @@ function resolveActiveTaskIdentity(taskRef: string, repoRoot: string): ActiveTas
   }
 
   if (!taskId) return null;
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId);
   if (!fs.existsSync(path.join(taskDir, 'task.md'))) return null;
   return { taskId, taskDir, taskRef: resolvedTaskRef };
 }

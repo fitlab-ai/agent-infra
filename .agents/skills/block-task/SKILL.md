@@ -37,7 +37,7 @@ description: >
 ## 执行步骤
 ### 1. 验证任务存在
 
-检查任务是否存在于 `.agents/workspace/active/{task-id}/`。
+检查任务是否存在于 `<task-workspace>/active/{task-id}/`。
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
@@ -62,10 +62,10 @@ agent-infra-internal task-lifecycle {task-id} block --agent {standard-agent-toke
 
 ### 4. 验证本地终态
 
-确认结构化结果的 `targetState=blocked`、目标路径为 `.agents/workspace/blocked/{task-id}`、短号效果已提交，并检查：
+确认结构化结果的 `targetState=blocked`、目标路径为 `<task-workspace>/blocked/{task-id}`、短号效果已提交，并检查：
 
 ```bash
-ls .agents/workspace/blocked/{task-id}/task.md
+ls <task-workspace>/blocked/{task-id}/task.md
 ```
 
 ### 5. 保留恢复身份
@@ -110,7 +110,7 @@ agent-infra-internal task-verify {task-id} block-task.completed --format text
 
 阻塞原因：{摘要}
 解除阻塞所需：{需要什么}
-归档路径：.agents/workspace/blocked/{task-id}/
+归档路径：<task-workspace>/blocked/{task-id}/
 
 可选：清理本任务的沙箱
 （任务已阻塞并移到 blocked/，task-bound 沙箱受保护，不会被 `ai sandbox rm --unbound` 自动删除；如确需清理，请先人工核对容器、控制清单和工作树身份。）
@@ -128,7 +128,7 @@ agent-infra-internal task-verify {task-id} block-task.completed --format text
 
 - [ ] 分析并记录了阻塞原因
 - [ ] 更新了 task.md 的阻塞状态和阻塞信息
-- [ ] 将任务目录移动到 `.agents/workspace/blocked/`
+- [ ] 将任务目录移动到 `<task-workspace>/blocked/`
 - [ ] 验证了移动成功
 - [ ] 告知了用户如何解除阻塞
 

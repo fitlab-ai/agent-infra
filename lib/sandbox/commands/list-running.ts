@@ -5,6 +5,7 @@ import { runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { isRemovedHashShortIdInput } from '../../task/short-id.ts';
 import { parseSandboxWorkspaceIdentity } from '../workspace-identity.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../../task/workspace-root.ts';
 
 export type SandboxRow = {
   name: string;
@@ -143,7 +144,7 @@ function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
     );
   }
   for (const sub of ['active', 'completed', 'blocked', 'archive']) {
-    const taskMdPath = path.join(repoRoot, '.agents', 'workspace', sub, taskId, 'task.md');
+    const taskMdPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), sub, taskId, 'task.md');
     if (!fs.existsSync(taskMdPath)) continue;
     const content = fs.readFileSync(taskMdPath, 'utf8');
     const fm = content.match(/^branch:\s*(.+)$/m);

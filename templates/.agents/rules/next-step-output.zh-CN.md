@@ -17,7 +17,7 @@
 
 - **下一步 TUI 命令**（`/analyze-task`、`/{{project}}:review-code`、`$create-pr` 等，含 Markdown 表格单元格内的命令）→ 一律用 `{task-ref}`（短号）。
 - **「任务信息」/「任务状态」结构化字段行** → 完整 ID 与短号同显：`- 任务 ID：{task-id}（短号 {task-ref}）`。
-- **报告标题**（`任务 {task-id} ... 完成`）与**产出文件路径**（`.agents/workspace/active/{task-id}/...`）→ 保持完整 `{task-id}`（物理路径与归档键，不可改）。
+- **报告标题**（`任务 {task-id} ... 完成`）与**产出文件路径**（`<task-workspace>/active/{task-id}/...`）→ 保持完整 `{task-id}`（物理路径与归档键，不可改）。
 
 ## 统一客户端命令渲染
 
@@ -39,7 +39,7 @@ agent-infra-internal agent-client next-steps \
 
 ## 取短号（`{task-ref}`）
 
-短号唯一真源是注册表 `.agents/workspace/active/.short-ids.json`（经 `task-short-id.js`）。**禁止**读取 task.md frontmatter 的 `short_id` 字段（该字段不可信）。
+短号唯一真源是注册表 `<task-workspace>/active/.short-ids.json`（经 `task-short-id.js`）。**禁止**读取 task.md frontmatter 的 `short_id` 字段（该字段不可信）。
 
 在已解析出完整 `$task_id` 后，用以下片段反查短号；命中返回裸数字 `NN`，未命中自动回退完整 `TASK-id`：
 

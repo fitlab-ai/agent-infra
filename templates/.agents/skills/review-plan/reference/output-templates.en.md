@@ -24,7 +24,7 @@ When the finalizer fails, or the model stops because of a safety gate, lack of p
 
 ```text
 Task {task-id} review results were generated, but lifecycle advancement stopped.
-- Review artifact: .agents/workspace/active/{task-id}/{review-artifact}
+- Review artifact: <task-workspace>/active/{task-id}/{review-artifact}
 - Last valid summary/findings: {last-readable-review-result}
 - Local repair attempts: {repairAttempts}
 - Last diagnostic: {last-structured-diagnostic}
@@ -43,7 +43,7 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 ```text
 Task {task-id} technical plan review completed. Verdict: approved.
 - Blockers: 0 | Major issues: 0 | Minor issues: 0 | Human-decision: {h}
-[- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
+[- Review report: <task-workspace>/active/{task-id}/{review-artifact}]
 
 Next step - write code:
 {next-step-commands}
@@ -59,7 +59,7 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 ```text
 Task {task-id} technical plan review completed. Verdict: changes requested.
 - Blockers: 0 | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
-- Review report: .agents/workspace/active/{task-id}/{review-artifact}
+- Review report: <task-workspace>/active/{task-id}/{review-artifact}
 
 Next step - revise technical plan:
 {next-step-commands}
@@ -75,7 +75,7 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 ```text
 Task {task-id} technical plan review completed. Verdict: changes requested.
 - Blockers: {n} | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
-- Review report: .agents/workspace/active/{task-id}/{review-artifact}
+- Review report: <task-workspace>/active/{task-id}/{review-artifact}
 
 Next step - revise technical plan:
 {next-step-commands}
@@ -91,7 +91,7 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 ```text
 Task {task-id} technical plan review completed. Verdict: rejected, redesign required.
 - Blockers: {n} | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
-- Review report: .agents/workspace/active/{task-id}/{review-artifact}
+- Review report: <task-workspace>/active/{task-id}/{review-artifact}
 
 Next step - redesign:
 {next-step-commands}

@@ -263,7 +263,7 @@ function validateSealRequest(
 
 function validateReviewerSealPaths(receipt: DelegationReceipt, changedPaths: readonly string[]): ReceiptFailure | null {
   if (receipt.role !== 'reviewer') return null;
-  const taskRoot = `.agents/workspace/active/${receipt.taskId}/`;
+  const taskRoot = `task-workspace/active/${receipt.taskId}/`;
   const allowed = new Set([
     `${taskRoot}${receipt.artifact}`,
     `${taskRoot}task.md`,

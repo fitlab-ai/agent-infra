@@ -49,12 +49,12 @@ for (const file of files) {
 }
 
 // Report titles ("任务 {task-id} ..." / "Task {task-id} ...") and artifact paths
-// (".agents/workspace/active/{task-id}/...") must keep the full {task-id} form.
+// ("<task-workspace>/active/{task-id}/...") must keep the full {task-id} form.
 test('report titles and artifact paths keep the full {task-id}', () => {
   const runtime = fs.readFileSync(path.resolve('.agents/skills/analyze-task/SKILL.md'), 'utf8');
   assert.match(
     runtime,
-    /\.agents\/workspace\/active\/\{task-id\}\//,
+    /<task-workspace>\/active\/\{task-id\}\//,
     'artifact paths must keep the full {task-id}'
   );
   assert.match(

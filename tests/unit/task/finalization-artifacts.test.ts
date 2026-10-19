@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,12 +8,12 @@ import {
   COMPLETION_BACKFILL_FAMILIES,
   inspectCompletionArtifacts
 } from '../../../lib/task/finalization-artifacts.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 function fixture() {
-  const repoRoot = createTempDir('finalization-artifacts-');
+  const { repoRoot } = createTaskWorkspaceFixture('finalization-artifacts-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   return { repoRoot, taskId, taskDir };

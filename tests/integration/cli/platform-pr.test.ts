@@ -1,10 +1,11 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, taskWorkspaceProject } from '../../helpers.ts';
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -174,7 +175,7 @@ test('platform-pr summary-sync strict mode keeps report failures non-zero withou
   try {
     const args = [
       'summary-sync', fixture.taskId, '--agent', 'codex', '--body-file', 'body.md',
-      '--change-report-file', `.agents/workspace/active/${fixture.taskId}/pr-change-report.json`, '--result', 'no_op'
+      '--change-report-file', path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'pr-change-report.json'), '--result', 'no_op'
     ];
     const relaxed = run(args, { cwd: fixture.root, env: fixture.env });
     assert.equal(relaxed.status, 0, relaxed.stderr || relaxed.stdout);
@@ -198,9 +199,9 @@ function externalFixture(taskContent: string) {
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' } }));
   const renderedTask = taskContent.replaceAll('{task-id}', taskId);
   const fact = `\n${factLine(buildUnboundFact())}`;
   const taskWithContract = renderedTask
@@ -258,9 +259,9 @@ function createFixture(fact: ReturnType<typeof buildUnboundFact> | ReturnType<ty
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
   execFileSync('git', ['push', '-q', 'aaa', `HEAD:refs/heads/feature`], { cwd: root });
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' } }));
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---', `id: ${taskId}`, 'status: active', 'branch: feature', 'platform_issue_identity: \'{"kind":"number","value":7}\'', 'agent_infra_version: v0.9.12-alpha.0',
     factLine(fact), '---', '', '# Task', '', '## Review Disagreement Ledger', '',
@@ -495,7 +496,7 @@ test('platform-pr skip refuses a bound fact without mutation', () => {
 test('platform-pr skip refuses completed tasks without mutation', () => {
   const f = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
   try {
-    const completedDir = path.join(f.root, '.agents', 'workspace', 'completed', f.taskId);
+    const completedDir = path.join(taskWorkspaceRoot(f.root),  'completed', f.taskId);
     fs.mkdirSync(path.dirname(completedDir), { recursive: true });
     fs.renameSync(f.taskDir, completedDir);
     const taskPath = path.join(completedDir, 'task.md');
@@ -548,7 +549,7 @@ test('platform-pr skip dry-run does not mutate the current fact', () => {
 test('platform-pr skip refuses required PR policy and missing facts without mutation', () => {
   const required = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
   try {
-    fs.writeFileSync(path.join(required.root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'required' }));
+    fs.writeFileSync(path.join(required.root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(required.root), prFlow: 'required' }));
     const taskPath = path.join(required.taskDir, 'task.md');
     const before = fs.readFileSync(taskPath, 'utf8');
     const output = run(['skip', required.taskId, '--agent', 'codex'], { cwd: required.root, env: required.env });
@@ -648,9 +649,9 @@ test('platform-pr create refuses to locate or create a PR before remote branch d
     execFileSync('git', ['remote', 'add', 'aaa', 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     execFileSync('git', ['config', `url.${remote}.insteadOf`, 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'', factLine(buildUnboundFact()), '---', '',
       '# Task', '', '## Activity Log', ''
@@ -697,9 +698,9 @@ test('platform-pr create rechecks a bound PR before replaying it', () => {
     execFileSync('git', ['config', `url.${remote}.insteadOf`, 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'',
       factLine(boundFixture(771, headSha)), '---', '', '# Task', '', '## Activity Log', ''
@@ -776,9 +777,9 @@ test('platform-pr create does not require commit finalization evidence before re
     execFileSync('git', ['config', `url.${remote}.insteadOf`, 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'', factLine(buildUnboundFact()), '---', '',
       '# Task', '', '## Activity Log', '',

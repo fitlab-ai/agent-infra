@@ -10,6 +10,7 @@ import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from '.
 import { enumerateAllTaskDirs } from './resolve-ref.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { AGENT_TOKEN_VALUES, type AgentToken } from '../agent-clients/tokens.ts';
+import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
 const PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'] as const;
@@ -372,9 +373,16 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
     throw new Error('TASK_CREATE_VERSION_INVALID: agentInfraVersion must be a valid v-prefixed semver');
   }
   const repoRoot = fs.realpathSync.native(options.repoRoot);
-  const workspaceRoot = path.join(repoRoot, '.agents', 'workspace');
+  const workspaceRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
   const activeRoot = path.join(workspaceRoot, 'active');
   ensureRealDirectory(path.join(repoRoot, '.agents'), 'TASK_CREATE_WORKSPACE_INVALID');
+  const home = path.resolve(process.env.HOME || '');
+  if (!home || !path.isAbsolute(home)) throw new Error('TASK_CREATE_WORKSPACE_INVALID');
+  const managedRoots = [path.join(home, '.agent-infra'), path.join(home, '.agent-infra', 'task-workspaces')];
+  for (const root of managedRoots) {
+    if (fs.existsSync(root)) assertRealDirectory(root, 'TASK_CREATE_WORKSPACE_INVALID');
+    else fs.mkdirSync(root, { mode: 0o700 });
+  }
   ensureRealDirectory(workspaceRoot, 'TASK_CREATE_WORKSPACE_INVALID');
   ensureRealDirectory(activeRoot, 'TASK_CREATE_WORKSPACE_INVALID');
   const projectConfig = readProject(repoRoot);

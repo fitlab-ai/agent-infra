@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -19,14 +20,14 @@ function mkFixture(): { repoRoot: string } {
   fs.copyFileSync(SCRIPT, path.join(agentsDir, 'scripts', 'task-short-id.js'));
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
-    JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } })
+    JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength: 2 } })
   );
-  fs.mkdirSync(path.join(agentsDir, 'workspace', 'active'), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot), 'active'), { recursive: true });
   return { repoRoot };
 }
 
 function writeTask(repoRoot: string, state: string, taskId: string): string {
-  const dir = path.join(repoRoot, '.agents', 'workspace', state, taskId);
+  const dir = path.join(taskWorkspaceRoot(repoRoot),  state, taskId);
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(

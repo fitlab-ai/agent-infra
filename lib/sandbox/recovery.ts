@@ -30,6 +30,7 @@ import {
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
 import { resolveTaskWorkspace } from './task-resolver.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import {
   parseSandboxWorkspaceIdentity,
   sameSandboxWorkspaceIdentity,
@@ -450,11 +451,13 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
     });
   }
   if (snapshot.workspaceTopology === 'legacy-parent') {
+    const legacyRoot = snapshot.mounts.some((mount) => mount.path === '/task-workspace')
+      ? '/task-workspace' : '/workspace/.agents/workspace';
     findings.push({
       repairKind: 'hard-failure',
       code: 'SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH',
       message: 'Sandbox uses the legacy workspace parent-mount topology; recreate the container explicitly to migrate it.',
-      path: '/workspace/.agents/workspace'
+      path: legacyRoot
     });
   }
   if (snapshot.taskView && !snapshot.taskView.readable) {
@@ -476,7 +479,8 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
   for (const mount of snapshot.mounts) {
     if (
       snapshot.workspaceTopology === 'legacy-parent'
-      && mount.path.startsWith('/workspace/.agents/workspace')
+      && (mount.path.startsWith('/workspace/.agents/workspace')
+        || mount.path.startsWith('/task-workspace'))
     ) continue;
     if (
       mount.actualType !== mount.expectedType
@@ -571,13 +575,14 @@ function inspectContainer(
 }
 
 function workspaceTopology(mountsByDestination: ReadonlyMap<string, DockerMount>): SandboxRecoverySnapshot['workspaceTopology'] {
-  if (mountsByDestination.has('/workspace/.agents/workspace')) return 'legacy-parent';
+  if (mountsByDestination.has('/workspace/.agents/workspace')
+    || mountsByDestination.has('/task-workspace')) return 'legacy-parent';
   const perState = [
-    '/workspace/.agents/workspace/active',
-    '/workspace/.agents/workspace/active/.short-ids.json',
-    '/workspace/.agents/workspace/completed',
-    '/workspace/.agents/workspace/blocked',
-    '/workspace/.agents/workspace/archive'
+    '/task-workspace/active',
+    '/task-workspace/active/.short-ids.json',
+    '/task-workspace/completed',
+    '/task-workspace/blocked',
+    '/task-workspace/archive'
   ];
   return perState.some((destination) => mountsByDestination.has(destination))
     ? 'per-state'
@@ -618,8 +623,9 @@ function recoveryTaskSources(repoRoot: string, taskId: string): {
   mountPaths: string[];
   accessiblePaths: string[];
 } {
-  const activePath = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
-  const completedPath = path.join(repoRoot, '.agents', 'workspace', 'completed', taskId);
+  const taskRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
+  const activePath = path.join(taskRoot, 'active', taskId);
+  const completedPath = path.join(taskRoot, 'completed', taskId);
   if (fs.existsSync(activePath) && !fs.existsSync(completedPath)) {
     const source = assertSandboxTaskSource(repoRoot, taskId);
     return { mountPaths: [source], accessiblePaths: [source] };
@@ -635,7 +641,7 @@ function recoveryTaskSources(repoRoot: string, taskId: string): {
   }
 
   const completedRoot = fs.realpathSync.native(
-    path.join(repoRoot, '.agents', 'workspace', 'completed')
+    path.join(taskRoot, 'completed')
   );
   const completedSource = fs.realpathSync.native(path.dirname(task.taskMd));
   if (path.dirname(completedSource) !== completedRoot) {
@@ -643,9 +649,7 @@ function recoveryTaskSources(repoRoot: string, taskId: string): {
   }
 
   const historicalActivePath = path.join(
-    repoRoot,
-    '.agents',
-    'workspace',
+    taskRoot,
     'active',
     taskId
   );
@@ -670,7 +674,7 @@ export function startCompletedSandboxContainer(params: {
 }): void {
   const taskSources = recoveryTaskSources(params.config.repoRoot, params.taskId);
   const completedSource = taskSources.accessiblePaths[0]!;
-  const activeRoot = path.join(params.config.repoRoot, '.agents', 'workspace', 'active');
+  const activeRoot = path.join(resolveProjectTaskWorkspaceRoot(params.config.repoRoot), 'active');
   const historicalSource = path.join(activeRoot, params.taskId);
   fs.mkdirSync(activeRoot, { recursive: true });
   let replacedEmptyRoot = false;
@@ -791,11 +795,11 @@ function expectedMounts(params: {
     expectedType: 'bind' as const,
     hostPaths: mount.hostPaths,
     ...(taskSources !== null && taskId !== null
-      && mount.containerPath === `/workspace/.agents/workspace/active/${taskId}`
+      && mount.containerPath === `/task-workspace/active/${taskId}`
       ? { sourceAccessiblePaths: taskSources!.accessiblePaths }
       : {}),
     ...(completedTaskSource !== null && taskId !== null
-      && mount.containerPath === `/workspace/.agents/workspace/completed/${taskId}`
+      && mount.containerPath === `/task-workspace/completed/${taskId}`
       ? { sourceAccessiblePaths: [completedTaskSource] }
       : {}),
     expectedRW: !mount.readOnly
@@ -929,7 +933,7 @@ export function collectSandboxRecoverySnapshot(params: {
   const tools = [...capabilityPlan.tools];
   const topology = workspaceTopology(mountsByDestination);
   const taskViewPath = workspace.mode === 'task-bound'
-    ? `/workspace/.agents/workspace/active/${workspace.taskId}/task.md`
+    ? `/task-workspace/active/${workspace.taskId}/task.md`
     : null;
   const seeds = declaredTmpfsSeedEntries(tools).map((seed) => {
     const mounted = mountsByDestination.get(seed.stagingPath)?.Type === 'bind';
@@ -1215,6 +1219,10 @@ function canRetryFreshReadiness(findings: SandboxRecoveryFinding[]): boolean {
     && finding.path !== undefined
     && (
       finding.path.startsWith('/workspace/.agents/workspace')
+      || finding.path.startsWith('/task-workspace/active')
+      || finding.path.startsWith('/task-workspace/blocked')
+      || finding.path.startsWith('/task-workspace/completed')
+      || finding.path.startsWith('/task-workspace/archive')
       || finding.path === '/home/devuser/.host-shell-config'
       || finding.path === '/home/devuser/.bash_aliases'
       || finding.path === '/run/agent-infra/runtime'

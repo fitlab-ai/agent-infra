@@ -53,16 +53,23 @@ node -p "'v' + require('./package.json').version"
 
 ## 创建第一个任务
 
+先通过统一 resolver 取得宿主任务根，供以下示例使用：
+
+```bash
+TASK_WORKSPACE_ROOT=$(agent-infra-internal task-workspace resolve --boundary host | node -e 'let input="";process.stdin.setEncoding("utf8");process.stdin.on("data",chunk=>input+=chunk);process.stdin.on("end",()=>process.stdout.write(JSON.parse(input).root));')
+```
+
 1. 将任务模板复制到活跃工作区：
 
 ```bash
-cp .agents/templates/task.md .agents/workspace/active/task-001.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000"
+cp .agents/templates/task.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md"
 ```
 
 2. 填写任务元数据：
 
 ```yaml
-id: task-001
+id: TASK-20260101-120000
 type: feature          # feature | bugfix | refactor | docs | chore
 status: active         # active | blocked | completed
 assigned_to: claude    # claude | codex | antigravity | opencode | human
@@ -92,7 +99,7 @@ Claude Code 擅长代码库探索和理解文件间的复杂关系。
 agy
 
 # 示例提示：
-# "基于 .agents/workspace/active/task-001.md 中的分析结果，
+# "基于 $TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md 中的分析结果，
 #  创建技术设计方案。定义接口并概述实现思路。"
 ```
 
@@ -103,7 +110,7 @@ agy
 codex
 
 # 示例提示：
-# "实现 .agents/workspace/active/task-001.md 中描述的变更。
+# "实现 $TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md 中描述的变更。
 #  遵循设计部分。为此工作创建新分支。"
 ```
 
@@ -130,7 +137,8 @@ claude
 
 ```bash
 # 快速缺陷修复工作流
-cp .agents/templates/task.md .agents/workspace/active/bugfix-001.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000"
+cp .agents/templates/task.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md"
 # 编辑任务，然后：
 # 1. 使用 Claude Code 分析
 # 2. 使用 Codex/OpenCode 修复
@@ -144,7 +152,8 @@ cp .agents/templates/task.md .agents/workspace/active/bugfix-001.md
 3. **报告**：从模板生成审查报告。
 
 ```bash
-cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120001"
+cp .agents/templates/review-report.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120001/review-report.md"
 # 使用 Claude Code 填写审查内容
 ```
 
@@ -156,7 +165,8 @@ cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
 4. **验证**（Claude Code）：确保没有回归问题，运行测试。
 
 ```bash
-cp .agents/templates/task.md .agents/workspace/active/refactor-001.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120002"
+cp .agents/templates/task.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120002/task.md"
 # 按照 .agents/workflows/refactoring.yaml 中的重构工作流执行
 ```
 
@@ -165,7 +175,8 @@ cp .agents/templates/task.md .agents/workspace/active/refactor-001.md
 在 AI 工具之间切换时，创建交接文档：
 
 ```bash
-cp .agents/templates/handoff.md .agents/workspace/active/handoff-task-001-phase2.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120003"
+cp .agents/templates/handoff.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120003/handoff.md"
 ```
 
 填写：

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
@@ -98,14 +99,14 @@ async function platformComment(args: string[] = []): Promise<void> {
     const unexpected = Object.keys(parsed.values).find((key) => !['issue', 'taskId', 'output', 'cwd'].includes(key));
     if (unexpected) { fail(`recover does not accept '--${unexpected}'`); return; }
     const outputPath = path.resolve(cwd, output);
-    const workspaceDir = path.resolve(cwd, '.agents', 'workspace');
+    const workspaceDir = resolveProjectTaskWorkspaceRoot(cwd);
     const stagingDir = path.dirname(outputPath);
     const stagingParent = fs.existsSync(stagingDir) ? path.dirname(fs.realpathSync(stagingDir)) : '';
     const realWorkspace = fs.existsSync(workspaceDir) ? fs.realpathSync(workspaceDir) : '';
     if (path.basename(outputPath) !== 'task.md' || stagingParent !== realWorkspace
       || !path.basename(stagingDir).startsWith('.restore-staging-') || !fs.existsSync(stagingDir)
       || !fs.lstatSync(stagingDir).isDirectory() || fs.existsSync(outputPath)) {
-      fail('recover output must be a new task.md inside an existing .agents/workspace/.restore-staging-* directory');
+      fail('recover output must be a new task.md inside an existing task-workspace/.restore-staging-* directory');
       return;
     }
     const listed = await listPlatformComments(issue, cwd);

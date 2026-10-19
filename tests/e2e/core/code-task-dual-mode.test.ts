@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -14,7 +15,7 @@ const FULL_ANALYSIS = "# Analysis\n\n## Flow Decision\n\n- **Path**: full.\n- **
 function makeFixture(files: Record<string, string>) {
   const root = createTempDir("agent-infra-detect-mode-");
   spawnSync("git", ["init", "-q"], { cwd: root });
-  const taskDir = path.join(root, ".agents", "workspace", "active", TASK_ID);
+  const taskDir = path.join(taskWorkspaceRoot(root),  "active", TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: technical-design-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };

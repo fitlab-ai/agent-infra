@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -13,12 +14,12 @@ function mkFixtureRepo(): { repoRoot: string; activeDir: string } {
   fs.mkdirSync(agentsDir, { recursive: true });
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
-    JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } })
+    JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength: 2 } })
   );
-  const activeDir = path.join(agentsDir, 'workspace', 'active');
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot), 'active');
   fs.mkdirSync(activeDir, { recursive: true });
-  fs.mkdirSync(path.join(agentsDir, 'workspace', 'blocked'), { recursive: true });
-  fs.mkdirSync(path.join(agentsDir, 'workspace', 'completed'), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot), 'blocked'), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot), 'completed'), { recursive: true });
   return { repoRoot, activeDir };
 }
 
@@ -57,7 +58,7 @@ test('ai task ls defaults to active state', () => {
   const { repoRoot, activeDir } = mkFixtureRepo();
   writeTask(activeDir, 'TASK-20260101-000001', { short_id: '#01', type: 'feature', status: 'active', current_step: 'plan', branch: 'feature-one' });
   writeTask(
-    path.join(repoRoot, '.agents', 'workspace', 'blocked'),
+    path.join(taskWorkspaceRoot(repoRoot),  'blocked'),
     'TASK-20260101-000002',
     { short_id: '#02', type: 'bugfix', status: 'blocked', current_step: 'blocked', branch: 'bug-two' }
   );
@@ -70,9 +71,9 @@ test('ai task ls defaults to active state', () => {
 test('ai task ls --all spans active + blocked + completed (not archive)', () => {
   const { repoRoot, activeDir } = mkFixtureRepo();
   writeTask(activeDir, 'TASK-20260101-000001', { short_id: '#01', branch: 'feature-active' });
-  writeTask(path.join(repoRoot, '.agents', 'workspace', 'blocked'), 'TASK-20260101-000002', { short_id: '#02', branch: 'feature-blocked' });
-  writeTask(path.join(repoRoot, '.agents', 'workspace', 'completed'), 'TASK-20260101-000003', { short_id: '#03', branch: 'feature-completed' });
-  const archiveDir = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  writeTask(path.join(taskWorkspaceRoot(repoRoot),  'blocked'), 'TASK-20260101-000002', { short_id: '#02', branch: 'feature-blocked' });
+  writeTask(path.join(taskWorkspaceRoot(repoRoot),  'completed'), 'TASK-20260101-000003', { short_id: '#03', branch: 'feature-completed' });
+  const archiveDir = path.join(taskWorkspaceRoot(repoRoot),  'archive');
   fs.mkdirSync(archiveDir, { recursive: true });
   writeTask(archiveDir, 'TASK-20250101-000099', { short_id: '#99', branch: 'feature-archive' });
 
@@ -87,7 +88,7 @@ test('ai task ls --all spans active + blocked + completed (not archive)', () => 
 test('ai task ls --blocked filters to blocked state only', () => {
   const { repoRoot, activeDir } = mkFixtureRepo();
   writeTask(activeDir, 'TASK-20260101-000001', { short_id: '#01', branch: 'feature-active' });
-  writeTask(path.join(repoRoot, '.agents', 'workspace', 'blocked'), 'TASK-20260101-000002', { short_id: '#02', branch: 'feature-blocked' });
+  writeTask(path.join(taskWorkspaceRoot(repoRoot),  'blocked'), 'TASK-20260101-000002', { short_id: '#02', branch: 'feature-blocked' });
 
   const out = runCli(['task', 'ls', '--blocked'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
@@ -143,7 +144,7 @@ test('ai task ls renders "-" for an active task absent from the registry', () =>
 test('ai task ls shows the retained short id for completed tasks', () => {
   const { repoRoot, activeDir } = mkFixtureRepo();
   writeTask(
-    path.join(repoRoot, '.agents', 'workspace', 'completed'),
+    path.join(taskWorkspaceRoot(repoRoot),  'completed'),
     'TASK-20260101-000003',
     { short_id: '#03', branch: 'feature-done' }
   );

@@ -26,7 +26,7 @@ description: >
 - 审查深度由证据完整度和变更风险决定，不由提交者身份决定
 - 执行本技能后，你**必须**立即更新 task.md（经 `task-activity` typed intent）
 - 绝不自动执行 `git add` 或 `git commit`
-- 一次性检视路径（无任务/Issue）走 `.agents/workspace/reviews/{pr-number}/`，标记 `recoverable: false`，不承担可恢复承诺
+- 一次性检视路径（无任务/Issue）走 `<task-workspace>/reviews/{pr-number}/`，标记 `recoverable: false`，不承担可恢复承诺
 
 ## 常见违规借口与反驳
 
@@ -62,7 +62,7 @@ agent-infra-internal pr-review-grade resolve-host --pr {pr-number} [--cwd <path>
 
 - **唯一宿主**：绑定 `{task-id}`，调用 `task-activity pr-review-inspect` 取得 canonical round、prepared/open 状态和最近成功审查身份，再按下述恢复规则开始本轮（进入步骤 2）。
 - **多宿主歧义**：`resolve-host` 返回 `ambiguous`，`decide` 会拒绝分类（fail closed）。立即停止并提示人工指定唯一宿主；不进入证据分类。
-- **无宿主**：默认阻塞，要求先建立 Issue/task 关联（给出关联指引），不自动创建/导入 Issue。仅当用户显式选择「仅一次性检视」时，过程文件写入 `.agents/workspace/reviews/{pr-number}/`（`recoverable: false`）。
+- **无宿主**：默认阻塞，要求先建立 Issue/task 关联（给出关联指引），不自动创建/导入 Issue。仅当用户显式选择「仅一次性检视」时，过程文件写入 `<task-workspace>/reviews/{pr-number}/`（`recoverable: false`）。
 
 任务锚定路径在宿主与远端 head 确定后执行：
 

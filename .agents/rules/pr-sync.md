@@ -59,7 +59,7 @@ precheck 必须覆盖六项固定检查并提供文件证据；`formalReview` �
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
   --agent {standard-agent-token} --body-file {summary-body-file} \
-  --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
+  --change-report-file <task-workspace>/active/{task-id}/pr-change-report.json \
   --result {primary-result}
 ```
 

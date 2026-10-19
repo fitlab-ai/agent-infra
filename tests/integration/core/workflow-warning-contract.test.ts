@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -27,7 +28,7 @@ for (const [name, body, code] of [
   test(`warning readers and verification reject ${name}`, async () => {
     const root = createTempDir('warning-contract-');
     const taskId = 'TASK-20260909-160000';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     const configDir = path.join(root, '.agents', 'skills', 'probe', 'config');
     try {
       fs.mkdirSync(taskDir, { recursive: true });

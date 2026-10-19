@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +12,7 @@ function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
   const root = createTempDir('task-snapshot-unit-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\r\n'));
   fs.writeFileSync(path.join(taskDir, 'z.md'), 'z');

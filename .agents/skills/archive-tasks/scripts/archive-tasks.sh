@@ -4,7 +4,15 @@ set -e
 
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/../../../.." && pwd)
-WORKSPACE_ROOT="$REPO_ROOT/.agents/workspace"
+if [ -f "$REPO_ROOT/bin/internal-cli.sh" ]; then
+  WORKSPACE_RESULT=$(CDPATH= cd "$REPO_ROOT" && sh "$REPO_ROOT/bin/internal-cli.sh" task-workspace resolve --boundary host)
+elif command -v agent-infra-internal >/dev/null 2>&1; then
+  WORKSPACE_RESULT=$(CDPATH= cd "$REPO_ROOT" && agent-infra-internal task-workspace resolve --boundary host)
+else
+  printf 'archive-tasks: agent-infra-internal task-workspace resolver is unavailable\n' >&2
+  exit 1
+fi
+WORKSPACE_ROOT=$(printf '%s' "$WORKSPACE_RESULT" | node -e 'let input="";process.stdin.setEncoding("utf8");process.stdin.on("data",chunk=>input+=chunk);process.stdin.on("end",()=>{const result=JSON.parse(input);if(result.status!=="resolved"||typeof result.root!=="string")process.exit(1);process.stdout.write(result.root);});')
 COMPLETED_DIR="$WORKSPACE_ROOT/completed"
 ARCHIVE_DIR="$WORKSPACE_ROOT/archive"
 MANIFEST_PATH="$ARCHIVE_DIR/manifest.md"
@@ -586,4 +594,4 @@ echo
 echo "Summary:"
 printf -- '- Archived: %s\n' "$archived_count"
 printf -- '- Skipped: %s\n' "$skipped_count"
-printf -- '- Manifest: %s\n' ".agents/workspace/archive/manifest.md"
+printf -- '- Manifest: %s\n' "$ARCHIVE_DIR/manifest.md"

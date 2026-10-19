@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ import { createTempDir, filePath } from '../../helpers.ts';
 test('external provider checks preserve status classification and snapshot fields', async () => {
   const root = createTempDir('provider-checks-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   const identity = {
     resource: { kind: 'number' as const, value: 5 }, repository: 'o/r', url: 'https://code.example/5',
     head: { repository: 'o/r', ref: 'feature', sha: 'a'.repeat(40) },
@@ -31,6 +32,7 @@ test('external provider checks preserve status classification and snapshot field
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\npr_delivery_fact: ${JSON.stringify(fact)}\n---\n`);
     for (const [status, bucket, state] of cases) {
       fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+        project: taskWorkspaceProject(root),
         platform: { type: 'external-checks', providers: { 'external-checks': {
           source: filePath('tests/fixtures/platform-providers/remote-evidence-provider.mjs'),
           config: {

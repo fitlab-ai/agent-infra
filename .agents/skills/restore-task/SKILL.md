@@ -14,7 +14,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 只从匹配 `.agents/rules/issue-sync.md` 标记注册表的评论恢复文件
-- 先恢复到 `.agents/workspace/` 内的受控 staging，校验后由 lifecycle 原子落位到 `active/{task-id}/`
+- 先恢复到 `<task-workspace>/` 内的受控 staging，校验后由 lifecycle 原子落位到 `active/{task-id}/`
 - 如果目标目录已存在，立即停止并提示用户先处理目录冲突
 - 执行本技能后，你**必须**立即更新恢复出的 `task.md`
 
@@ -74,8 +74,8 @@ description: >
 - 拼接得到最终文件内容
 
 在写文件前检查：
-- `.agents/workspace/active/{task-id}/`、`blocked/{task-id}/`、`completed/{task-id}/` 均不存在
-- 创建唯一 `.agents/workspace/.restore-staging-*` 路径，且与 active 位于同一文件系统
+- `<task-workspace>/active/{task-id}/`、`blocked/{task-id}/`、`completed/{task-id}/` 均不存在
+- 创建唯一 `<task-workspace>/.restore-staging-*` 路径，且与 active 位于同一文件系统
 
 如果目录已存在，立即停止并提示用户先手动处理。
 

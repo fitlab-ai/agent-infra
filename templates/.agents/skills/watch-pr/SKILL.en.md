@@ -40,7 +40,7 @@ After prerequisites pass and before this round's first artifact action, append a
 Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deterministic branches:
 
 - Scenario A (argument omitted): reverse-lookup the active task from the current branch, then read its verified `pr_delivery_fact.identity.number`.
-- Scenario B (omitted task ref or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for verified `pr_delivery_fact.identity.number` as `{pr#}`; if the fact is unbound, follow "Error Handling" to prompt running `create-pr` first, then stop.
+- Scenario B (omitted task ref or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `<task-workspace>/active/{task-id}/task.md` for verified `pr_delivery_fact.identity.number` as `{pr#}`; if the fact is unbound, follow "Error Handling" to prompt running `create-pr` first, then stop.
 - Scenario C (`--pr <number>` or a PR URL): use that PR number directly as `{pr#}`; then determine `{task-id}` via "Reverse-lookup task".
 - Reverse-lookup task (scenarios A / C): use task context/query capabilities to find the unique active task bound to `{pr#}`. If none exists, stop and request binding first; the typed checks intent does not create a second taskless state machine.
 
@@ -53,7 +53,7 @@ Initialize `repairCommits=[]` and `rebaseAttempts=0`. Before overwriting the cur
 ```bash
 node --experimental-strip-types --input-type=module -e '
 import { readPrChangeReport } from "./lib/platform/pr-change-report.ts";
-const report = readPrChangeReport(`.agents/workspace/active/${process.argv[1]}/pr-change-report.json`);
+const report = readPrChangeReport(`<task-workspace>/active/${process.argv[1]}/pr-change-report.json`);
 const previous = report.ok
   ? { repository: report.value.identity.repository, resource: report.value.identity.resource, head: report.value.identity.head.sha }
   : { status: "unavailable" };
@@ -85,7 +85,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-Update `.agents/workspace/active/{task-id}/task.md`:
+Update `<task-workspace>/active/{task-id}/task.md`:
 - `assigned_to`: {current agent}
 - `updated_at`: {current time}
 - `agent_infra_version`: per `.agents/rules/version-stamp.md`

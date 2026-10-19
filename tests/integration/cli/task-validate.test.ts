@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,9 +34,11 @@ function fixture(linkedWorktree = false) {
   if (!linkedWorktree) {
     spawnSync('git', ['switch', '-c', branch], { cwd: root, env: gitSafeEnv() });
   }
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', id);
+  const project = taskWorkspaceProject(root);
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project, agentClients: CANONICAL_AGENT_CLIENTS }));
+  const taskDir = path.join(taskWorkspaceRoot(root), 'active', id);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture', agentClients: CANONICAL_AGENT_CLIENTS }));
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${id}\nbranch: ${branch}\nstatus: active\n---\n# Task\n`);
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'committed\n');
   const allocation = spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', id], {
@@ -117,7 +120,7 @@ exec /usr/bin/git "$@"
 test('explicit branch validation writes a non-recoverable branch-only envelope', (t) => {
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
-  fs.rmSync(path.join(f.root, '.agents', 'workspace', 'active', f.id), { recursive: true, force: true });
+  fs.rmSync(path.join(taskWorkspaceRoot(f.root),  'active', f.id), { recursive: true, force: true });
   const evidenceFile = path.join(f.root, 'branch-only-evidence.json');
   const result = spawnTaskValidate(f.root, gitSafeEnv(), [
     f.branch, '--scope', 'snapshot', '--format', 'json', '--evidence-file', evidenceFile, '--',

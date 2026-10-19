@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -17,9 +18,9 @@ function fixture(issueNumber = '') {
   const root = createTempDir('platform-issue-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: root });
-  const dir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  const dir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
   const identity = issueNumber ? `platform_issue_identity: '{"kind":"number","value":${issueNumber}}'\n` : '';
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: TASK-20260101-000001\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n${identity}---\n\n# 任务：Add safe sync\n\n## 描述\n\nKeep | shell characters.\n\n## 需求\n\n- [x] first\n- [ ] second\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return root;
@@ -42,14 +43,14 @@ function inLabelIssueFixture() {
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-    platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
+    project: taskWorkspaceProject(root), platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
   }));
   fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
   fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
   fs.writeFileSync(path.join(root, 'lib', 'core.ts'), 'change\n');
-  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const taskPath = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md');
   const task = fs.readFileSync(taskPath, 'utf8').replace('platform_issue_identity: \'{"kind":"number","value":7}\'\n---', 'platform_issue_identity: \'{"kind":"number","value":7}\'\ndelivery_base_ref: HEAD~1\n---');
   fs.writeFileSync(taskPath, task);
   execFileSync('git', ['add', '.'], { cwd: root });
@@ -200,10 +201,10 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
     execFileSync('git', ['checkout', '-qb', 'feature'], { cwd: root });
     fs.writeFileSync(path.join(root, 'lib.txt'), 'change\n');
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      platform: { type: 'github' }, labels: { in: { core: ['lib.txt'] } }
+      project: taskWorkspaceProject(root), platform: { type: 'github' }, labels: { in: { core: ['lib.txt'] } }
     }));
-    fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
-      fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
+    fs.writeFileSync(path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md'),
+      fs.readFileSync(path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
         .replace('platform_issue_identity: \'{"kind":"number","value":7}\'', 'platform_issue_identity: \'{"kind":"number","value":7}\'\ndelivery_base_ref: main'));
     execFileSync('git', ['add', '.'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
@@ -431,7 +432,7 @@ test('issue sync flattens paginated milestones and converges on a specific versi
 
 test('issue sync resolves organization schema and migrates type before pinned fields', async () => {
   const root = fixture('7');
-  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const taskPath = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md');
   fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace('type: feature', 'type: feature\npriority: 高'));
   const writes: Array<{ query: string; variables: Record<string, unknown> }> = [];
   const client = clientFor((args, input) => {

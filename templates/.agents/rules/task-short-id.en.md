@@ -87,9 +87,9 @@ fi
 ## Storage
 
 Short ids are pure local state, persisted only in the registry
-`.agents/workspace/active/.short-ids.json`; task.md does not hold the short id:
+`<task-workspace>/active/.short-ids.json`; task.md does not hold the short id:
 
-- Path: `<repo-root>/.agents/workspace/active/.short-ids.json`
+- Path: `<repo-root>/<task-workspace>/active/.short-ids.json`
 - Schema: `{ "version": 1, "ids": { "01": "TASK-20260609-192644", "02": "TASK-…" } }`
 - Keys are zero-padded decimal strings of `task.shortIdLength` digits; values are
   full `TASK-…` task ids.

@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,14 +9,14 @@ import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const METADATA = { timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' };
 
 function fixture(rows: string[] = []) {
-  const repoRoot = createTempDir('ledger-intents-');
+  const { repoRoot } = createTaskWorkspaceFixture('ledger-intents-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nstatus: active\nagent_infra_version: v0.8.6-alpha.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };

@@ -1,10 +1,11 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { filePath, gitSafeEnv, initIsolatedGitRepo, onPlatforms, taskWorkspaceProject } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
@@ -32,10 +33,13 @@ function snapshot(repoRoot: string, baseline: string, diffBase?: string) {
 
 function setupRepo(tempRoot: string) {
   initIsolatedGitRepo(tempRoot);
-  write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ delivery: { remote: "origin", baseRef: "main" } }) + "\n");
+  write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot), delivery: { remote: "origin", baseRef: "main" } }) + "\n");
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
   git(tempRoot, ["config", "user.name", "Codex"]);
-  write(path.join(tempRoot, ".gitignore"), "task/\n.agents/workspace/\n");
+  const verifyConfig = path.join(tempRoot, ".agents", "skills", "review-code", "config");
+  fs.mkdirSync(verifyConfig, { recursive: true });
+  fs.copyFileSync(filePath(".agents/skills/review-code/config/verify.json"), path.join(verifyConfig, "verify.json"));
+  write(path.join(tempRoot, ".gitignore"), ".agents/workspace/\n");
   write(path.join(tempRoot, ".agents/skills/x.md"), "base\n");
   git(tempRoot, ["add", "-A"]);
   git(tempRoot, ["commit", "-qm", "base"]);
@@ -44,7 +48,7 @@ function setupRepo(tempRoot: string) {
   git(tempRoot, ["add", "-A"]);
   git(tempRoot, ["commit", "-qm", "reviewed"]);
   return {
-    taskDir: path.join(tempRoot, "task", TASK_ID),
+    taskDir: path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID),
     previous,
     baseline: git(tempRoot, ["rev-parse", "HEAD"])
   };
@@ -351,7 +355,7 @@ test("review-fact validates the task branch worktree instead of the task workspa
     git(tempRoot, ["-C", registeredWorktree, "commit", "-qm", "commit task worktree change"]);
     const reviewedHead = git(tempRoot, ["-C", registeredWorktree, "rev-parse", "HEAD"]);
     fs.renameSync(registeredWorktree, sandboxWorktree);
-    const taskDir = path.join(sandboxWorktree, ".agents", "workspace", TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(sandboxWorktree),  TASK_ID);
 
     write(path.join(taskDir, "task.md"), taskContent(reviewedHead, true, branch));
     write(path.join(taskDir, "review-code.md"), artifactContent(reviewedHead, snapshot(sandboxWorktree, reviewedHead)));

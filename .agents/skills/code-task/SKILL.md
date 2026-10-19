@@ -75,7 +75,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 ### 1. 验证前置条件
 
 先检查：
-- `.agents/workspace/active/{task-id}/task.md`
+- `<task-workspace>/active/{task-id}/task.md`
 
 如果缺少任务文件，立即停止。生命周期输入由步骤 4 的核心查询按已选路径验证；技能不得预先固定要求方案产物。
 
@@ -165,7 +165,7 @@ agent-infra-internal task-artifact {task-id} init --family code --artifact {code
 
 骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实实现与验证内容后才能通过完成门禁。preflight 或 finalizer 返回结构错误时，按 `.agents/rules/local-artifact-repair.md` 直接修正正式产物并重跑原入口；当前结构、资格和摘要事实是唯一门禁。
 
-创建 `.agents/workspace/active/{task-id}/{code-artifact}`。
+创建 `<task-workspace>/active/{task-id}/{code-artifact}`。
 
 > 报告结构、必填章节和完整模板见 `reference/report-template.md`。写报告前先读取 `reference/report-template.md`。
 
@@ -207,7 +207,7 @@ echo "$finalizer"
 
 ### 11. 更新任务状态
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
+更新 `<task-workspace>/active/{task-id}/task.md`：
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 产物链接、阶段与完成日志由 completed 事件统一登记
 - 完成业务内容更新后声明完成事件：

@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -38,7 +39,7 @@ test('platform-sync obtains computed in-label repository metadata from the selec
     fs.writeFileSync(path.join(root, 'lib', 'core.ts'), 'export const core = true;\n');
     git(root, ['add', 'lib/core.ts']);
     git(root, ['commit', '-qm', 'change']);
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---',

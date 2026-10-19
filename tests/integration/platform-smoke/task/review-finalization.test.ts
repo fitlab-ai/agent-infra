@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -100,7 +101,7 @@ function filledOfficialReviewSample(
 function officialTemplateDomainFixture(stage: 'analysis' | 'plan' | 'code', artifact: string, report: string) {
   const root = createTempDir('official-review-template-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
   for (const input of ['analysis.md', 'plan.md', 'code.md']) fs.writeFileSync(path.join(dir, input), '# input\n');
   const step = stage === 'analysis' ? 'Review Analysis' : stage === 'plan' ? 'Review Plan' : 'Review Code';
@@ -128,7 +129,7 @@ status: active
 function domainFixture() {
   const root = createTempDir('review-finalization-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
   fs.writeFileSync(path.join(dir, 'task.md'), `---

@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -56,7 +57,7 @@ import { createTask } from '../../../../lib/task/create-service.ts';
 import { SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import { finalizeSandboxControlManifest } from '../../../../lib/sandbox/workspace-view.ts';
-import { createTempDir, onPlatforms } from '../../../helpers.ts';
+import { createTempDir, onPlatforms, taskWorkspaceProject } from '../../../helpers.ts';
 
 const manifest: SandboxControlManifest = {
   engine: 'docker',
@@ -475,12 +476,12 @@ test('task-create executor preserves accepted terminal status when the host serv
   const root = createTempDir('task-create-terminal-failure-');
   const requestId = '12345678-1234-4234-8234-123456789abc';
   const taskTemplateDir = path.join(root, '.agents', 'templates');
-  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   fs.mkdirSync(taskTemplateDir, { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-    project: 'demo', task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' }
+    project: taskWorkspaceProject(root), task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' }
   }));
+  fs.mkdirSync(path.join(taskWorkspaceRoot(root), 'active'), { recursive: true });
   fs.copyFileSync('.agents/templates/task.md', path.join(taskTemplateDir, 'task.md'));
   fs.copyFileSync('.agents/skills/create-task/config/verify.json', path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   const templatePath = path.join(taskTemplateDir, 'task.md');
@@ -531,7 +532,7 @@ test('task-create executor preserves accepted terminal status when the host serv
     assert.equal(result.exitCode, 1);
     assert.deepEqual(output.control, { requestId, accepted: true, recovery: 'none' });
     assert.equal(output.error.code, 'TASK_CREATE_QUALIFICATION_INVALID');
-    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+    assert.deepEqual(fs.readdirSync(path.join(taskWorkspaceRoot(root), 'active')), []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

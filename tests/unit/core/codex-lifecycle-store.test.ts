@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,14 +12,14 @@ import {
   dispatchOrchestrationDelegation,
   prepareOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
 });
 function temporaryRoot(): string {
-  const root = createTempDir('codex-lifecycle-store-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('codex-lifecycle-store-');
   fixtureRoots.add(root);
   return root;
 }
@@ -26,7 +27,7 @@ function temporaryRoot(): string {
 function preparedTask(now?: () => string) {
   const root = temporaryRoot();
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.12-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const policy = {

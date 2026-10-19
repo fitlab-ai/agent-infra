@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,14 +9,14 @@ import {
   inspectPrReviewActivity
 } from '../../../lib/task/activity-intent.ts';
 import { VERSION } from '../../../lib/version.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const HEAD = 'a'.repeat(40);
 
 function fixtureTask() {
-  const root = createTempDir('activity-intent-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('activity-intent-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---
 id: ${taskId}
@@ -311,10 +312,10 @@ test('PR review dry-run validates without writing', () => {
 });
 
 test('PR review intents reject a task that is not active', () => {
-  const root = createTempDir('activity-intent-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('activity-intent-');
   try {
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'completed', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'completed', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\n---\n`);
     writeArtifact(taskDir);

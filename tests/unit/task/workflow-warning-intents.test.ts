@@ -1,15 +1,16 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { applyWorkflowWarningIntent } from '../../../lib/task/workflow-warning-intents.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 function fixture() {
-  const repoRoot = createTempDir('warning-intents-');
+  const { repoRoot } = createTaskWorkspaceFixture('warning-intents-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: old\nstatus: active\nagent_infra_version: v0.8.6-alpha.0\n---\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };

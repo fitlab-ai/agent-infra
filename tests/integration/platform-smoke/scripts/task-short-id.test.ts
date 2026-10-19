@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { createTempDir } from "../../../helpers.ts";
+import { createTempDir, taskWorkspaceProject, taskWorkspaceRoot } from "../../../helpers.ts";
 
 const TEMPLATES_SKILLS = path.resolve(process.cwd(), "templates/.agents/skills");
 
@@ -67,7 +67,12 @@ const SCRIPT = path.resolve(
 );
 
 function mkTmp(): string {
-  return createTempDir("tsid-");
+  const root = createTempDir("tsid-");
+  const git = spawnSync("git", ["init", "--quiet"], { cwd: root, encoding: "utf8" });
+  if (git.status !== 0) throw new Error(`git init failed: ${git.stderr}`);
+  fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(root) }));
+  return root;
 }
 
 function mkTask(activeDir: string, taskId: string): string {
@@ -419,10 +424,11 @@ test("default width is 2 even without --short-id-length flag and without task.sh
   // the default 2-digit zero-padded form (matching lib/defaults.json).
   const tmp = mkTmp();
   const agentsDir = path.join(tmp, ".agents");
-  const active = path.join(agentsDir, "workspace", "active");
-  fs.mkdirSync(active, { recursive: true });
+  fs.mkdirSync(agentsDir, { recursive: true });
   // Stub .airc.json without a `task` key.
-  fs.writeFileSync(path.join(agentsDir, ".airc.json"), JSON.stringify({ project: "x" }));
+  fs.writeFileSync(path.join(agentsDir, ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(tmp) }));
+  const active = path.join(taskWorkspaceRoot(tmp), "active");
+  fs.mkdirSync(active, { recursive: true });
   const taskId = "TASK-20260601-000001";
   fs.mkdirSync(path.join(active, taskId), { recursive: true });
   fs.writeFileSync(

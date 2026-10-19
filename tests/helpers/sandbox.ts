@@ -17,6 +17,7 @@ type SandboxFixtureOptions = {
 };
 type SandboxFixture = {
   repoDir: string;
+  project: string;
   binDir: string;
   logPath: string;
   envFileLogPath: string;
@@ -265,25 +266,25 @@ function writeSandboxEngineFixture(
       "    const control = path.join(controlRoot, 'channel');",
       "    const workspaceMounts = mode === 'task-bound'",
       "      ? [",
-      "        { Type: 'bind', Source: path.join(view, 'active', '.short-ids.json'), Destination: '/workspace/.agents/workspace/active/.short-ids.json', RW: false },",
+      "        { Type: 'bind', Source: path.join(view, 'active', '.short-ids.json'), Destination: '/task-workspace/active/.short-ids.json', RW: false },",
       "        ...['completed', 'blocked', 'archive'].map((state) => ({",
       "          Type: 'bind',",
       "          Source: path.join(view, state),",
-      "          Destination: path.posix.join('/workspace/.agents/workspace', state),",
+      "          Destination: path.posix.join('/task-workspace', state),",
       "          RW: false",
       "        }))",
       "      ]",
       "      : ['active', 'completed', 'blocked', 'archive'].map((state) => ({",
       "        Type: 'bind',",
       "        Source: path.join(view, state),",
-      "        Destination: path.posix.join('/workspace/.agents/workspace', state),",
+      "        Destination: path.posix.join('/task-workspace', state),",
       "        RW: false",
       "      }));",
       "    const defaults = [",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'worktrees', project, branchDir), Destination: '/workspace', RW: true },",
       "      ...workspaceMounts,",
-      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(repoDir, '.agents', 'workspace', 'active', taskId), Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true }] : []),",
-      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(repoDir, '.agents', 'workspace', 'completed', taskId), Destination: `/workspace/.agents/workspace/completed/${taskId}`, RW: true }] : []),",
+      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(home, '.agent-infra', 'task-workspaces', project, 'active', taskId), Destination: `/task-workspace/active/${taskId}`, RW: true }] : []),",
+      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(home, '.agent-infra', 'task-workspaces', project, 'completed', taskId), Destination: `/task-workspace/completed/${taskId}`, RW: true }] : []),",
       "      { Type: 'bind', Source: control, Destination: '/run/agent-infra/control', RW: true },",
       "      { Type: 'bind', Source: path.join(controlRoot, 'public'), Destination: '/run/agent-infra/control-status', RW: false },",
       "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(controlRoot, 'runtime'), Destination: '/run/agent-infra/runtime', RW: true }] : []),",
@@ -311,7 +312,7 @@ function writeSandboxEngineFixture(
       "    }",
       "    for (const mount of defaults.filter((mount) => mount.Type === 'bind' && !fs.existsSync(mount.Source))) {",
       "      fs.mkdirSync(path.dirname(mount.Source), { recursive: true });",
-      "      if (mount.Destination === '/workspace/.agents/workspace/active/.short-ids.json') fs.writeFileSync(mount.Source, '{}\\n');",
+      "      if (mount.Destination === '/task-workspace/active/.short-ids.json') fs.writeFileSync(mount.Source, '{}\\n');",
       "      else fs.mkdirSync(mount.Source, { recursive: true });",
       "    }",
       "    return defaults;",
@@ -500,6 +501,7 @@ function writeSandboxEngineFixture(
 
   return {
     repoDir,
+    project,
     binDir,
     logPath,
     envFileLogPath,

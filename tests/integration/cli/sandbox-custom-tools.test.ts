@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
@@ -90,7 +91,7 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
     { Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
     ...["active", "completed", "blocked", "archive"].map((state) => ({
       Source: path.join(view.root, state),
-      Destination: path.posix.join("/workspace/.agents/workspace", state),
+      Destination: path.posix.join("/task-workspace", state),
       RW: false
     })),
     { Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },

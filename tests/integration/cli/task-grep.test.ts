@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -16,10 +17,10 @@ function mkFixture(): { repoRoot: string } {
   fs.copyFileSync(SCRIPT, path.join(agentsDir, 'scripts', 'task-short-id.js'));
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
-    JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } })
+    JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength: 2 } })
   );
   for (const state of ['active', 'blocked', 'completed']) {
-    fs.mkdirSync(path.join(agentsDir, 'workspace', state), { recursive: true });
+    fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot), state), { recursive: true });
   }
   return { repoRoot };
 }
@@ -31,7 +32,7 @@ function writeTask(
   taskId: string,
   files: Record<string, string>
 ): void {
-  const dir = path.join(repoRoot, '.agents', 'workspace', state, taskId);
+  const dir = path.join(taskWorkspaceRoot(repoRoot),  state, taskId);
   fs.mkdirSync(dir, { recursive: true });
   if (!files['task.md']) {
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# ${taskId}\n`);
@@ -43,7 +44,7 @@ function writeTask(
 
 // Write a task dir under the archive YYYY/MM/DD layout.
 function writeArchiveTask(repoRoot: string, taskId: string, files: Record<string, string>): void {
-  const dir = path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '06', '18', taskId, 'local');
+  const dir = path.join(taskWorkspaceRoot(repoRoot),  'archive', '2026', '06', '18', taskId, 'local');
   fs.mkdirSync(dir, { recursive: true });
   if (!files['task.md']) {
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# ${taskId}\n`);
@@ -151,7 +152,7 @@ test('a ref narrows the scan to a single task', () => {
 test('an artifact selector (name or number) narrows the scan to a single file', () => {
   const { repoRoot } = mkFixture();
   const taskId = 'TASK-20260101-000001';
-  const dir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const dir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# ${taskId}\nKEYWORD task\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), 'KEYWORD analysis\n');

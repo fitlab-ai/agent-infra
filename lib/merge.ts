@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { removeDirRecursive } from './remove-dir.ts';
 import { validateCurrentTaskContract } from './task/current-contract.ts';
+import { resolveProjectTaskWorkspaceRoot } from './task/workspace-root.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -988,7 +989,7 @@ function mergeArchiveSection(sourceArchive: string, localArchive: string, report
 }
 
 function printSection(lines: string[], name: MutableSection, counts: MutableCounts): void {
-  const title = `${SECTION_LABELS[name].padEnd(9, ' ')} (.agents/workspace/${name}/):`;
+  const title = `${SECTION_LABELS[name].padEnd(9, ' ')} (task workspace/${name}/):`;
   lines.push(title);
 
   const allEntries: Array<[MutableAction, string]> = [
@@ -1013,7 +1014,7 @@ function printSection(lines: string[], name: MutableSection, counts: MutableCoun
 }
 
 function printArchiveSection(lines: string[], counts: ArchiveCounts): void {
-  const title = `${SECTION_LABELS.archive.padEnd(9, ' ')} (.agents/workspace/archive/):`;
+  const title = `${SECTION_LABELS.archive.padEnd(9, ' ')} (task workspace/archive/):`;
   lines.push(title);
 
   if (counts.copied.length === 0 && counts.skipped.length === 0) {
@@ -1105,7 +1106,7 @@ async function cmdMerge(args: string[]): Promise<void> {
   }
 
   const repoRoot = process.cwd();
-  const workspaceDir = path.join(repoRoot, '.agents', 'workspace');
+  const workspaceDir = resolveProjectTaskWorkspaceRoot(repoRoot);
   const archiveDir = path.join(workspaceDir, 'archive');
   const backupStamp = formatBackupTimestamp(new Date());
   const projectKey = resolveRecoveryProjectKey(repoRoot);

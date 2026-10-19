@@ -13,7 +13,7 @@ Summary:
 - All tests passed: {yes/no}
 
 Output files:
-- Code report: .agents/workspace/active/{task-id}/{code-artifact}
+- Code report: <task-workspace>/active/{task-id}/{code-artifact}
 
 Next step - code review:
 {next-step-commands}

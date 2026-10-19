@@ -1,6 +1,8 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../../helpers.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,13 +10,14 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
-  prepareSandboxCompletedTaskMountSource,
   prepareSandboxWorkspaceMountTargets,
+  prepareSandboxCompletedTaskMountSource,
   sandboxControlPaths,
   sandboxWorkspaceViewStatePaths
 } from '../../../../lib/sandbox/workspace-view.ts';
 import { acquireSandboxControlReplacement } from '../../../../lib/sandbox/control/lifecycle.ts';
 import { sandboxCoreBindMounts } from '../../../../lib/sandbox/mounts.ts';
+import { resolveSandboxTarget } from '../../../../lib/sandbox/workspace-identity.ts';
 import { createTempDir, assertModeBits, onPlatforms } from '../../../helpers.ts';
 
 test('workspace view state paths use the isolated runtime state allowlist', () => {
@@ -58,7 +61,7 @@ test('branch-only view is stable and exposes an empty registry', () => {
 test('task-bound control paths use a stable project and full-task control root', () => {
   const root = createTempDir('sandbox-task-runtime-root-');
   const taskId = 'TASK-20261006-010203';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: task-branch\n---\n`);
   const controlBase = path.join(root, 'stable-control-base');
@@ -104,10 +107,8 @@ test('task-bound control materialization rejects a symlinked managed-root ancest
 
 test('workspace mount targets are created by the host with private permissions', () => {
   const root = createTempDir('sandbox-workspace-target-');
-
+  const workspace = taskWorkspaceRoot(root);
   prepareSandboxWorkspaceMountTargets(root);
-
-  const workspace = path.join(root, '.agents', 'workspace');
   assert.equal(fs.statSync(workspace).isDirectory(), true);
   assertModeBits(workspace, 0o700);
   for (const { hostPath } of sandboxWorkspaceViewStatePaths(workspace)) {
@@ -115,17 +116,18 @@ test('workspace mount targets are created by the host with private permissions',
     assertModeBits(hostPath, 0o700);
   }
   assert.equal(fs.statSync(path.join(workspace, 'active', '.short-ids.json')).isFile(), true);
+  assert.equal(fs.readFileSync(path.join(workspace, 'active', '.short-ids.json'), 'utf8'), '{"version":1,"ids":{}}\n');
+  assert.equal(resolveSandboxTarget('feature/empty', root).workspace.mode, 'branch-only');
 });
 
 test('workspace mount targets preserve existing runtime content on repeat', () => {
   const root = createTempDir('sandbox-workspace-target-repeat-');
-  const workspace = path.join(root, '.agents', 'workspace');
+  const workspace = taskWorkspaceRoot(root);
   prepareSandboxWorkspaceMountTargets(root);
   const registry = path.join(workspace, 'active', '.short-ids.json');
   const sentinel = path.join(workspace, 'active', 'sentinel');
   fs.writeFileSync(registry, '{"keep":true}\n');
   fs.writeFileSync(sentinel, 'preserve\n');
-
   prepareSandboxWorkspaceMountTargets(root);
 
   assert.equal(fs.readFileSync(registry, 'utf8'), '{"keep":true}\n');
@@ -137,10 +139,9 @@ test('task-bound sandboxes bind only their completed task directory writable', (
   const repoRoot = path.join(root, 'repo');
   const worktree = path.join(root, 'worktree');
   const taskId = 'TASK-20260809-010203';
-  fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace'), { recursive: true });
+  fs.mkdirSync(taskWorkspaceRoot(repoRoot), { recursive: true });
   fs.mkdirSync(worktree, { recursive: true });
   const completedSource = prepareSandboxCompletedTaskMountSource(repoRoot, taskId);
-  prepareSandboxWorkspaceMountTargets(worktree, taskId);
 
   const mounts = sandboxCoreBindMounts({
     repoRoot, worktreeBase: path.join(root, 'worktrees'), shareBase: path.join(root, 'shares'),
@@ -148,37 +149,56 @@ test('task-bound sandboxes bind only their completed task directory writable', (
   }, 'feature/task', {
     worktree, workspaceViewRoot: path.join(root, 'view'), controlDir: path.join(root, 'control', 'channel'),
     controlRootDir: path.join(root, 'control'),
-    controlStatusDir: path.join(root, 'control', 'public'), taskSources: [path.join(repoRoot, 'active', taskId)],
+    controlStatusDir: path.join(root, 'control', 'public'), taskSources: [path.join(taskWorkspaceRoot(repoRoot), 'active', taskId)],
     completedTaskSource: completedSource, taskId
   });
-  const parent = mounts.find((mount) => mount.containerPath === '/workspace/.agents/workspace/completed');
-  const task = mounts.find((mount) => mount.containerPath === `/workspace/.agents/workspace/completed/${taskId}`);
+  const parent = mounts.find((mount) => mount.containerPath === '/task-workspace/completed');
+  const task = mounts.find((mount) => mount.containerPath === `/task-workspace/completed/${taskId}`);
   assert.equal(parent, undefined);
-  assert.deepEqual(task, { hostPaths: [completedSource], containerPath: `/workspace/.agents/workspace/completed/${taskId}`, readOnly: false });
-  assert.equal(fs.statSync(path.join(worktree, '.agents', 'workspace', 'completed', taskId)).isDirectory(), true);
+  assert.deepEqual(task, { hostPaths: [completedSource], containerPath: `/task-workspace/completed/${taskId}`, readOnly: false });
+  assert.equal(fs.statSync(path.join(taskWorkspaceRoot(repoRoot), 'completed', taskId)).isDirectory(), true);
   assert.deepEqual(fs.readdirSync(completedSource), []);
 });
 
 test('workspace mount targets reject symbolic-link destinations', () => {
   const root = createTempDir('sandbox-workspace-target-link-');
   const outside = createTempDir('sandbox-workspace-target-outside-');
-  fs.mkdirSync(path.join(root, '.agents'));
-  fs.symlinkSync(outside, path.join(root, '.agents', 'workspace'), process.platform === 'win32' ? 'junction' : 'dir');
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.mkdirSync(path.dirname(taskWorkspaceRoot(root)), { recursive: true });
+  fs.symlinkSync(outside, taskWorkspaceRoot(root), process.platform === 'win32' ? 'junction' : 'dir');
 
   assert.throws(() => prepareSandboxWorkspaceMountTargets(root), /must not contain a symbolic link/);
 });
 
 test('workspace mount target rejects symbolic-link ancestors', () => {
   const root = createTempDir('sandbox-workspace-ancestor-link-');
+  const home = path.join(root, 'home');
   const outside = createTempDir('sandbox-workspace-ancestor-outside-');
-  fs.symlinkSync(outside, path.join(root, '.agents'), process.platform === 'win32' ? 'junction' : 'dir');
-
-  assert.throws(() => prepareSandboxWorkspaceMountTargets(root), /must not contain a symbolic link/);
+  const project = taskWorkspaceProject(root);
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project }));
+  fs.mkdirSync(path.join(home, '.agent-infra'), { recursive: true });
+  fs.symlinkSync(outside, path.join(home, '.agent-infra', 'task-workspaces'), process.platform === 'win32' ? 'junction' : 'dir');
+  const moduleUrl = new URL('../../../../lib/sandbox/workspace-view.ts', import.meta.url).href;
+  const script = `import { prepareSandboxWorkspaceMountTargets } from ${JSON.stringify(moduleUrl)}; prepareSandboxWorkspaceMountTargets(process.argv[1]);`;
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
+  for (const key of [
+    'AGENT_INFRA_SANDBOX', 'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_ROOT_DIR', 'AGENT_INFRA_CONTROL_ROOT_ID',
+    'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR'
+  ]) delete env[key];
+  const child = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', script, root], {
+    cwd: process.cwd(),
+    env,
+    encoding: 'utf8'
+  });
+  assert.notEqual(child.status, 0, child.stdout);
+  assert.match(child.stderr, /must not contain a symbolic link/);
 });
 
 test('task sources reject symlinks before they become writable mounts', () => {
   const root = createTempDir('sandbox-source-');
-  const active = path.join(root, '.agents', 'workspace', 'active');
+  const active = path.join(taskWorkspaceRoot(root),  'active');
   const outside = path.join(root, 'outside');
   fs.mkdirSync(active, { recursive: true });
   fs.mkdirSync(outside);

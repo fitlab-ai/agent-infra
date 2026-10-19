@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,7 +13,7 @@ const TASK_ID = 'TASK-20260101-000001';
 function fixture() {
   const root = createTempDir('qualify-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
   const taskPath = path.join(dir, 'task.md');
   fs.writeFileSync(taskPath, `---

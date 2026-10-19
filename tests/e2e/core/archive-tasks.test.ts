@@ -1,7 +1,8 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -38,9 +39,14 @@ function runArchiveScript(repoDir: string, ...args: string[]): string {
 
 function setupRepo() {
   const repoDir = createTempDir("archive-tasks-");
+  execFileSync("git", ["init", "-q"], { cwd: repoDir });
 
   fs.mkdirSync(path.join(repoDir, ".agents/skills/archive-tasks/scripts"), { recursive: true });
-  fs.mkdirSync(path.join(repoDir, ".agents/workspace/completed"), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoDir), "completed"), { recursive: true });
+  fs.mkdirSync(path.join(repoDir, "bin"), { recursive: true });
+  fs.copyFileSync(path.join(process.cwd(), "bin/internal-cli.sh"), path.join(repoDir, "bin/internal-cli.sh"));
+  fs.cpSync(path.join(process.cwd(), "dist"), path.join(repoDir, "dist"), { recursive: true });
+  fs.symlinkSync(path.join(process.cwd(), "node_modules"), path.join(repoDir, "node_modules"), process.platform === "win32" ? "junction" : "dir");
   fs.writeFileSync(
     path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh"),
     read(".agents/skills/archive-tasks/scripts/archive-tasks.sh"),
@@ -55,7 +61,7 @@ function writeCompletedTask(
   taskId: string,
   { completedAt, updatedAt = completedAt, type = "feature", title, extraFile = "note.txt" }: CompletedTaskOptions
 ) {
-  const taskDir = path.join(repoDir, ".agents/workspace/completed", taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoDir), "completed", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
     path.join(taskDir, "task.md"),
@@ -81,7 +87,7 @@ test("archive-tasks archives all completed tasks and rebuilds the manifest", () 
     });
 
     const output = runArchiveScript(repoDir);
-    const archiveRoot = path.join(repoDir, ".agents/workspace/archive");
+    const archiveRoot = path.join(taskWorkspaceRoot(repoDir), "archive");
     const firstArchive = path.join(archiveRoot, "2026/03/01/TASK-20260301-000001");
     const secondArchive = path.join(archiveRoot, "2026/03/02/TASK-20260302-000002");
     const rootManifest = fs.readFileSync(path.join(archiveRoot, "manifest.md"), "utf8");
@@ -96,7 +102,7 @@ test("archive-tasks archives all completed tasks and rebuilds the manifest", () 
     assert.ok(fs.existsSync(path.join(secondArchive, "local/note.txt")), "task files should be moved without compression");
     assert.ok(fs.existsSync(path.join(secondArchive, "local/contents.sha256")), "local archive content should have a checksum manifest");
     assert.ok(
-      !fs.existsSync(path.join(repoDir, ".agents/workspace/completed", "TASK-20260301-000001")),
+      !fs.existsSync(path.join(taskWorkspaceRoot(repoDir), "completed", "TASK-20260301-000001")),
       "archived tasks should no longer remain in completed/"
     );
     assert.match(rootManifest, /\| 2026 \| 2 \| \[2026\/manifest\.md\]\(2026\/manifest\.md\) \|/);
@@ -117,7 +123,7 @@ test("archive-tasks keeps the completed task when checksum validation fails", on
       completedAt: "2026-03-01 09:00:00",
       title: "checksum failure"
     });
-    const completedTaskDir = path.join(repoDir, ".agents/workspace/completed", taskId);
+    const completedTaskDir = path.join(taskWorkspaceRoot(repoDir), "completed", taskId);
     const taskMdBefore = fs.readFileSync(path.join(completedTaskDir, "task.md"));
     const fakeBin = path.join(repoDir, "fake-bin");
     fs.mkdirSync(fakeBin);
@@ -138,7 +144,7 @@ test("archive-tasks keeps the completed task when checksum validation fails", on
     assert.notEqual(result.status, 0);
     assert.deepEqual(fs.readFileSync(path.join(completedTaskDir, "task.md")), taskMdBefore);
     assert.equal(
-      fs.existsSync(path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId)),
+      fs.existsSync(path.join(taskWorkspaceRoot(repoDir), "archive/2026/03/01", taskId)),
       false
     );
   } finally {
@@ -155,8 +161,8 @@ test("archive-tasks rolls back the published archive when completed source remov
       completedAt: "2026-03-01 09:00:00",
       title: "source removal failure"
     });
-    const completedTaskDir = path.join(repoDir, ".agents/workspace/completed", taskId);
-    const archiveTaskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
+    const completedTaskDir = path.join(taskWorkspaceRoot(repoDir), "completed", taskId);
+    const archiveTaskDir = path.join(taskWorkspaceRoot(repoDir), "archive/2026/03/01", taskId);
     const taskMdBefore = fs.readFileSync(path.join(completedTaskDir, "task.md"));
     const fakeBin = path.join(repoDir, "fake-bin");
     fs.mkdirSync(fakeBin);
@@ -193,7 +199,7 @@ test("archive-tasks limits monthly manifests to 1000 entries with a truncation n
   try {
     for (let index = 1; index <= 1001; index += 1) {
       const taskId = `TASK-20260315-${String(index).padStart(6, "0")}`;
-      const local = path.join(repoDir, ".agents/workspace/archive/2026/03/15", taskId, "local");
+      const local = path.join(taskWorkspaceRoot(repoDir), "archive/2026/03/15", taskId, "local");
       fs.mkdirSync(
         local,
         { recursive: true }
@@ -207,7 +213,7 @@ test("archive-tasks limits monthly manifests to 1000 entries with a truncation n
     runArchiveScript(repoDir);
 
     const monthManifest = fs.readFileSync(
-      path.join(repoDir, ".agents/workspace/archive/2026/03/manifest.md"),
+      path.join(taskWorkspaceRoot(repoDir), "archive/2026/03/manifest.md"),
       "utf8"
     );
 
@@ -234,18 +240,18 @@ test("archive-tasks supports --before and explicit task IDs", () => {
 
     runArchiveScript(repoDir, "--before", "2026-03-10");
     assert.ok(
-      fs.existsSync(path.join(repoDir, ".agents/workspace/archive/2026/03/05/TASK-20260305-000005")),
+      fs.existsSync(path.join(taskWorkspaceRoot(repoDir), "archive/2026/03/05/TASK-20260305-000005")),
       "--before should archive tasks older than the given date"
     );
     assert.ok(
-      fs.existsSync(path.join(repoDir, ".agents/workspace/completed/TASK-20260312-000012")),
+      fs.existsSync(path.join(taskWorkspaceRoot(repoDir), "completed/TASK-20260312-000012")),
       "--before should retain newer tasks in completed/"
     );
 
     const output = runArchiveScript(repoDir, "TASK-20260312-000012");
     assert.match(output, /Archived TASK-20260312-000012 -> 2026\/03\/12\/TASK-20260312-000012\//);
     assert.ok(
-      fs.existsSync(path.join(repoDir, ".agents/workspace/archive/2026/03/12/TASK-20260312-000012")),
+      fs.existsSync(path.join(taskWorkspaceRoot(repoDir), "archive/2026/03/12/TASK-20260312-000012")),
       "explicit task IDs should archive the requested task"
     );
   } finally {
@@ -275,11 +281,11 @@ test("archive-tasks supports --days and skips already archived task IDs", () => 
     const firstOutput = runArchiveScript(repoDir, "--days", "5");
     assert.match(firstOutput, /- Archived: 1/);
     assert.ok(
-      fs.existsSync(path.join(repoDir, `.agents/workspace/archive/${formatDate(older).replace(/-/g, "/")}/TASK-OLDER-0001`)),
+      fs.existsSync(path.join(taskWorkspaceRoot(repoDir), `archive/${formatDate(older).replace(/-/g, "/")}/TASK-OLDER-0001`)),
       "--days should archive tasks older than the retention window"
     );
     assert.ok(
-      fs.existsSync(path.join(repoDir, ".agents/workspace/completed/TASK-RECENT-0002")),
+      fs.existsSync(path.join(taskWorkspaceRoot(repoDir), "completed/TASK-RECENT-0002")),
       "--days should keep recent tasks in completed/"
     );
 

@@ -7,16 +7,16 @@ description: >
 
 # 归档已完成任务
 
-将 `.agents/workspace/completed/` 中的已完成任务归档到 `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/local/`，并重建三级归档索引。TASK 本地材料位于 `local/`，含按路径排序的 `contents.sha256`；TASK 根目录不存放普通文件。
-- 根 manifest：`.agents/workspace/archive/manifest.md`
-- 年 manifest：`.agents/workspace/archive/YYYY/manifest.md`
-- 月 manifest：`.agents/workspace/archive/YYYY/MM/manifest.md`
+将 `<task-workspace>/completed/` 中的已完成任务归档到 `<task-workspace>/archive/YYYY/MM/DD/TASK-xxx/local/`，并重建三级归档索引。TASK 本地材料位于 `local/`，含按路径排序的 `contents.sha256`；TASK 根目录不存放普通文件。
+- 根 manifest：`<task-workspace>/archive/manifest.md`
+- 年 manifest：`<task-workspace>/archive/YYYY/manifest.md`
+- 月 manifest：`<task-workspace>/archive/YYYY/MM/manifest.md`
 
 ## 执行流程
 
 ### 1. 验证环境
 
-确认 `.agents/workspace/completed/` 存在，并根据用户输入选择以下四种调用方式之一：
+确认 `<task-workspace>/completed/` 存在，并根据用户输入选择以下四种调用方式之一：
 - 无参数：归档全部已完成任务
 - `--days N`：保留最近 `N` 天，仅归档更早的任务
 - `--before YYYY-MM-DD`：仅归档指定日期之前的任务

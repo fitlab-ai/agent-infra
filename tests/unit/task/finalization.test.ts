@@ -1,10 +1,11 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
-import { createTempDir, onPlatforms } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, onPlatforms } from '../../helpers.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
 import { inspectCompletionBackfillEligibility } from '../../../lib/platform/completion-backfill.ts';
 import {
@@ -28,11 +29,11 @@ const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-08-24 12:00:00+00:00', agentInfraVersion: 'v0.9.9' };
 
 function fixture(): { repoRoot: string; taskDir: string } {
-  const repoRoot = createTempDir('task-finalization-');
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  const { repoRoot, project } = createTaskWorkspaceFixture('task-finalization-');
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project, task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---', `id: ${TASK_ID}`, 'platform_issue_identity: \'{"kind":"number","value":42}\'', 'status: active', 'current_step: code-review',
     'assigned_to: codex', 'updated_at: old', 'agent_infra_version: v0.9.9', 'target_date:', '---',
@@ -119,7 +120,7 @@ test('finalization receipt is stored in the unique owning task directory', async
 test('finalization receipt lookup rejects duplicate task ids and task document id mismatches', () => {
   const duplicate = fixture();
   try {
-    const otherTaskDir = path.join(duplicate.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+    const otherTaskDir = path.join(taskWorkspaceRoot(duplicate.repoRoot),  'completed', TASK_ID);
     fs.mkdirSync(otherTaskDir, { recursive: true });
     fs.writeFileSync(path.join(otherTaskDir, 'task.md'), `---\nid: ${TASK_ID}\n---\n`);
     assert.throws(() => readTaskFinalizationReceipt(duplicate.repoRoot, TASK_ID), /duplicate task identity/u);
@@ -265,7 +266,7 @@ test('host finalization stops before lifecycle when completion backfill has no s
     assert.equal(result.error?.code, 'BACKFILL_PENDING');
     assert.equal(commentCalls, 0);
     assert.equal(verifyCalls, 0);
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID, 'task.md')), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -299,7 +300,7 @@ test('finalization keeps the active task document unchanged when terminal commen
     assert.deepEqual(projectionStates, ['completed', 'completed', 'completed']);
     assert.match(taskProjections[1]!, /NETWORK_ERROR \| open/u);
     assert.match(taskProjections[2]!, /NETWORK_ERROR \| resolved/u);
-    const completedTask = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md');
+    const completedTask = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md');
     assert.equal(taskProjections[2], fs.readFileSync(completedTask, 'utf8'));
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -398,7 +399,7 @@ test('completed finalization does not replay lifecycle for a backfill warning', 
     await applyTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
     });
-    const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.task-finalization.json');
+    const receiptPath = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, '.task-finalization.json');
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
     fs.writeFileSync(receiptPath, `${JSON.stringify({
       ...receipt,
@@ -432,7 +433,7 @@ test('completed finalization schedules backfill from an eligible task artifact w
     await applyTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
     });
-    const taskMd = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md');
+    const taskMd = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md');
     const content = fs.readFileSync(taskMd, 'utf8');
     fs.writeFileSync(taskMd, content.replace('## Activity Log', [
       '## Workflow Warnings', '',
@@ -468,7 +469,7 @@ test('completed finalization fails closed when an artifact warning references a 
     await applyTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => { verifyCalls += 1; return verification('pass'); }), backfill
     });
-    const taskDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
     const taskMd = path.join(taskDir, 'task.md');
     fs.symlinkSync('task.md', path.join(taskDir, 'analysis.md'));
     fs.writeFileSync(taskMd, fs.readFileSync(taskMd, 'utf8').replace('## Activity Log', [
@@ -505,7 +506,7 @@ test('completed finalization keeps deterministic backfill errors fail-closed', a
     await applyTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
     });
-    const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.task-finalization.json');
+    const receiptPath = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, '.task-finalization.json');
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
     fs.writeFileSync(receiptPath, `${JSON.stringify({
       ...receipt,
@@ -562,9 +563,9 @@ test('host finalization rejects an inconsistent copied-back lifecycle journal wi
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
     assert.equal(fs.existsSync(f.taskDir), true);
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID)), false);
     assert.deepEqual(
-      JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+      JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json'), 'utf8')).ids,
       { '01': TASK_ID }
     );
   } finally {
@@ -620,7 +621,7 @@ test('host finalization rejects a journal that claims a retained short id was re
   try {
     assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
     bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, binding);
-    const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+    const targetDir = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
     fs.mkdirSync(path.dirname(targetDir), { recursive: true });
     fs.renameSync(f.taskDir, targetDir);
     const journalPath = path.join(targetDir, '.task-lifecycle.json');
@@ -636,7 +637,7 @@ test('host finalization rejects a journal that claims a retained short id was re
     assert.equal(result.error?.code, 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
     assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.lastError, null);
     assert.deepEqual(
-      JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+      JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json'), 'utf8')).ids,
       { '01': TASK_ID }
     );
   } finally {
@@ -656,7 +657,7 @@ test('host resumes a pending canonical receipt with a new sandbox generation aft
     });
     assert.equal(prepared.status, 'prepared');
     bindTaskFinalizationReceipt(host.repoRoot, TASK_ID, oldBinding);
-    const registryPath = path.join(host.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+    const registryPath = path.join(taskWorkspaceRoot(host.repoRoot),  'active', '.short-ids.json');
     fs.writeFileSync(registryPath, 'invalid json');
     const interrupted = await commitPreparedTaskFinalization(request, {
       ...options(host.repoRoot, commentSync, verify), controlBinding: oldBinding
@@ -668,7 +669,7 @@ test('host resumes a pending canonical receipt with a new sandbox generation aft
     });
     assert.equal(retry.status, 'completed', JSON.stringify(retry));
     assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, oldBinding);
-    assert.equal(fs.existsSync(path.join(host.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(host.repoRoot),  'completed', TASK_ID)), true);
   } finally {
     fs.rmSync(host.repoRoot, { recursive: true, force: true });
   }
@@ -718,8 +719,8 @@ test('host finalization uses the canonical root and makes a successful replay a 
     assert.deepEqual(verificationEvents, ['complete-task.completed']);
     assert.equal(second.verification, null);
     assert.equal(second.taskComment, null);
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
-    assert.equal((fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md')), true);
+    assert.equal((fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -811,7 +812,7 @@ test('host finalization does not report completion when the committed task fails
   try {
     const failed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const failedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
-    const completedTaskDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+    const completedTaskDir = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
     assert.equal(failed.status, 'failed');
     assert.equal(failed.result, 'failed');
     assert.equal(failed.error?.code, 'CHECK_FAILED');
@@ -854,7 +855,7 @@ test('host finalization runs the terminal gate against the completed task docume
   };
   try {
     const result = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
-    const completedTask = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+    const completedTask = fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8');
     assert.equal(result.status, 'completed');
     assert.deepEqual(verificationEvents, ['complete-task.completed']);
     assert.match(completedTask, /^status: completed$/m);
@@ -915,7 +916,7 @@ test('host finalization keeps a blocked terminal gate pending for a completed ta
     assert.deepEqual(result.pendingSteps, ['task-comment', 'verification']);
     assert.equal(receipt?.lifecycle, 'done');
     assert.equal(receipt?.verification, 'pending');
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID)), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -951,7 +952,7 @@ test('host finalization seals a staged summary after core verification and retai
     assert.deepEqual(timeline, ['summary', 'task', 'verify']);
     assert.equal(verifyCalls, 1);
     assert.equal(receipt?.summary, 'done');
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, '.delivery-summary.json')), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1041,7 +1042,7 @@ test('host finalization re-runs the terminal gate after interruption at the life
     });
     assert.equal(interrupted.status, 'failed');
     assert.equal(receiptAtLifecycle.value?.verification, 'pending');
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID)), true);
 
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
@@ -1112,7 +1113,7 @@ test('host finalization keeps a receipt persistence error blocked when warnings 
 test('host finalization reports lifecycle changes when verification and receipt persistence fail', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
-  const receiptDirectory = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+  const receiptDirectory = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
   })}\n`);
@@ -1183,7 +1184,7 @@ test('host finalization resolves a summary warning after a successful retry', as
     assert.equal(third.result, 'completed');
     assert.deepEqual(calls.slice(-2), ['summary', 'task']);
     assert.equal(receipt?.warnings.some((warning) => warning.step === 'summary' && warning.status === 'open'), false);
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, '.delivery-summary.json')), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1203,7 +1204,7 @@ test('host finalization revalidates canonical steps when the receipt is absent',
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    fs.rmSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.task-finalization.json'));
+    fs.rmSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, '.task-finalization.json'));
     const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
@@ -1219,7 +1220,7 @@ test('host finalization rejects a current receipt that omits warningProjection',
   const f = fixture();
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
-  const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.task-finalization.json');
+  const receiptPath = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, '.task-finalization.json');
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
@@ -1320,8 +1321,8 @@ test('host finalization retries only the pending terminal steps after a comment 
     assert.equal(second.status, 'completed');
     assert.equal(commentCalls, 3);
     assert.equal(verifyCalls, 1);
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
-    const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID)), true);
+    const completed = fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8');
     assert.match(completed, /\| NETWORK_RETRY \| resolved \|/);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -1346,7 +1347,7 @@ test('host finalization projects every stable warning key for a step before reso
     await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+    const completed = fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8');
     assert.equal(recovered.result, 'completed');
     assert.match(completed, /\| ERROR_A \| resolved \|/);
     assert.match(completed, /\| ERROR_B \| resolved \|/);
@@ -1427,7 +1428,7 @@ test('broker commit fails closed on the short-id registry after sandbox preparat
     const f = fixture();
     const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
     const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
-    const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+    const registryPath = path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json');
     try {
       const first = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify));
       mutate(registryPath);
@@ -1436,7 +1437,7 @@ test('broker commit fails closed on the short-id registry after sandbox preparat
       assert.equal(commit.status, 'failed', label);
       assert.equal(commit.error?.code, 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE', label);
       assert.equal(commit.lifecycle, null, label);
-      assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), true, label);
+      assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID)), true, label);
       const receipt = fs.readFileSync(path.join(f.taskDir, '.task-finalization.json'), 'utf8');
       assert.equal(JSON.stringify(commit).includes(f.repoRoot), false, label);
       assert.equal(receipt.includes(f.repoRoot), false, label);

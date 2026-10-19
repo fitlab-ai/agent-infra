@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,7 +16,7 @@ function fixture(t: TestContext) {
   execFileSync('git', ['init', '-q', '-b', 'scratch'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Fixture'], { cwd: root });
   const taskId = 'TASK-20260906-010203';
-  const source = path.join(root, '.agents', 'workspace', 'completed', taskId);
+  const source = path.join(taskWorkspaceRoot(root),  'completed', taskId);
   fs.mkdirSync(source, { recursive: true });
   fs.writeFileSync(path.join(source, 'task.md'), `---\nid: ${taskId}\nbranch: scratch\nstatus: completed\n---\n`);
   const control = path.join(root, 'control');

@@ -9,6 +9,8 @@ import {
   createTempDir,
   INTERNAL_CLI_PATH,
   envWithPrependedPath,
+  taskWorkspaceProject,
+  taskWorkspaceRoot,
   writeNodeCommandShim
 } from "../../../helpers.ts";
 
@@ -32,15 +34,17 @@ function withInternalCliPath<T>(operation: () => T): T {
 
 function mkFixtureRepo(shortIdLength: number = 1): { repoRoot: string; activeDir: string } {
   const repoRoot = createTempDir("tr-");
+  const git = spawnSync("git", ["init", "--quiet"], { cwd: repoRoot, encoding: "utf8" });
+  if (git.status !== 0) throw new Error(`git init failed: ${git.stderr}`);
   const agentsDir = path.join(repoRoot, ".agents");
   const scriptsDir = path.join(agentsDir, "scripts");
   fs.mkdirSync(scriptsDir, { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(scriptsDir, "task-short-id.js"));
   fs.writeFileSync(
     path.join(agentsDir, ".airc.json"),
-    JSON.stringify({ task: { shortIdLength } })
+    JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength } })
   );
-  const activeDir = path.join(agentsDir, "workspace", "active");
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot), "active");
   fs.mkdirSync(activeDir, { recursive: true });
   return { repoRoot, activeDir };
 }

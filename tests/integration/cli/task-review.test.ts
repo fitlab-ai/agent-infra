@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,7 +19,7 @@ const scenarios = [
 function fixture(scenario: (typeof scenarios)[number], line: string) {
   const root = createTempDir('task-review-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(dir, scenario.input), '# Input\n');

@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { createTempDir, INTERNAL_CLI_PATH, gitSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, gitSafeEnv, taskWorkspaceProject } from '../../helpers.ts';
+
+function configureTaskWorkspace(root: string): void {
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root) }));
+}
 
 function run(root: string, args: string[]) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'git-workflow', ...args], { cwd: root, encoding: 'utf8', env: gitSafeEnv() });
@@ -14,11 +19,13 @@ test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
   const root = createTempDir('git-workflow-cli-');
   const remote = createTempDir('git-workflow-remote-');
   try {
+    configureTaskWorkspace(root);
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
     execFileSync('git', ['init', '-q', '-b', 'feature'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
     execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: root });
+    execFileSync('git', ['add', '.agents/.airc.json'], { cwd: root });
     fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\n');
     execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
@@ -52,11 +59,13 @@ test('git-workflow commit reports push failure and recovers through push-only co
   const remote = createTempDir('git-workflow-policy-remote-');
   const missingRemote = path.join(remote, 'missing.git');
   try {
+    configureTaskWorkspace(root);
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
     execFileSync('git', ['init', '-q', '-b', 'feature'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
     execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', missingRemote], { cwd: root });
+    execFileSync('git', ['add', '.agents/.airc.json'], { cwd: root });
     fs.writeFileSync(path.join(root, 'feature.txt'), 'feature\n');
     execFileSync('git', ['add', 'feature.txt'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'feature'], { cwd: root });
@@ -97,11 +106,13 @@ test('git-workflow commit rejects a branch/ref mismatch before pushing', () => {
   const root = createTempDir('git-workflow-policy-mismatch-');
   const remote = createTempDir('git-workflow-policy-mismatch-remote-');
   try {
+    configureTaskWorkspace(root);
     execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
     execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: root });
+    execFileSync('git', ['add', '.agents/.airc.json'], { cwd: root });
     fs.writeFileSync(path.join(root, 'main.txt'), 'main\n');
     execFileSync('git', ['add', 'main.txt'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'main'], { cwd: root });

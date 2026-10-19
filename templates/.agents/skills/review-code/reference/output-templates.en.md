@@ -25,7 +25,7 @@ When the finalizer fails, or the model stops because of a safety gate, lack of p
 
 ```text
 Task {task-id} review results were generated, but lifecycle advancement stopped.
-- Review artifact: .agents/workspace/active/{task-id}/{review-artifact}
+- Review artifact: <task-workspace>/active/{task-id}/{review-artifact}
 - Last valid summary/findings: {last-readable-review-result}
 - Local repair attempts: {repairAttempts}
 - Last diagnostic: {last-structured-diagnostic}
@@ -51,7 +51,7 @@ Common Branch A summary:
 ```text
 Task {task-id} review completed. Verdict: approved.
 - Blockers: 0 | Major: 0 | Minor: 0 | Manual-validation: {e} | Human-decision: {h}
-[- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
+[- Review report: <task-workspace>/active/{task-id}/{review-artifact}]
 ```
 
 #### Branch A1: Create a Pull Request
@@ -99,7 +99,7 @@ When `h = 0`, populate `{next-step-commands}` by running `agent-infra-internal a
 ```text
 Task {task-id} review completed. Verdict: changes requested.
 - Blockers: {blockers} | Major: {major} | Minor: {minor} | Manual-validation: {e} | Human-decision: {h}
-- Review report: .agents/workspace/active/{task-id}/{review-artifact}
+- Review report: <task-workspace>/active/{task-id}/{review-artifact}
 
 Next step - fix the findings:
 {next-step-commands}
@@ -123,7 +123,7 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 ```text
 Task {task-id} review completed. Verdict: rejected, re-design the technical plan.
 - Blockers: {blockers} | Major: {major} | Minor: {minor} | Manual-validation: {e} | Human-decision: {h}
-- Review report: .agents/workspace/active/{task-id}/{review-artifact}
+- Review report: <task-workspace>/active/{task-id}/{review-artifact}
 
 Next step - re-design the technical plan:
 {next-step-commands}

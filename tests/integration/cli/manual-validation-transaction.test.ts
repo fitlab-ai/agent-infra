@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -130,10 +131,10 @@ function createFixture(): Fixture {
   const headSha = git(root, ['rev-parse', 'HEAD']);
   git(root, ['remote', 'add', 'origin', 'https://github.com/acme/widgets.git']);
 
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}\n');
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }) + '\n');
   const changeReportScriptDir = path.join(root, '.agents', 'skills', 'create-pr', 'scripts');
   fs.mkdirSync(changeReportScriptDir, { recursive: true });
   fs.copyFileSync(path.join(process.cwd(), '.agents', 'skills', 'create-pr', 'scripts', 'change-report.mjs'), path.join(changeReportScriptDir, 'change-report.mjs'));
@@ -260,6 +261,7 @@ function configureOpaqueIdentity(fixture: Fixture, config: Record<string, unknow
   fs.writeFileSync(fixture.taskPath, taskContent.replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(fact)}`));
   const source = path.resolve(process.cwd(), 'tests/fixtures/platform-providers/opaque-identity-provider.mjs');
   fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
+    project: taskWorkspaceProject(fixture.root),
     platform: { type: 'trae', providers: { trae: { source, config: {
       repository: 'acme/widgets', number: 42, baseSha: fixture.baseSha, headSha: fixture.headSha, ...config
     } } } }

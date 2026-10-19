@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,16 +6,17 @@ import path from 'node:path';
 
 import { parseRunArgs, runSkill } from '../../../lib/run/index.ts';
 import { buildTuiCommand, renderPrompt, selectTui } from '../../../lib/run/tui.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260430-163836';
 
 function writeTaskFixture(options: { withShortId?: boolean } = {}): string {
-  const repoRoot = createTempDir('run-skill-repo-');
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  const { repoRoot, project } = createTaskWorkspaceFixture('run-skill-repo-');
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project, task: { shortIdLength: 2 } }));
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
-    path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
+    path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json'),
     JSON.stringify({ version: 1, ids: { '01': TASK_ID } }),
     'utf8'
   );
@@ -23,11 +25,11 @@ function writeTaskFixture(options: { withShortId?: boolean } = {}): string {
     fs.mkdirSync(path.join(repoRoot, '.agents', 'scripts'), { recursive: true });
     fs.writeFileSync(
       path.join(repoRoot, '.agents', '.airc.json'),
-      JSON.stringify({ task: { shortIdLength: 2 } }),
+      JSON.stringify({ project, task: { shortIdLength: 2 } }),
       'utf8'
     );
     fs.writeFileSync(
-      path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
+      path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json'),
       JSON.stringify({ version: 1, ids: { '01': TASK_ID } }),
       'utf8'
     );
@@ -287,7 +289,7 @@ test('runSkill writes a managed run record after successful task scheduling', as
   });
 
   assert.equal(code, 0);
-  const runsDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'runs');
+  const runsDir = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID, 'runs');
   const records = fs.readdirSync(runsDir);
   assert.equal(records.length, 1);
   const record = JSON.parse(fs.readFileSync(path.join(runsDir, records[0]!), 'utf8'));
@@ -322,7 +324,7 @@ test('runSkill resolves bare short task refs when writing managed run records', 
   });
 
   assert.equal(code, 0);
-  const runsDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'runs');
+  const runsDir = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID, 'runs');
   const [recordFile] = fs.readdirSync(runsDir);
   const record = JSON.parse(fs.readFileSync(path.join(runsDir, recordFile!), 'utf8'));
   assert.equal(record.task_id, TASK_ID);
@@ -338,7 +340,7 @@ test('runSkill does not write run records for create-task host execution', async
   });
 
   assert.equal(code, 0);
-  assert.equal(fs.existsSync(path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'runs')), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID, 'runs')), false);
 });
 
 test('runSkill honors command.allowedSkills as a narrowing allow-list', async () => {

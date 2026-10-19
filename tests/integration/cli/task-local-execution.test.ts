@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +16,7 @@ test('sandbox workflow and orchestration commands execute locally without publis
   const statusDir = path.join(controlRoot, 'public');
   const channelDir = path.join(controlRoot, 'channel');
   const requestsDir = path.join(channelDir, 'requests');
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   const generation = 'local-execution-generation';
   const controlRootId = 'a'.repeat(96);
   try {
@@ -53,6 +54,7 @@ test('sandbox workflow and orchestration commands execute locally without publis
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
       AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),
       AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
+      AGENT_INFRA_TEST_TASK_WORKSPACE_ROOT: taskWorkspaceRoot(root),
     };
     const begin = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-orchestration', TASK_ID,
       'begin-or-resume', '--client', 'claude-code',

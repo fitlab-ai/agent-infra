@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import path from 'node:path';
 import { inspectPlatformCommentOperation } from '../../../lib/platform/issue-comments.ts';
 import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations } from '../../../lib/task/platform-operation-recovery.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -30,12 +31,19 @@ test('Issue metadata recovery confirms requested fields while ignoring unrelated
 });
 
 function fixture() {
-  const repoRoot = createTempDir('platform-operation-recovery-');
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  const { repoRoot } = createTaskWorkspaceFixture('platform-operation-recovery-');
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   const taskFile = path.join(taskDir, 'task.md');
   fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: active\n---\n\n# Original title\n`);
-  return { repoRoot, taskDir, taskFile };
+  const project = (JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { project: string }).project;
+  return { repoRoot, taskDir, taskFile, project };
+}
+
+function writePlatformConfig(repoRoot: string, platform: Record<string, unknown>): void {
+  const configPath = path.join(repoRoot, '.agents', '.airc.json');
+  const current = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  fs.writeFileSync(configPath, JSON.stringify({ ...current, platform }));
 }
 
 test('recovery supersedes an old comment digest when its task projection changed', async () => {
@@ -70,12 +78,10 @@ test('recovery removes an already queued replacement and continues to the next c
   const f = fixture();
   try {
     fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs'), config: {} } }
-      }
-    }));
+    writePlatformConfig(f.repoRoot, {
+      type: 'trae',
+      providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs'), config: {} } }
+    });
     const old = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
     assert.ok(old);
     recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...old, dependency: 'deferred', state: 'pending' });
@@ -105,12 +111,10 @@ test('each automatic recovery run retries the head three times and records cumul
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
     fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
-      }
-    }));
+    writePlatformConfig(f.repoRoot, {
+      type: 'trae',
+      providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
+    });
     const operation = recordPlatformOperation({
       taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
       expectedDigest: 'a'.repeat(64), pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },
@@ -134,12 +138,10 @@ test('recovery retries the failed head and leaves later writes queued', async ()
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
     fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
-      }
-    }));
+    writePlatformConfig(f.repoRoot, {
+      type: 'trae',
+      providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
+    });
     const earlier = {
       taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request' as const,
       target: 'head:feature:base:main', expectedDigest: 'a'.repeat(64),
@@ -172,12 +174,10 @@ test('human supplied retry count overrides the automatic retry budget even when 
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
     fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true, verifyHeadFailures: 5 } } }
-      }
-    }));
+    writePlatformConfig(f.repoRoot, {
+      type: 'trae',
+      providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true, verifyHeadFailures: 5 } } }
+    });
     const operation = recordPlatformOperation({
       taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
       expectedDigest: 'a'.repeat(64), pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },

@@ -1042,9 +1042,9 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
 
   let gitRoot;
   try {
-    gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    gitRoot = execFileSync("git", ["-C", repositoryRoot, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
   } catch {
-    return blockedResult("post-review-commit", "git unavailable or task directory is not inside a git repository");
+    return blockedResult("post-review-commit", "git unavailable or repository root is not inside a git repository");
   }
 
   const task = loadTask(taskDir);

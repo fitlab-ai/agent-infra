@@ -45,7 +45,9 @@ export function inspectReviewIdentity(taskDir: string, reportContent: string, re
   }
   try {
     const metadata = parseTypedTaskFrontmatter(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'));
-    const taskRepositoryRoot = git(taskDir, ['rev-parse', '--show-toplevel']);
+    const taskRepositoryRoot = repositoryRoot
+      ? fs.realpathSync.native(repositoryRoot)
+      : git(taskDir, ['rev-parse', '--show-toplevel']);
     const branch = String(metadata.branch ?? '').trim();
     const gitRoot = branch ? resolveBranchWorktree(taskRepositoryRoot, branch) : taskRepositoryRoot;
     if (!gitRoot) return result('indeterminate', `Task branch '${branch}' is not checked out in a registered worktree`, reviewedHead);

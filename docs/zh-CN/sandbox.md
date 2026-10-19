@@ -130,7 +130,7 @@ ai sandbox create feature/proxy --inherit-proxy
 
 ## 按任务隔离的工作区身份
 
-每个沙箱都有显式 workspace identity。branch-only 沙箱对 `active`、`completed`、`blocked`、`archive` 使用互不重叠的只读目录挂载。task-bound 沙箱把 `active` 目录挂载替换为只读的 `.agents/workspace/active/.short-ids.json` 文件，继续只读挂载 `completed`、`blocked`、`archive`，并且只把 `.agents/workspace/active/<TASK-id>` 覆盖为可写。active 祖先目录由可写的 `/workspace` worktree 提供；宿主 workspace 根目录绝不会被挂载，其他状态下的全部任务都不可见。
+每个沙箱都有显式 workspace identity。branch-only 沙箱对 `active`、`completed`、`blocked`、`archive` 使用互不重叠的只读目录挂载。task-bound 沙箱把 `active` 目录挂载替换为只读的 `/task-workspace/active/.short-ids.json` 文件，继续只读挂载 `completed`、`blocked`、`archive`，并且只把 `/task-workspace/active/<TASK-id>` 覆盖为可写。任务工作区独立挂载到 `/task-workspace`，项目 worktree 仍挂载到 `/workspace`，宿主任务根不会整体挂载。其他状态下的任务仍不可见。
 
 如果 task-bound 容器仍然存在，但任务已经移动到 `completed`，`ai sandbox exec <branch>` 会在核对容器标签、唯一的 completed 任务、分支、task view 和历史任务挂载后，原位重新进入同一个容器。该流程内部使用完整 TASK-id，不会恢复或重新分配 active 短号。如果 completed readiness 失败，或用户执行 `ai sandbox exec --recreate <branch>`，命令会 fail closed，原容器保持不变。需要保留现场时可手动进入原容器；如果明确要新建 branch-only 沙箱，则分开执行 `ai sandbox rm <TASK-id>` 和 `ai sandbox create <branch>`。`ai sandbox rm` 是完整的交互式 sandbox 清理入口，不是只删除容器；它可能删除 worktree、本地分支、工具/shell 状态和 branch share。
 
@@ -168,7 +168,7 @@ task-bound workspace 挂载由宿主创建的可写 task projection，权威 tas
 
 Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs 中，使日志和运行时状态保留在内存。Linux 管理的 `packages/app-server-daemon` 目录会从项目和分支专属的工具状态目录以读写方式挂载，因此 daemon bootstrap 和更新可在容器重建后保留，同时不会复用宿主机安装的二进制文件。tmpfs 丢失后，其中的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；凭据、shell 配置、worktree 与 share 目录继续由宿主持久化。
 
-`ai sandbox ls` 保持精简：列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、workspace identity、完整 task ID 和分支），并在表后为每个容器显示 health/task-view 摘要。要查看某个沙箱的完整详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印基于标签的 workspace identity、该分支的 worktree 路径、各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径、broker health 和 task-view。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+`ai sandbox ls` 保持精简：列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、workspace identity、完整 task ID 和分支），并在表后为每个容器显示 health/task-view 摘要。要查看某个沙箱的完整详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印基于标签的 workspace identity、该分支的 worktree 路径、各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径、broker health 和 task-view。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `/task-workspace/active/.short-ids.json` 解析当前任务短号。
 
 下一个大版本的破坏性迁移：任务短号仅使用裸数字。请把 `#NN` 改为 `NN`；引用后的 `#NN` 输入也会被拒绝。
 
@@ -318,7 +318,7 @@ child close
 
 如果 broker 在 result record 有效、terminal 清理前重启，普通 process-control family
 可以收敛为带有“output unavailable”语义的 terminal response。task-finalization 更严格：
-成功的 exit code 不能证明 task 已完成；`.agents/workspace/<state>/<task-id>/.task-finalization.json`
+成功的 exit code 不能证明 task 已完成；`<task-workspace>/<state>/<task-id>/.task-finalization.json`
 中的任务目录回执仍是业务 authority。只有宿主 direct-host finalization 和宿主侧
 sandbox-control broker 可以写入任务目录回执。沙箱 client 通过 control protocol 请求宿主
 执行 finalization，沙箱读取器从同一挂载的任务目录读取回执。

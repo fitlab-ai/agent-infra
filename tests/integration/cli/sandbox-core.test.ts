@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -251,7 +252,7 @@ test("sandbox rm cleans per-branch shell config dir", () => {
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project });
-    const activeWorkspace = path.join(fixture.repoDir, ".agents", "workspace", "active");
+  const activeWorkspace = path.join(taskWorkspaceRoot(fixture.repoDir, path.dirname(fixture.repoDir)), "active");
     fs.mkdirSync(activeWorkspace, { recursive: true });
     fs.writeFileSync(path.join(activeWorkspace, ".short-ids.json"), "{invalid json", "utf8");
     const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
@@ -275,7 +276,7 @@ test("sandbox rm cleans per-branch shell config dir", () => {
 });
 
 function writeShortIdRegistry(repoDir: string, ids: Record<string, string>): void {
-  const activeDir = path.join(repoDir, ".agents", "workspace", "active");
+  const activeDir = path.join(taskWorkspaceRoot(repoDir, path.dirname(repoDir)), "active");
   fs.mkdirSync(activeDir, { recursive: true });
   fs.writeFileSync(
     path.join(activeDir, ".short-ids.json"),
@@ -284,7 +285,7 @@ function writeShortIdRegistry(repoDir: string, ids: Record<string, string>): voi
 }
 
 function writeActiveTaskBranch(repoDir: string, taskId: string, branch: string): void {
-  const taskDir = path.join(repoDir, ".agents", "workspace", "active", taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoDir, path.dirname(repoDir)), "active", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`);
 }
@@ -296,8 +297,8 @@ function writeTaskBranch(
   branch: string
 ): void {
   const taskDir = state === "archive"
-    ? path.join(repoDir, ".agents", "workspace", "archive", "2026", "01", "01", taskId, "local")
-    : path.join(repoDir, ".agents", "workspace", state, taskId);
+    ? path.join(taskWorkspaceRoot(repoDir, path.dirname(repoDir)), "archive", "2026", "01", "01", taskId, "local")
+    : path.join(taskWorkspaceRoot(repoDir, path.dirname(repoDir)), state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nstatus: ${state === "archive" ? "completed" : state}\nbranch: ${branch}\n---\n# body\n`);
 }
@@ -520,7 +521,7 @@ test("sandbox rm rejects an unmapped short id before sandbox cleanup side effect
     assert.equal(result.status, 1);
     assert.match(result.stderr, /short id '08' not found/i);
     assert.deepEqual(fixture.readDockerCalls(), []);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fixture.repoDir, ".agents", "workspace", "active", ".short-ids.json"), "utf8")), {
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(fixture.repoDir, path.dirname(fixture.repoDir)), "active", ".short-ids.json"), "utf8")), {
       version: 1,
       ids: { "07": registeredTaskId }
     });
@@ -845,7 +846,7 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     assert.ok(runCall.some((arg) => arg.includes(":/share/branch")));
     for (const state of ["active", "completed", "blocked", "archive"]) {
       assert.ok(
-        runCall.some((arg) => isReadOnlyMountFor(arg, `/workspace/.agents/workspace/${state}`)),
+        runCall.some((arg) => isReadOnlyMountFor(arg, `/task-workspace/${state}`)),
         `expected read-only ${state} workspace mount`
       );
     }
@@ -1089,25 +1090,25 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
     assert.ok(runCall.some((arg) => isReadOnlyMountFor(arg, "/workspace/.git")));
     assert.ok(runCall.some((arg) => isReadOnlyMountFor(
       arg,
-      "/workspace/.agents/workspace/active/.short-ids.json"
+      "/task-workspace/active/.short-ids.json"
     )));
     for (const state of ["blocked", "archive"]) {
       assert.ok(runCall.some((arg) => isReadOnlyMountFor(
         arg,
-        `/workspace/.agents/workspace/${state}`
+        `/task-workspace/${state}`
       )));
     }
     assert.equal(runCall.some((arg) => isReadOnlyMountFor(
       arg,
-      "/workspace/.agents/workspace/completed"
+      "/task-workspace/completed"
     )), false);
     assert.ok(runCall.some((arg) => isWritableMountFor(
       arg,
-      `/workspace/.agents/workspace/active/${taskId}`
+      `/task-workspace/active/${taskId}`
     )));
     assert.ok(runCall.some((arg) => isWritableMountFor(
       arg,
-      `/workspace/.agents/workspace/completed/${taskId}`
+      `/task-workspace/completed/${taskId}`
     )));
     assert.ok(runCall.some((arg) => isWritableMountFor(arg, '/run/agent-infra/control-root')
       && arg.includes(`${controlRoot}:/run/agent-infra/control-root`)));
@@ -1363,7 +1364,7 @@ test("resolveTaskBranch returns plain branch names unchanged", async () => {
 test("resolveTaskBranch reads branch from task frontmatter", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = createTempDir("agent-infra-sandbox-task-frontmatter-");
-  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180000");
+  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180000");
 
   try {
     fs.mkdirSync(taskDir, { recursive: true });
@@ -1396,7 +1397,7 @@ test("resolveTaskBranch strips matching quotes from task branch metadata", async
 
   try {
     for (const [taskId, branchLine] of cases) {
-      const taskDir = path.join(tmpDir, ".agents", "workspace", "active", taskId);
+      const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", taskId);
       fs.mkdirSync(taskDir, { recursive: true });
       fs.writeFileSync(path.join(taskDir, "task.md"), [
         "---",
@@ -1421,7 +1422,7 @@ test("resolveTaskBranch strips matching quotes from task branch metadata", async
 test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = createTempDir("agent-infra-sandbox-task-context-");
-  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180001");
+  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180001");
 
   try {
     fs.mkdirSync(taskDir, { recursive: true });
@@ -1448,7 +1449,7 @@ test("resolveTaskBranch falls back to the context branch for legacy tasks", asyn
 test("resolveTaskBranch strips matching quotes from legacy context branch metadata", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = createTempDir("agent-infra-sandbox-task-context-quotes-");
-  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180012");
+  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180012");
 
   try {
     fs.mkdirSync(taskDir, { recursive: true });
@@ -1477,8 +1478,8 @@ for (const workspaceDir of ["completed", "blocked", "archive"]) {
     const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
     const tmpDir = createTempDir(`agent-infra-sandbox-task-${workspaceDir}-`);
     const taskDir = workspaceDir === "archive"
-      ? path.join(tmpDir, ".agents", "workspace", workspaceDir, "2026", "04", "01", "TASK-20260401-180003", "local")
-      : path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
+      ? path.join(taskWorkspaceRoot(tmpDir),  workspaceDir, "2026", "04", "01", "TASK-20260401-180003", "local")
+      : path.join(taskWorkspaceRoot(tmpDir),  workspaceDir, "TASK-20260401-180003");
 
     try {
       fs.mkdirSync(taskDir, { recursive: true });
@@ -1505,8 +1506,8 @@ for (const workspaceDir of ["completed", "blocked", "archive"]) {
 test("resolveTaskBranch prefers active over completed when both exist", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = createTempDir("agent-infra-sandbox-task-priority-");
-  const activeDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180004");
-  const completedDir = path.join(tmpDir, ".agents", "workspace", "completed", "TASK-20260401-180004");
+  const activeDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180004");
+  const completedDir = path.join(taskWorkspaceRoot(tmpDir),  "completed", "TASK-20260401-180004");
 
   try {
     fs.mkdirSync(activeDir, { recursive: true });
@@ -1536,7 +1537,7 @@ test("resolveTaskBranch prefers active over completed when both exist", async ()
 test("resolveTaskBranch rejects missing task files and missing branch metadata", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = createTempDir("agent-infra-sandbox-task-errors-");
-  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180002");
+  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180002");
 
   try {
     assert.throws(
@@ -1707,6 +1708,7 @@ test("sandbox list-running isTaskShortRef matches bare numeric only", async () =
 test("sandbox list-running resolveTaskShortRef hits registry and returns task.md branch", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
   const tmp = createTempDir("rtsr-hit-");
+  execFileSync("git", ["init", "-q"], { cwd: tmp });
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
   fs.copyFileSync(
     path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
@@ -1714,7 +1716,7 @@ test("sandbox list-running resolveTaskShortRef hits registry and returns task.md
   );
   fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
   const taskId = "TASK-20250301-000001";
-  const active = path.join(tmp, ".agents", "workspace", "active");
+  const active = path.join(taskWorkspaceRoot(tmp),  "active");
   fs.mkdirSync(path.join(active, taskId), { recursive: true });
   fs.writeFileSync(
     path.join(active, taskId, "task.md"),
@@ -1734,6 +1736,7 @@ test("sandbox list-running resolveTaskShortRef hits registry and returns task.md
 test("sandbox list-running resolveTaskShortRef throws when registry hits but branch metadata missing (M-1)", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
   const tmp = createTempDir("rtsr-corrupt-");
+  execFileSync("git", ["init", "-q"], { cwd: tmp });
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
   fs.copyFileSync(
     path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
@@ -1741,7 +1744,7 @@ test("sandbox list-running resolveTaskShortRef throws when registry hits but bra
   );
   fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
   const taskId = "TASK-20250301-000002";
-  const active = path.join(tmp, ".agents", "workspace", "active");
+  const active = path.join(taskWorkspaceRoot(tmp),  "active");
   fs.mkdirSync(path.join(active, taskId), { recursive: true });
   // task.md exists but has no branch field
   fs.writeFileSync(
@@ -1764,6 +1767,7 @@ test("sandbox list-running resolveTaskShortRef throws when registry hits but bra
 test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4: no ls-index fallback)", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
   const tmp = createTempDir("rtsr-miss-");
+  execFileSync("git", ["init", "-q"], { cwd: tmp });
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
   fs.copyFileSync(
     path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
@@ -1771,7 +1775,7 @@ test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4:
   );
   fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
   // Empty registry; no active tasks → resolve('#1') misses.
-  fs.mkdirSync(path.join(tmp, ".agents", "workspace", "active"), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(tmp),  "active"), { recursive: true });
   // The legacy ls-index fallback has been removed. miss → throw, not run[0].branch.
   assert.throws(
     () => resolveTaskShortRef("1", { repoRoot: tmp }),
@@ -2154,9 +2158,9 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
       path.join(scriptsDir, "task-short-id.js")
     );
     const taskId = "TASK-20260301-000001";
-    const active = path.join(fixture.repoDir, ".agents", "workspace", "active");
+    const active = path.join(taskWorkspaceRoot(fixture.repoDir, tmpDir), "active");
     fs.mkdirSync(path.join(active, taskId), { recursive: true });
-    fs.mkdirSync(path.join(fixture.repoDir, ".agents", "workspace", "completed", taskId), { recursive: true });
+    fs.mkdirSync(path.join(taskWorkspaceRoot(fixture.repoDir, tmpDir), "completed", taskId), { recursive: true });
     fs.writeFileSync(
       path.join(active, taskId, "task.md"),
       `---\nid: ${taskId}\nbranch: registry-branch\n---\n`

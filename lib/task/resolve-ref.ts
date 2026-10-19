@@ -3,11 +3,14 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { normalizeShortIdInput, resolveShortIdReadOnly } from './short-id.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
+import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 // Flat-structured workspace dirs that hold tasks under `{dir}/{taskId}/task.md`.
 // Note: `archive` uses a three-level YYYY/MM/DD layout and is handled separately.
 const FLAT_WORKSPACE_DIRS = ['active', 'blocked', 'completed'] as const;
+
+function taskRoot(repoRoot: string): string { return resolveProjectTaskWorkspaceRoot(repoRoot); }
 
 type ResolveRefResult =
   | {
@@ -81,11 +84,11 @@ function listSortedNumeric(dir: string, width: number): string[] {
 }
 
 function findInArchive(repoRoot: string, taskId: string): string | null {
-  // archive-tasks stores local material at .agents/workspace/archive/YYYY/MM/DD/{taskId}/local/task.md
+  // archive-tasks stores local material at the project task workspace archive/YYYY/MM/DD/{taskId}/local/task.md
   // where YYYY/MM/DD comes from completed_at (or updated_at fallback) — NOT from
   // the task id's creation date. So we cannot derive the path from taskId alone;
   // walk the bounded YYYY/MM/DD tree instead. Newest-first to favor recent archives.
-  const archiveDir = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  const archiveDir = path.join(taskRoot(repoRoot), 'archive');
   for (const year of listSortedNumeric(archiveDir, 4)) {
     const yearDir = path.join(archiveDir, year);
     for (const month of listSortedNumeric(yearDir, 2)) {
@@ -104,7 +107,7 @@ function findTaskMd(
   taskId: string
 ): { taskMdPath: string; state: TaskWorkspaceState } | null {
   for (const sub of FLAT_WORKSPACE_DIRS) {
-    const candidate = path.join(repoRoot, '.agents', 'workspace', sub, taskId, 'task.md');
+    const candidate = path.join(taskRoot(repoRoot), sub, taskId, 'task.md');
     if (fs.existsSync(candidate)) return { taskMdPath: candidate, state: sub };
   }
   const archived = findInArchive(repoRoot, taskId);
@@ -120,7 +123,7 @@ function findTaskMd(
 function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string }[] {
   const out: { taskId: string; taskDir: string }[] = [];
   for (const sub of FLAT_WORKSPACE_DIRS) {
-    const base = path.join(repoRoot, '.agents', 'workspace', sub);
+    const base = path.join(taskRoot(repoRoot), sub);
     if (!fs.existsSync(base)) continue;
     for (const entry of fs.readdirSync(base).sort()) {
       if (!TASK_ID_RE.test(entry)) continue;
@@ -155,12 +158,12 @@ function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: stri
   };
 
   for (const state of FLAT_WORKSPACE_DIRS) {
-    const base = path.join(repoRoot, '.agents', 'workspace', state);
+    const base = path.join(taskRoot(repoRoot), state);
     if (!fs.existsSync(base)) continue;
     for (const taskId of fs.readdirSync(base).sort()) add(taskId, path.join(base, taskId), state);
   }
 
-  const archive = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  const archive = path.join(taskRoot(repoRoot), 'archive');
   for (const year of listSortedNumeric(archive, 4).reverse()) {
     const yearDir = path.join(archive, year);
     for (const month of listSortedNumeric(yearDir, 2).reverse()) {
@@ -179,7 +182,7 @@ function locateHotTaskDirs(
   taskId: string
 ): { taskId: string; taskDir: string; taskMdPath: string; state: Exclude<TaskWorkspaceState, 'archive'> }[] {
   return FLAT_WORKSPACE_DIRS.flatMap((state) => {
-    const taskDir = path.join(repoRoot, '.agents', 'workspace', state, taskId);
+    const taskDir = path.join(taskRoot(repoRoot), state, taskId);
     const taskMdPath = path.join(taskDir, 'task.md');
     return fs.existsSync(taskMdPath) ? [{ taskId, taskDir, taskMdPath, state }] : [];
   });
@@ -300,7 +303,7 @@ function resolveTaskContext(
     };
   }
 
-  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const activeDir = path.join(taskRoot(repoRoot), 'active');
   const matches: { taskId: string; taskDir: string; taskMdPath: string }[] = [];
   if (fs.existsSync(activeDir)) {
     for (const entry of fs.readdirSync(activeDir).sort()) {

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs } from '../git/workflow.ts';
@@ -134,6 +135,7 @@ function resolveBoundTask(input: CommitOperationInput):
     };
     return boundTask(input, resolved.taskId, resolved.taskDir, resolved.taskMdPath, resolved.repoRoot, resolved.state);
   }
+  if (!fs.existsSync(path.join(input.cwd, '.agents', '.airc.json'))) return { kind: 'none' };
   const context = resolveTaskContext(undefined, { repoRoot: input.cwd });
   if (context.ok) return boundTask(input, context.taskId, context.taskDir, context.taskMdPath, context.repoRoot, context.state);
   if (context.code === 'TASK_CONTEXT_NOT_FOUND') return { kind: 'none' };

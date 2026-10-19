@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -67,7 +68,7 @@ function fixture() {
   git(root, ['config', 'user.email', 'test@example.com']);
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'base']);
@@ -80,7 +81,7 @@ function fixture() {
   git(root, ['add', 'source.txt']);
   git(root, ['commit', '-qm', 'feature']);
   const reviewedHead = git(root, ['rev-parse', 'HEAD']);
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---',

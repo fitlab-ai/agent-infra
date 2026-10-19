@@ -60,7 +60,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agents/workspace/active/{task-id}/task.md` - 任务文件
+- `<task-workspace>/active/{task-id}/task.md` - 任务文件
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
@@ -122,7 +122,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
      - 否则（无待答问题）→ 选最高价值的一个问题（验收标准 > 范围 > 歧义），写入 `## Brainstorming`：`status: asking`、`pending_question: <问题>`、`question_count += 1`。
   2. 若 `start_date` 为空，写入当日日期（`date +%F`）；随后执行 `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {standard-agent-token} --question {question_count}`，由核心统一更新基础 frontmatter 和 Activity Log。
   3. Issue 同步（存在有效 `platform_issue_identity` 时，任一失败跳过）：调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
-  4. 校验（替代步骤 8 的 artifact gate）：`agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
+  4. 校验（替代步骤 8 的 artifact gate）：`agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' <task-workspace>/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
   5. 用户输出：只展示当前**单个问题** + 如何回答/继续（再次触发 `analyze-task {task-ref}` 并附答案）。
   6. **STOP**，等待回答。下一次触发回到本步骤。
 
@@ -151,7 +151,7 @@ agent-infra-internal task-artifact {task-id} init --family analysis --artifact {
 
 > 步骤 6–9 属**场景 A（正常产出）**路径。**场景 B（提问早退）**已在步骤 4 内完成状态更新、task 评论同步与校验并 STOP，不进入这些步骤。
 
-创建 `.agents/workspace/active/{task-id}/{analysis-artifact}`。
+创建 `<task-workspace>/active/{task-id}/{analysis-artifact}`。
 
 ## 输出模板
 
@@ -228,7 +228,7 @@ agent-infra-internal task-artifact {task-id} init --family analysis --artifact {
 
 ### 7. 更新任务状态
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
+更新 `<task-workspace>/active/{task-id}/task.md`：
 - 仅更新优先级、Brainstorming、审查响应等本技能拥有的业务内容；产物链接、阶段与完成日志由 completed 事件统一登记
 - 在追加工作流 Activity Log 条目之前，基于分析结果（业务影响、风险、依赖、阻塞条件）重估 `priority`。若重估值与 `task.md` 当前值不一致：
   - 用新值覆盖 frontmatter 的 `priority` 字段
@@ -288,7 +288,7 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 - 风险等级：{评估}
 
 产出文件：
-- 分析报告：.agents/workspace/active/{task-id}/{analysis-artifact}
+- 分析报告：<task-workspace>/active/{task-id}/{analysis-artifact}
 
 下一步 - 按所选路径继续：
 {next-step-commands}
@@ -297,7 +297,7 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 ## 完成检查清单
 
 - [ ] 阅读并理解了任务文件和来源信息
-- [ ] 创建了分析文档 `.agents/workspace/active/{task-id}/{analysis-artifact}`
+- [ ] 创建了分析文档 `<task-workspace>/active/{task-id}/{analysis-artifact}`
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 更新了 task.md 中的 `assigned_to`

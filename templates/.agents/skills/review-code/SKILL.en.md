@@ -66,7 +66,7 @@ After resolving the artifact context and before this round's first artifact acti
 ### 1. Verify Prerequisites
 
 Require:
-- `.agents/workspace/active/{task-id}/task.md`
+- `<task-workspace>/active/{task-id}/task.md`
 - a resolvable task branch and Git review target. Implementation artifacts are optional context and must not gate review eligibility.
 
 ### 2. Resolve the Artifact Context
@@ -107,7 +107,7 @@ agent-infra-internal task-artifact {task-id} init --family review-code --artifac
 
 The skeleton does not generate a verdict, findings, or counts; complete review content is required before summary finalization. On a structural error, follow `.agents/rules/local-artifact-repair.md` to correct the formal review artifact directly and rerun the original finalizer; current artifact content is the only input.
 
-Create `.agents/workspace/active/{task-id}/{review-artifact}`.
+Create `<task-workspace>/active/{task-id}/{review-artifact}`.
 
 > The report format and severity layout live in `reference/report-template.md`. Read `reference/report-template.md` before writing the review.
 

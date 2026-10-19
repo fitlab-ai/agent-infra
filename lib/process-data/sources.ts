@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { createGitHubClient } from '../platform/github-client.ts';
 import { enumerateAllTaskDirs } from '../task/resolve-ref.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { captureText, inspectPrivacy, redactExcerpt } from './privacy.ts';
 import { canonicalJsonBytes, sha256 } from './store.ts';
 
@@ -157,6 +158,11 @@ function fetchRestCollection<T>(options: FetchRestCollectionOptions<T>): Process
 }
 
 function relativeIdentity(repoRoot: string, filePath: string): string {
+  const workspaceRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
+  const taskRelative = path.relative(workspaceRoot, filePath);
+  if (taskRelative && !taskRelative.startsWith('..') && !path.isAbsolute(taskRelative)) {
+    return path.posix.join('task-workspace', taskRelative.split(path.sep).join('/'));
+  }
   const relative = path.relative(repoRoot, filePath);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`path escapes repository: ${filePath}`);
   return relative.split(path.sep).join('/');

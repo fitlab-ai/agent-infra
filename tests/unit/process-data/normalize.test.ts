@@ -9,7 +9,7 @@ test('normalization classifies tasks, activity telemetry, receipts and operation
   const objects: CapturedObject[] = [
     {
       sourceKind: 'local-file',
-      sourceIdentity: '.agents/workspace/active/TASK-20260101-000001/task.md',
+      sourceIdentity: 'task-workspace/active/TASK-20260101-000001/task.md',
       sha256: 'a'.repeat(64),
       bytes: 100,
       content: [
@@ -61,7 +61,7 @@ test('normalization preserves repeated historical rows with unique deterministic
   const repeatedFinding = '| CD-1 | code | 1 | major | closed | review-code.md#CD-1 |';
   const task: CapturedObject = {
     sourceKind: 'local-file',
-    sourceIdentity: '.agents/workspace/archive/2026/01/01/TASK-20260101-000001/task.md',
+    sourceIdentity: 'task-workspace/archive/2026/01/01/TASK-20260101-000001/task.md',
     sha256: 'd'.repeat(64),
     bytes: 200,
     content: [
@@ -101,7 +101,7 @@ test('normalization canonicalizes activity actors through the current token rule
   const actors = ['human', 'claude', 'traecli', 'claude-code', 'antigravity-cli', 'devuser', 'gemini', 'gemini-cli'];
   const task: CapturedObject = {
     sourceKind: 'local-file',
-    sourceIdentity: '.agents/workspace/active/TASK-20260101-000002/task.md',
+    sourceIdentity: 'task-workspace/active/TASK-20260101-000002/task.md',
     sha256: 'e'.repeat(64),
     bytes: 400,
     content: [

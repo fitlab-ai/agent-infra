@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -79,6 +80,7 @@ test("validate-artifact audits PR metadata for an opaque canonical identity", ()
     remoteState: "open"
   })));
   write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+    project: taskWorkspaceProject(tempRoot),
     platform: {
       type: "trae",
       providers: {
@@ -149,6 +151,7 @@ test("platform-sync computes in: labels from the repository when the task worksp
     const ctx = setupPlatformSyncEnv(repositoryRoot);
     const externalTaskDir = path.join(tempRoot, "host-workspace", taskId);
     write(path.join(repositoryRoot, ".agents", ".airc.json"), JSON.stringify({
+      project: taskWorkspaceProject(repositoryRoot),
       platform: { type: "github" },
       labels: { in: { cli: ["lib/"] } }
     }));
@@ -186,11 +189,12 @@ test("platform-sync computes in: labels from a moved task worktree", async () =>
     assert.equal(committed.status, 0, committed.stderr);
     fs.renameSync(registeredWorktree, sandboxWorktree);
 
-    const taskDir = path.join(sandboxWorktree, ".agents", "workspace", "active", taskId);
     write(path.join(sandboxWorktree, ".agents", ".airc.json"), JSON.stringify({
+      project: taskWorkspaceProject(repositoryRoot),
       platform: { type: "github" },
       labels: { in: { cli: ["lib/"] } }
     }));
+    const taskDir = path.join(taskWorkspaceRoot(sandboxWorktree), "active", taskId);
     write(path.join(taskDir, "task.md"), buildTaskContent({
       branch,
       platform_issue_identity: '\'{"kind":"number","value":65}\''
@@ -213,7 +217,7 @@ test("platform-sync performs no GitHub operation when the repository selects non
   await withTempRoot("agent-infra-platform-sync-none-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const argsPath = path.join(tempRoot, "gh-args.jsonl");
-    write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"none"}}');
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot), platform: { type: "none" } }));
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
       when: "platform_issue_identity_exists"
@@ -228,11 +232,14 @@ test("platform-sync performs no GitHub operation when the repository selects non
 test("requirements sync converges before the complete-task platform gate", async () => {
   await withProjectTempRoot("agent-infra-requirements-convergence-", async (tempRoot) => {
     initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
-    const taskDir = path.join(tempRoot, ".agents", "workspace", "active", taskId);
+    const verifyConfig = path.join(tempRoot, ".agents", "skills", "complete-task", "config");
+    fs.mkdirSync(verifyConfig, { recursive: true });
+    fs.copyFileSync(filePath(".agents/skills/complete-task/config/verify.json"), path.join(verifyConfig, "verify.json"));
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot),  "active", taskId);
     const issuePath = path.join(tempRoot, "issue.json");
     const commentsPath = path.join(tempRoot, "comments.json");
     const fakeGhPath = path.join(tempRoot, "fake-gh.cjs");
-    write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"github"}}');
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot), platform: { type: "github" } }));
     write(path.join(taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'', type: "bugfix" }));
     write(fakeGhPath, loadFixture("fake-gh.js"));
     writeJson(issuePath, {
@@ -1077,7 +1084,7 @@ for (const c of createPrCases) {
       GH_FAKE_PR_NUMBER: "77",
       ...c.env
     });
-    assert.equal(result.status, c.expectedStatus, result.stderr);
+    assert.equal(result.status, c.expectedStatus, result.stderr || result.stdout);
     const payload = assertPayloadStatus(result, {
       type: "platform-sync",
       status: "pass"
@@ -1216,6 +1223,7 @@ const commitCases = [
   },
   {
     name: "validate-artifact platform-sync fails for commit when summary comment is missing on the PR",
+    setupHead: true,
     prComments() {
       return [];
     },
@@ -1230,7 +1238,7 @@ for (const c of commitCases) {
     const headSha = c.setupHead ? createHeadCommit(tempRoot) : "";
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       platform_issue_identity: '\'{"kind":"number","value":65}\'',
-      ...(c.useFakeGh === false ? {} : { pr_delivery_fact: boundFactValue(77) }),
+      ...(c.useFakeGh === false ? {} : { pr_delivery_fact: boundFactValue(77, headSha) }),
       ...c.taskOverrides
     }));
     if (c.useFakeGh !== false) {
@@ -1244,9 +1252,10 @@ for (const c of commitCases) {
           GH_FAKE_ISSUE_PATH: ctx.issuePath,
           GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
           GH_FAKE_ISSUE_NUMBER: "65",
-          GH_FAKE_PR_NUMBER: "77"
+          GH_FAKE_PR_NUMBER: "77",
+          ...(headSha ? { GH_FAKE_PR_HEAD_SHA: headSha } : {})
         });
-    assert.equal(result.status, c.expectedStatus, result.stderr);
+    assert.equal(result.status, c.expectedStatus, result.stderr || result.stdout);
     const payload = assertPayloadStatus(result, {
       type: "platform-sync",
       status: c.expectedStatus === 0 ? "pass" : "fail"
@@ -1280,7 +1289,7 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
       GH_FAKE_PR_NUMBER: "77",
       GH_FAKE_PR_HEAD_SHA: prSha
     });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
     assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
   })
 ));
@@ -1297,9 +1306,10 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
       GH_FAKE_ISSUE_NUMBER: "65",
-      GH_FAKE_PR_NUMBER: "77"
+      GH_FAKE_PR_NUMBER: "77",
+      GH_FAKE_PR_HEAD_SHA: mainSha
     });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
     assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
   })
 ));
@@ -1309,6 +1319,8 @@ test("validate-artifact platform-sync fails closed while computing in: labels fo
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
     write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+      project: taskWorkspaceProject(tempRoot),
+      platform: { type: "github" },
       labels: { in: { source: [".platform-sync-base"] } }
     }));
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
@@ -1323,9 +1335,10 @@ test("validate-artifact platform-sync fails closed while computing in: labels fo
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
       GH_FAKE_ISSUE_NUMBER: "65",
-      GH_FAKE_PR_NUMBER: "77"
+      GH_FAKE_PR_NUMBER: "77",
+      GH_FAKE_PR_HEAD_SHA: mainSha
     });
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
     const payload = assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     const inLabels = payload.checks.find((check) => check.checkId === "platform.in-labels-computed");
     assert.ok(inLabels);
@@ -1336,12 +1349,17 @@ test("validate-artifact platform-sync fails closed while computing in: labels fo
 
 test("validate-artifact platform-sync blocks after retry exhaustion on gh network errors", () => (
   withTempRoot("agent-infra-gate-blocked-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, taskId);
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskDir = ctx.taskDir;
+    const verifyConfig = path.join(tempRoot, ".agents", "skills", "code-task", "config");
+    fs.mkdirSync(verifyConfig, { recursive: true });
+    fs.copyFileSync(filePath(".agents/skills/code-task/config/verify.json"), path.join(verifyConfig, "verify.json"));
     const binDir = path.join(tempRoot, "bin");
     const ghPath = path.join(binDir, "gh");
     const ghScriptPath = path.join(binDir, "gh.js");
     write(path.join(taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));
+    attachArtifactCompletionFact(taskDir, "code");
     write(ghScriptPath, "console.error('network timeout');\nprocess.exit(1);\n");
     writeNodeCommandShim(ghPath, ghScriptPath);
 
@@ -1351,7 +1369,7 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
         AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
       }
     });
-    assert.equal(result.status, 2);
+    assert.equal(result.status, 2, result.stderr || result.stdout);
     const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.gate, "blocked");
     const githubCheck = payload.checks.find((check) => check.type === "platform-sync");

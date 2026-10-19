@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,9 +25,9 @@ test('PR readiness watcher reaches injected deadline and preserves the observed 
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:o/r.git'], { cwd: root });
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
       identity: { resource: { kind: 'number', value: 5 }, repository: 'o/r', url: 'https://github.com/o/r/pull/5', head: { repository: 'o/r', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'o/r', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
     })))}`, '---', ''].join('\n'));

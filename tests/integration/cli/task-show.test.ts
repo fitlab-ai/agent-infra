@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -18,9 +19,9 @@ function mkFixture(): { repoRoot: string; activeDir: string } {
   fs.copyFileSync(SCRIPT, path.join(agentsDir, 'scripts', 'task-short-id.js'));
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
-    JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } })
+    JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength: 2 } })
   );
-  const activeDir = path.join(agentsDir, 'workspace', 'active');
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot), 'active');
   fs.mkdirSync(activeDir, { recursive: true });
   return { repoRoot, activeDir };
 }
@@ -65,7 +66,7 @@ test('ai task show rejects removed #1 hash form', () => {
 
 test('ai task show <TASK-id> resolves a completed task (flat layout)', () => {
   const { repoRoot } = mkFixture();
-  const completedDir = path.join(repoRoot, '.agents', 'workspace', 'completed');
+  const completedDir = path.join(taskWorkspaceRoot(repoRoot),  'completed');
   fs.mkdirSync(completedDir, { recursive: true });
   const taskId = 'TASK-20250101-000099';
   writeTask(completedDir, taskId, 'feature-completed');
@@ -78,13 +79,11 @@ test('ai task show <TASK-id> resolves a completed task (flat layout)', () => {
 test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/', () => {
   const { repoRoot } = mkFixture();
   // archive-tasks SKILL moves completed tasks into
-  //   .agents/workspace/archive/YYYY/MM/DD/TASK-YYYYMMDD-HHMMSS/local/task.md
+  //   <task-workspace>/archive/YYYY/MM/DD/TASK-YYYYMMDD-HHMMSS/local/task.md
   // where YYYY/MM/DD comes from completed_at (NOT from the task id timestamp).
   const taskId = 'TASK-20260613-120000';
   const datedDir = path.join(
-    repoRoot,
-    '.agents',
-    'workspace',
+    taskWorkspaceRoot(repoRoot),
     'archive',
     '2026',
     '06',
@@ -111,9 +110,7 @@ test('ai task show <TASK-id> resolves an archived task whose archive date differ
   // Jun 13). The lookup must NOT derive the path from the task id date.
   const taskId = 'TASK-20260612-120000';
   const datedDir = path.join(
-    repoRoot,
-    '.agents',
-    'workspace',
+    taskWorkspaceRoot(repoRoot),
     'archive',
     '2026',
     '06',

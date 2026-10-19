@@ -47,7 +47,7 @@ No Pull Request is required; run instead:
 
 Parse the task scope first: an optional `--task <ref>` or `-t <ref>` selects `{task-id}`; a positional task ref is not interpreted. The remaining positional argument, when present, is `{target-branch}`.
 
-If `{task-id}` is provided, read `.agents/workspace/active/{task-id}/task.md` to load task metadata such as `platform_issue_identity` and `type`.
+If `{task-id}` is provided, read `<task-workspace>/active/{task-id}/task.md` to load task metadata such as `platform_issue_identity` and `type`.
 If `{task-id}` is omitted, try to resolve it from the current session context; if it still cannot be determined, skip task-association logic in later steps.
 
 ### 2. Determine the Target Branch
@@ -86,7 +86,7 @@ The core renderer owns the report section. It is part of the reviewer summary be
 
 Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md`.
 
-Aggregate a reviewer-facing summary from those artifacts with exactly one `<!-- canonical-pr-change-report -->` placeholder, and maintain a single idempotent summary comment via the hidden marker. Pass `--change-report-file .agents/workspace/active/{task-id}/pr-change-report.json` and the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
+Aggregate a reviewer-facing summary from those artifacts with exactly one `<!-- canonical-pr-change-report -->` placeholder, and maintain a single idempotent summary comment via the hidden marker. Pass `--change-report-file <task-workspace>/active/{task-id}/pr-change-report.json` and the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
 
 > Canonical context, aggregation, and the `summary-sync` call live in `reference/comment-publish.md`, which points to `.agents/rules/pr-sync.md`. Read that reference before publishing.
 

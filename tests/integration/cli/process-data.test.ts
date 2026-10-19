@@ -1,3 +1,4 @@
+import { taskWorkspaceProject } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,19 +7,24 @@ import { spawnSync } from 'node:child_process';
 
 import { createTempDir, CLI_PATH } from '../../helpers.ts';
 import { createObjectStore, publishSnapshot } from '../../../lib/process-data/store.ts';
+import { resolveTaskWorkspaceLayout } from '../../../lib/task/workspace-root.ts';
 
-function fixture(project: unknown = 'demo') {
+function fixture(project?: unknown, createTask = true) {
   const root = createTempDir('process-data-cli-');
   const home = createTempDir('process-data-home-');
+  const projectKey = project ?? taskWorkspaceProject(root);
   spawnSync('git', ['init', '-q'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project }));
-  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001'), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
-    '---\nid: TASK-20260101-000001\n---\n\n# Task\n'
-  );
-  return { root, home };
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: projectKey }));
+  if (createTask) {
+    const taskRoot = resolveTaskWorkspaceLayout({ project: projectKey as string, boundary: 'host', home }).root;
+    fs.mkdirSync(path.join(taskRoot, 'active', 'TASK-20260101-000001'), { recursive: true });
+    fs.writeFileSync(
+      path.join(taskRoot, 'active', 'TASK-20260101-000001', 'task.md'),
+      '---\nid: TASK-20260101-000001\n---\n\n# Task\n'
+    );
+  }
+  return { root, home, project: projectKey };
 }
 
 function run(root: string, home: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
@@ -27,7 +33,7 @@ function run(root: string, home: string, args: string[], env: NodeJS.ProcessEnv 
 }
 
 test('historical v1 snapshots remain readable through explicit roots while local capture is retired', () => {
-  const { root, home } = fixture();
+  const { root, home, project } = fixture();
   const dataRoot = path.join(root, '.historical-data');
   const store = createObjectStore(dataRoot);
   const object = store.put(Buffer.from('legacy evidence'));
@@ -70,7 +76,7 @@ test('historical v1 snapshots remain readable through explicit roots while local
   assert.equal(outsideRoot.status, 1);
   assert.match(JSON.parse(outsideRoot.stdout).error.message, /inside the repository/);
 
-  const taskRoot = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  const taskRoot = path.join(resolveTaskWorkspaceLayout({ project: project as string, boundary: 'host', home }).root, 'active', 'TASK-20260101-000001');
   const taskData = run(root, home, ['verify', snapshotId, '--root', taskRoot]);
   assert.equal(taskData.status, 1);
   assert.match(JSON.parse(taskData.stdout).error.message, /task directory/);
@@ -115,7 +121,7 @@ test('data help exposes the v2 export as-of option', () => {
 });
 
 test('full capture uses explicit GitHub pages through a fake gh boundary', () => {
-  const { root, home } = fixture();
+  const { root, home, project } = fixture();
   const fake = path.join(root, 'fake-gh.mjs');
   fs.writeFileSync(fake, `
 const args = process.argv.slice(2);
@@ -154,7 +160,7 @@ process.exit(1);
       else if (entry.name === 'manifest.json') manifestFiles.push(candidate);
     }
   };
-  const defaultRoot = path.join(home, '.agent-infra', 'data-store', 'demo');
+  const defaultRoot = path.join(home, '.agent-infra', 'data-store', project as string);
   visit(path.join(defaultRoot, 'snapshots'));
   const manifest = JSON.parse(fs.readFileSync(manifestFiles[0]!, 'utf8'));
   assert.equal(manifest.schema, 'raw-manifest/v2');
@@ -184,7 +190,7 @@ test('invalid project configuration fails before creating the default root', () 
   assert.equal(JSON.parse(missingConfig.stdout).error.code, 'DATA_COMMAND_FAILED');
   assert.equal(fs.existsSync(path.join(missing.home, '.agent-infra', 'data-store')), false);
 
-  const invalid = fixture('../escape');
+  const invalid = fixture('../escape', false);
   const invalidConfig = run(invalid.root, invalid.home, ['verify', 'missing-snapshot']);
   assert.equal(invalidConfig.status, 1);
   assert.equal(JSON.parse(invalidConfig.stdout).error.code, 'DATA_COMMAND_FAILED');
@@ -192,7 +198,7 @@ test('invalid project configuration fails before creating the default root', () 
 });
 
 test('default root rejects symlink components inside the home boundary', () => {
-  const { root, home } = fixture();
+  const { root, home } = fixture(undefined, false);
   const linked = path.join(home, '.agent-infra');
   const target = path.join(home, 'outside');
   fs.mkdirSync(target);

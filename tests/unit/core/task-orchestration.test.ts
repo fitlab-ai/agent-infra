@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,7 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
-import { createTempDir, recordArtifactCompletions } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, recordArtifactCompletions } from '../../helpers.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -60,13 +61,14 @@ function prepareOrchestrationDelegation(
 }
 
 function fixture(step: string) {
-  const root = createTempDir('orchestration-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('orchestration-');
   fixtureRoots.add(root);
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001');
   fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: ${step}\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
-  return { root, taskDir };
+  const project = (JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')) as { project: string }).project;
+  return { root, taskDir, project };
 }
 
 function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
@@ -134,7 +136,7 @@ test('dispatch records the pending delegation as dispatched', () => {
 function approvedCodeFixture(manualValidation = 0) {
   const f = fixture('code-review');
   fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), '{}\n');
+  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ project: f.project })}\n`);
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
   fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), '# Analysis Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(f.taskDir, 'plan.md'), '# Plan\n');
@@ -149,7 +151,7 @@ function cleanCommitCandidateFixture(prFlow: unknown = 'required') {
   const f = approvedCodeFixture();
   const head = 'a'.repeat(40);
   fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ prFlow })}\n`);
+  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ project: f.project, prFlow })}\n`);
   const fact = encodePrDeliveryFact(buildBoundFact({ identity: { resource: { kind: 'number', value: 42 }, repository: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/42', head: { repository: 'acme/widgets', ref: 'feature', sha: head }, base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open' }));
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\nagent_infra_version: v0.9.11-alpha.0\npr_delivery_fact: ${JSON.stringify(fact)}\nlast_reviewed_commit: ${head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   seedLifecycleReceipts(f);
@@ -257,7 +259,7 @@ test('task-scoped prepare does not inspect an unrelated active task', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const otherTaskId = 'TASK-20260101-000002';
-  const otherTaskDir = path.join(f.root, '.agents', 'workspace', 'active', otherTaskId);
+  const otherTaskDir = path.join(taskWorkspaceRoot(f.root),  'active', otherTaskId);
   fs.mkdirSync(otherTaskDir, { recursive: true });
   fs.mkdirSync(path.join(otherTaskDir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(otherTaskDir, '.runtime', 'orchestration.json'), '{"schemaVersion":3}\n');
@@ -691,7 +693,7 @@ test('route stops at a dirty reviewed head without preparing a commit', () => {
 test('route clean completion does not depend on PR flow configuration', () => {
   for (const config of [{ prFlow: 'disabled' }, {}]) {
     const f = cleanCommitCandidateFixture(config.prFlow);
-    fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify(config)}\n`);
+    fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ ...config, project: f.project })}\n`);
     let captures = 0;
     const routed = routeOrchestration('TASK-20260101-000001', {
       repoRoot: f.root,
@@ -723,7 +725,7 @@ test('route clean completion does not depend on PR flow configuration', () => {
 
 test('route clean completion does not read orchestration PR configuration', () => {
   const f = cleanCommitCandidateFixture();
-  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), '{not-json\n');
+  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ project: f.project, prFlow: 'always' })}\n`);
   const clean = 'b'.repeat(40);
   assert.equal(routeOrchestration('TASK-20260101-000001', {
     repoRoot: f.root,
@@ -932,7 +934,7 @@ test('same-client native starts and stops are isolated by task identity', () => 
   const f = fixture('requirement-analysis-review');
   const taskA = 'TASK-20260101-000001';
   const taskB = 'TASK-20260101-000002';
-  const taskBDir = path.join(f.root, '.agents', 'workspace', 'active', taskB);
+  const taskBDir = path.join(taskWorkspaceRoot(f.root),  'active', taskB);
   fs.mkdirSync(path.join(taskBDir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(taskBDir, 'task.md'), `---\nid: ${taskB}\nstatus: active\ncurrent_step: requirement-analysis-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   for (const taskDir of [f.taskDir, taskBDir]) {
@@ -970,9 +972,9 @@ test('same-client native starts and stops are isolated by task identity', () => 
       taskId,
       captureWorkspace: () => 'after-tree',
       diffWorkspace: () => [
-        `.agents/workspace/active/${taskId}/review-analysis.md`,
-        `.agents/workspace/active/${taskId}/task.md`,
-        `.agents/workspace/active/${taskId}/.runtime/orchestration.json`
+        `task-workspace/active/${taskId}/review-analysis.md`,
+        `task-workspace/active/${taskId}/task.md`,
+        `task-workspace/active/${taskId}/.runtime/orchestration.json`
       ]
     });
     assert.equal(stopped.status, 'running');
@@ -1012,7 +1014,7 @@ test('task-local pending guard ignores paused runs that retain audit evidence', 
   });
   pauseOrchestration('TASK-20260101-000001', 'HOOK_FAILED', 'hook failed', true, { repoRoot: f.root });
 
-  const secondTaskDir = path.join(f.root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  const secondTaskDir = path.join(taskWorkspaceRoot(f.root),  'active', 'TASK-20260101-000002');
   fs.mkdirSync(secondTaskDir, { recursive: true });
   fs.writeFileSync(
     path.join(secondTaskDir, 'task.md'),
@@ -1041,7 +1043,7 @@ test('different tasks can hold independent pending delegations while one task st
     repoRoot: f.root, captureWorkspace: snapshot
   });
 
-  const secondTaskDir = path.join(f.root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  const secondTaskDir = path.join(taskWorkspaceRoot(f.root),  'active', 'TASK-20260101-000002');
   fs.mkdirSync(secondTaskDir, { recursive: true });
   fs.writeFileSync(
     path.join(secondTaskDir, 'task.md'),
@@ -1094,9 +1096,9 @@ test('native stop derives the workspace delta before sealing the unique delegati
     taskId: 'TASK-20260101-000001',
     captureWorkspace,
     diffWorkspace: () => [
-      '.agents/workspace/active/TASK-20260101-000001/review-analysis.md',
-      '.agents/workspace/active/TASK-20260101-000001/task.md',
-      '.agents/workspace/active/TASK-20260101-000001/.runtime/orchestration.json'
+      'task-workspace/active/TASK-20260101-000001/review-analysis.md',
+      'task-workspace/active/TASK-20260101-000001/task.md',
+      'task-workspace/active/TASK-20260101-000001/.runtime/orchestration.json'
     ]
   });
 
@@ -1187,7 +1189,7 @@ test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () 
     repoRoot: f.root,
     taskId: 'TASK-20260101-000001',
     captureWorkspace: () => 'legacy-after-tree',
-    diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000002/analysis.md']
+    diffWorkspace: () => ['task-workspace/active/TASK-20260101-000002/analysis.md']
   });
 
   assert.equal(stopped.status, 'paused');

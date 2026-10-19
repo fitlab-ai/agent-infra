@@ -18,6 +18,7 @@ import { validateCurrentTaskContract } from './current-contract.ts';
 import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
+import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -436,14 +437,14 @@ function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent:
   let workspace: string;
   let stagingDir: string;
   try {
-    workspace = fs.realpathSync.native(path.resolve(repoRoot, '.agents', 'workspace'));
+    workspace = fs.realpathSync.native(resolveProjectTaskWorkspaceRoot(repoRoot));
     stagingDir = fs.realpathSync.native(path.resolve(request.stagingDir));
   } catch (error) {
     return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) };
   }
   const relative = path.relative(workspace, stagingDir);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || path.basename(stagingDir) === taskId) {
-    return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging must be a non-final directory inside .agents/workspace' };
+    return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging must be a non-final directory inside the project task workspace' };
   }
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(stagingDir, { withFileTypes: true }); }
@@ -670,7 +671,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   } else {
     return failed(request, { code: 'LIFECYCLE_TASK_NOT_FOUND', message: `task ${taskId} has no lifecycle source` }, { taskId });
   }
-  const targetPath = path.join(repoRoot, '.agents', 'workspace', spec.target, taskId);
+  const targetPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), spec.target, taskId);
   const requiredSteps = stepsForIntent(request.intent);
   const movingTaskDirectory = sourcePath !== targetPath;
   const currentTaskFile = path.join(sourcePath, 'task.md');
@@ -708,7 +709,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     if (!contract.ok) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contract.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
   const registryRequest = executeShortIdCommand({
-    operation: 'list', activeDir: path.join(repoRoot, '.agents', 'workspace', 'active'),
+    operation: 'list', activeDir: path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active'),
     shortIdLength: configuredShortIdLength(repoRoot)
   });
   if (registryRequest.status === 'failed') {
@@ -879,7 +880,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
       }
     }
   }
-  const activeTaskPath = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const activeTaskPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId);
   if (request.intent === 'complete' && fs.existsSync(activeTaskPath)) {
     try {
       let sourceIsVirtiofsMount = false;

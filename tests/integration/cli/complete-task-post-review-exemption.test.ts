@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -33,7 +34,7 @@ test("complete-task renders an exemption covering multiple post-review commits",
     commit("first\n", "first");
     commit("second\n", "second");
 
-    const taskDir = path.join(root, ".agents", "workspace", "active", taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  "active", taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, "review-code.md"), "# Review\n");
     const reviewPath = path.join(taskDir, "review-code.md");

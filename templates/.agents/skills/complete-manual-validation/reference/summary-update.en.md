@@ -19,7 +19,7 @@ agent-infra-internal manual-validation transaction {task-id} --prepare \
 agent-infra-internal manual-validation transaction {task-id} \
   --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} \
-  --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
+  --change-report-file <task-workspace>/active/{task-id}/pr-change-report.json \
   --agent {standard-agent-token} --result no_op
 ```
 

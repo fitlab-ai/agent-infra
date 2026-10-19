@@ -45,11 +45,11 @@ Extract key information:
 
 ### 2. Create the Task Directory and File
 
-Check whether `.agents/workspace/active/` already has a task for this alert.
+Check whether `<task-workspace>/active/` already has a task for this alert.
 - If found, **reuse the existing task by default**; do not ask the user. State clearly in the final notice: "Reused existing task `{task-id}`; not re-imported." If the user wants to re-import, they must first archive or delete the existing task
 - If not found, create a new task
 
-Create directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+Create directory: `<task-workspace>/active/TASK-{yyyyMMdd-HHmmss}/`
 
 Task metadata must include:
 ```yaml
@@ -118,7 +118,7 @@ Task information:
 - Task ID: {task-id} (short id {task-ref})
 
 Output file:
-- Task file: .agents/workspace/active/{task-id}/task.md
+- Task file: <task-workspace>/active/{task-id}/task.md
 
 Next step:
 {next-step-commands}

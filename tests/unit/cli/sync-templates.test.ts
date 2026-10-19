@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
@@ -93,7 +94,7 @@ test("syncTemplates creates runtime workspace states and retires only provably o
       [unownedRoot, [], "local workspace notes\n"]
     ] as const) {
       writeJson(root, ".agents/.airc.json", {
-        project: "demo", org: "acme", language: "en", platform: { type: "none" },
+        project: `sync-${path.basename(root)}`, org: "acme", language: "en", platform: { type: "none" },
         files: { managed, merged: [], ejected: [] }
       });
       writeFile(root, ".agents/workspace/README.md", content);
@@ -104,14 +105,14 @@ test("syncTemplates creates runtime workspace states and retires only provably o
     const unowned = syncTemplates(unownedRoot, templateRoot);
 
     for (const state of ["active", "blocked", "completed", "archive"]) {
-      assert.equal(fs.statSync(path.join(ownedRoot, ".agents", "workspace", state)).isDirectory(), true);
+      assert.equal(fs.statSync(path.join(taskWorkspaceRoot(ownedRoot),  state)).isDirectory(), true);
     }
-    assert.equal(fs.readFileSync(path.join(ownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
+    assert.equal(fs.readFileSync(path.join(ownedRoot, ".agents", "workspace", "README.md"), "utf8"), "local workspace notes\n");
     assert.ok(owned.registryRemoved.some((entry) => entry.entry === ".agents/workspace/README.md" && entry.list === "managed"));
     assert.ok(owned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
-    assert.equal(fs.existsSync(path.join(officialRoot, ".agents/workspace/README.md")), false);
+    assert.equal(fs.existsSync(path.join(officialRoot, ".agents", "workspace", "README.md")), false);
     assert.ok(official.managed.removed.includes(".agents/workspace/README.md"));
-    assert.equal(fs.readFileSync(path.join(unownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
+    assert.equal(fs.readFileSync(path.join(unownedRoot, ".agents", "workspace", "README.md"), "utf8"), "local workspace notes\n");
     assert.ok(unowned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -127,7 +128,7 @@ test("syncTemplates retires a recorded-baseline file and protects one that drift
     const driftedRoot = path.join(tmpDir, "drifted");
     for (const [root, content] of [[matchedRoot, pristine], [driftedRoot, "# edited by hand\n"]] as const) {
       writeJson(root, ".agents/.airc.json", {
-        project: "demo", org: "acme", language: "en", platform: { type: "none" },
+        project: `sync-${path.basename(root)}`, org: "acme", language: "en", platform: { type: "none" },
         files: {
           managed: [".agents/workspace/README.md"],
           merged: [],
@@ -143,9 +144,9 @@ test("syncTemplates retires a recorded-baseline file and protects one that drift
     const matched = syncTemplates(matchedRoot, templateRoot);
     const drifted = syncTemplates(driftedRoot, templateRoot);
 
-    assert.equal(fs.existsSync(path.join(matchedRoot, ".agents/workspace/README.md")), false);
+    assert.equal(fs.existsSync(path.join(matchedRoot, ".agents", "workspace", "README.md")), false);
     assert.ok(matched.managed.removed.includes(".agents/workspace/README.md"));
-    assert.equal(fs.readFileSync(path.join(driftedRoot, ".agents/workspace/README.md"), "utf8"), "# edited by hand\n");
+    assert.equal(fs.readFileSync(path.join(driftedRoot, ".agents", "workspace", "README.md"), "utf8"), "# edited by hand\n");
     assert.ok(drifted.managed.protected.some((entry) =>
       entry.target === ".agents/workspace/README.md" && entry.reason === "user-modified"));
   } finally {
@@ -242,11 +243,13 @@ test("syncTemplates rejects a symbolic-link runtime workspace before template wr
     const projectRoot = path.join(tmpDir, "project");
     const outside = path.join(tmpDir, "outside");
     writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      project: `sync-link-${path.basename(projectRoot)}`, org: "acme", language: "en", platform: { type: "none" },
       files: { managed: [], merged: [], ejected: [] }
     });
     fs.mkdirSync(outside);
-    fs.symlinkSync(outside, path.join(projectRoot, ".agents", "workspace"));
+    const workspace = taskWorkspaceRoot(projectRoot);
+    fs.mkdirSync(path.dirname(workspace), { recursive: true });
+    fs.symlinkSync(outside, workspace);
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     assert.throws(() => syncTemplates(projectRoot, templateRoot), /real directory/);
     assert.deepEqual(fs.readdirSync(outside), []);

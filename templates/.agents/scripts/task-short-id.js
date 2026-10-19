@@ -57,22 +57,16 @@ if (args.includes("--help") || args.includes("-h")) {
 }
 const repoRoot = findRepoRoot(process.cwd());
 const forwarded = [...args];
-if (!forwarded.includes("--active-dir")) {
-  if (!repoRoot) {
-    fs.writeSync(2, "Error: cannot determine active task directory\n");
-    process.exit(1);
-  }
-  forwarded.push("--active-dir", path.join(repoRoot, ".agents", "workspace", "active"));
-}
 if (!forwarded.includes("--short-id-length")) {
   forwarded.push("--short-id-length", String(configuredWidth(repoRoot)));
 }
 const sourceCli = findSourceCli();
 const installedCli = resolveCommand("agent-infra-internal");
 const child = sourceCli
-  ? spawnSync(process.execPath, ["--experimental-strip-types", sourceCli, "task-short-id", ...forwarded], { encoding: "utf8" })
+  ? spawnSync(process.execPath, ["--experimental-strip-types", sourceCli, "task-short-id", ...forwarded], { cwd: repoRoot || process.cwd(), encoding: "utf8" })
   : spawnSync(installedCli, ["task-short-id", ...forwarded], {
       encoding: "utf8",
+      cwd: repoRoot || process.cwd(),
       shell: process.platform === "win32" && /\.(?:bat|cmd)$/i.test(installedCli)
     });
 if (child.error) {

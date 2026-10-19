@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -30,7 +31,7 @@ function fixture(files: Record<string, string> = {}, completeReports = true) {
   const repoRoot = createTempDir('artifact-lifecycle-');
   spawnSync('git', ['init', '-q'], { cwd: repoRoot });
   fs.writeFileSync(path.join(repoRoot, '.gitignore'), '.agents/workspace/\n');
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(taskDir, name), content);
@@ -81,7 +82,7 @@ function git(root: string, args: string[]): string {
 function completedReviewFixture(f: ReturnType<typeof fixture>, options: { includeReviewedHead?: boolean } = {}) {
   const aircPath = path.join(f.repoRoot, '.agents', '.airc.json');
   fs.mkdirSync(path.dirname(aircPath), { recursive: true });
-  fs.writeFileSync(aircPath, JSON.stringify({ delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
+  fs.writeFileSync(aircPath, JSON.stringify({ project: taskWorkspaceProject(f.repoRoot), delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
   fs.writeFileSync(path.join(f.repoRoot, '.gitignore'), '.agents/workspace/\n');
   git(f.repoRoot, ['config', 'user.email', 'codex@example.com']);
   git(f.repoRoot, ['config', 'user.name', 'Codex']);

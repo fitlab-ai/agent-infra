@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { createTempDir, INTERNAL_CLI_PATH, filePath } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, filePath, taskWorkspaceProject } from '../../helpers.ts';
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 
@@ -14,9 +15,9 @@ function fixture() {
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\nplatform_issue_identity: '{"kind":"number","value":7}'\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const commentsPath = path.join(root, 'comments.json');
   fs.writeFileSync(commentsPath, '[]');
@@ -63,7 +64,7 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).status, 'no-op');
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
-  const operationJournalPath = path.join(path.dirname(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md')), '.platform-operations.json');
+  const operationJournalPath = path.join(path.dirname(path.join(taskWorkspaceRoot(f.root),  'active', f.taskId, 'task.md')), '.platform-operations.json');
   const operationJournal = JSON.parse(fs.readFileSync(operationJournalPath, 'utf8'));
   assert.equal(operationJournal.operations.length, 1);
   assert.equal(operationJournal.operations[0].kind, 'task-comment');
@@ -83,7 +84,7 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(recovery.status, 0, recovery.stderr || recovery.stdout);
   assert.equal(JSON.parse(recovery.stdout).status, 'no-op');
 
-  const stagingDir = path.join(f.root, '.agents', 'workspace', '.restore-staging-cli-test');
+  const stagingDir = path.join(taskWorkspaceRoot(f.root),  '.restore-staging-cli-test');
   const outputPath = path.join(stagingDir, 'task.md');
   fs.mkdirSync(stagingDir, { recursive: true });
   const recovered = runComment([
@@ -99,7 +100,7 @@ test('platform internal commands expose stable JSON and idempotent task comment 
 test('platform-comment preserves source content including local-looking artifact links', () => {
   const taskFixture = fixture();
   try {
-    const taskPath = path.join(taskFixture.root, '.agents', 'workspace', 'active', taskFixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(taskFixture.root),  'active', taskFixture.taskId, 'task.md');
     fs.appendFileSync(taskPath, '\n@2x\n');
     const taskResult = runComment(['sync', taskFixture.taskId, '--kind', 'task', '--agent', 'codex'], taskFixture);
     assert.equal(taskResult.status, 0, taskResult.stderr || taskResult.stdout);
@@ -111,7 +112,7 @@ test('platform-comment preserves source content including local-looking artifact
 
   const artifactFixture = fixture();
   try {
-    const artifactPath = path.join(artifactFixture.root, '.agents', 'workspace', 'active', artifactFixture.taskId, 'analysis.md');
+    const artifactPath = path.join(taskWorkspaceRoot(artifactFixture.root),  'active', artifactFixture.taskId, 'analysis.md');
     fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');
     const artifactResult = runComment([
       'sync', artifactFixture.taskId, '--kind', 'artifact', '--artifact', 'analysis.md', '--agent', 'codex'
@@ -129,7 +130,7 @@ test('platform-comment preserves source content including local-looking artifact
 test('platform-comment CLI encodes mixed-case HTML and rejects malformed content before remote writes', () => {
   const f = fixture();
   try {
-    const taskPath = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(f.root),  'active', f.taskId, 'task.md');
     const initialContent = fs.readFileSync(taskPath, 'utf8');
     fs.writeFileSync(taskPath, initialContent.replace('## Review Disagreement Ledger', [
       '## Requirements',
@@ -167,7 +168,7 @@ test('platform-comment CLI encodes mixed-case HTML and rejects malformed content
 test('platform task comment sync excludes receipt evidence from the projection', () => {
   const f = fixture();
   try {
-    const taskDir = path.join(f.root, '.agents', 'workspace', 'active', f.taskId);
+    const taskDir = path.join(taskWorkspaceRoot(f.root),  'active', f.taskId);
     fs.writeFileSync(path.join(taskDir, 'plan.md'), '# Plan\n');
     fs.writeFileSync(path.join(taskDir, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n');
     const taskPath = path.join(taskDir, 'task.md');
@@ -244,7 +245,7 @@ test('stage-summary stores the canonical body and digest used for delivery comme
     const args = ['stage-summary', f.taskId, '--body-file', bodyPath];
     assert.equal(runComment(args, f).status, 0);
     assert.equal(runComment(args, f).status, 0);
-    const staged = JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, '.delivery-summary.json'), 'utf8'));
+    const staged = JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.root),  'active', f.taskId, '.delivery-summary.json'), 'utf8'));
     assert.equal(staged.taskId, f.taskId);
     assert.equal(staged.body, 'Durable &lt;delivery&gt; summary.\n');
     assert.equal(staged.sha256, createHash('sha256').update(staged.body).digest('hex'));
@@ -277,7 +278,7 @@ test('ordinary summary sync refuses to re-post an out-of-order summary without f
 test('platform-comment backfill syncs all completion artifacts and resolves matching artifact warnings', () => {
   const f = fixture();
   try {
-    const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
+    const taskMd = path.join(taskWorkspaceRoot(f.root),  'active', f.taskId, 'task.md');
     fs.writeFileSync(taskMd, [
       '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'platform_issue_identity: \'{"kind":"number","value":7}\'', '---', '',
       '# Task', '', '## Review Disagreement Ledger', '',
@@ -329,7 +330,7 @@ test('platform-comment backfill syncs all completion artifacts and resolves matc
 test('platform-comment backfill leaves warnings open when an artifact comment fails', () => {
   const f = fixture();
   try {
-    const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
+    const taskMd = path.join(taskWorkspaceRoot(f.root),  'active', f.taskId, 'task.md');
     fs.writeFileSync(taskMd, [
       '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'platform_issue_identity: \'{"kind":"number","value":7}\'', '---', '',
       '# Task', '', '## Review Disagreement Ledger', '',

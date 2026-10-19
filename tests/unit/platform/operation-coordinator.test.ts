@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,12 +8,12 @@ import { createHash } from 'node:crypto';
 import { coordinatePlatformWrite } from '../../../lib/platform/operation-coordinator.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 test('a queued write stays local when an earlier operation cannot drain', async () => {
-  const repoRoot = createTempDir('platform-operation-coordinator-');
+  const { repoRoot } = createTaskWorkspaceFixture('platform-operation-coordinator-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   let drainCalled = false;
@@ -46,9 +47,9 @@ test('a queued write stays local when an earlier operation cannot drain', async 
 });
 
 test('the current platform write starts only after earlier work drains', async () => {
-  const repoRoot = createTempDir('platform-operation-order-');
+  const { repoRoot } = createTaskWorkspaceFixture('platform-operation-order-');
   const taskId = 'TASK-20260101-000002';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const events: string[] = [];
@@ -82,9 +83,9 @@ test('the current platform write starts only after earlier work drains', async (
 });
 
 test('a required write waits behind an earlier deferred failure', async () => {
-  const repoRoot = createTempDir('platform-operation-dependency-');
+  const { repoRoot } = createTaskWorkspaceFixture('platform-operation-dependency-');
   const taskId = 'TASK-20260101-000003';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   try {
@@ -116,9 +117,9 @@ test('a required write waits behind an earlier deferred failure', async () => {
 });
 
 test('Issue closure waits for earlier deferred writes before changing the terminal state', async () => {
-  const repoRoot = createTempDir('platform-operation-close-');
+  const { repoRoot } = createTaskWorkspaceFixture('platform-operation-close-');
   const taskId = 'TASK-20260101-000004';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'completed', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'completed', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\n---\n`);
   try {

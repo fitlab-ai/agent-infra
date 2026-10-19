@@ -138,7 +138,7 @@ The switch does not configure the Docker daemon or builder. Image pulls and `FRO
 
 ## Task-scoped workspace identity
 
-Every sandbox has an explicit workspace identity. A branch-only sandbox uses non-overlapping read-only directory mounts for `active`, `completed`, `blocked`, and `archive`. A task-bound sandbox replaces the `active` directory mount with a read-only `.agents/workspace/active/.short-ids.json` file, keeps `completed`, `blocked`, and `archive` read-only, and overlays only `.agents/workspace/active/<TASK-id>` as writable. The active ancestor itself is supplied by the writable `/workspace` worktree; the host workspace root is never mounted, and tasks in every other state remain invisible.
+Every sandbox has an explicit workspace identity. A branch-only sandbox uses non-overlapping read-only directory mounts for `active`, `completed`, `blocked`, and `archive`. A task-bound sandbox replaces the `active` directory mount with a read-only `/task-workspace/active/.short-ids.json` file, keeps `completed`, `blocked`, and `archive` read-only, and overlays only `/task-workspace/active/<TASK-id>` as writable. The task workspace is mounted independently at `/task-workspace`; the project worktree remains at `/workspace`, and the full host task root is never mounted. Tasks in every other state remain invisible.
 
 When a task-bound container still exists after its task moves to `completed`, `ai sandbox exec <branch>` may re-enter that same container after verifying the container label, the unique completed task, the branch, the task view, and the historical task mount. This re-entry uses the full task ID internally and does not restore or allocate an active short ID. If completed readiness fails, or if `ai sandbox exec --recreate <branch>` is requested, the command fails closed and leaves the original container untouched. Enter the existing container manually, or explicitly run `ai sandbox rm <TASK-id>` followed by `ai sandbox create <branch>` to start a new branch-only sandbox. `ai sandbox rm` is the full interactive sandbox cleanup path, not a container-only delete: it may remove the worktree, local branch, tool/shell state, and branch share.
 
@@ -177,7 +177,7 @@ If in-place recovery fails, the command stops before entering the container or s
 
 Codex keeps `/home/devuser/.codex` on a 512 MiB executable tmpfs so logs and runtime state stay in memory. Its Linux-managed `packages/app-server-daemon` directory is mounted read-write from the project and branch tool-state directory, so daemon bootstrap and updates persist across container recreation without reusing host-installed binaries. Codex databases, logs, sessions, and other non-seeded files under the tmpfs cannot be recovered after tmpfs loss. Declared seed entries such as `config.toml` and `model-catalogs` are reconstructable from their read-only staging mounts; credentials, shell configuration, worktrees, and share directories remain host-persistent.
 
-`ai sandbox ls` keeps a compact view: it lists the current project's Containers table (the `#` row number, the `SHORT` task short id, names, status, workspace identity, full task ID, and branch), followed by one health/task-view summary per container. To inspect full details for one sandbox, use `ai sandbox show <branch | TASK-id | N>`: it prints the label-derived workspace identity, that branch's worktree path, per-tool state paths (Claude Code, Codex, Antigravity CLI, OpenCode), broker health, and task-view details. The argument follows the same contract as `ai sandbox exec` and `ai sandbox start`, so `ai sandbox show 11` resolves the active task short id via `.agents/workspace/active/.short-ids.json`.
+`ai sandbox ls` keeps a compact view: it lists the current project's Containers table (the `#` row number, the `SHORT` task short id, names, status, workspace identity, full task ID, and branch), followed by one health/task-view summary per container. To inspect full details for one sandbox, use `ai sandbox show <branch | TASK-id | N>`: it prints the label-derived workspace identity, that branch's worktree path, per-tool state paths (Claude Code, Codex, Antigravity CLI, OpenCode), broker health, and task-view details. The argument follows the same contract as `ai sandbox exec` and `ai sandbox start`, so `ai sandbox show 11` resolves the active task short id via `/task-workspace/active/.short-ids.json`.
 
 Breaking migration for the next major version: task short ids now use bare digits only. Replace `#NN` with `NN`; quoted `#NN` input is rejected.
 
@@ -390,7 +390,7 @@ If the broker restarts after a valid result record but before terminal cleanup,
 generic process-control families can converge to a terminal response with
 output unavailable. Task finalization is stricter: a successful exit code is
 not proof of task completion; the canonical finalization receipt at
-`.agents/workspace/<state>/<task-id>/.task-finalization.json` remains the business
+`<task-workspace>/<state>/<task-id>/.task-finalization.json` remains the business
 authority. Direct-host finalization and the host-side sandbox-control broker are
 the only writers of that task-local receipt. The sandbox client requests
 finalization through the control protocol, and sandbox readers observe the same

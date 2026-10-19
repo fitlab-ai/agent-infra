@@ -26,7 +26,7 @@
 agent-infra-internal platform-context resolve [--cwd <path>]
 agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
 agent-infra-internal platform-comment recover --issue <issue-token> --task-id <TASK-id> \
-  --output <.agents/workspace/.restore-staging-*/task.md> [--cwd <path>]
+  --output <<task-workspace>/.restore-staging-*/task.md> [--cwd <path>]
 agent-infra-internal platform-comment owner <task-ref>
 agent-infra-internal platform-comment sync <task-ref> \
   --kind task|artifact|summary|cancel --agent {standard-agent-token} \

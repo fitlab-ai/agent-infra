@@ -4,19 +4,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { createTempDir, INTERNAL_CLI_PATH, filePath, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, filePath, gitSafeEnv, sandboxControlSafeEnv, taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
+function taskRoot(root: string): string {
+  return taskWorkspaceRoot(root, path.join(root, '.home'));
+}
+
 function fixture() {
   const root = createTempDir('complete-task-preflight-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  const activeDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const home = path.join(root, '.home');
+  fs.mkdirSync(home, { recursive: true });
+  const activeDir = path.join(taskRoot(root), 'active', TASK_ID);
   fs.mkdirSync(activeDir, { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture-project', prFlow: 'disabled', task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), prFlow: 'disabled', task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(taskRoot(root), 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
   fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
     skill: 'complete-task', checks: { 'required-pr-delivery': null }
   }));
@@ -30,7 +36,7 @@ function fixture() {
     '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
     '', '## Activity Log', ''
   ].join('\n'));
-  return { root, activeDir };
+  return { root, home, activeDir };
 }
 
 function writeControlManifest(root: string, controlRoot: string): void {
@@ -38,7 +44,7 @@ function writeControlManifest(root: string, controlRoot: string): void {
   fs.writeFileSync(path.join(controlRoot, 'manifest.json'), `${JSON.stringify({
     branch: 'fixture-branch', channelDir: 'channel', container: 'fixture-container',
     containerIdentity: { id: 'fixture-container-id', labels: {} }, engine: 'docker', generation: 'fixture-generation',
-    mode: 'task-bound', processingDir: 'processing', project: 'fixture-project', publicStatusDir: 'public',
+    mode: 'task-bound', processingDir: 'processing', project: taskWorkspaceProject(root), publicStatusDir: 'public',
     repoRoot: root, runtimeDir: 'runtime', taskId: TASK_ID, token: 'fixture-token', worktreeRoot: root,
     authorityEvidence: {
       version: 1, provider: 'docker', lockDomain: 'a'.repeat(64), routeKind: 'default', routeSelector: {},
@@ -73,6 +79,7 @@ test('compiled preflight does not require a checks snapshot for a bound historic
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: f.root });
 
     fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), JSON.stringify({
+      project: taskWorkspaceProject(f.root),
       platform: { type: 'github' },
       prFlow: 'disabled',
       task: { shortIdLength: 2 }
@@ -97,7 +104,7 @@ test('compiled preflight does not require a checks snapshot for a bound historic
     ], {
       cwd: f.root,
       encoding: 'utf8',
-      env: sandboxControlSafeEnv(gitSafeEnv(process.env))
+      env: sandboxControlSafeEnv(gitSafeEnv({ ...process.env, HOME: f.home }))
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -114,7 +121,7 @@ test('compiled preflight does not require a checks snapshot for a bound historic
 test('preflight success releases only this task short id when its sandbox control root is absent', () => {
   const f = fixture();
   try {
-    fs.writeFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID, '02': 'TASK-20260101-000002' } })}\n`);
+    fs.writeFileSync(path.join(taskRoot(f.root), 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID, '02': 'TASK-20260101-000002' } })}\n`);
     const preflight = run(f.root, ['task-verify', TASK_ID, 'complete-task.preflight', '--format', 'text']);
     assert.equal(preflight.status, 0, preflight.stderr);
     assert.match(preflight.stdout, /Verification: pass \| Target: complete-task\.preflight \| Skill: complete-task/);
@@ -122,9 +129,9 @@ test('preflight success releases only this task short id when its sandbox contro
     const completed = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
     assert.equal(completed.status, 0, JSON.stringify(completed));
     assert.equal(JSON.parse(completed.stdout).status, 'completed');
-    assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskRoot(f.root), 'completed', TASK_ID, 'task.md')), true);
     assert.equal(run(f.root, ['task-context', 'resolve', '01']).status, 1);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '02': 'TASK-20260101-000002' });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(taskRoot(f.root), 'active', '.short-ids.json'), 'utf8')).ids, { '02': 'TASK-20260101-000002' });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -139,14 +146,14 @@ test('host finalization CLI completes the terminal sequence and makes replay ide
     assert.equal(firstPayload.status, 'completed');
     assert.equal(firstPayload.accepted, true);
     assert.equal(firstPayload.result.status, 'completed');
-    assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskRoot(f.root), 'completed', TASK_ID, 'task.md')), true);
 
     const second = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
     assert.equal(second.status, 0, second.stderr || second.stdout);
     const secondPayload = JSON.parse(second.stdout);
     assert.equal(secondPayload.status, 'completed');
     assert.equal(secondPayload.changed, false);
-    assert.equal((fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+    assert.equal((fs.readFileSync(path.join(taskRoot(f.root), 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -154,12 +161,12 @@ test('host finalization CLI completes the terminal sequence and makes replay ide
 
 test('successful replay releases the short id after the target sandbox control root is removed', () => {
   const f = fixture();
-  const controlRoot = path.join(f.root, '.home', '.agent-infra', 'sandbox-control', 'fixture-project', 'tasks', TASK_ID);
+  const controlRoot = path.join(f.home, '.agent-infra', 'sandbox-control', taskWorkspaceProject(f.root), 'tasks', TASK_ID);
   try {
     writeControlManifest(f.root, controlRoot);
     const first = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
     assert.equal(first.status, 0, first.stderr || first.stdout);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(taskRoot(f.root), 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
 
     fs.rmSync(controlRoot, { recursive: true, force: true });
     const replay = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
@@ -167,7 +174,7 @@ test('successful replay releases the short id after the target sandbox control r
     const replayPayload = JSON.parse(replay.stdout);
     assert.equal(replayPayload.status, 'completed');
     assert.equal(replayPayload.changed, true);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(taskRoot(f.root), 'active', '.short-ids.json'), 'utf8')).ids, {});
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -175,8 +182,8 @@ test('successful replay releases the short id after the target sandbox control r
 
 test('failed short id release after successful replay can be retried', () => {
   const f = fixture();
-  const controlRoot = path.join(f.root, '.home', '.agent-infra', 'sandbox-control', 'fixture-project', 'tasks', TASK_ID);
-  const activeDir = path.join(f.root, '.agents', 'workspace', 'active');
+  const controlRoot = path.join(f.home, '.agent-infra', 'sandbox-control', taskWorkspaceProject(f.root), 'tasks', TASK_ID);
+  const activeDir = path.join(taskRoot(f.root), 'active');
   const lockPath = path.join(activeDir, '.short-ids.json.lock');
   try {
     writeControlManifest(f.root, controlRoot);
@@ -201,8 +208,8 @@ test('failed short id release after successful replay can be retried', () => {
 
 test('malformed target control state prevents short id release', () => {
   const f = fixture();
-  const controlRoot = path.join(f.root, '.home', '.agent-infra', 'sandbox-control', 'fixture-project', 'tasks', TASK_ID);
-  const registryPath = path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json');
+  const controlRoot = path.join(f.home, '.agent-infra', 'sandbox-control', taskWorkspaceProject(f.root), 'tasks', TASK_ID);
+  const registryPath = path.join(taskRoot(f.root), 'active', '.short-ids.json');
   try {
     fs.mkdirSync(controlRoot, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, 'manifest.json'), '{}\n');
@@ -223,7 +230,7 @@ test('completed verification resolves the archived task without moving it back t
     const verified = run(f.root, ['task-verify', TASK_ID, 'complete-task.completed', '--format', 'text']);
     assert.equal(verified.status, 0, verified.stderr);
     assert.match(verified.stdout, /Verification: pass \| Target: complete-task\.completed \| Skill: complete-task/);
-    assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), false);
+    assert.equal(fs.existsSync(path.join(taskRoot(f.root), 'active', TASK_ID, 'task.md')), false);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -46,7 +47,7 @@ function writeTask(
   reviewedHead: string,
   ledgerRows: string[] = []
 ): string {
-  const taskDir = path.join(caller, ".agents", "workspace", "active", taskId);
+  const taskDir = path.join(taskWorkspaceRoot(caller),  "active", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), [
     "---",
@@ -274,7 +275,7 @@ test("complete-task consumes a human exemption for merged identity failures befo
     assert.match(rendered, /PR_MERGE_IDENTITY_INVALID/);
     assert.match(rendered, /PRC-1: maintainer allowed reviewed and merged identities/);
 
-    const completedTask = path.join(fixtureRoot, ".agents", "workspace", "completed", taskId);
+    const completedTask = path.join(taskWorkspaceRoot(fixtureRoot),  "completed", taskId);
     fs.mkdirSync(path.dirname(completedTask), { recursive: true });
     fs.renameSync(activeTask, completedTask);
     const completed = await verifyInProcess({

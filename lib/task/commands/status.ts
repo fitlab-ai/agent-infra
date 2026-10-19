@@ -521,7 +521,7 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
   const run = input.run ?? makeRunner(input.repoRoot);
   const artifacts = enumerateArtifacts(input.taskDir);
   const workflow = collectWorkflow(content, input.now);
-  const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active');
+  const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active', false, input.repoRoot);
   const next = facts.ok ? recommendNext(facts.facts) : null;
   const recommendation = next?.action ?? DASH;
 

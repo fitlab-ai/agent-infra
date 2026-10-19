@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { createTempDir, CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH, taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 
 const SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
@@ -16,9 +16,9 @@ function mkFixture(): { repoRoot: string; activeDir: string } {
   fs.copyFileSync(SCRIPT, path.join(agentsDir, 'scripts', 'task-short-id.js'));
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
-    JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } })
+    JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength: 2 } })
   );
-  const activeDir = path.join(agentsDir, 'workspace', 'active');
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot), 'active');
   fs.mkdirSync(activeDir, { recursive: true });
   return { repoRoot, activeDir };
 }

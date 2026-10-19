@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { resolveProjectTaskWorkspaceRoot } from '../../task/workspace-root.ts';
+import { detectRepoRoot } from '../../task/resolve-ref.ts';
 import {
   SANDBOX_CONTROL_MAX_BYTES,
   SANDBOX_CONTROL_STATUS_STALE_MS,
@@ -158,18 +160,11 @@ type CanonicalRequestTask =
 
 // Use the current short-id contract for the first visible active registry.
 export function resolveVisibleActiveShortId(ref: string): string | null {
-  let dir = process.cwd();
-  for (let depth = 0; depth < 64; depth += 1) {
-    const registryPath = path.join(dir, '.agents', 'workspace', 'active', '.short-ids.json');
-    if (fs.existsSync(registryPath)) {
-      const resolved = resolveShortIdReadOnly(ref, dir, { shortIdLength: configuredShortIdLength(dir) });
-      return resolved.ok ? resolved.taskId : null;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
+  const repoRoot = detectRepoRoot();
+  const registryPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', '.short-ids.json');
+  if (!fs.existsSync(registryPath)) return null;
+  const resolved = resolveShortIdReadOnly(ref, repoRoot, { shortIdLength: configuredShortIdLength(repoRoot) });
+  return resolved.ok ? resolved.taskId : null;
 }
 
 // A request's leading argument is only a task reference for some families and

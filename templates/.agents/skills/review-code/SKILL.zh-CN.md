@@ -65,7 +65,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 ### 1. 验证前置条件
 
 要求存在：
-- `.agents/workspace/active/{task-id}/task.md`
+- `<task-workspace>/active/{task-id}/task.md`
 - 可解析的任务分支与 Git 审查目标。实现产物属于可选上下文，不得作为审查资格门槛。
 
 ### 2. 解析审查上下文
@@ -106,7 +106,7 @@ agent-infra-internal task-artifact {task-id} init --family review-code --artifac
 
 骨架不生成审查结论、发现或计数；完成审查内容后才能进入 summary finalizer。结构错误时，遵循 `.agents/rules/local-artifact-repair.md` 直接修正正式审查产物并重跑原 finalizer；当前产物内容是唯一输入。
 
-创建 `.agents/workspace/active/{task-id}/{review-artifact}`。
+创建 `<task-workspace>/active/{task-id}/{review-artifact}`。
 
 > 报告格式和严重程度布局见 `reference/report-template.md`。写报告前先读取 `reference/report-template.md`。
 
