@@ -298,10 +298,15 @@ function writeRegistry(registryPath: string, registry: RegistrySchema): void {
 function mutateShortIdRegistry(
   repoRoot: string,
   taskId: string,
-  requested: ShortIdMutationEffect
+  requested: ShortIdMutationEffect,
+  releasePredicate?: (hasMapping: boolean) => boolean
 ): ShortIdMutationResult {
   const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
-  return mutateShortIdRegistryAt(activeDir, configuredShortIdLength(repoRoot), taskId, requested);
+  return mutateShortIdRegistryAt(activeDir, configuredShortIdLength(repoRoot), taskId, requested, false, !releasePredicate, releasePredicate);
+}
+
+function withShortIdRegistryLock<T>(repoRoot: string, operation: () => T): T {
+  return withRegistryLock(path.join(repoRoot, '.agents', 'workspace', 'active'), operation);
 }
 
 type ShortIdCommandRequest = {
@@ -324,7 +329,8 @@ function mutateShortIdRegistryAt(
   taskId: string,
   requested: ShortIdMutationEffect,
   onlyReleaseWhenInactive = false,
-  pruneOrphans = true
+  pruneOrphans = true,
+  releasePredicate?: (hasMapping: boolean) => boolean
 ): ShortIdMutationResult {
   const registryPath = path.join(activeDir, REGISTRY_NAME);
   return withRegistryLock(activeDir, () => {
@@ -337,6 +343,7 @@ function mutateShortIdRegistryAt(
       }
     }
     const existing = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId);
+    const releaseAllowed = requested !== 'release' || !releasePredicate || releasePredicate(Boolean(existing));
     let result: ShortIdMutationResult;
     if (requested === 'alloc') {
       if (!fs.existsSync(path.join(activeDir, taskId, 'task.md'))) {
@@ -355,7 +362,7 @@ function mutateShortIdRegistryAt(
       }
     } else if (requested === 'release') {
       const taskIsActive = fs.existsSync(path.join(activeDir, taskId, 'task.md'));
-      if (!existing || (onlyReleaseWhenInactive && taskIsActive)) {
+      if (!existing || (onlyReleaseWhenInactive && taskIsActive) || !releaseAllowed) {
         result = { effect: 'unchanged', shortId: existing?.[0] ?? null, changed: false };
       } else {
         delete registry.ids[existing[0]];
@@ -567,6 +574,7 @@ export {
   inspectShortIdRegistry,
   configuredShortIdLength,
   mutateShortIdRegistry,
+  withShortIdRegistryLock,
   releaseStaleShortIdRegistry,
   executeShortIdCommand
 };

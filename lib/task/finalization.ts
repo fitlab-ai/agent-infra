@@ -14,7 +14,6 @@ import { parseTaskFrontmatter } from './frontmatter.ts';
 import { recoverPlatformOperations } from './platform-operation-recovery.ts';
 import {
   applyTaskLifecycle,
-  inspectTaskBoundControlState,
   inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
   type TaskLifecycleRequest,
@@ -32,10 +31,11 @@ import {
   type OperationWarning,
   type OperationWarningSeverity
 } from './operation-outcome.ts';
-import { acquireSandboxControlReplacement, readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
+import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import { validateSandboxControlIdentity } from '../sandbox/control/identity-sentinel.ts';
 
 const RECEIPT_VERSION = 4 as const;
+const RELEASE_SHORT_ID_IF_CONTROL_ABSENT = { releaseShortIdIfControlAbsent: true as const };
 const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification', 'summary'] as const;
 type FinalizationStep = typeof FINALIZATION_STEPS[number];
 type FinalizationStepState = 'pending' | 'done' | 'skipped';
@@ -82,32 +82,6 @@ type TaskFinalizationOptions = Readonly<{
   preflight?: typeof verifyTaskEvent;
   beforeLifecycle?: (taskId: string) => Promise<void>;
 }>;
-
-function completionReleasesShortId(
-  repoRoot: string,
-  taskId: string,
-  options: TaskFinalizationOptions
-): Readonly<{ release: boolean; error: FinalizationError | null }> {
-  if (options.controlBinding || options.beforeLifecycle) return { release: false, error: null };
-  if (!options.controlRoot) return {
-    release: false,
-    error: {
-      code: 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE',
-      message: 'cannot verify task-bound sandbox control state without its deterministic control root',
-      retryable: false
-    }
-  };
-  const state = inspectTaskBoundControlState(options.controlRoot, taskId, repoRoot, options.controlProject);
-  if (state.state === 'invalid') return {
-    release: false,
-    error: {
-      code: 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE',
-      message: `cannot verify task-bound sandbox control state: ${state.message ?? 'invalid control state'}`,
-      retryable: false
-    }
-  };
-  return { release: state.state === 'absent', error: null };
-}
 
 type TaskFinalizationReceipt = Readonly<{
   version: typeof RECEIPT_VERSION;
@@ -1091,12 +1065,11 @@ async function prepareTaskFinalizationCore(
       lifecycleResult = { status: 'no-op', changed: false, error: null };
       receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
     } else {
-      const shortIdDecision = completionReleasesShortId(repoRoot, taskId, options);
-      if (shortIdDecision.error) return failed(taskId, shortIdDecision.error);
+      const directHost = Boolean(options.controlRoot && !options.controlBinding && !options.beforeLifecycle);
       const result = lifecycle(
         {
           taskRef: taskId, intent: 'complete', agent: request.agent,
-          ...(shortIdDecision.release ? { releaseShortId: true as const } : {})
+          ...(directHost ? RELEASE_SHORT_ID_IF_CONTROL_ABSENT : {})
         },
         {
           repoRoot,
@@ -1239,55 +1212,35 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
         retryable: false
       });
-      let replacementLease: ReturnType<typeof acquireSandboxControlReplacement> | null = null;
-      let controlRootCreatedForLock = false;
-      let shortIdDecision: ReturnType<typeof completionReleasesShortId>;
-      if (options.controlRoot && !options.controlBinding && !options.beforeLifecycle) {
-        controlRootCreatedForLock = !fs.existsSync(options.controlRoot);
-        try {
-          replacementLease = acquireSandboxControlReplacement(options.controlRoot);
-        } catch (error) {
-          const detail = errorOf(error, 'TASK_FINALIZATION_CONTROL_AUTHORITY_BUSY', true);
-          detail.code = 'TASK_FINALIZATION_CONTROL_AUTHORITY_BUSY';
-          return failed(resolved.taskId, detail);
-        }
-        shortIdDecision = controlRootCreatedForLock
-          ? { release: true, error: null }
-          : completionReleasesShortId(repoRoot, resolved.taskId, options);
-        if (shortIdDecision.error) {
-          replacementLease.release();
-          return failed(resolved.taskId, shortIdDecision.error);
-        }
-        if (!shortIdDecision.release) {
-          replacementLease.release();
-          replacementLease = null;
-          controlRootCreatedForLock = false;
-        }
-      } else {
-        shortIdDecision = completionReleasesShortId(repoRoot, resolved.taskId, options);
-        if (shortIdDecision.error) return failed(resolved.taskId, shortIdDecision.error);
-      }
-      receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
-      const lifecycleRequest = {
-        taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent,
-        ...(shortIdDecision.release ? { releaseShortId: true as const } : {})
-      };
-      const lifecycleOptions = {
-        repoRoot,
-        ...(options.controlRoot && !controlRootCreatedForLock ? { controlRoot: options.controlRoot } : {}),
-        ...(options.controlProject ? { controlProject: options.controlProject } : {}),
-        ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
-      };
       let result: TaskLifecycleResult;
-      try {
+      if (options.controlRoot && !options.controlBinding && !options.beforeLifecycle) {
+        receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
+        const lifecycleRequest = {
+          taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent,
+          ...RELEASE_SHORT_ID_IF_CONTROL_ABSENT
+        };
+        const lifecycleOptions = {
+          repoRoot, controlRoot: options.controlRoot,
+          ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+          ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+        };
         result = options.lifecycle
           ? options.lifecycle(lifecycleRequest, lifecycleOptions)
           : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
-      } finally {
-        if (replacementLease) {
-          replacementLease.release();
-          if (controlRootCreatedForLock) fs.rmdirSync(options.controlRoot!);
-        }
+      } else {
+        receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
+        const lifecycleRequest = {
+          taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent
+        };
+        const lifecycleOptions = {
+          repoRoot,
+          ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+          ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+          ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+        };
+        result = options.lifecycle
+          ? options.lifecycle(lifecycleRequest, lifecycleOptions)
+          : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
       }
       const step = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {

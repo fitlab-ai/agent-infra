@@ -10,7 +10,7 @@ import { upsertSection } from './sections.ts';
 import { locateHotTaskDirs, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import {
   configuredShortIdLength, executeShortIdCommand, loadShortIdByTaskId,
-  mutateShortIdRegistry, releaseStaleShortIdRegistry
+  mutateShortIdRegistry
 } from './short-id.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskMutation, TaskOperationSummary, TaskWriteMetadata } from './write.ts';
@@ -59,7 +59,7 @@ type TaskLifecycleRequest =
   | { taskRef: string; intent: 'block'; agent: string; reason: string; unblockCondition: string; dryRun?: boolean }
   | { taskRef: string; intent: 'activate'; agent: string; note: string; dryRun?: boolean }
   | { taskRef: string; intent: 'cancel'; agent: string; reason: string; dryRun?: boolean }
-  | { taskRef: string; intent: 'complete'; agent: string; releaseShortId?: true; dryRun?: boolean }
+  | { taskRef: string; intent: 'complete'; agent: string; releaseShortIdIfControlAbsent?: true; dryRun?: boolean }
   | { taskRef: string; intent: 'close-codescan'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'close-dependabot'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'restore'; agent: string; stagingDir: string; issueNumber: number; dryRun?: boolean }
@@ -125,8 +125,8 @@ type TaskLifecycleOptions = {
 type TaskCompletionProjection = Readonly<{ taskId: string; content: string; timestamp: string; agentInfraVersion: string }>;
 
 const STEPS: readonly LifecycleStep[] = ['task-written', 'directory-moved', 'registry-committed'];
-function stepsForIntent(request: Pick<TaskLifecycleRequest, 'intent'> & { releaseShortId?: true }): readonly LifecycleStep[] {
-  return request.intent === 'complete' && !request.releaseShortId ? ['task-written', 'directory-moved'] : STEPS;
+function stepsForIntent(request: Pick<TaskLifecycleRequest, 'intent'> & { releaseShortIdIfControlAbsent?: true }): readonly LifecycleStep[] {
+  return request.intent === 'complete' && !request.releaseShortIdIfControlAbsent ? ['task-written', 'directory-moved'] : STEPS;
 }
 const DEFAULT_IO: LifecycleFileSystem = {
   renameSync: (source, target) => fs.renameSync(source, target),
@@ -151,7 +151,7 @@ function isVirtiofsMountPoint(directory: string, mountInfo: string): boolean {
   });
 }
 
-function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'> & { releaseShortId?: true }, error: LifecycleError, extra: Partial<TaskLifecycleResult> = {}): TaskLifecycleResult {
+function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'> & { releaseShortIdIfControlAbsent?: true }, error: LifecycleError, extra: Partial<TaskLifecycleResult> = {}): TaskLifecycleResult {
   return {
     status: 'failed', changed: false, requestRef: request.taskRef, taskId: null,
     intent: request.intent, sourceState: null, targetState: null, sourcePath: null,
@@ -220,7 +220,7 @@ function intentIdentity(request: TaskLifecycleRequest, taskId: string): string {
   if ('note' in request) payload.note = request.note;
   if ('alertNumber' in request) payload.alertNumber = request.alertNumber;
   if ('issueNumber' in request) payload.issueNumber = request.issueNumber;
-  if (request.intent === 'complete' && request.releaseShortId) payload.releaseShortId = true;
+  if (request.intent === 'complete' && request.releaseShortIdIfControlAbsent) payload.releaseShortIdIfControlAbsent = true;
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
@@ -229,7 +229,7 @@ function transition(request: TaskLifecycleRequest): { sources: readonly SourceSt
   if (request.intent === 'activate') return { sources: ['blocked'], target: 'active', registry: 'alloc' };
   if (request.intent === 'cancel') return { sources: ['active', 'blocked'], target: 'completed', registry: 'release' };
   if (request.intent === 'restore') return { sources: ['staging'], target: 'active', registry: 'alloc' };
-  if (request.intent === 'complete') return { sources: ['active'], target: 'completed', registry: request.releaseShortId ? 'release' : 'none' };
+  if (request.intent === 'complete') return { sources: ['active'], target: 'completed', registry: request.releaseShortIdIfControlAbsent ? 'release' : 'none' };
   return { sources: ['active'], target: 'completed', registry: 'release' };
 }
 
@@ -417,6 +417,13 @@ function taskBoundControlMoveSafety(
     catch {
       return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control root is missing, malformed, or belongs to another task' };
     }
+  }
+  if (request.intent === 'complete' && request.releaseShortIdIfControlAbsent && controlRoot) {
+    const state = inspectTaskBoundControlState(controlRoot, taskId, repoRoot, options.controlProject);
+    if (state.state === 'invalid') return {
+      code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
+      message: `task-bound sandbox control state cannot be verified: ${state.message ?? 'invalid control state'}`
+    };
   }
   if (request.intent !== 'complete' && (pathExists(controlManifest) || pathExists(controlLease))) {
     return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory' };
@@ -962,8 +969,14 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   let shortId: TaskLifecycleResult['shortId'] = { effect: 'unchanged', shortId: request.intent === 'complete' ? registeredKey ?? null : null, changed: false };
   if (requiredSteps.includes('registry-committed') && !completed.has('registry-committed')) {
     try {
-      shortId = request.intent === 'complete' && request.releaseShortId
-        ? releaseStaleShortIdRegistry(repoRoot, taskId)
+      shortId = request.intent === 'complete' && request.releaseShortIdIfControlAbsent
+        ? mutateShortIdRegistry(repoRoot, taskId, 'release', (hasMapping) => {
+          if (!options.controlRoot) throw Object.assign(new Error('task-bound sandbox control root is required'), { code: 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE' });
+          const state = inspectTaskBoundControlState(options.controlRoot, taskId, repoRoot, options.controlProject);
+          if (state.state === 'invalid') throw Object.assign(new Error(state.message ?? 'invalid task-bound sandbox control state'), { code: 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE' });
+          if (state.state === 'valid' && !hasMapping) throw Object.assign(new Error('valid task-bound control state has no short-id mapping'), { code: 'LIFECYCLE_SHORT_ID_PRECONDITION' });
+          return state.state === 'absent';
+        })
         : mutateShortIdRegistry(repoRoot, taskId, spec.registry);
     }
     catch (error) { return failed(request, { code: (error as { code?: string }).code ?? 'LIFECYCLE_SHORT_ID_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], pendingSteps: requiredSteps.filter((step) => !completed.has(step)), timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
@@ -973,7 +986,6 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   }
   const mappings = loadShortIdByTaskId(repoRoot);
   if (spec.target === 'active' && !mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'active lifecycle target has no short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-  if (request.intent === 'complete' && request.releaseShortId && mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'completed lifecycle requested short-id release but retained a registry mapping' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
   if (request.intent !== 'complete' && spec.target !== 'active' && mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'non-active lifecycle target retained a short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
   try { io.unlinkSync(journalPath); }
   catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_CLEANUP_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }

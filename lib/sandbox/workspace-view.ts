@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import { resolveTaskWorkspace } from './task-resolver.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
-import { loadShortIdByTaskId } from '../task/short-id.ts';
+import { loadShortIdByTaskId, withShortIdRegistryLock } from '../task/short-id.ts';
 import {
   createSandboxControlIdentitySentinel,
   writeSandboxControlIdentitySentinel
@@ -354,31 +354,36 @@ export function finalizeSandboxControlManifest(
   }>
 ): SandboxControlManifest {
   if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
-  if (setup.manifestDraft.mode === 'task-bound' && setup.replacementLease) {
-    setup.replacementLease.assertOwned();
-    if (!loadShortIdByTaskId(setup.manifestDraft.repoRoot).has(setup.manifestDraft.taskId!)) {
-      throw new Error('SANDBOX_TASK_SHORT_ID_RELEASED');
+  const publish = (): SandboxControlManifest => {
+    if (setup.manifestDraft.mode === 'task-bound') {
+      setup.replacementLease?.assertOwned();
+      if (!loadShortIdByTaskId(setup.manifestDraft.repoRoot).has(setup.manifestDraft.taskId!)) {
+        throw new Error('SANDBOX_TASK_SHORT_ID_RELEASED');
+      }
     }
-  }
-  const manifest: SandboxControlManifest = {
-    ...setup.manifestDraft,
-    engine: identity.engine,
-    containerIdentity: { id: identity.id, labels: { ...identity.labels } },
-    authorityEvidence: identity.authorityEvidence
+    const manifest: SandboxControlManifest = {
+      ...setup.manifestDraft,
+      engine: identity.engine,
+      containerIdentity: { id: identity.id, labels: { ...identity.labels } },
+      authorityEvidence: identity.authorityEvidence
+    };
+    const persistedManifest = {
+      ...manifest,
+      channelDir: 'channel',
+      publicStatusDir: 'public',
+      processingDir: 'processing',
+      runtimeDir: 'runtime'
+    };
+    const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+    try {
+      fs.writeFileSync(temporary, `${JSON.stringify(persistedManifest)}\n`, { mode: 0o600, flag: 'wx' });
+      fs.renameSync(temporary, setup.manifestPath);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+    return manifest;
   };
-  const persistedManifest = {
-    ...manifest,
-    channelDir: 'channel',
-    publicStatusDir: 'public',
-    processingDir: 'processing',
-    runtimeDir: 'runtime'
-  };
-  const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  try {
-    fs.writeFileSync(temporary, `${JSON.stringify(persistedManifest)}\n`, { mode: 0o600, flag: 'wx' });
-    fs.renameSync(temporary, setup.manifestPath);
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
-  return manifest;
+  return setup.manifestDraft.mode === 'task-bound'
+    ? withShortIdRegistryLock(setup.manifestDraft.repoRoot, publish)
+    : publish();
 }
