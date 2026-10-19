@@ -1603,6 +1603,10 @@ export async function create(
                 : []),
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
+              // Every task sandbox runs without seccomp and AppArmor filtering;
+              // capabilities and namespace isolation remain unchanged.
+              '--security-opt', 'seccomp=unconfined',
+              '--security-opt', 'apparmor=unconfined',
               ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
               ...dotfilesMount,

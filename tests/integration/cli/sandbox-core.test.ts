@@ -829,6 +829,10 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     const runCall = calls.find((call) => call[0] === "run");
     assert.ok(runCall, "expected sandbox create to invoke docker run");
     assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
+    const seccompIndex = runCall.indexOf("--security-opt");
+    assert.notEqual(seccompIndex, -1, "expected sandbox to load security options");
+    assert.equal(runCall[seccompIndex + 1] ?? "", "seccomp=unconfined");
+    assert.ok(runCall.includes("apparmor=unconfined"));
     assert.equal(
       runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
       false,
@@ -858,6 +862,7 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
 test("sandbox create runs the configured project init command in the mounted workspace", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = createTempDir("agent-infra-sandbox-project-init-");
   let controlRoot = path.join(tmpDir, ".agent-infra", "sandbox-control", "not-created");

@@ -180,6 +180,12 @@ Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs �
 
 启用 Claude Code 时，`ai sandbox create` 还会把宿主机 `~/.claude/settings.json` 中的模型和 API provider 设置合并到沙箱内的 Claude Code settings。已有的沙箱值优先，因此沙箱内的本地覆盖会被保留。凭证仍使用上面的专用 credentials 通道；provider 环境设置只会作为 Claude Code settings 值复制。
 
+## 嵌套 bubblewrap 沙箱与安全配置
+
+每个任务沙箱都会设置 `--security-opt seccomp=unconfined` 和 `--security-opt apparmor=unconfined`。
+
+容器仍保留 namespaces、capabilities 和 cgroup 限制；不使用 `--privileged`。
+
 ## 宿主-沙箱文件交换
 
 `ai sandbox create` 会自动挂载两个可读写目录，方便宿主与容器之间互相 drop 文件，不污染 git 工作树：

@@ -189,6 +189,12 @@ When you run the sandbox over SSH, use `ai cp <ssh-alias>` on the Mac in front o
 
 When Claude Code is enabled, `ai sandbox create` also merges model and API provider settings from the host `~/.claude/settings.json` into the sandbox Claude Code settings. Existing sandbox values take precedence, so local sandbox overrides are preserved. Credentials still use the dedicated credentials channel above; provider environment settings are copied only as Claude Code settings values.
 
+## Nested bubblewrap sandbox and security options
+
+Every task sandbox sets `--security-opt seccomp=unconfined` and `--security-opt apparmor=unconfined`.
+
+The container still keeps namespaces, capabilities, and cgroup limits; `--privileged` is not used.
+
 ## Host-sandbox file exchange
 
 `ai sandbox create` mounts two writable directories for dropping files between
