@@ -4,7 +4,6 @@ import os from 'node:os';
 import { isSandbox } from '../sandbox/environment.ts';
 
 export type ExecutionBoundary = 'host' | 'container';
-export type SandboxMode = 'task-bound' | 'branch-only';
 
 /**
  * Resolve the physical task-workspace boundary from the verified process

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import test from 'node:test';
@@ -30,13 +29,4 @@ test('task-workspace resolve returns the shared host root and isolated container
   const container = run(fixture.repoRoot, ['resolve', '--boundary', 'container']);
   assert.equal(container.status, 0, container.stderr);
   assert.equal(JSON.parse(container.stdout).root, '/task-workspace');
-});
-
-test('task-workspace migrate refuses to start without both maintenance attestations', () => {
-  const fixture = createTaskWorkspaceFixture('task-workspace-migration-cli-');
-  initFixtureRepository(fixture.repoRoot);
-  const result = run(fixture.repoRoot, ['migrate', '--migration-id', 'fixture-no-attestation']);
-  assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'TASK_WORKSPACE_MAINTENANCE_REQUIRED');
-  assert.deepEqual(fs.readdirSync(fixture.taskRoot), []);
 });

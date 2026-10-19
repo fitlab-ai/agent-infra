@@ -113,7 +113,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'platform-checks', 'logs', 'conditional', 'diagnostic'),
     descriptor('internal', 'task-context', 'resolve', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-workspace', 'resolve', 'non-task', 'diagnostic', 'none'),
-    descriptor('internal', 'task-workspace', 'migrate', 'non-task', 'progress', 'none'),
     descriptor('internal', 'task-ledger', 'decision-next-id', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-ledger', 'stage-status', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-ledger', 'finding-upsert', 'task-bound', 'progress'),
