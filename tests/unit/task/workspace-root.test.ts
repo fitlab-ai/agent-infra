@@ -27,13 +27,12 @@ test('container task root is separate from the project checkout', () => {
 
 test('verified sandbox markers select the container boundary for both permission modes', (t) => {
   const fixture = createTaskWorkspaceFixture('workspace-root-boundary-');
-  const statusDir = path.join(fixture.home, `status-${fixture.project}`);
   const prior = new Map<string, string | undefined>();
+  prior.set('AGENT_INFRA_CONTROL_STATUS_DIR', process.env.AGENT_INFRA_CONTROL_STATUS_DIR);
   const envValues = {
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-test',
     AGENT_INFRA_CONTROL_DIR: path.join(fixture.home, 'control'),
-    AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
     AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(64),
     AGENT_INFRA_TASK_ID: undefined,
     AGENT_INFRA_RUNTIME_DIR: undefined,
@@ -77,6 +76,8 @@ test('verified sandbox markers select the container boundary for both permission
   fs.writeFileSync(path.join(decoyActive, 'task.md'), `---\nid: ${homeDecoyId}\nstatus: active\n---\n`);
   fs.writeFileSync(path.join(fixture.taskRoot, 'active', '.short-ids.json'), JSON.stringify({ version: 1, ids: { '01': homeDecoyId } }));
   for (const mode of ['task-bound', 'branch-only'] as const) {
+    const statusDir = path.join(fixture.home, `status-${fixture.project}-${mode}`);
+    process.env.AGENT_INFRA_CONTROL_STATUS_DIR = statusDir;
     const sentinel = createSandboxControlIdentitySentinel({ mode, taskId: mode === 'task-bound' ? taskId : null, generation: 'generation-test', controlRootId: 'a'.repeat(64) });
     writeSandboxControlIdentitySentinel(statusDir, sentinel);
     if (mode === 'task-bound') {
