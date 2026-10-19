@@ -35,7 +35,6 @@ import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import { validateSandboxControlIdentity } from '../sandbox/control/identity-sentinel.ts';
 
 const RECEIPT_VERSION = 4 as const;
-const RELEASE_SHORT_ID_IF_CONTROL_ABSENT = { releaseShortIdIfControlAbsent: true as const };
 const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification', 'summary'] as const;
 type FinalizationStep = typeof FINALIZATION_STEPS[number];
 type FinalizationStepState = 'pending' | 'done' | 'skipped';
@@ -1065,12 +1064,8 @@ async function prepareTaskFinalizationCore(
       lifecycleResult = { status: 'no-op', changed: false, error: null };
       receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
     } else {
-      const directHost = Boolean(options.controlRoot && !options.controlBinding && !options.beforeLifecycle);
       const result = lifecycle(
-        {
-          taskRef: taskId, intent: 'complete', agent: request.agent,
-          ...(directHost ? RELEASE_SHORT_ID_IF_CONTROL_ABSENT : {})
-        },
+        { taskRef: taskId, intent: 'complete', agent: request.agent },
         {
           repoRoot,
           prepareOnly: true,
@@ -1212,36 +1207,17 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
         retryable: false
       });
-      let result: TaskLifecycleResult;
-      if (options.controlRoot && !options.controlBinding && !options.beforeLifecycle) {
-        receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
-        const lifecycleRequest = {
-          taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent,
-          ...RELEASE_SHORT_ID_IF_CONTROL_ABSENT
-        };
-        const lifecycleOptions = {
-          repoRoot, controlRoot: options.controlRoot,
-          ...(options.controlProject ? { controlProject: options.controlProject } : {}),
-          ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
-        };
-        result = options.lifecycle
-          ? options.lifecycle(lifecycleRequest, lifecycleOptions)
-          : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
-      } else {
-        receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
-        const lifecycleRequest = {
-          taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent
-        };
-        const lifecycleOptions = {
-          repoRoot,
-          ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
-          ...(options.controlProject ? { controlProject: options.controlProject } : {}),
-          ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
-        };
-        result = options.lifecycle
-          ? options.lifecycle(lifecycleRequest, lifecycleOptions)
-          : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
-      }
+      receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
+      const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
+      const lifecycleOptions = {
+        repoRoot,
+        ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+        ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+        ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+      };
+      const result = options.lifecycle
+        ? options.lifecycle(lifecycleRequest, lifecycleOptions)
+        : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
       const step = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });

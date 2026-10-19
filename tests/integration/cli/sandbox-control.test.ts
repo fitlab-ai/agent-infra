@@ -614,9 +614,6 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
       branch,
       identity: { mode: 'task-bound', taskId }
     });
-    const activeWorkspace = path.join(root, '.agents', 'workspace', 'active');
-    fs.mkdirSync(activeWorkspace, { recursive: true });
-    fs.writeFileSync(path.join(activeWorkspace, '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': taskId } })}\n`);
     const controlRoot = sandboxControlPaths({
       base: controlBase, project: 'demo', container: 'demo-dev-feature',
       identity: { mode: 'task-bound', taskId }

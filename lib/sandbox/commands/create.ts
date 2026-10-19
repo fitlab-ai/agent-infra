@@ -10,7 +10,6 @@ import pc from 'picocolors';
 import { listAgentClientAdapters } from '../../agent-clients/registry.ts';
 import type { SandboxAlias } from '../tool-types.ts';
 import { loadConfig } from '../config.ts';
-import { loadShortIdByTaskId, withShortIdRegistryLock } from '../../task/short-id.ts';
 import {
   assertValidBranchName,
   containerName,
@@ -1308,16 +1307,7 @@ export async function create(
         title: `Starting container '${container}'`,
         task: async (message: (text: string) => void) => {
           const hadControlRootBeforeAcquire = fs.existsSync(controlPaths.root);
-          let replacementLease: ReturnType<typeof acquireSandboxControlReplacement>;
-          if (target.workspace.mode === 'task-bound') {
-            const taskId = target.workspace.taskId;
-            replacementLease = withShortIdRegistryLock(effectiveConfig.repoRoot, () => {
-              if (!loadShortIdByTaskId(effectiveConfig.repoRoot).has(taskId)) {
-                throw new Error('SANDBOX_TASK_SHORT_ID_RELEASED');
-              }
-              return acquireSandboxControlReplacement(controlPaths.root);
-            });
-          } else replacementLease = acquireSandboxControlReplacement(controlPaths.root);
+          const replacementLease = acquireSandboxControlReplacement(controlPaths.root);
           let replacementLeaseHeld = true;
           let replacementCutover: ReturnType<typeof beginSandboxControlReplacement> | null = null;
           try {

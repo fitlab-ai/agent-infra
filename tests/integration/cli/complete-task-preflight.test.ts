@@ -33,6 +33,23 @@ function fixture() {
   return { root, activeDir };
 }
 
+function writeControlManifest(root: string, controlRoot: string): void {
+  for (const name of ['channel', 'public', 'processing', 'runtime']) fs.mkdirSync(path.join(controlRoot, name), { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, 'manifest.json'), `${JSON.stringify({
+    branch: 'fixture-branch', channelDir: 'channel', container: 'fixture-container',
+    containerIdentity: { id: 'fixture-container-id', labels: {} }, engine: 'docker', generation: 'fixture-generation',
+    mode: 'task-bound', processingDir: 'processing', project: 'fixture-project', publicStatusDir: 'public',
+    repoRoot: root, runtimeDir: 'runtime', taskId: TASK_ID, token: 'fixture-token', worktreeRoot: root,
+    authorityEvidence: {
+      version: 1, provider: 'docker', lockDomain: 'a'.repeat(64), routeKind: 'default', routeSelector: {},
+      normalizedEndpoint: 'unix:///var/run/docker.sock', endpointFingerprint: 'b'.repeat(64),
+      daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
+      apiVersion: { major: 1, minor: 44 }, authorityFingerprint: 'd'.repeat(64)
+    },
+    controlRootId: 'e'.repeat(96)
+  })}\n`);
+}
+
 function run(root: string, args: string[]) {
   const home = path.join(root, '.home');
   fs.mkdirSync(home, { recursive: true });
@@ -130,6 +147,68 @@ test('host finalization CLI completes the terminal sequence and makes replay ide
     assert.equal(secondPayload.status, 'completed');
     assert.equal(secondPayload.changed, false);
     assert.equal((fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('successful replay releases the short id after the target sandbox control root is removed', () => {
+  const f = fixture();
+  const controlRoot = path.join(f.root, '.home', '.agent-infra', 'sandbox-control', 'fixture-project', 'tasks', TASK_ID);
+  try {
+    writeControlManifest(f.root, controlRoot);
+    const first = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
+
+    fs.rmSync(controlRoot, { recursive: true, force: true });
+    const replay = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(replay.status, 0, replay.stderr || replay.stdout);
+    assert.equal(JSON.parse(replay.stdout).status, 'completed');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('failed short id release after successful replay can be retried', () => {
+  const f = fixture();
+  const controlRoot = path.join(f.root, '.home', '.agent-infra', 'sandbox-control', 'fixture-project', 'tasks', TASK_ID);
+  const activeDir = path.join(f.root, '.agents', 'workspace', 'active');
+  const lockPath = path.join(activeDir, '.short-ids.json.lock');
+  try {
+    writeControlManifest(f.root, controlRoot);
+    const first = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    fs.rmSync(controlRoot, { recursive: true, force: true });
+    fs.mkdirSync(lockPath);
+
+    const blocked = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.notEqual(blocked.status, 0);
+    assert.equal(JSON.parse(blocked.stdout).status, 'blocked');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(activeDir, '.short-ids.json'), 'utf8')).ids['01'], TASK_ID);
+
+    fs.rmdirSync(lockPath);
+    const retry = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(retry.status, 0, retry.stderr || retry.stdout);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(activeDir, '.short-ids.json'), 'utf8')).ids, {});
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('malformed target control state prevents short id release', () => {
+  const f = fixture();
+  const controlRoot = path.join(f.root, '.home', '.agent-infra', 'sandbox-control', 'fixture-project', 'tasks', TASK_ID);
+  const registryPath = path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json');
+  try {
+    fs.mkdirSync(controlRoot, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, 'manifest.json'), '{}\n');
+
+    const result = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.notEqual(result.status, 0);
+    assert.equal(JSON.parse(result.stdout).status, 'failed');
+    assert.equal(JSON.parse(fs.readFileSync(registryPath, 'utf8')).ids['01'], TASK_ID);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

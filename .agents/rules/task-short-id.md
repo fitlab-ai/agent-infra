@@ -19,11 +19,11 @@
 |-----------|---------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | alloc     | `create-task`、`import-issue`、`import-codescan`、`import-dependabot`                       | 分配最小可用 `NN`，写入注册表。                                  |
 | resolve   | 生命周期 SKILL（`analyze-task` / `plan-task` / `code-task` / `review-*` / `commit` / …）    | `NN` → 完整 task id 查询，不分配。                              |
-| release   | 无 sandbox 控制状态的任务完成；sandbox cleanup 成功；以及 `cancel-task`、`block-task`、`close-codescan`、`close-dependabot` | 从注册表移除。                                                   |
+| release   | 任务完成且目标 sandbox control root 不存在；sandbox cleanup 成功；以及 `cancel-task`、`block-task`、`close-codescan`、`close-dependabot` | 从注册表移除。                                                   |
 | re-alloc  | `restore-task`                                                                              | 重新分配（可能与历史不同），写入注册表。                         |
 
-complete 在 task-bound sandbox 控制状态明确不存在时释放当前任务短号。有效且身份匹配的控制 manifest 表示 sandbox 仍关联，短号继续保留，供 cleanup 解析。
-控制状态存在但损坏、不完整或无法核验时，完成操作失败关闭且不释放短号。受管 sandbox cleanup 确认容器已删除且清理成功后，释放对应 completed task 的短号。
+任务完成返回最终成功后检查目标 sandbox control root；确认不存在时释放短号，存在时保留。无法确认路径状态时返回可重试错误。成功回放执行相同收尾。
+受管 sandbox cleanup 确认容器已删除且清理成功后，释放对应 completed task 的短号。
 其他 lifecycle intent 继续按表中时机释放短号。
 
 ## 配置
