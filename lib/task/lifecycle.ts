@@ -308,6 +308,12 @@ function pathExists(candidate: string): boolean {
   }
 }
 
+function hasTaskBoundControlState(controlRoot: string): boolean {
+  return pathExists(controlRoot)
+    || pathExists(path.join(controlRoot, 'manifest.json'))
+    || pathExists(path.join(controlRoot, 'lease.json'));
+}
+
 function assertRealDirectoryAncestors(directory: string): void {
   const absolute = path.resolve(directory);
   let current = path.parse(absolute).root;
@@ -351,28 +357,11 @@ export function inspectTaskBoundControlState(
 ): Readonly<{ state: 'absent' | 'valid' | 'invalid'; message?: string }> {
   const absoluteRoot = path.resolve(controlRoot);
   try {
-    if (path.basename(absoluteRoot) !== taskId || path.basename(path.dirname(absoluteRoot)) !== 'tasks'
-      || (expectedProject !== undefined && path.basename(path.dirname(path.dirname(absoluteRoot))) !== expectedProject)) {
-      throw new Error('control root path does not match the task/project layout');
-    }
-    let current = path.parse(absoluteRoot).root;
-    for (const segment of absoluteRoot.slice(current.length).split(path.sep).filter(Boolean)) {
-      current = path.join(current, segment);
-      let stat: fs.Stats;
-      try { stat = fs.lstatSync(current); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'absent' };
-        throw error;
-      }
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('control root ancestor is not a real directory');
-    }
-    let rootStat: fs.Stats;
-    try { rootStat = fs.lstatSync(absoluteRoot); }
+    try { assertTaskControlRootPath(absoluteRoot, taskId, expectedProject); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'absent' };
       throw error;
     }
-    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('control root is not a real directory');
     assertTaskControlManifestIdentity(absoluteRoot, taskId, repoRoot, expectedProject);
     const manifestPath = path.join(absoluteRoot, 'manifest.json');
     const manifest: SandboxControlManifest = readSandboxControlManifest(manifestPath);
@@ -401,10 +390,16 @@ function taskBoundControlMoveSafety(
   validateManifestIdentity: boolean
 ): LifecycleError | null {
   if (!controlRoot) return null;
+  if (request.intent === 'complete' && request.releaseShortIdIfControlAbsent) {
+    const state = inspectTaskBoundControlState(controlRoot, taskId, repoRoot, options.controlProject);
+    if (state.state === 'invalid') return {
+      code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
+      message: `task-bound sandbox control state cannot be verified: ${state.message ?? 'invalid control state'}`
+    };
+    return null;
+  }
   const controlManifest = path.join(controlRoot, 'manifest.json');
-  const controlLease = path.join(controlRoot, 'lease.json');
-  const stateExists = pathExists(controlRoot) || pathExists(controlManifest) || pathExists(controlLease);
-  if (stateExists) {
+  if (hasTaskBoundControlState(controlRoot)) {
     try {
       assertTaskControlRootPath(controlRoot, taskId, options.controlProject);
       if (validateManifestIdentity) {
@@ -417,16 +412,10 @@ function taskBoundControlMoveSafety(
     catch {
       return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control root is missing, malformed, or belongs to another task' };
     }
-  }
-  if (request.intent === 'complete' && request.releaseShortIdIfControlAbsent && controlRoot) {
-    const state = inspectTaskBoundControlState(controlRoot, taskId, repoRoot, options.controlProject);
-    if (state.state === 'invalid') return {
+    if (request.intent !== 'complete') return {
       code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
-      message: `task-bound sandbox control state cannot be verified: ${state.message ?? 'invalid control state'}`
+      message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory'
     };
-  }
-  if (request.intent !== 'complete' && (pathExists(controlManifest) || pathExists(controlLease))) {
-    return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task-bound sandbox control state exists; stop and remove the verified sandbox before moving the task directory' };
   }
   return null;
 }
