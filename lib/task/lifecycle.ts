@@ -138,7 +138,7 @@ const DEFAULT_IO: LifecycleFileSystem = {
 
 function isVirtiofsMountPoint(directory: string, mountInfo: string): boolean {
   const decodeMountInfoPath = (value: string): string => value.replace(/\\([0-7]{3})/gu, (_match, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)));
-  const expected = path.resolve(directory);
+  const expected = fs.realpathSync.native(directory);
   return mountInfo.split('\n').some((line) => {
     if (!line) return false;
     const fields = line.split(' ');

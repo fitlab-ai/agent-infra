@@ -55,9 +55,9 @@ test('verified sandbox markers select the container boundary for both permission
   const containerRoot = path.join(fixture.home, 'container-mounts', fixture.project);
   fs.mkdirSync(containerRoot, { recursive: true });
   const remap = (value: fs.PathLike): fs.PathLike => {
-    const candidate = path.resolve(String(value));
+    const candidate = path.posix.normalize(String(value).replaceAll('\\', '/'));
     return candidate === rootPrefix || candidate.startsWith(`${rootPrefix}/`)
-      ? path.join(containerRoot, path.relative(rootPrefix, candidate))
+      ? path.join(containerRoot, path.posix.relative(rootPrefix, candidate))
       : value;
   };
   const originalExists = fs.existsSync;

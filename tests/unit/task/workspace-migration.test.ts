@@ -280,7 +280,7 @@ test('migration discovery freezes same-project registered Git worktrees only', (
   for (const root of [repo, other]) fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   const sources = discoverTaskWorkspaceSources(repo);
   assert.deepEqual(sources.sort(), [
-    fs.realpathSync(path.join(repo, '.agents', 'workspace')),
-    fs.realpathSync(path.join(other, '.agents', 'workspace'))
+    fs.realpathSync.native(path.join(repo, '.agents', 'workspace')),
+    fs.realpathSync.native(path.join(other, '.agents', 'workspace'))
   ].sort());
 });
