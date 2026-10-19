@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import { resolveTaskWorkspace } from './task-resolver.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
+import { loadShortIdByTaskId } from '../task/short-id.ts';
 import {
   createSandboxControlIdentitySentinel,
   writeSandboxControlIdentitySentinel
@@ -55,6 +56,7 @@ export type SandboxControlSetup = Readonly<{
   token: string;
   generation: string;
   controlRootId: string;
+  replacementLease?: Readonly<{ root: string; assertOwned(): void }>;
 }>;
 
 export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine' | 'authorityEvidence'> & {
@@ -338,7 +340,8 @@ export function materializeSandboxControl(params: Readonly<{
     processingDir,
     runtimeDir,
   };
-  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation, controlRootId: identitySentinel.controlRootId };
+  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation, controlRootId: identitySentinel.controlRootId,
+    ...(params.replacementLease ? { replacementLease: params.replacementLease } : {}) };
 }
 
 export function finalizeSandboxControlManifest(
@@ -351,6 +354,12 @@ export function finalizeSandboxControlManifest(
   }>
 ): SandboxControlManifest {
   if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
+  if (setup.manifestDraft.mode === 'task-bound' && setup.replacementLease) {
+    setup.replacementLease.assertOwned();
+    if (!loadShortIdByTaskId(setup.manifestDraft.repoRoot).has(setup.manifestDraft.taskId!)) {
+      throw new Error('SANDBOX_TASK_SHORT_ID_RELEASED');
+    }
+  }
   const manifest: SandboxControlManifest = {
     ...setup.manifestDraft,
     engine: identity.engine,

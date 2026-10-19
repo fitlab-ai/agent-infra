@@ -21,6 +21,7 @@ import {
   type TaskFinalizationReceipt
 } from '../../../lib/task/finalization.ts';
 import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
+import { acquireSandboxControlReplacement } from '../../../lib/sandbox/control/lifecycle.ts';
 import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/verification.ts';
 
@@ -159,6 +160,74 @@ test('host finalization fails closed when task-bound control state cannot be ver
     assert.equal(result.error?.code, 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE');
     assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization fails closed when an ancestor of task-bound control state is a dangling symlink', async () => {
+  const f = fixture();
+  fs.symlinkSync(path.join(f.repoRoot, 'missing-agent-infra'), path.join(f.repoRoot, '.agent-infra'));
+  try {
+    const result = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')));
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE');
+    assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization shares the replacement authority with a concurrent control publisher', async () => {
+  const f = fixture();
+  let publicationAttempt: 'busy' | 'acquired' | null = null;
+  let publicationError = '';
+  const opts: TaskFinalizationOptions = {
+    ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+    lifecycle: (lifecycleRequest, lifecycleOptions) => {
+      if (lifecycleOptions?.prepareOnly) return applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
+      try {
+        const lease = acquireSandboxControlReplacement(controlRoot(f.repoRoot));
+        publicationAttempt = 'acquired';
+        lease.release();
+      } catch (error) {
+        publicationError = String(error);
+        publicationAttempt = String(error).includes('SANDBOX_CONTROL_REPLACEMENT_BUSY') ? 'busy' : 'acquired';
+      }
+      return applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
+    }
+  };
+  try {
+    const result = await applyTaskFinalization(request, opts);
+    assert.ok(publicationAttempt === 'busy', `publication attempt=${publicationAttempt}; ${publicationError}`);
+    assert.equal(result.status, 'completed', JSON.stringify(result));
+    assert.equal(fs.existsSync(path.join(controlRoot(f.repoRoot), 'manifest.json')), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
+    assert.equal(fs.existsSync(controlRoot(f.repoRoot)), false);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization preserves the short id while control publication owns the replacement lease, then retries', async () => {
+  const f = fixture();
+  const root = controlRoot(f.repoRoot);
+  const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const creatorLease = acquireSandboxControlReplacement(root);
+  try {
+    const interrupted = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')));
+    assert.equal(interrupted.status, 'failed');
+    assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).ids, { '01': TASK_ID });
+  } finally {
+    creatorLease.release();
+    fs.rmdirSync(root);
+  }
+  try {
+    const resumed = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')));
+    assert.equal(resumed.status, 'completed', JSON.stringify(resumed));
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).ids, {});
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

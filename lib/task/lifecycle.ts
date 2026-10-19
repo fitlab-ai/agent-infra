@@ -308,18 +308,22 @@ function pathExists(candidate: string): boolean {
   }
 }
 
+function assertRealDirectoryAncestors(directory: string): void {
+  const absolute = path.resolve(directory);
+  let current = path.parse(absolute).root;
+  for (const segment of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    const stat = fs.lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('control root ancestor is not a real directory');
+  }
+}
+
 function assertTaskControlRootPath(controlRoot: string, taskId: string, expectedProject?: string): void {
   if (path.basename(controlRoot) !== taskId || path.basename(path.dirname(controlRoot)) !== 'tasks'
     || (expectedProject !== undefined && path.basename(path.dirname(path.dirname(controlRoot))) !== expectedProject)) {
     throw new Error('control root path does not match the task/project layout');
   }
-  const managedBase = path.dirname(path.dirname(path.dirname(controlRoot)));
-  let current = managedBase;
-  for (const segment of path.relative(managedBase, controlRoot).split(path.sep).filter(Boolean)) {
-    const stat = fs.lstatSync(current);
-    if (stat.isSymbolicLink()) throw new Error('control root ancestor is a symbolic link');
-    current = path.join(current, segment);
-  }
+  assertRealDirectoryAncestors(controlRoot);
   const stat = fs.lstatSync(controlRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('control root is not a real directory');
 }
@@ -351,9 +355,9 @@ export function inspectTaskBoundControlState(
       || (expectedProject !== undefined && path.basename(path.dirname(path.dirname(absoluteRoot))) !== expectedProject)) {
       throw new Error('control root path does not match the task/project layout');
     }
-    const managedBase = path.dirname(path.dirname(path.dirname(absoluteRoot)));
-    let current = managedBase;
-    for (const segment of path.relative(managedBase, absoluteRoot).split(path.sep).filter(Boolean)) {
+    let current = path.parse(absoluteRoot).root;
+    for (const segment of absoluteRoot.slice(current.length).split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
       let stat: fs.Stats;
       try { stat = fs.lstatSync(current); }
       catch (error) {
@@ -361,7 +365,6 @@ export function inspectTaskBoundControlState(
         throw error;
       }
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('control root ancestor is not a real directory');
-      current = path.join(current, segment);
     }
     let rootStat: fs.Stats;
     try { rootStat = fs.lstatSync(absoluteRoot); }

@@ -32,7 +32,7 @@ import {
   type OperationWarning,
   type OperationWarningSeverity
 } from './operation-outcome.ts';
-import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
+import { acquireSandboxControlReplacement, readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import { validateSandboxControlIdentity } from '../sandbox/control/identity-sentinel.ts';
 
 const RECEIPT_VERSION = 4 as const;
@@ -1239,8 +1239,34 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
         retryable: false
       });
-      const shortIdDecision = completionReleasesShortId(repoRoot, resolved.taskId, options);
-      if (shortIdDecision.error) return failed(resolved.taskId, shortIdDecision.error);
+      let replacementLease: ReturnType<typeof acquireSandboxControlReplacement> | null = null;
+      let controlRootCreatedForLock = false;
+      let shortIdDecision: ReturnType<typeof completionReleasesShortId>;
+      if (options.controlRoot && !options.controlBinding && !options.beforeLifecycle) {
+        controlRootCreatedForLock = !fs.existsSync(options.controlRoot);
+        try {
+          replacementLease = acquireSandboxControlReplacement(options.controlRoot);
+        } catch (error) {
+          const detail = errorOf(error, 'TASK_FINALIZATION_CONTROL_AUTHORITY_BUSY', true);
+          detail.code = 'TASK_FINALIZATION_CONTROL_AUTHORITY_BUSY';
+          return failed(resolved.taskId, detail);
+        }
+        shortIdDecision = controlRootCreatedForLock
+          ? { release: true, error: null }
+          : completionReleasesShortId(repoRoot, resolved.taskId, options);
+        if (shortIdDecision.error) {
+          replacementLease.release();
+          return failed(resolved.taskId, shortIdDecision.error);
+        }
+        if (!shortIdDecision.release) {
+          replacementLease.release();
+          replacementLease = null;
+          controlRootCreatedForLock = false;
+        }
+      } else {
+        shortIdDecision = completionReleasesShortId(repoRoot, resolved.taskId, options);
+        if (shortIdDecision.error) return failed(resolved.taskId, shortIdDecision.error);
+      }
       receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
       const lifecycleRequest = {
         taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent,
@@ -1248,13 +1274,21 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       };
       const lifecycleOptions = {
         repoRoot,
-        ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+        ...(options.controlRoot && !controlRootCreatedForLock ? { controlRoot: options.controlRoot } : {}),
         ...(options.controlProject ? { controlProject: options.controlProject } : {}),
         ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
       };
-      const result = options.lifecycle
-        ? options.lifecycle(lifecycleRequest, lifecycleOptions)
-        : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
+      let result: TaskLifecycleResult;
+      try {
+        result = options.lifecycle
+          ? options.lifecycle(lifecycleRequest, lifecycleOptions)
+          : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
+      } finally {
+        if (replacementLease) {
+          replacementLease.release();
+          if (controlRootCreatedForLock) fs.rmdirSync(options.controlRoot!);
+        }
+      }
       const step = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
