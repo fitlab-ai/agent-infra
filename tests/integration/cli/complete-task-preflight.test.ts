@@ -164,7 +164,9 @@ test('successful replay releases the short id after the target sandbox control r
     fs.rmSync(controlRoot, { recursive: true, force: true });
     const replay = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
     assert.equal(replay.status, 0, replay.stderr || replay.stdout);
-    assert.equal(JSON.parse(replay.stdout).status, 'completed');
+    const replayPayload = JSON.parse(replay.stdout);
+    assert.equal(replayPayload.status, 'completed');
+    assert.equal(replayPayload.changed, true);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

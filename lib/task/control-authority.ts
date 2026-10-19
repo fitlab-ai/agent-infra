@@ -371,7 +371,8 @@ export function dispatchTaskControlOperation(
       if (context.source !== 'direct-host' || !controlRoot || result.status !== 'completed' || !result.taskId) return result;
       try {
         if (fs.lstatSync(controlRoot, { throwIfNoEntry: false }) === undefined) {
-          releaseStaleShortIdRegistry(context.repoRoot, result.taskId);
+          const released = releaseStaleShortIdRegistry(context.repoRoot, result.taskId);
+          return { ...result, changed: result.changed || released.changed };
         }
         return result;
       } catch (error) {
