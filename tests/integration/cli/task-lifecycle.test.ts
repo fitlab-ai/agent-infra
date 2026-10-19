@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { createTempDir, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -34,6 +35,23 @@ test('task-lifecycle CLI stays inside its fixture with sandbox control authority
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).taskId, TASK_ID);
   assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+});
+
+test('complete-release lifecycle removes only its bound task mapping and replays idempotently', () => {
+  const f = fixture();
+  const registryPath = path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json');
+  fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { '01': TASK_ID, '02': 'TASK-20260101-000002' } })}\n`);
+  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex', releaseShortId: true as const };
+  try {
+    const first = applyTaskLifecycle(request, { repoRoot: f.root });
+    assert.equal(first.status, 'applied');
+    assert.deepEqual(first.completedSteps, ['task-written', 'directory-moved', 'registry-committed']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).ids, { '02': 'TASK-20260101-000002' });
+
+    const replay = applyTaskLifecycle(request, { repoRoot: f.root });
+    assert.equal(replay.status, 'no-op');
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).ids, { '02': 'TASK-20260101-000002' });
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('task-lifecycle CLI prints one JSON result and uses domain exit codes', () => {

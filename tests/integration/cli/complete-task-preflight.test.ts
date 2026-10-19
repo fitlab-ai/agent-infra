@@ -15,7 +15,7 @@ function fixture() {
   const activeDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(activeDir, { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled', task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture-project', prFlow: 'disabled', task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
   fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
     skill: 'complete-task', checks: { 'required-pr-delivery': null }
@@ -34,10 +34,12 @@ function fixture() {
 }
 
 function run(root: string, args: string[]) {
+  const home = path.join(root, '.home');
+  fs.mkdirSync(home, { recursive: true });
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], {
     cwd: root,
     encoding: 'utf8',
-    env: sandboxControlSafeEnv()
+    env: sandboxControlSafeEnv({ ...process.env, HOME: home })
   });
 }
 
@@ -92,9 +94,10 @@ test('compiled preflight does not require a checks snapshot for a bound historic
   }
 });
 
-test('preflight success permits one archive and retains the short id until sandbox cleanup', () => {
+test('preflight success releases only this task short id when its sandbox control root is absent', () => {
   const f = fixture();
   try {
+    fs.writeFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID, '02': 'TASK-20260101-000002' } })}\n`);
     const preflight = run(f.root, ['task-verify', TASK_ID, 'complete-task.preflight', '--format', 'text']);
     assert.equal(preflight.status, 0, preflight.stderr);
     assert.match(preflight.stdout, /Verification: pass \| Target: complete-task\.preflight \| Skill: complete-task/);
@@ -103,8 +106,8 @@ test('preflight success permits one archive and retains the short id until sandb
     assert.equal(completed.status, 0, JSON.stringify(completed));
     assert.equal(JSON.parse(completed.stdout).status, 'completed');
     assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
-    assert.equal(run(f.root, ['task-context', 'resolve', '01']).status, 0);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '01': TASK_ID });
+    assert.equal(run(f.root, ['task-context', 'resolve', '01']).status, 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, { '02': 'TASK-20260101-000002' });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

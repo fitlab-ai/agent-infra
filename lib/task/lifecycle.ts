@@ -10,7 +10,7 @@ import { upsertSection } from './sections.ts';
 import { locateHotTaskDirs, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import {
   configuredShortIdLength, executeShortIdCommand, loadShortIdByTaskId,
-  mutateShortIdRegistry
+  mutateShortIdRegistry, releaseStaleShortIdRegistry
 } from './short-id.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskMutation, TaskOperationSummary, TaskWriteMetadata } from './write.ts';
@@ -18,6 +18,9 @@ import { validateCurrentTaskContract } from './current-contract.ts';
 import { isValidAgentInfraVersion } from '../version.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
+import { readActiveLease } from '../sandbox/control/state.ts';
+import type { SandboxControlManifest } from '../sandbox/control/protocol.ts';
+import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -56,7 +59,7 @@ type TaskLifecycleRequest =
   | { taskRef: string; intent: 'block'; agent: string; reason: string; unblockCondition: string; dryRun?: boolean }
   | { taskRef: string; intent: 'activate'; agent: string; note: string; dryRun?: boolean }
   | { taskRef: string; intent: 'cancel'; agent: string; reason: string; dryRun?: boolean }
-  | { taskRef: string; intent: 'complete'; agent: string; dryRun?: boolean }
+  | { taskRef: string; intent: 'complete'; agent: string; releaseShortId?: true; dryRun?: boolean }
   | { taskRef: string; intent: 'close-codescan'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'close-dependabot'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'restore'; agent: string; stagingDir: string; issueNumber: number; dryRun?: boolean }
@@ -122,8 +125,8 @@ type TaskLifecycleOptions = {
 type TaskCompletionProjection = Readonly<{ taskId: string; content: string; timestamp: string; agentInfraVersion: string }>;
 
 const STEPS: readonly LifecycleStep[] = ['task-written', 'directory-moved', 'registry-committed'];
-function stepsForIntent(intent: TaskLifecycleIntent): readonly LifecycleStep[] {
-  return intent === 'complete' ? ['task-written', 'directory-moved'] : STEPS;
+function stepsForIntent(request: Pick<TaskLifecycleRequest, 'intent'> & { releaseShortId?: true }): readonly LifecycleStep[] {
+  return request.intent === 'complete' && !request.releaseShortId ? ['task-written', 'directory-moved'] : STEPS;
 }
 const DEFAULT_IO: LifecycleFileSystem = {
   renameSync: (source, target) => fs.renameSync(source, target),
@@ -148,13 +151,13 @@ function isVirtiofsMountPoint(directory: string, mountInfo: string): boolean {
   });
 }
 
-function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'>, error: LifecycleError, extra: Partial<TaskLifecycleResult> = {}): TaskLifecycleResult {
+function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'> & { releaseShortId?: true }, error: LifecycleError, extra: Partial<TaskLifecycleResult> = {}): TaskLifecycleResult {
   return {
     status: 'failed', changed: false, requestRef: request.taskRef, taskId: null,
     intent: request.intent, sourceState: null, targetState: null, sourcePath: null,
     targetPath: null, task: { operations: [] }, directory: { effect: 'unchanged', changed: false },
     shortId: { effect: 'unchanged', shortId: null, changed: false }, timestamp: null,
-    agentInfraVersion: null, journalPath: null, completedSteps: [], pendingSteps: stepsForIntent(request.intent),
+    agentInfraVersion: null, journalPath: null, completedSteps: [], pendingSteps: stepsForIntent(request),
     error, ...extra
   };
 }
@@ -217,6 +220,7 @@ function intentIdentity(request: TaskLifecycleRequest, taskId: string): string {
   if ('note' in request) payload.note = request.note;
   if ('alertNumber' in request) payload.alertNumber = request.alertNumber;
   if ('issueNumber' in request) payload.issueNumber = request.issueNumber;
+  if (request.intent === 'complete' && request.releaseShortId) payload.releaseShortId = true;
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
@@ -225,7 +229,7 @@ function transition(request: TaskLifecycleRequest): { sources: readonly SourceSt
   if (request.intent === 'activate') return { sources: ['blocked'], target: 'active', registry: 'alloc' };
   if (request.intent === 'cancel') return { sources: ['active', 'blocked'], target: 'completed', registry: 'release' };
   if (request.intent === 'restore') return { sources: ['staging'], target: 'active', registry: 'alloc' };
-  if (request.intent === 'complete') return { sources: ['active'], target: 'completed', registry: 'none' };
+  if (request.intent === 'complete') return { sources: ['active'], target: 'completed', registry: request.releaseShortId ? 'release' : 'none' };
   return { sources: ['active'], target: 'completed', registry: 'release' };
 }
 
@@ -332,6 +336,56 @@ function assertTaskControlManifestIdentity(controlRoot: string, taskId: string, 
   if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId || manifest.project !== project
     || typeof manifest.repoRoot !== 'string' || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
     throw new Error('control manifest identity does not match the task');
+  }
+}
+
+export function inspectTaskBoundControlState(
+  controlRoot: string,
+  taskId: string,
+  repoRoot: string,
+  expectedProject?: string
+): Readonly<{ state: 'absent' | 'valid' | 'invalid'; message?: string }> {
+  const absoluteRoot = path.resolve(controlRoot);
+  try {
+    if (path.basename(absoluteRoot) !== taskId || path.basename(path.dirname(absoluteRoot)) !== 'tasks'
+      || (expectedProject !== undefined && path.basename(path.dirname(path.dirname(absoluteRoot))) !== expectedProject)) {
+      throw new Error('control root path does not match the task/project layout');
+    }
+    const managedBase = path.dirname(path.dirname(path.dirname(absoluteRoot)));
+    let current = managedBase;
+    for (const segment of path.relative(managedBase, absoluteRoot).split(path.sep).filter(Boolean)) {
+      let stat: fs.Stats;
+      try { stat = fs.lstatSync(current); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'absent' };
+        throw error;
+      }
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('control root ancestor is not a real directory');
+      current = path.join(current, segment);
+    }
+    let rootStat: fs.Stats;
+    try { rootStat = fs.lstatSync(absoluteRoot); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'absent' };
+      throw error;
+    }
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('control root is not a real directory');
+    assertTaskControlManifestIdentity(absoluteRoot, taskId, repoRoot, expectedProject);
+    const manifestPath = path.join(absoluteRoot, 'manifest.json');
+    const manifest: SandboxControlManifest = readSandboxControlManifest(manifestPath);
+    const leasePath = path.join(absoluteRoot, 'lease.json');
+    if (pathExists(leasePath)) {
+      const leaseStat = fs.lstatSync(leasePath);
+      if (!leaseStat.isFile() || leaseStat.isSymbolicLink()) throw new Error('control lease is not a real file');
+      const lease = JSON.parse(fs.readFileSync(leasePath, 'utf8')) as { generation?: unknown; taskId?: unknown; branch?: unknown };
+      if (lease.generation !== manifest.generation || lease.taskId !== taskId || lease.branch !== manifest.branch) {
+        throw new Error('control lease identity does not match the task manifest');
+      }
+      readActiveLease(manifest);
+    }
+    return { state: 'valid' };
+  } catch (error) {
+    return { state: 'invalid', message: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -611,7 +665,7 @@ export function inspectTaskLifecycleProgress(
     if (journal.taskId !== taskId || journal.intent !== 'complete'
       || journal.intentDigest !== intentIdentity(request, taskId)
       || journal.sourceState !== 'active' || journal.targetState !== 'completed') return 'unknown';
-    if (journal.completedSteps.some((step, index) => stepsForIntent(journal.intent)[index] !== step)) return 'unknown';
+    if (journal.completedSteps.some((step, index) => stepsForIntent(request)[index] !== step)) return 'unknown';
     const directoryMoved = journal.completedSteps.includes('directory-moved');
     const registryCommitted = journal.completedSteps.includes('registry-committed');
     const hasShortId = loadShortIdByTaskId(repoRoot).has(taskId);
@@ -671,7 +725,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     return failed(request, { code: 'LIFECYCLE_TASK_NOT_FOUND', message: `task ${taskId} has no lifecycle source` }, { taskId });
   }
   const targetPath = path.join(repoRoot, '.agents', 'workspace', spec.target, taskId);
-  const requiredSteps = stepsForIntent(request.intent);
+  const requiredSteps = stepsForIntent(request);
   const movingTaskDirectory = sourcePath !== targetPath;
   const currentTaskFile = path.join(sourcePath, 'task.md');
   const existingJournal = fs.existsSync(path.join(sourcePath, '.task-lifecycle.json'));
@@ -904,14 +958,19 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   }
   let shortId: TaskLifecycleResult['shortId'] = { effect: 'unchanged', shortId: request.intent === 'complete' ? registeredKey ?? null : null, changed: false };
   if (requiredSteps.includes('registry-committed') && !completed.has('registry-committed')) {
-    try { shortId = mutateShortIdRegistry(repoRoot, taskId, spec.registry); }
-    catch (error) { return failed(request, { code: (error as { code?: string }).code ?? 'LIFECYCLE_SHORT_ID_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+    try {
+      shortId = request.intent === 'complete' && request.releaseShortId
+        ? releaseStaleShortIdRegistry(repoRoot, taskId)
+        : mutateShortIdRegistry(repoRoot, taskId, spec.registry);
+    }
+    catch (error) { return failed(request, { code: (error as { code?: string }).code ?? 'LIFECYCLE_SHORT_ID_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], pendingSteps: requiredSteps.filter((step) => !completed.has(step)), timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
     completed.add('registry-committed'); journal.completedSteps = [...completed];
     try { writeJournal(journalPath, journal, io); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
   }
   const mappings = loadShortIdByTaskId(repoRoot);
   if (spec.target === 'active' && !mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'active lifecycle target has no short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+  if (request.intent === 'complete' && request.releaseShortId && mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'completed lifecycle requested short-id release but retained a registry mapping' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
   if (request.intent !== 'complete' && spec.target !== 'active' && mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'non-active lifecycle target retained a short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
   try { io.unlinkSync(journalPath); }
   catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_CLEANUP_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }

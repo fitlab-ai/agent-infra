@@ -14,6 +14,7 @@ import { parseTaskFrontmatter } from './frontmatter.ts';
 import { recoverPlatformOperations } from './platform-operation-recovery.ts';
 import {
   applyTaskLifecycle,
+  inspectTaskBoundControlState,
   inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
   type TaskLifecycleRequest,
@@ -81,6 +82,32 @@ type TaskFinalizationOptions = Readonly<{
   preflight?: typeof verifyTaskEvent;
   beforeLifecycle?: (taskId: string) => Promise<void>;
 }>;
+
+function completionReleasesShortId(
+  repoRoot: string,
+  taskId: string,
+  options: TaskFinalizationOptions
+): Readonly<{ release: boolean; error: FinalizationError | null }> {
+  if (options.controlBinding || options.beforeLifecycle) return { release: false, error: null };
+  if (!options.controlRoot) return {
+    release: false,
+    error: {
+      code: 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE',
+      message: 'cannot verify task-bound sandbox control state without its deterministic control root',
+      retryable: false
+    }
+  };
+  const state = inspectTaskBoundControlState(options.controlRoot, taskId, repoRoot, options.controlProject);
+  if (state.state === 'invalid') return {
+    release: false,
+    error: {
+      code: 'TASK_FINALIZATION_CONTROL_STATE_UNAVAILABLE',
+      message: `cannot verify task-bound sandbox control state: ${state.message ?? 'invalid control state'}`,
+      retryable: false
+    }
+  };
+  return { release: state.state === 'absent', error: null };
+}
 
 type TaskFinalizationReceipt = Readonly<{
   version: typeof RECEIPT_VERSION;
@@ -1064,8 +1091,13 @@ async function prepareTaskFinalizationCore(
       lifecycleResult = { status: 'no-op', changed: false, error: null };
       receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
     } else {
+      const shortIdDecision = completionReleasesShortId(repoRoot, taskId, options);
+      if (shortIdDecision.error) return failed(taskId, shortIdDecision.error);
       const result = lifecycle(
-        { taskRef: taskId, intent: 'complete', agent: request.agent },
+        {
+          taskRef: taskId, intent: 'complete', agent: request.agent,
+          ...(shortIdDecision.release ? { releaseShortId: true as const } : {})
+        },
         {
           repoRoot,
           prepareOnly: true,
@@ -1207,8 +1239,13 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
         retryable: false
       });
+      const shortIdDecision = completionReleasesShortId(repoRoot, resolved.taskId, options);
+      if (shortIdDecision.error) return failed(resolved.taskId, shortIdDecision.error);
       receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
-      const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
+      const lifecycleRequest = {
+        taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent,
+        ...(shortIdDecision.release ? { releaseShortId: true as const } : {})
+      };
       const lifecycleOptions = {
         repoRoot,
         ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
