@@ -122,7 +122,7 @@ function ensureRealDirectory(directory: string): void {
 
 function assertSafeDestination(destination: string): void {
   const { resolved, root, segments: parts } = splitDestinationPath(destination);
-  const managedIndex = parts.lastIndexOf('.agent-infra');
+  const managedIndex = parts.indexOf('.agent-infra');
   let anchor = managedIndex >= 0
     ? path.join(root, ...parts.slice(0, managedIndex))
     : path.dirname(resolved);

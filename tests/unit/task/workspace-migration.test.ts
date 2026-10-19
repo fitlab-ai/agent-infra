@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { onPlatforms } from '../../helpers.ts';
-import { discoverTaskWorkspaceSources, migrateTaskWorkspace, splitDestinationPath } from '../../../lib/task/workspace-migration.ts';
+import { discoverTaskWorkspaceSources, migrateProjectTaskWorkspace, migrateTaskWorkspace, splitDestinationPath } from '../../../lib/task/workspace-migration.ts';
 
 test('destination path segmentation keeps Windows drive and UNC roots separate', () => {
   const drive = splitDestinationPath('C:\\Users\\fixture\\.agent-infra\\task-workspaces\\demo', path.win32);
@@ -207,6 +207,34 @@ test('migration rejects symlinked destination ancestors and replaced roots befor
   assert.throws(() => migrateTaskWorkspace({ sources: [source], destination: target, migrationId: 'root-link' }), /symlink|canonical/u);
   assert.deepEqual(fs.readFileSync(path.join(source, 'active', 'bytes')), originalBytes);
   assert.deepEqual(fs.readFileSync(path.join(moved, 'active', 'bytes')), originalBytes);
+});
+
+test('project migration rejects a managed-root symlink when project repeats the root name', onPlatforms('linux', 'darwin'), (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'task-workspace-repeated-root-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const repo = path.join(temp, 'repo');
+  const home = path.join(temp, 'home');
+  const outside = path.join(temp, 'outside');
+  fs.mkdirSync(path.join(repo, '.agents', 'workspace', 'active'), { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(path.join(outside, 'task-workspaces'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.agents', '.airc.json'), JSON.stringify({ project: '.agent-infra' }));
+  const sourceBytes = Buffer.from([0, 255, 10, 128]);
+  fs.writeFileSync(path.join(repo, '.agents', 'workspace', 'active', 'a'), sourceBytes);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  fs.symlinkSync(outside, path.join(home, '.agent-infra'));
+
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    assert.throws(() => migrateProjectTaskWorkspace(repo, 'repeated-root'), /symlink|canonical/u);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+
+  assert.deepEqual(fs.readFileSync(path.join(repo, '.agents', 'workspace', 'active', 'a')), sourceBytes);
+  assert.equal(fs.existsSync(path.join(outside, 'task-workspaces', '.agent-infra')), false);
 });
 
 test('migration rejects a changed source set or source tree before destination commit', (t) => {
