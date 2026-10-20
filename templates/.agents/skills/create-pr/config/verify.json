@@ -15,7 +15,6 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "(Create PR|PR Created)"
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists"

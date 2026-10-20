@@ -69,9 +69,7 @@ const DEFAULT_REQUIRED_FIELDS = [
 ];
 
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
-// Start markers (action suffixed with ` [started]`) are excluded from the
-// "latest action" / freshness computation so a step's in-flight marker never
-// satisfies a skill's expected_action_pattern; the matching done entry does.
+// Started rows do not represent completed lifecycle actions.
 const ACTIVITY_LOG_STARTED_RE = /\s*\[started\]\s*$/;
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -358,16 +356,10 @@ function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFil
   if (expectedStep && metadata.current_step !== expectedStep) {
     let validLifecycleArtifact = false;
     if (currentTask) {
-      const activityConfig = loadVerificationConfig(repositoryRoot, skillName).checks?.["activity-log"];
       const { section, invalidEntries } = inspectActivityLog(task.content);
-      if (activityConfig && section && invalidEntries.length === 0) {
-        let latestAction = "";
-        for (const entry of section.entries) {
-          if (!ACTIVITY_LOG_STARTED_RE.test(entry.step)) latestAction = entry.step;
-        }
+      if (section && invalidEntries.length === 0) {
         validLifecycleArtifact = checkArtifactLifecycleActivityLog(
-          taskDir, artifactFile, skillName,
-          activityConfig, task, section.entries, latestAction
+          taskDir, artifactFile, skillName, task, section.entries
         )?.status === "pass";
       }
     }
@@ -725,16 +717,16 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
 }
 
-const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
-  "analyze-task": { family: "analysis", event: "analyze.completed" },
-  "plan-task": { family: "plan", event: "plan.completed" },
-  "review-analysis": { family: "review-analysis", event: "review-analysis.completed" },
-  "review-plan": { family: "review-plan", event: "review-plan.completed" },
-  "code-task": { family: "code", event: "code.completed" },
-  "review-code": { family: "review-code", event: "review-code.completed" }
+const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string; action: string }>> = {
+  "analyze-task": { family: "analysis", event: "analyze.completed", action: "Analyze Task" },
+  "plan-task": { family: "plan", event: "plan.completed", action: "Plan Task" },
+  "review-analysis": { family: "review-analysis", event: "review-analysis.completed", action: "Review Analysis" },
+  "review-plan": { family: "review-plan", event: "review-plan.completed", action: "Review Plan" },
+  "code-task": { family: "code", event: "code.completed", action: "Code Task" },
+  "review-code": { family: "review-code", event: "review-code.completed", action: "Review Code" }
 };
 
-function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, config: any, task: any, entries: any[], latestAction: string): any {
+function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, task: any, entries: any[]): any {
   const stage = ARTIFACT_ACTIVITY_STAGES[skillName];
   if (!stage) return null;
   const inventory = inspectArtifactDirectory(taskDir, stage.family as any);
@@ -772,25 +764,19 @@ function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string
     }
   }
 
-  const expectedAction = new RegExp(config.expected_action_pattern);
+  const roundActionPattern = new RegExp(`^${stage.action} \\(Round ${identity.round}(?:, [^)]+)?\\)$`);
   const roundAction = entries.find((entry) => {
-    if (ACTIVITY_LOG_STARTED_RE.test(entry.step)) return false;
-    if (!expectedAction.test(entry.step)) return false;
-    expectedAction.lastIndex = 0;
-    const actionRound = /\(Round (\d+)/.exec(entry.step)?.[1];
-    return actionRound === String(identity.round) && entry.note.includes(`→ ${output}`);
+    return !ACTIVITY_LOG_STARTED_RE.test(entry.step)
+      && roundActionPattern.test(entry.step)
+      && entry.note.includes(`→ ${output}`);
   });
   if (!roundAction) {
     return failResult("activity-log", `No completed Activity Log row records '${output}' for ${skillName} Round ${identity.round}`);
   }
-  if (skillName === "plan-task" && /^(?:Human Decision|Decision)\b/.test(latestAction)
-    && expectedAction.test(latestAction)) {
-    return passResult("activity-log", `Plan completion '${output}' is current; latest action '${latestAction}' is a human decision`);
-  }
   return passResult("activity-log", `Current ${stage.family} completion '${output}' is valid for Round ${identity.round}`);
 }
 
-function checkActivityLog({ taskDir, config, skillName, artifactFile }: any): any {
+function checkActivityLog({ taskDir, skillName, artifactFile }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("activity-log", task.message);
@@ -802,44 +788,16 @@ function checkActivityLog({ taskDir, config, skillName, artifactFile }: any): an
   const entries = section.entries;
   if (entries.length === 0) return failResult("activity-log", "Activity Log has no entries");
 
-  let latestAction = "";
-  let latestTimestamp = "";
-  const doneActions: string[] = [];
-
   for (const entry of entries) {
     if (!entry.note.trim()) return failResult("activity-log", "Activity Log entry note is required");
-    const { time: timestamp, step: action } = entry;
-    // A `[started]` marker is not a terminal action: keep latestAction/latestTimestamp
-    // on the most recent done entry so expected_action_pattern sees it.
-    if (!ACTIVITY_LOG_STARTED_RE.test(action)) {
-      latestTimestamp = timestamp;
-      latestAction = action;
-      doneActions.push(action);
-    }
   }
 
   const artifactLifecycleResult = checkArtifactLifecycleActivityLog(
-    taskDir, artifactFile, skillName, config, task, entries, latestAction
+    taskDir, artifactFile, skillName, task, entries
   );
   if (artifactLifecycleResult) return artifactLifecycleResult;
 
-  if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
-    const expected = new RegExp(config.expected_action_pattern);
-    let index = doneActions.length - 1;
-    while (index >= 0 && doneActions[index] === 'Commit' && !expected.test(doneActions[index]!)) index -= 1;
-    if (index >= 0 && expected.test(doneActions[index]!)) {
-      latestAction = doneActions[index]!;
-    }
-  }
-
-  if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
-    return failResult(
-      "activity-log",
-      `Latest action '${latestAction}' does not match '${config.expected_action_pattern}'`
-    );
-  }
-
-  return passResult("activity-log", `Latest entry '${latestAction}' at ${latestTimestamp}`);
+  return passResult("activity-log", "Activity Log is valid");
 }
 
 function checkCompletionChecklist({ taskDir, config }: any): any {

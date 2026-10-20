@@ -335,15 +335,6 @@
     {
       "file": "lib/task/verification-engine.ts",
       "ruleId": "complexity",
-      "stableId": "c9fe37e7c71c3356e93207a846ffb1db030525584a254f1656b64303fd3fef6c",
-      "displayName": "checkActivityLog",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
       "stableId": "138c1e2a7cdf1222e4c7d83e17995a3ad97966e9cf2fb6e5bce6cdfa58200a20",
       "displayName": "checkArtifact",
       "metric": 35,
@@ -447,15 +438,6 @@
       "displayName": "checkTaskMeta",
       "metric": 46,
       "normalizedMessage": "complexity=46",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "max-depth",
-      "stableId": "42a0923eb2aa6883320e84f2b80c94880deca8df2c66c8c1d4e89a34cc878978",
-      "displayName": "checkTaskMeta",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
       "count": 1
     },
     {

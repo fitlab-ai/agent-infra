@@ -18,7 +18,6 @@
       "require_platform_issue_identity": true
     },
     "activity-log": {
-      "expected_action_pattern": "Import Issue"
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists",

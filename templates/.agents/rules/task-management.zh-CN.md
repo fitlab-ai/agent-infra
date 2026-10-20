@@ -89,8 +89,6 @@
 
 **人工计数**（`ai task log`）：审查步骤行把两项人工计数并入 NOTE 的 verdict 文本，逗号分隔、紧随 `blockers/major/minor`，固定英文标签 `Manual-validation: {e}, Human-decision: {h}`。`Human-decision`（`{h}`）按 canonical 步骤名前缀（`Review Analysis` / `Review Plan` / `Review Code`）映射到 `analysis` / `plan` / `code`，统计 `## 审查分歧账本` 中对应阶段 `status = needs-human-decision` 的当前待裁决数量，不包含已 `human-decided` 的行；`Manual-validation`（`{e}`）解析 review done note 中的 `Manual-validation: {n}` 源字段（展示时归一化为同一字段），缺失为 `0`。非审查步骤不附加人工计数。
 
-**gate**（`checkActivityLog`）：计算「最新 action / freshness」时跳过 `[started]` 行（升序与格式校验仍覆盖全部行），故 started 标记不会污染各 SKILL 的 `expected_action_pattern`。
-
 **写 started 的 SKILL**：所有**会向某个任务的 `## 活动日志` 追加条目**的工作流 SKILL 都写 started，保证 `ai task log` 整张表的 STARTED 列一致完整。两种写法按技能是否已有 task.md 区分：
 
 - **常规写法（task.md 已存在）**——在「该轮实质工作开始时」（前置条件确认后、第一个产出动作前）追加 started 行，完成时写 done 行：

@@ -24,7 +24,6 @@
       "stage": "analysis"
     },
     "activity-log": {
-      "expected_action_pattern": "(Review Analysis|Analysis Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists"

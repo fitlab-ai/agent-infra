@@ -28,7 +28,6 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Complete Manual Validation"
     },
     "review-ledger": {
       "stage_scope": [

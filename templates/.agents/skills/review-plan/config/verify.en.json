@@ -24,7 +24,6 @@
       "stage": "plan"
     },
     "activity-log": {
-      "expected_action_pattern": "(Review Plan|Plan Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists"

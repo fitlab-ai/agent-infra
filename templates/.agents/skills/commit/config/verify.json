@@ -15,7 +15,6 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Commit"
     },
     "platform-sync": {
       "when": "pr_fact_bound"

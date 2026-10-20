@@ -86,8 +86,6 @@ Other skills continue past deferrable writes according to their local delivery g
 
 **Human counts** (`ai task log`): review step rows fold two human counts into the NOTE verdict text, comma-separated, right after `blockers/major/minor`, with fixed English labels `Manual-validation: {e}, Human-decision: {h}`. `Human-decision` (`{h}`) maps canonical step prefixes (`Review Analysis` / `Review Plan` / `Review Code`) to `analysis` / `plan` / `code`, then counts current pending rows in `## Review Disagreement Ledger` / `## 审查分歧账本` for that stage with `status = needs-human-decision`, excluding rows already marked `human-decided`. `Manual-validation` (`{e}`) parses the `Manual-validation: {n}` source field from the review done note (normalized to the same field when displayed), defaulting to `0`. Non-review rows carry no human counts.
 
-**Gate** (`checkActivityLog`): when computing the "latest action / freshness" it skips `[started]` lines (ascending-order and format checks still cover every line), so a started marker never satisfies a skill's `expected_action_pattern`.
-
 **Skills that write started**: every workflow skill that **appends entries to a task's `## Activity Log`** writes started, so the STARTED column stays uniformly complete across the whole `ai task log` table. Two forms, depending on whether task.md already exists:
 
 - **Standard form (task.md already exists)** — append the started line when that round's real work begins (after prerequisites, before the first artifact action) and the done line on completion:

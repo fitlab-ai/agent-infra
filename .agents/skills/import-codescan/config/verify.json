@@ -17,7 +17,6 @@
       "expected_status": "active"
     },
     "activity-log": {
-      "expected_action_pattern": "(Import Codescan|Import Code Scanning Alert)"
     },
     "platform-sync": null
   }

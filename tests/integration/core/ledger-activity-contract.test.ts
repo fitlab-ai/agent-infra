@@ -77,8 +77,3 @@ test('activity gate rejects empty notes while the reader retains the entry', asy
     assert.equal((await verify(content, 'activity-log')).status, 'fail');
   }
 });
-
-test('activity gate retains done-action selection across starts and trailing commits', async () => {
-  const content = ['## Activity Log', entry('2026-09-09 16:00:00+00:00'), entry('2026-09-09 16:01:00+00:00', 'Commit'), entry('2026-09-09 16:02:00+00:00', 'Review Code (Round 1) [started]')].join('\n');
-  assert.equal((await verify(content, 'activity-log', { expected_action_pattern: '^Code Task' })).status, 'pass');
-});

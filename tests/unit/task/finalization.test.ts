@@ -844,7 +844,7 @@ test('host finalization runs the terminal gate against the completed task docume
   fs.mkdirSync(path.dirname(verifyPath), { recursive: true });
   fs.writeFileSync(verifyPath, JSON.stringify({ checks: {
     'task-meta': { required_fields: ['id', 'status', 'completed_at'], expected_status: 'completed', require_completed_at: true },
-    'activity-log': { expected_action_pattern: '(Complete Task|Completed)' },
+    'activity-log': {},
     'completion-checklist': { require_all_checked: true }
   } }));
   const verificationEvents: string[] = [];
