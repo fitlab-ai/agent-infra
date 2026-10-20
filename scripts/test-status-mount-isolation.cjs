@@ -1,8 +1,37 @@
 const fs = require('node:fs');
-const { installTaskWorkspacePathMapping } = require('./test-task-workspace-path-mapping.cjs');
+const path = require('node:path');
 
 const taskWorkspaceFixtureRoot = process.env.AGENT_INFRA_TEST_TASK_WORKSPACE_ROOT;
-if (taskWorkspaceFixtureRoot) installTaskWorkspacePathMapping(taskWorkspaceFixtureRoot);
+if (taskWorkspaceFixtureRoot) {
+  const mount = '/task-workspace';
+  const mapTaskWorkspacePath = (value) => {
+    if (typeof value !== 'string' && !Buffer.isBuffer(value) && !(value instanceof URL)) return value;
+    const pathname = value instanceof URL ? value.pathname : value.toString();
+    const normalized = path.posix.normalize(pathname.replaceAll('\\', '/'));
+    if (normalized !== mount && !normalized.startsWith(`${mount}/`)) return value;
+    return path.join(taskWorkspaceFixtureRoot, normalized.slice(mount.length).replace(/^\/+/, ''));
+  };
+  const originalNativeRealpath = fs.realpathSync.native;
+  for (const method of [
+    'accessSync', 'appendFileSync', 'chmodSync', 'chownSync', 'copyFileSync', 'existsSync',
+    'lstatSync', 'mkdirSync', 'openSync', 'readFileSync', 'readdirSync', 'realpathSync',
+    'renameSync', 'rmSync', 'rmdirSync', 'statSync', 'unlinkSync', 'utimesSync', 'writeFileSync'
+  ]) {
+    const original = fs[method];
+    if (typeof original !== 'function') continue;
+    fs[method] = function mapTaskWorkspaceFsPath(file, ...args) {
+      const mappedArgs = method === 'copyFileSync' || method === 'renameSync'
+        ? [mapTaskWorkspacePath(args[0]), ...args.slice(1)]
+        : args;
+      return original.call(this, mapTaskWorkspacePath(file), ...mappedArgs);
+    };
+  }
+  if (typeof originalNativeRealpath === 'function') {
+    fs.realpathSync.native = function mapTaskWorkspaceNativeRealpath(file, ...args) {
+      return originalNativeRealpath.call(this, mapTaskWorkspacePath(file), ...args);
+    };
+  }
+}
 
 const fixedStatusMount = '/run/agent-infra/control-status';
 const originalBinding = process.binding;
