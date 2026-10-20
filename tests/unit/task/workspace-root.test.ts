@@ -42,6 +42,12 @@ test('task workspace mapping rewrites filesystem paths without changing data or 
   fs.renameSync('/task-workspace/copied.txt', '/task-workspace/renamed.txt');
   assert.equal(fs.readFileSync(path.join(target, 'renamed.txt'), 'utf8'), '/task-workspace/data');
   assert.equal(fs.existsSync(copy), false);
+
+  const windowsPayload = path.win32.join('/task-workspace', 'windows-payload.txt');
+  fs.writeFileSync(windowsPayload, 'windows path payload');
+  fs.copyFileSync(windowsPayload, path.win32.join('/task-workspace', 'windows-copy.txt'));
+  fs.renameSync(path.win32.join('/task-workspace', 'windows-copy.txt'), path.win32.join('/task-workspace', 'windows-renamed.txt'));
+  assert.equal(fs.readFileSync(path.join(target, 'windows-renamed.txt'), 'utf8'), 'windows path payload');
 });
 
 test('verified sandbox markers select the container boundary for both permission modes', (t) => {

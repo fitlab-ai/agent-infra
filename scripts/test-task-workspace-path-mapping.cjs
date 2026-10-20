@@ -6,8 +6,9 @@ function installTaskWorkspacePathMapping(root) {
   const mapPath = (value) => {
     if (typeof value !== 'string' && !Buffer.isBuffer(value) && !(value instanceof URL)) return value;
     const pathname = value instanceof URL ? value.pathname : value.toString();
-    if (pathname !== mount && !pathname.startsWith(`${mount}/`)) return value;
-    return path.join(root, pathname.slice(mount.length).replace(/^\/+/, ''));
+    const normalized = path.posix.normalize(pathname.replaceAll('\\', '/'));
+    if (normalized !== mount && !normalized.startsWith(`${mount}/`)) return value;
+    return path.join(root, normalized.slice(mount.length).replace(/^\/+/, ''));
   };
   const methods = [
     'accessSync', 'appendFileSync', 'chmodSync', 'chownSync', 'copyFileSync', 'existsSync',
