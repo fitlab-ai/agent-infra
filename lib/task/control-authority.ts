@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
@@ -38,6 +39,7 @@ import type {
 } from '../agent-clients/adapter.ts';
 import { resolveTaskContext, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { verifyTaskEvent } from './verification.ts';
+import { releaseStaleShortIdRegistry } from './short-id.ts';
 
 export type TaskControlExecutionContext =
   | Readonly<{
@@ -365,6 +367,26 @@ export function dispatchTaskControlOperation(
       preflight: (request, options) => verifyTaskEvent(
         { ...request, event: 'complete-task.hard-preflight' }, options
       )
+    }).then((result) => {
+      if (context.source !== 'direct-host' || !controlRoot || result.status !== 'completed' || !result.taskId) return result;
+      try {
+        if (fs.lstatSync(controlRoot, { throwIfNoEntry: false }) === undefined) {
+          const released = releaseStaleShortIdRegistry(context.repoRoot, result.taskId);
+          return { ...result, changed: result.changed || released.changed };
+        }
+        return result;
+      } catch (error) {
+        return {
+          ...result,
+          status: 'blocked',
+          result: 'blocked',
+          error: {
+            code: 'TASK_FINALIZATION_SHORT_ID_RELEASE_FAILED',
+            message: error instanceof Error ? error.message : String(error),
+            retryable: true
+          }
+        };
+      }
     });
   }
   try {
