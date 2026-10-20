@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import test from 'node:test';
 import path from 'node:path';
@@ -7,14 +8,17 @@ import { createSandboxControlIdentitySentinel, writeSandboxControlIdentitySentin
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
 import { resolveShortIdReadOnly } from '../../../lib/task/short-id.ts';
 import { taskViewForManifest } from '../../../lib/sandbox/control/task-view.ts';
-import { createTaskWorkspaceFixture, taskWorkspaceRoot } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, createTempDir, taskWorkspaceRoot } from '../../helpers.ts';
 
-test('host task workspaces are shared by worktrees and isolated by project', () => {
+const require = createRequire(import.meta.url);
+const { installTaskWorkspacePathMapping } = require('../../../scripts/test-task-workspace-path-mapping.cjs') as {
+  installTaskWorkspacePathMapping: (root: string) => () => void;
+};
+
+test('host task workspace root is deterministic for a project and isolated between projects', () => {
   const first = resolveTaskWorkspaceLayout({ project: 'agent-infra', boundary: 'host', home: '/home/dev' });
-  const second = resolveTaskWorkspaceLayout({ project: 'agent-infra', boundary: 'host', home: '/home/dev' });
   const other = resolveTaskWorkspaceLayout({ project: 'other', boundary: 'host', home: '/home/dev' });
   assert.equal(first.root, path.join('/home/dev', '.agent-infra/task-workspaces/agent-infra'));
-  assert.equal(first.root, second.root);
   assert.notEqual(first.root, other.root);
   assert.equal(first.shortIds, path.join(first.active, '.short-ids.json'));
 });
@@ -23,6 +27,21 @@ test('container task root is separate from the project checkout', () => {
   const layout = resolveTaskWorkspaceLayout({ project: 'agent-infra', boundary: 'container' });
   assert.equal(layout.root, '/task-workspace');
   assert.equal(path.posix.relative('/workspace', layout.root).startsWith('..'), true);
+});
+
+test('task workspace mapping rewrites filesystem paths without changing data or options', (t) => {
+  const target = createTempDir('workspace-root-mapping-');
+  const restore = installTaskWorkspacePathMapping(target);
+  t.after(restore);
+  const destination = path.join(target, 'payload.txt');
+  fs.writeFileSync('/task-workspace/payload.txt', '/task-workspace/data', { encoding: 'utf8' });
+  assert.equal(fs.readFileSync(destination, 'utf8'), '/task-workspace/data');
+  assert.equal(fs.realpathSync.native('/task-workspace/payload.txt'), destination);
+  const copy = path.join(target, 'copied.txt');
+  fs.copyFileSync('/task-workspace/payload.txt', '/task-workspace/copied.txt');
+  fs.renameSync('/task-workspace/copied.txt', '/task-workspace/renamed.txt');
+  assert.equal(fs.readFileSync(path.join(target, 'renamed.txt'), 'utf8'), '/task-workspace/data');
+  assert.equal(fs.existsSync(copy), false);
 });
 
 test('verified sandbox markers select the container boundary for both permission modes', (t) => {
@@ -50,23 +69,10 @@ test('verified sandbox markers select the container boundary for both permission
     }
   });
 
-  const rootPrefix = '/task-workspace';
   const containerRoot = path.join(fixture.home, 'container-mounts', fixture.project);
   fs.mkdirSync(containerRoot, { recursive: true });
-  const remap = (value: fs.PathLike): fs.PathLike => {
-    const candidate = path.posix.normalize(String(value).replaceAll('\\', '/'));
-    return candidate === rootPrefix || candidate.startsWith(`${rootPrefix}/`)
-      ? path.join(containerRoot, path.posix.relative(rootPrefix, candidate))
-      : value;
-  };
-  const originalExists = fs.existsSync;
-  const originalReadFile = fs.readFileSync;
-  const originalReaddir = fs.readdirSync;
-  t.mock.method(fs, 'existsSync', (filePath: fs.PathLike) => originalExists(remap(filePath)));
-  t.mock.method(fs, 'readFileSync', ((filePath: fs.PathOrFileDescriptor, ...args: unknown[]) =>
-    (originalReadFile as (...values: unknown[]) => Buffer | string)(remap(filePath as fs.PathLike), ...args)) as typeof fs.readFileSync);
-  t.mock.method(fs, 'readdirSync', ((filePath: fs.PathLike, ...args: unknown[]) =>
-    (originalReaddir as (...values: unknown[]) => unknown)(remap(filePath), ...args)) as typeof fs.readdirSync);
+  const restorePathMapping = installTaskWorkspacePathMapping(containerRoot);
+  t.after(restorePathMapping);
 
   const taskId = 'TASK-20991231-235959';
   const homeDecoyId = 'TASK-20991231-235958';

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
@@ -376,8 +377,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
   const workspaceRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
   const activeRoot = path.join(workspaceRoot, 'active');
   ensureRealDirectory(path.join(repoRoot, '.agents'), 'TASK_CREATE_WORKSPACE_INVALID');
-  const home = path.resolve(process.env.HOME || '');
-  if (!home || !path.isAbsolute(home)) throw new Error('TASK_CREATE_WORKSPACE_INVALID');
+  const home = path.resolve(process.env.HOME || os.homedir());
   const managedRoots = [path.join(home, '.agent-infra'), path.join(home, '.agent-infra', 'task-workspaces')];
   for (const root of managedRoots) {
     if (fs.existsSync(root)) assertRealDirectory(root, 'TASK_CREATE_WORKSPACE_INVALID');

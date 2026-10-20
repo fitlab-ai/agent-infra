@@ -83,12 +83,12 @@ function listSortedNumeric(dir: string, width: number): string[] {
     .reverse();
 }
 
-function findInArchive(repoRoot: string, taskId: string): string | null {
+function findInArchive(workspaceRoot: string, taskId: string): string | null {
   // archive-tasks stores local material at the project task workspace archive/YYYY/MM/DD/{taskId}/local/task.md
   // where YYYY/MM/DD comes from completed_at (or updated_at fallback) — NOT from
   // the task id's creation date. So we cannot derive the path from taskId alone;
   // walk the bounded YYYY/MM/DD tree instead. Newest-first to favor recent archives.
-  const archiveDir = path.join(taskRoot(repoRoot), 'archive');
+  const archiveDir = path.join(workspaceRoot, 'archive');
   for (const year of listSortedNumeric(archiveDir, 4)) {
     const yearDir = path.join(archiveDir, year);
     for (const month of listSortedNumeric(yearDir, 2)) {
@@ -103,14 +103,14 @@ function findInArchive(repoRoot: string, taskId: string): string | null {
 }
 
 function findTaskMd(
-  repoRoot: string,
+  workspaceRoot: string,
   taskId: string
 ): { taskMdPath: string; state: TaskWorkspaceState } | null {
   for (const sub of FLAT_WORKSPACE_DIRS) {
-    const candidate = path.join(taskRoot(repoRoot), sub, taskId, 'task.md');
+    const candidate = path.join(workspaceRoot, sub, taskId, 'task.md');
     if (fs.existsSync(candidate)) return { taskMdPath: candidate, state: sub };
   }
-  const archived = findInArchive(repoRoot, taskId);
+  const archived = findInArchive(workspaceRoot, taskId);
   return archived ? { taskMdPath: archived, state: 'archive' } : null;
 }
 
@@ -122,8 +122,9 @@ function findTaskMd(
  */
 function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string }[] {
   const out: { taskId: string; taskDir: string }[] = [];
+  const workspaceRoot = taskRoot(repoRoot);
   for (const sub of FLAT_WORKSPACE_DIRS) {
-    const base = path.join(taskRoot(repoRoot), sub);
+    const base = path.join(workspaceRoot, sub);
     if (!fs.existsSync(base)) continue;
     for (const entry of fs.readdirSync(base).sort()) {
       if (!TASK_ID_RE.test(entry)) continue;
@@ -142,6 +143,7 @@ function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string 
  */
 function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: string; state: TaskWorkspaceState }[] {
   const out: { taskId: string; taskDir: string; state: TaskWorkspaceState }[] = [];
+  const workspaceRoot = taskRoot(repoRoot);
   const seen = new Map<string, string>();
   const add = (taskId: string, taskDir: string, state: TaskWorkspaceState) => {
     if (!TASK_ID_RE.test(taskId)) return;
@@ -158,12 +160,12 @@ function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: stri
   };
 
   for (const state of FLAT_WORKSPACE_DIRS) {
-    const base = path.join(taskRoot(repoRoot), state);
+    const base = path.join(workspaceRoot, state);
     if (!fs.existsSync(base)) continue;
     for (const taskId of fs.readdirSync(base).sort()) add(taskId, path.join(base, taskId), state);
   }
 
-  const archive = path.join(taskRoot(repoRoot), 'archive');
+  const archive = path.join(workspaceRoot, 'archive');
   for (const year of listSortedNumeric(archive, 4).reverse()) {
     const yearDir = path.join(archive, year);
     for (const month of listSortedNumeric(yearDir, 2).reverse()) {
@@ -181,8 +183,9 @@ function locateHotTaskDirs(
   repoRoot: string,
   taskId: string
 ): { taskId: string; taskDir: string; taskMdPath: string; state: Exclude<TaskWorkspaceState, 'archive'> }[] {
+  const workspaceRoot = taskRoot(repoRoot);
   return FLAT_WORKSPACE_DIRS.flatMap((state) => {
-    const taskDir = path.join(taskRoot(repoRoot), state, taskId);
+    const taskDir = path.join(workspaceRoot, state, taskId);
     const taskMdPath = path.join(taskDir, 'task.md');
     return fs.existsSync(taskMdPath) ? [{ taskId, taskDir, taskMdPath, state }] : [];
   });
@@ -247,7 +250,7 @@ function resolveTaskRef(arg: string, options: ResolveTaskRefOptions = {}): Resol
     }
     taskId = shortResult.taskId;
   }
-  const located = findTaskMd(repoRoot, taskId);
+  const located = findTaskMd(taskRoot(repoRoot), taskId);
   if (!located) {
     return {
       ok: false,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -53,14 +54,14 @@ const qualificationCandidate: TaskCreateCandidateV1 = {
   }
 };
 
-function fixture(): string {
+function fixture(home = fixtureHome): string {
   const root = createTempDir('agent-infra-task-create-');
   const project = `task-create-${randomUUID()}`;
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project, task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' } }));
-  const taskRoot = path.join(fixtureHome, '.agent-infra', 'task-workspaces', project);
+  const taskRoot = path.join(home, '.agent-infra', 'task-workspaces', project);
   fs.mkdirSync(path.join(taskRoot, 'active'), { recursive: true });
   fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
@@ -291,6 +292,27 @@ test('local task creation rejects a symbolic-link workspace without writing outs
     cleanupFixture(root);
     fs.rmSync(outside, { recursive: true, force: true });
   }
+});
+
+test('local task creation uses the OS home and rejects a linked managed root when HOME is unset', onPlatforms('linux', 'darwin'), (t) => {
+  const home = createTempDir('agent-infra-task-create-home-');
+  const outside = createTempDir('agent-infra-task-create-home-outside-');
+  const root = fixture(home);
+  const previousHome = process.env.HOME;
+  delete process.env.HOME;
+  t.mock.method(os, 'homedir', () => home);
+  t.after(() => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    cleanupFixture(root);
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  fs.rmSync(path.join(home, '.agent-infra'), { recursive: true, force: true });
+  fs.symlinkSync(outside, path.join(home, '.agent-infra'));
+  assert.throws(() => createLocalTask(candidate, { repoRoot: root }), /TASK_CREATE_WORKSPACE_INVALID/);
+  assert.deepEqual(fs.readdirSync(outside), []);
 });
 
 test('same-second task creation advances to the next free TASK-id', () => {
