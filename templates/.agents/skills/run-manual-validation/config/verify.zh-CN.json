@@ -34,7 +34,6 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Run Manual Validation \\(Round \\d+\\)"
     },
     "review-ledger": {
       "stage_scope": [

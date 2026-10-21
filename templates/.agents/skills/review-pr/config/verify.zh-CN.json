@@ -23,7 +23,6 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Review PR \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists"

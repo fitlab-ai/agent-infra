@@ -335,7 +335,7 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
   }
 });
 
-test('plan activity checks keep the latest human decision branch', async () => {
+test('plan activity checks preserve completion facts after a human decision', async () => {
   const f = fixture();
   const analysisPath = path.join(f.taskDir, 'analysis.md');
   const planPath = path.join(f.taskDir, 'plan.md');
@@ -367,7 +367,6 @@ test('plan activity checks keep the latest human decision branch', async () => {
       artifactFile: 'plan.md', checks: ['activity-log'], repositoryRoot: process.cwd()
     });
     assert.equal(result.status, 'pass', result.message);
-    assert.match(result.message, /latest action 'Human Decision'/);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

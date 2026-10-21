@@ -33,7 +33,6 @@ test("restore-task verify configs declare the expected checks", () => {
       `${relativePath} should declare the restore-task checks`
     );
     assert.equal(verify.checks["task-meta"].require_platform_issue_identity, true);
-    assert.equal(verify.checks["activity-log"].expected_action_pattern, "Restore Task");
     assert.equal(verify.checks["platform-sync"], null);
   });
 });

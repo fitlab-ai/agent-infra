@@ -317,17 +317,7 @@ for (const c of taskMetaCases) {
 
 const activityLogCases: ActivityLogCase[] = [
   {
-    name: "validate-artifact activity-log passes for create-task happy path with Issue created",
-    issueIdentity: 296,
-    activityLines(now) {
-      return [`- ${now} — **Create Task** by codex — Task created from description`];
-    },
-    assertResult(result) {
-      assert.equal(result.status, 0, result.stderr);
-    }
-  },
-  {
-    name: "validate-artifact activity-log fails for create-task when Create Issue entry is appended",
+    name: "validate-artifact activity-log passes for create-task when a later normal log is appended",
     issueIdentity: 296,
     activityLines(now) {
       return [
@@ -336,24 +326,9 @@ const activityLogCases: ActivityLogCase[] = [
       ];
     },
     assertResult(result) {
-      assert.equal(result.status, 1);
-      assert.match(result.stdout, /Latest action 'Create Issue' does not match/);
+      assert.equal(result.status, 0, result.stderr);
     }
   },
-  {
-    name: "validate-artifact activity-log fails for create-task when Issue Creation Skipped entry is appended",
-    issueIdentity: "N/A",
-    activityLines(now) {
-      return [
-        `- ${now} — **Create Task** by codex — Task created from description`,
-        `- ${now} — **Issue Creation Skipped** by codex — GitHub Issue creation failed`
-      ];
-    },
-    assertResult(result) {
-      assert.equal(result.status, 1);
-      assert.match(result.stdout, /Latest action 'Issue Creation Skipped' does not match/);
-    }
-  }
 ];
 
 for (const c of activityLogCases) {

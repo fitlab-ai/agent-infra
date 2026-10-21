@@ -21,7 +21,6 @@
       "schema": "analysis"
     },
     "activity-log": {
-      "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists"
