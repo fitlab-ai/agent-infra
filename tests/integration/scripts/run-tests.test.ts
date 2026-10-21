@@ -85,6 +85,30 @@ test('test runner forwards the configured concurrency to node test', () => {
   }
 });
 
+test('test runner uses a canonical isolated home', onPlatforms('linux', 'darwin'), () => {
+  const root = createTempDir('agent-infra-test-runner-home-');
+  const fixture = path.join(root, 'home.test.mjs');
+  const observed = path.join(root, 'observed-home');
+  fs.writeFileSync(fixture, [
+    "import fs from 'node:fs';",
+    "import test from 'node:test';",
+    "test('isolated home', () => fs.writeFileSync(process.env.AGENT_INFRA_TEST_HOME_OBSERVED, JSON.stringify([process.env.HOME, fs.realpathSync.native(process.env.HOME)])));",
+    ''
+  ].join('\n'));
+
+  try {
+    const result = spawnSync(process.execPath, [RUNNER, '--skip-build', fixture], {
+      encoding: 'utf8',
+      env: { ...process.env, AGENT_INFRA_TEST_HOME_OBSERVED: observed }
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const [isolatedHome, canonicalHome] = JSON.parse(fs.readFileSync(observed, 'utf8')) as [string, string];
+    assert.equal(isolatedHome, canonicalHome);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('invalid test concurrency fails before the build starts', () => {
   const root = createTempDir('agent-infra-test-runner-invalid-concurrency-');
   const npm = path.join(root, 'npm');

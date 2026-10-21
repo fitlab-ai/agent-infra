@@ -31,7 +31,7 @@ let activeChild;
 let receivedSignal;
 let terminationPromise;
 let testRunLock;
-const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-home-'));
+const isolatedHome = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-home-')));
 const isolatedGitConfig = path.join(isolatedHome, '.gitconfig');
 fs.writeFileSync(isolatedGitConfig, '[user]\n\tname = Agent Infra Test\n\temail = agent-infra-test@example.invalid\n');
 env.HOME = isolatedHome;
