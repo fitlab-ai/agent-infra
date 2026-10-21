@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isRemovedHashShortIdInput } from '../task/short-id.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const SHORT_ID_RE = /^\d+$/;
@@ -35,10 +36,11 @@ function stripQuotes(value: string): string {
 }
 
 function readTaskContent(repoRoot: string, taskId: string): { content: string; state: TaskWorkspaceState; taskMd: string } {
+  const taskRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
   for (const state of TASK_WORKSPACE_STATES) {
     const taskPath = state === 'archive'
-      ? path.join(repoRoot, '.agents', 'workspace', state, ...findArchiveTaskParts(repoRoot, taskId), 'local', 'task.md')
-      : path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
+      ? path.join(taskRoot, state, ...findArchiveTaskParts(repoRoot, taskId), 'local', 'task.md')
+      : path.join(taskRoot, state, taskId, 'task.md');
     if (fs.existsSync(taskPath)) {
       return { content: fs.readFileSync(taskPath, 'utf8'), state, taskMd: taskPath };
     }
@@ -47,8 +49,9 @@ function readTaskContent(repoRoot: string, taskId: string): { content: string; s
 }
 
 function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspace[] {
+  const taskRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
   const hot = TASK_WORKSPACE_STATES.filter((state) => state !== 'archive').flatMap((state) => {
-    const taskMd = path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
+    const taskMd = path.join(taskRoot, state, taskId, 'task.md');
     if (!fs.existsSync(taskMd)) return [];
     const content = fs.readFileSync(taskMd, 'utf8');
     return [{
@@ -60,7 +63,7 @@ function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspac
   });
   const parts = findArchiveTaskParts(repoRoot, taskId);
   if (parts.length === 0) return hot;
-  const taskMd = path.join(repoRoot, '.agents', 'workspace', 'archive', ...parts, 'local', 'task.md');
+  const taskMd = path.join(taskRoot, 'archive', ...parts, 'local', 'task.md');
   if (!fs.existsSync(taskMd)) return hot;
   const content = fs.readFileSync(taskMd, 'utf8');
   return [...hot, {
@@ -72,7 +75,7 @@ function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspac
 }
 
 function findArchiveTaskParts(repoRoot: string, taskId: string): string[] {
-  const archiveRoot = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  const archiveRoot = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'archive');
   if (!fs.existsSync(archiveRoot)) return [];
   for (const year of fs.readdirSync(archiveRoot).sort().reverse()) {
     if (!/^\d{4}$/.test(year)) continue;
@@ -129,7 +132,7 @@ export function resolveTaskWorkspace(taskId: string, repoRoot: string): TaskWork
 }
 
 export function listTaskWorkspaces(repoRoot: string, state: TaskWorkspaceState): TaskWorkspace[] {
-  const stateRoot = path.join(repoRoot, '.agents', 'workspace', state);
+  const stateRoot = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), state);
   if (state === 'archive') {
     if (!fs.existsSync(stateRoot)) return [];
     const rows: TaskWorkspace[] = [];

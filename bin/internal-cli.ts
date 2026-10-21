@@ -196,6 +196,11 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
     taskContext(process.argv.slice(3));
     break;
   }
+  case 'task-workspace': {
+    const { taskWorkspace } = await import('../lib/internal/task-workspace.ts');
+    taskWorkspace(process.argv.slice(3));
+    break;
+  }
   case 'task-ledger': {
     const { taskLedger } = await import('../lib/internal/task-ledger.ts');
     await taskLedger(process.argv.slice(3));

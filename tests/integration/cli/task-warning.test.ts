@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ function fixture() {
   const root = createTempDir('task-warning-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
-  const dir = path.join(root, '.agents', 'workspace', 'active', id);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
   return { root, id, file: path.join(dir, 'task.md') };

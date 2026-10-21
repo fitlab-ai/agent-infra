@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -143,7 +144,7 @@ test('task-bound push-only retry ignores review artifacts and only follows Git f
   const remote = createTempDir('commit-operation-remote-');
   const missingRemote = path.join(remote, 'missing.git');
   const taskId = 'TASK-20260101-000005';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -238,7 +239,7 @@ test('commit core rejects an unknown runtime mode before writing Git state', () 
 test('task-bound direct commit validates the task branch through the same core', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
@@ -261,7 +262,7 @@ test('task-bound direct commit validates the task branch through the same core',
 test('task-bound local delivery creates a checkpoint without touching the remote', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000007';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -288,7 +289,7 @@ test('task-bound local delivery creates a checkpoint without touching the remote
 test('task-bound local delivery replaces a stale prepared intent with current Git facts', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000008';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -334,7 +335,7 @@ test('task-bound local delivery replaces a stale prepared intent with current Gi
 test('task-bound local retry validates a committed intent against Git before syncing it', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000009';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -367,7 +368,7 @@ test('task-bound local retry validates a committed intent against Git before syn
 test('task-bound local retry preserves a committed intent whose Git identity is invalid', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000010';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -402,7 +403,7 @@ test('task-bound local retry preserves a committed intent whose Git identity is 
 test('task-bound local retry accepts the original multiline commit message after a sync warning', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000011';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -439,7 +440,7 @@ test('task-bound local retry preserves Git-significant whitespace in commit mess
   for (const [index, message] of messages.entries()) {
     const root = fixture();
     const taskId = `TASK-20260101-00001${5 + index}`;
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     try {
       fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
       fs.mkdirSync(taskDir, { recursive: true });
@@ -471,7 +472,7 @@ test('task-bound local retry preserves Git-significant whitespace in commit mess
 test('task-bound local retry accepts directory pathspecs after a sync warning', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000012';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -508,7 +509,7 @@ test('task-bound local retry accepts directory pathspecs after a sync warning', 
 test('prepared recovery validates a multiline commit under its directory pathspec', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000013';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -549,7 +550,7 @@ test('prepared recovery validates a multiline commit under its directory pathspe
 test('synced intent retry validates its Git identity and clears the retained marker', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000014';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -582,7 +583,7 @@ test('synced intent retry validates its Git identity and clears the retained mar
 test('task-bound commit from a repository subdirectory resolves the canonical repository root', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000003';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   const subdirectory = path.join(root, 'sub');
   try {
     fs.mkdirSync(subdirectory, { recursive: true });
@@ -616,7 +617,7 @@ test('task-bound commit from a repository subdirectory resolves the canonical re
 test('no-op task retry repairs a task sync warning and records the commit activity', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000004';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
@@ -641,7 +642,7 @@ test('no-op task retry repairs a task sync warning and records the commit activi
 test('no-op task retry does not duplicate a Commit activity after an intervening event', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000006';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
@@ -667,7 +668,7 @@ test('no-op task retry does not duplicate a Commit activity after an intervening
 test('no-op task retry records a fresh Commit activity after a later code review', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000007';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
@@ -690,7 +691,7 @@ test('no-op task retry records a fresh Commit activity after a later code review
 test('orchestrated commit is rejected because lifecycle commit delegation was removed', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000002';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);

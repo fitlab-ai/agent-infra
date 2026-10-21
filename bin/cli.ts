@@ -31,7 +31,7 @@ Commands:
   run             Schedule a lifecycle skill in the task sandbox tmux session
   sandbox, s      Manage Docker-based AI sandboxes
   server          Run the local AI collaboration daemon (start/stop/status/logs)
-  task, t         Read-only views of .agents/workspace tasks
+  task, t         Read-only views of project task workspaces
   sync            Update seed files and sync file registry for an existing project
   update          Update the agent-infra CLI itself
   version         Show version

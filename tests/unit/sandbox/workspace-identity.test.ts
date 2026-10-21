@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,16 +9,16 @@ import {
   resolveSandboxTarget,
   sameSandboxWorkspaceIdentity
 } from '../../../lib/sandbox/workspace-identity.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 function fixture(): string {
-  const root = createTempDir('sandbox-identity-');
-  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
+  const { repoRoot: root } = createTaskWorkspaceFixture('sandbox-identity-');
+  fs.mkdirSync(path.join(taskWorkspaceRoot(root),  'active'), { recursive: true });
   return root;
 }
 
 function addTask(root: string, taskId: string, branch: string, shortId: string): void {
-  const active = path.join(root, '.agents', 'workspace', 'active');
+  const active = path.join(taskWorkspaceRoot(root),  'active');
   const taskDir = path.join(active, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: ${branch}\n---\n`);
@@ -30,17 +31,17 @@ function addTask(root: string, taskId: string, branch: string, shortId: string):
 }
 
 function addTaskInState(root: string, state: string, taskId: string, branch: string): void {
-  const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: ${state}\nbranch: ${branch}\n---\n`);
 }
 
 function addArchivedTask(root: string, taskId: string, branch: string, shortId: string): void {
-  const taskDir = path.join(root, '.agents', 'workspace', 'archive', '2026', '10', '13', taskId, 'local');
+  const taskDir = path.join(taskWorkspaceRoot(root),  'archive', '2026', '10', '13', taskId, 'local');
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n`);
   fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+    path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'),
     `${JSON.stringify({ version: 1, ids: { [shortId]: taskId } })}\n`
   );
 }
@@ -87,7 +88,7 @@ test('resolveSandboxCleanupTarget resolves a retained short id to the completed 
   const taskId = 'TASK-20260809-010211';
   addTaskInState(root, 'completed', taskId, 'agent-infra-fix-completed');
   fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+    path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'),
     `${JSON.stringify({ version: 1, ids: { '07': taskId } })}\n`
   );
 
@@ -121,7 +122,7 @@ test('resolveSandboxCleanupTarget rejects a branch shared by tasks in different 
   const branch = 'agent-infra-feature-reused';
   addTask(root, 'TASK-20261013-010212', branch, '08');
   const archivedTaskId = 'TASK-20261013-010213';
-  const archiveDir = path.join(root, '.agents', 'workspace', 'archive', '2026', '10', '13', archivedTaskId, 'local');
+  const archiveDir = path.join(taskWorkspaceRoot(root),  'archive', '2026', '10', '13', archivedTaskId, 'local');
   fs.mkdirSync(archiveDir, { recursive: true });
   fs.writeFileSync(path.join(archiveDir, 'task.md'), `---\nid: ${archivedTaskId}\nstatus: completed\nbranch: ${branch}\n---\n`);
 
@@ -138,7 +139,7 @@ test('resolveSandboxCleanupTarget applies duplicate task-state checks to an acti
   addTaskInState(root, 'active', taskId, branch);
   addTaskInState(root, 'completed', taskId, 'agent-infra-bugfix-completed-cleanup');
   fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+    path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'),
     `${JSON.stringify({ version: 1, ids: { '09': taskId } })}\n`
   );
 
@@ -199,7 +200,7 @@ test('resolveSandboxCleanupTarget applies duplicate-state checks to every refere
     addTaskInState(root, 'completed', taskId, completedBranch);
     addTaskInState(root, 'blocked', taskId, activeBranch);
     fs.writeFileSync(
-      path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+      path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'),
       `${JSON.stringify({ version: 1, ids: { '07': taskId } })}\n`
     );
 

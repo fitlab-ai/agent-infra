@@ -40,7 +40,7 @@ description: >
 按以下确定性分支解析出目标 PR 号 `{pr#}` 与可选 `{task-id}`：
 
 - 场景 A（省略入参）：从当前分支反查 active task；定位后读取其 verified `pr_delivery_fact.identity.number`。
-- 场景 B（省略 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `.agents/workspace/active/{task-id}/task.md` 取 verified `pr_delivery_fact.identity.number` 作为 `{pr#}`；fact 未绑定时按「错误处理」提示先 `create-pr`，停止。
+- 场景 B（省略 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `<task-workspace>/active/{task-id}/task.md` 取 verified `pr_delivery_fact.identity.number` 作为 `{pr#}`；fact 未绑定时按「错误处理」提示先 `create-pr`，停止。
 - 场景 C（`--pr <number>` 或 PR URL）：直接取该 PR 号为 `{pr#}`；随后按「反查任务」确定 `{task-id}`。
 - 反查任务（场景 A / C）：通过任务上下文/任务查询取得与 `{pr#}` 唯一绑定的 active task。未命中时停止并提示先绑定 PR；typed checks intent 不建立第二套无任务状态机。
 
@@ -53,7 +53,7 @@ description: >
 ```bash
 node --experimental-strip-types --input-type=module -e '
 import { readPrChangeReport } from "./lib/platform/pr-change-report.ts";
-const report = readPrChangeReport(`.agents/workspace/active/${process.argv[1]}/pr-change-report.json`);
+const report = readPrChangeReport(`<task-workspace>/active/${process.argv[1]}/pr-change-report.json`);
 const previous = report.ok
   ? { repository: report.value.identity.repository, resource: report.value.identity.resource, head: report.value.identity.head.sha }
   : { status: "unavailable" };
@@ -85,7 +85,7 @@ process.stdout.write(`${JSON.stringify(previous)}\n`);
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
+更新 `<task-workspace>/active/{task-id}/task.md`：
 - `assigned_to`：{当前代理}
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值

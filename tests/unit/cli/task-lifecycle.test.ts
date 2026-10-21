@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +10,7 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
-import { createTempDir, supportsPosixModeBits } from '../../helpers.ts';
+import { createTempDir, createTaskWorkspaceFixture, supportsPosixModeBits } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {
@@ -18,17 +19,17 @@ const METADATA = {
 };
 
 function fixture(state: 'active' | 'blocked' = 'active') {
-  const repoRoot = createTempDir('task-lifecycle-');
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', state, TASK_ID);
+  const { repoRoot, project } = createTaskWorkspaceFixture('task-lifecycle-');
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  state, TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', 'active'), { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } }));
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot),  'active'), { recursive: true });
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project, task: { shortIdLength: 2 } }));
   fs.writeFileSync(
     path.join(taskDir, 'task.md'),
     `---\nid: ${TASK_ID}\nstatus: ${state}\ncurrent_step: code-review\nassigned_to: claude\nupdated_at: old\nagent_infra_version: v9.9.9\ntarget_date:\n${state === 'blocked' ? 'blocked_at: old\n' : ''}---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`
   );
   if (state === 'active') {
-    fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } }, null, 2)}\n`);
+    fs.writeFileSync(path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } }, null, 2)}\n`);
   }
   return { repoRoot, taskDir };
 }
@@ -47,20 +48,20 @@ test('block moves the task, updates one metadata pair, logs a pair, and releases
   );
   assert.equal(result.status, 'applied');
   assert.equal(result.shortId.effect, 'released');
-  const target = path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md');
+  const target = path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID, 'task.md');
   const content = fs.readFileSync(target, 'utf8');
   assert.match(content, /status: blocked/);
   assert.match(content, /blocked_at: 2026-07-18 12:00:00\+00:00/);
   assert.match(content, /agent_infra_version: v9\.9\.9/);
   assert.equal((content.match(/Block Task/g) ?? []).length, 2);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json'), 'utf8')).ids, {});
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID)), false);
 });
 
 test('task move refuses a task-bound sandbox control consumer without changing task or runtime bytes', () => {
   const f = fixture();
   const taskFile = path.join(f.taskDir, 'task.md');
-  const registryFile = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registryFile = path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json');
   const controlRoot = path.join(f.repoRoot, '.agent-infra', 'sandbox-control', 'demo', 'tasks', TASK_ID);
   fs.mkdirSync(controlRoot, { recursive: true });
   const manifest = path.join(controlRoot, 'manifest.json');
@@ -76,7 +77,7 @@ test('task move refuses a task-bound sandbox control consumer without changing t
   assert.equal(result.error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
   assert.deepEqual([fs.readFileSync(taskFile), fs.readFileSync(registryFile), fs.readFileSync(manifest)], before);
   assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID)), false);
 });
 
 test('task move refuses active or unreadable orchestration state and preserves all bytes', () => {
@@ -111,15 +112,15 @@ test('safe task move carries task-owned runtime bytes to the new state intact', 
     { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
   );
   assert.equal(result.status, 'applied');
-  assert.deepEqual(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID, '.runtime', 'orchestration.json')), before);
+  assert.deepEqual(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID, '.runtime', 'orchestration.json')), before);
   assert.equal(fs.existsSync(f.taskDir), false);
 });
 
 test('complete fills the empty completed mount, preserves task data, and retains its short id', () => {
   const f = fixture();
-  const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+  const targetDir = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
   fs.mkdirSync(targetDir, { recursive: true });
-  const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registryPath = path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json');
   const registryBefore = fs.readFileSync(registryPath);
   const payload = Buffer.from([0, 17, 255, 3]);
   const payloadPath = path.join(f.taskDir, '.runtime', 'payload.bin');
@@ -151,7 +152,7 @@ test('complete fills the empty completed mount, preserves task data, and retains
 test('complete preserves an empty virtiofs source mount and resolves the task from completed state', () => {
   const f = fixture();
   let rmdirCalls = 0;
-  const mountPoint = f.taskDir.replaceAll('\\', '\\\\').replaceAll(' ', '\\040');
+  const mountPoint = fs.realpathSync.native(f.taskDir).replaceAll('\\', '\\\\').replaceAll(' ', '\\040');
   const result = applyTaskLifecycle(
     { taskRef: TASK_ID, intent: 'complete', agent: 'codex' },
     {
@@ -171,10 +172,10 @@ test('complete preserves an empty virtiofs source mount and resolves the task fr
   assert.ok(resolved.ok);
   assert.equal(resolved.state, 'completed');
   assert.deepEqual(
-    JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+    JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json'), 'utf8')).ids,
     { '01': TASK_ID }
   );
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md')), true);
 });
 
 test('complete does not suppress EBUSY when the source path is not a virtiofs mountpoint', () => {
@@ -199,7 +200,7 @@ test('complete does not suppress EBUSY when the source path is not a virtiofs mo
 test('dry-run plans the same transition without changing bytes, mtime, directories, or registry', () => {
   const f = fixture();
   const taskFile = path.join(f.taskDir, 'task.md');
-  const registry = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registry = path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json');
   const beforeTask = fs.readFileSync(taskFile);
   const beforeRegistry = fs.readFileSync(registry);
   const beforeMtime = fs.statSync(taskFile).mtimeMs;
@@ -211,7 +212,7 @@ test('dry-run plans the same transition without changing bytes, mtime, directori
   assert.deepEqual(fs.readFileSync(taskFile), beforeTask);
   assert.deepEqual(fs.readFileSync(registry), beforeRegistry);
   assert.equal(fs.statSync(taskFile).mtimeMs, beforeMtime);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID)), false);
 });
 
 test('invalid transition fails before any side effect', () => {
@@ -232,7 +233,7 @@ test('same completed intent replays as no-op without duplicate log entries', () 
   const f = fixture();
   const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
   assert.equal(applyTaskLifecycle(request, { repoRoot: f.repoRoot, metadataProvider: () => METADATA }).status, 'applied');
-  const target = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md');
+  const target = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md');
   const before = fs.readFileSync(target);
   const replay = applyTaskLifecycle(request, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
   assert.equal(replay.status, 'no-op');
@@ -249,7 +250,7 @@ test('activate clears terminal fields, moves to active, and allocates a short id
   );
   assert.equal(result.status, 'applied');
   assert.equal(result.shortId.effect, 'allocated');
-  const target = path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md');
+  const target = path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID, 'task.md');
   const content = fs.readFileSync(target, 'utf8');
   assert.match(content, /status: active/);
   assert.match(content, /assigned_to: codex/);
@@ -278,8 +279,8 @@ test('activate rejects a blocked task with a missing ledger before journal, dire
   assert.equal(fs.readFileSync(taskPath, 'utf8'), missingLedger);
   assert.equal(fs.statSync(taskPath).mtimeMs, beforeMtime);
   assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json')), false);
 });
 
 test('activate rejects an invalid target metadata version before lifecycle mutation', () => {
@@ -297,8 +298,8 @@ test('activate rejects an invalid target metadata version before lifecycle mutat
   assert.deepEqual(fs.readFileSync(taskPath), before);
   assert.equal(fs.statSync(taskPath).mtimeMs, beforeMtime);
   assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json')), false);
 });
 
 test('security completion records the alert payload in its canonical done note', () => {
@@ -308,15 +309,15 @@ test('security completion records the alert payload in its canonical done note',
     { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
   );
   assert.equal(result.status, 'applied');
-  const content = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+  const content = fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8');
   assert.match(content, /Code Scanning alert #17 dismissed: false positive/);
 });
 
 test('restore validates staging before exposing active and allocates a short id', () => {
-  const repoRoot = createTempDir('task-restore-');
-  const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
+  const { repoRoot, project } = createTaskWorkspaceFixture('task-restore-');
+  const staging = path.join(taskWorkspaceRoot(repoRoot),  '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project, task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'analysis.md'), '# Analysis\n');
   const result = applyTaskLifecycle(
@@ -325,16 +326,16 @@ test('restore validates staging before exposing active and allocates a short id'
   );
   assert.equal(result.status, 'applied');
   assert.equal(fs.existsSync(staging), false);
-  const target = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md');
+  const target = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID, 'task.md');
   assert.match(fs.readFileSync(target, 'utf8'), /status: active/);
   assert.equal(result.shortId.shortId, '01');
 });
 
 test('restore transports task receipts with artifacts without using mtime', () => {
-  const repoRoot = createTempDir('task-restore-receipt-');
-  const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
+  const { repoRoot, project } = createTaskWorkspaceFixture('task-restore-receipt-');
+  const staging = path.join(taskWorkspaceRoot(repoRoot),  '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project, task: { shortIdLength: 2 } }));
   const taskPath = path.join(staging, 'task.md');
   fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'plan.md'), '# Plan\n');
@@ -370,11 +371,11 @@ test('restore transports task receipts with artifacts without using mtime', () =
     { repoRoot, metadataProvider: () => METADATA }
   );
   assert.equal(result.status, 'applied');
-  const targetTask = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md');
+  const targetTask = path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID, 'task.md');
   const restored = fs.readFileSync(targetTask, 'utf8');
   assert.deepEqual(receiptForOutput(restored, 'review-plan.md'), {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
-    inputSha256: sha256File(path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'plan.md')),
+    inputSha256: sha256File(path.join(taskWorkspaceRoot(repoRoot),  'active', TASK_ID, 'plan.md')),
     completedAt: '2026-07-18 12:00:00+00:00'
   });
   assert.equal(resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot }).status, 'ready');
@@ -382,7 +383,7 @@ test('restore transports task receipts with artifacts without using mtime', () =
 
 test('duplicate hot directories are rejected before either copy changes', () => {
   const f = fixture();
-  const duplicate = path.join(f.repoRoot, '.agents', 'workspace', 'blocked', TASK_ID);
+  const duplicate = path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID);
   fs.mkdirSync(path.dirname(duplicate), { recursive: true });
   fs.cpSync(f.taskDir, duplicate, { recursive: true });
   const before = fs.readFileSync(path.join(f.taskDir, 'task.md'));
@@ -413,7 +414,7 @@ test('task write failure preserves source bytes and retries with journal metadat
     metadataProvider: () => ({ timestamp: 'different', agentInfraVersion: 'different' })
   });
   assert.equal(recovered.status, 'applied');
-  const content = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+  const content = fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8');
   assert.match(content, /updated_at: 2026-07-18 12:00:00\+00:00/);
 });
 
@@ -445,13 +446,13 @@ test('active recovery rejects invalid journal metadata before resuming any lifec
   assert.deepEqual(fs.readFileSync(taskPath), beforeTask);
   assert.equal(fs.statSync(taskPath).mtimeMs, beforeTaskMtime);
   assert.deepEqual(fs.readFileSync(journalPath), beforeJournal);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
-  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json')), false);
 });
 
 test('complete rejects conflicting completed task content without overwriting either copy', () => {
   const f = fixture();
-  const target = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+  const target = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
   fs.mkdirSync(target, { recursive: true });
   fs.writeFileSync(path.join(target, 'other.txt'), 'existing completed data');
   const sourceTask = fs.readFileSync(path.join(f.taskDir, 'task.md'));

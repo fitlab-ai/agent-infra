@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,12 +13,12 @@ function makeTask(rows: string[] = [
 ]): { repoRoot: string; taskId: string; taskMd: string } {
   const repoRoot = createTempDir('decide-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(repoRoot) }));
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot), 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   spawnSync('git', ['checkout', '-b', 'agent-infra-feature-decision-lock'], { cwd: repoRoot });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo' }));
   const taskMd = path.join(taskDir, 'task.md');
   fs.writeFileSync(
     taskMd,

@@ -59,7 +59,7 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-su
 ### 2. 验证前置条件
 
 检查：
-- `.agents/workspace/active/{task-id}/task.md`
+- `<task-workspace>/active/{task-id}/task.md`
 - 有效 PR：优先使用显式 `{pr-ref}`，否则读取 task.md frontmatter 的 verified `pr_delivery_fact.identity.number`
 
 如果任务不存在、验证说明缺失，或无法解析有效 PR，立即停止。
@@ -96,7 +96,7 @@ prepare 必须先幂等登记 `manual-validation.started`，再写入 prepared t
 ```bash
 agent-infra-internal manual-validation transaction {task-id} \
   --artifact {manual-validation-artifact} \
-  --summary-file {summary-body-file} --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
+  --summary-file {summary-body-file} --change-report-file <task-workspace>/active/{task-id}/pr-change-report.json \
   --agent {standard-agent-token} --result no_op
 ```
 

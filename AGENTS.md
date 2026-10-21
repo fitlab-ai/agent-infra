@@ -198,7 +198,7 @@ npm test
 | Git commit message | 英文 | Conventional Commits 祈使语气 |
 | 任务标题 | 跟随用户输入语言 | task.md 标题保持用户原文，不套用 Conventional Commits 格式 |
 | GitHub Issue/PR 标题 | 英文前缀 + 跟随用户输入语言 | 格式：`type(scope): 中文描述`；type/scope 英文，描述保持原文 |
-| 任务工作区产物 | 跟随已部署的技能语言 | `.agents/workspace/` 文件使用 `.airc.json` 选定的 SKILL.md 语言 |
+| 任务工作区产物 | 跟随已部署的技能语言 | 使用统一 resolver 返回的任务根；正文语言与 `.airc.json` 选定的 SKILL.md 语言一致 |
 | Activity Log 步骤名 | 英文 | 工具链使用的结构化标识符（如 `**Commit** by`） |
 | 项目文档 | 英文（主） + 中文翻译 | 如 `README.md` + `README.zh-CN.md` |
 | AI 回复 | 跟随用户输入语言 | 中文问→中文答 |

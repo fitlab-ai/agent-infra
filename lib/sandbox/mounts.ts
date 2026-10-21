@@ -24,12 +24,12 @@ function workspaceStateMounts(workspaceViewRoot: string, taskBound: boolean): Sa
     .map(({ state, hostPath }) => taskBound && state === 'active'
       ? {
           hostPaths: [path.join(hostPath, '.short-ids.json')],
-          containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
+          containerPath: '/task-workspace/active/.short-ids.json',
           readOnly: true
         }
       : {
           hostPaths: [hostPath],
-          containerPath: path.posix.join('/workspace/.agents/workspace', state),
+          containerPath: path.posix.join('/task-workspace', state),
           readOnly: true
         }
     );
@@ -60,12 +60,12 @@ function taskWorkspaceMounts(taskSources: string[], taskBound: boolean, override
   const taskId = overrides.taskId!;
   const mounts: SandboxBindMountDeclaration[] = [{
     hostPaths: taskSources,
-    containerPath: path.posix.join('/workspace/.agents/workspace/active', taskId),
+    containerPath: path.posix.join('/task-workspace/active', taskId),
     readOnly: false
   }];
   if (overrides.completedTaskSource) mounts.push({
     hostPaths: [overrides.completedTaskSource],
-    containerPath: path.posix.join('/workspace/.agents/workspace/completed', taskId),
+    containerPath: path.posix.join('/task-workspace/completed', taskId),
     readOnly: false
   });
   return mounts;

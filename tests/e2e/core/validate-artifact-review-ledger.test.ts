@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -44,7 +45,7 @@ async function runLedger(skill: string, taskDir: string, repositoryRoot?: string
 
 test("review-ledger fails when no ledger section exists", async () => {
   await withTempRoot("agent-infra-ledger-none-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([], { withSection: false }));
 
     const { result, payload } = await runLedger("complete-task", taskDir);
@@ -56,7 +57,7 @@ test("review-ledger fails when no ledger section exists", async () => {
 
 test("review-ledger passes when every in-scope row is terminal", async () => {
   await withTempRoot("agent-infra-ledger-clean-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 2 | blocker | closed | fixed in code-r2, approved by review-code-r2 |",
       "| PL-1 | plan | 1 | major | confirmed | reviewer accepted refutation |"
@@ -69,7 +70,7 @@ test("review-ledger passes when every in-scope row is terminal", async () => {
 
 test("review-ledger fails on an open (unresolved) row", async () => {
   await withTempRoot("agent-infra-ledger-open-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker | open | review-code.md#1 |"
     ]));
@@ -83,7 +84,7 @@ test("review-ledger fails on an open (unresolved) row", async () => {
 
 test("review-ledger fails when a non-open status carries no evidence", async () => {
   await withTempRoot("agent-infra-ledger-evidence-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker | confirmed |  |"
     ]));
@@ -96,7 +97,7 @@ test("review-ledger fails when a non-open status carries no evidence", async () 
 
 test("review-ledger fails on an illegal status value", async () => {
   await withTempRoot("agent-infra-ledger-illegal-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker | bogus | x |"
     ]));
@@ -109,7 +110,7 @@ test("review-ledger fails on an illegal status value", async () => {
 
 test("review-ledger keeps disputed findings unresolved regardless of round count", async () => {
   await withTempRoot("agent-infra-ledger-converge-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 3 | blocker | refuted | still disputed |"
     ]));
@@ -122,7 +123,7 @@ test("review-ledger keeps disputed findings unresolved regardless of round count
 
 test("review-ledger keeps needs-human-decision blocking until ruled", async () => {
   await withTempRoot("agent-infra-ledger-human-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 3 | blocker | needs-human-decision | escalated |"
     ]));
@@ -140,7 +141,7 @@ test("review-ledger keeps needs-human-decision blocking until ruled", async () =
 
 test("review-ledger keeps HD decision rows blocking until human-decided", async () => {
   await withTempRoot("agent-infra-ledger-hd-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |"
     ]));
@@ -160,8 +161,8 @@ test("review-ledger keeps HD decision rows blocking until human-decided", async 
 test("review-ledger recognizes the evidence written by the real decide command", async () => {
   await withTempRoot("agent-infra-ledger-decide-", async (tempRoot) => {
     spawnSync("git", ["init", "--quiet"], { cwd: tempRoot });
-    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: "demo" }));
-    const taskDir = path.join(tempRoot, ".agents", "workspace", "active", TASK_ID);
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot) }));
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot),  "active", TASK_ID);
     const pending = [
       buildTaskFrontmatter({ id: TASK_ID, current_step: "code-review" }),
       "",
@@ -193,7 +194,7 @@ test("review-ledger recognizes the evidence written by the real decide command",
 
 test("review-ledger stage_scope only enforces stages before the caller", async () => {
   await withTempRoot("agent-infra-ledger-scope-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     // An open code-stage row is out of scope for plan-task (which only guards analysis).
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| AN-1 | analysis | 1 | major | closed | resolved |",
@@ -213,8 +214,8 @@ test("review-ledger stage_scope only enforces stages before the caller", async (
 test("review-ledger and stage-status agree for open minor, terminal, and advisory-only stages", async () => {
   await withTempRoot("agent-infra-ledger-parity-", async (tempRoot) => {
     spawnSync("git", ["init", "--quiet"], { cwd: tempRoot });
-    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: "demo" }));
-    const taskDir = path.join(tempRoot, ".agents", "workspace", "active", TASK_ID);
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot) }));
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot),  "active", TASK_ID);
     const cases = [
       { stage: "analysis", id: "AN-1", skill: "plan-task" },
       { stage: "plan", id: "PL-1", skill: "code-task" },
@@ -253,7 +254,7 @@ test("review-ledger and stage-status agree for open minor, terminal, and advisor
 
 test("review-ledger fails on a malformed (wrong column count) row", async () => {
   await withTempRoot("agent-infra-ledger-malformed-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, TASK_ID);
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker |"
     ]));

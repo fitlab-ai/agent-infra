@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import path from 'node:path';
 
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
 import { writeTask } from '../../../lib/task/write.ts';
-import { createTempDir, onPlatforms } from '../../helpers.ts';
+import { createTempDir, onPlatforms, taskWorkspaceProject } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-07-15 12:34:56+00:00', agentInfraVersion: 'v9.9.9' };
@@ -15,12 +16,13 @@ type FixtureState = 'active' | 'blocked' | 'completed' | 'archive';
 
 function fixture(state: FixtureState = 'active') {
   const repoRoot = createTempDir('task-write-');
-  const taskDir = state === 'archive'
-    ? path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '07', '15', TASK_ID, 'local')
-    : path.join(repoRoot, '.agents', 'workspace', state, TASK_ID);
-  fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), '{"task":{"shortIdLength":2}}\n');
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(repoRoot), task: { shortIdLength: 2 } }) + '\n');
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot), 'active'), { recursive: true });
+  const taskDir = state === 'archive'
+    ? path.join(taskWorkspaceRoot(repoRoot),  'archive', '2026', '07', '15', TASK_ID, 'local')
+    : path.join(taskWorkspaceRoot(repoRoot),  state, TASK_ID);
+  fs.mkdirSync(taskDir, { recursive: true });
   const taskMdPath = path.join(taskDir, 'task.md');
   fs.writeFileSync(
     taskMdPath,
@@ -32,7 +34,7 @@ function fixture(state: FixtureState = 'active') {
   }
   if (state === 'active') {
     fs.writeFileSync(
-      path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
+      path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json'),
       JSON.stringify({ version: 1, ids: { '01': TASK_ID } })
     );
   }
@@ -41,7 +43,7 @@ function fixture(state: FixtureState = 'active') {
 
 test('resolveTaskRef maps full and short refs without changing the registry', () => {
   const { repoRoot, taskMdPath } = fixture();
-  const registry = path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registry = path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json');
   const before = fs.readFileSync(registry);
   const beforeMtime = fs.statSync(registry).mtimeMs;
   assert.deepEqual(resolveTaskRef('1', { repoRoot }), {
@@ -67,7 +69,7 @@ test('resolveTaskRef returns stable codes for invalid, missing, stale and duplic
   const missing = resolveTaskRef('2', { repoRoot });
   assert.equal(missing.ok ? null : missing.code, 'SHORT_ID_NOT_FOUND');
 
-  const registry = path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registry = path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json');
   fs.writeFileSync(registry, JSON.stringify({ version: 1, ids: { '01': TASK_ID, '02': TASK_ID } }));
   const duplicate = resolveTaskRef('1', { repoRoot });
   assert.equal(duplicate.ok ? null : duplicate.code, 'SHORT_ID_REGISTRY_DUPLICATE_TASK');
@@ -79,7 +81,7 @@ test('resolveTaskRef returns stable codes for invalid, missing, stale and duplic
 
 test('resolveTaskRef distinguishes registry storage failures', () => {
   const { repoRoot } = fixture();
-  const registry = path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registry = path.join(taskWorkspaceRoot(repoRoot),  'active', '.short-ids.json');
   fs.rmSync(registry);
   let result = resolveTaskRef('1', { repoRoot });
   assert.equal(result.ok ? null : result.code, 'SHORT_ID_REGISTRY_NOT_FOUND');

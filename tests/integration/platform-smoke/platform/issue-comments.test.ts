@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -235,14 +236,14 @@ function syncFixture() {
   const root = createTempDir('platform-comment-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: root });
-  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001'), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
   fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
+    path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md'),
     '---\nid: TASK-20260101-000001\ntype: feature\nplatform_issue_identity: \'{"kind":"number","value":7}\'\n---\n\n# Task\n'
   );
   fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md'),
+    path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'analysis.md'),
     '# Analysis\n'
   );
   return root;
@@ -250,7 +251,7 @@ function syncFixture() {
 
 test('comment sync preserves source @ content', async () => {
   const root = syncFixture();
-  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const taskPath = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md');
   fs.appendFileSync(taskPath, '\n@2x\n');
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
@@ -280,7 +281,7 @@ test('comment sync preserves source @ content', async () => {
 
 test('comment sync rejects malformed content before reading or writing remote comments', async () => {
   const root = syncFixture();
-  fs.appendFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), '\n<DiV\n');
+  fs.appendFileSync(path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md'), '\n<DiV\n');
   let calls = 0;
   const client = {
     version() { calls += 1; return { ok: true, value: '2.72.0' }; },
@@ -299,7 +300,7 @@ test('comment sync rejects malformed content before reading or writing remote co
 test('comment sync excludes oversized process history from the task snapshot', async () => {
   const root = syncFixture();
   fs.appendFileSync(
-    path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
+    path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md'),
     `\n## 活动日志\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}\n`
   );
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
@@ -329,7 +330,7 @@ test('comment sync excludes oversized process history from the task snapshot', a
 
 test('comment sync transports safe artifact Markdown without changing its link syntax', async () => {
   const root = syncFixture();
-  const artifactPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md');
+  const artifactPath = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'analysis.md');
   fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
@@ -390,7 +391,7 @@ test('comment sync creates once and becomes a no-op on replay', async () => {
 
 test('task sync rejects a different writer before publishing the task snapshot', async () => {
   const root = syncFixture();
-  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const taskPath = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md');
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   let viewer = 'codex';
   let writes = 0;
@@ -464,7 +465,7 @@ test('task sync does not create a full task recovery transaction', async () => {
 
 test('task sync folds unrelated action records into the task comment', async () => {
   const root = syncFixture();
-  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const taskPath = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001', 'task.md');
   fs.appendFileSync(taskPath, [
     '', '## 活动日志', '',
     '- 2026-01-01 10:00:00+08:00 — **Create Task [started]** by codex — started',

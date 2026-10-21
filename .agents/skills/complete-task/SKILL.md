@@ -49,7 +49,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 ## 执行步骤
 ### 1. 验证任务存在
 
-检查任务是否存在于 `.agents/workspace/active/{task-id}/`。
+检查任务是否存在于 `<task-workspace>/active/{task-id}/`。
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
@@ -125,7 +125,7 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 
 ### 3. 完成业务内容更新
 
-在 `.agents/workspace/active/{task-id}/task.md` 中只更新生命周期核心不负责的业务内容：
+在 `<task-workspace>/active/{task-id}/task.md` 中只更新生命周期核心不负责的业务内容：
 - 新增或更新 `## 状态核对` 段，记录第 0 步审计命令、任务/产物范围、关键结果和未覆盖部分；正常成功不复制完整目录清单或 `task.md` 尾部，失败、阻塞、身份不一致或争议时附决定性原文行，放在 `## 活动日志` 之前
 - 标记所有工作流步骤为已完成
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
@@ -208,7 +208,7 @@ complete 保留短号映射。它只会在受管 sandbox 清理确认容器已�
 任务信息：
 - 标题：{title}
 - 完成时间：{timestamp}
-- 目标路径：.agents/workspace/completed/{task-id}/
+- 目标路径：<task-workspace>/completed/{task-id}/
 
 交付物：
 - {关键产出列表：修改的文件、添加的测试等}
@@ -226,7 +226,7 @@ ai sandbox rm {task-id}  # 或使用本任务仍保留的短号
 
 - [ ] 验证了所有工作流步骤已完成
 - [ ] 更新了 task.md 的完成状态和时间戳
-- [ ] 将任务目录移动到 `.agents/workspace/completed/`
+- [ ] 将任务目录移动到 `<task-workspace>/completed/`
 - [ ] 验证了转移成功
 - [ ] 告知了用户完成情况
 
@@ -241,7 +241,7 @@ ai sandbox rm {task-id}  # 或使用本任务仍保留的短号
 
 2. **回滚**：如果任务被错误转移：
    ```bash
-   mv .agents/workspace/completed/{task-id} .agents/workspace/active/{task-id}
+   mv <task-workspace>/completed/{task-id} <task-workspace>/active/{task-id}
    ```
    然后将 task.md 中的状态改回 `active`。
 

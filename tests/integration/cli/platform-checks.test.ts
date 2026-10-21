@@ -1,10 +1,11 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, taskWorkspaceProject } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -33,9 +34,9 @@ test('platform-checks inspect fails when a non-required check fails', () => {
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', boundFactLine(), '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     const checks = path.join(root, 'checks.json');
@@ -70,9 +71,9 @@ test('platform-checks inspect fails closed for conflicting, unknown, and contrad
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', boundFactLine(), '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     const checks = path.join(root, 'checks.json');
@@ -128,9 +129,9 @@ test('platform-checks preserves deterministic check errors without degradation',
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', boundFactLine(), '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);

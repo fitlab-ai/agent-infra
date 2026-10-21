@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 
-import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv, taskWorkspaceProject } from '../../helpers.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -27,7 +28,7 @@ test('task platform recovery rejects non-positive and non-integer retry budgets'
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
     for (const attempts of ['0', '-1', '1.5']) {
@@ -70,9 +71,9 @@ test('platform-issue requirements sync persists once and converges across CLI pr
     execFileSync('git', ['init', '-q'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---',
       `id: ${taskId}`,
@@ -139,11 +140,11 @@ test('platform-issue in-label sync stays deferred until completion and dry-run i
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
+      project: taskWorkspaceProject(root), platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
     }));
     fs.writeFileSync(path.join(root, 'lib', 'sample.ts'), 'export {};\n');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
@@ -214,7 +215,7 @@ test('platform-issue in-label sync stays deferred until completion and dry-run i
     assert.equal(readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === retargeted.id)?.state, 'unknown');
     const mappingFilesBefore = execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort();
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
+      project: taskWorkspaceProject(root), platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
     }));
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).labels.in, { cli: ['lib/'] });
     const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });

@@ -31,7 +31,7 @@ import {
 const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N> [cmd...]
 
 N references an active task short id from
-.agents/workspace/active/.short-ids.json. They resolve only via that
+the read-only task-workspace mount at /task-workspace/active/.short-ids.json. They resolve only via that
 registry — they do not reference a container's row position in
 'ai sandbox ls' output. --recreate rebuilds the matched container while
 preserving its task or branch identity. The same token after the target is

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { detectRepoRoot } from '../task/resolve-ref.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { acquireGitHubCheckpoint, commitGitHubCheckpoint, readGitHubCheckpoint, releaseGitHubCheckpoint } from './checkpoint.ts';
 import { materializeJson, materializeSnapshot } from './materialize.ts';
 import { normalizeResources } from './normalize.ts';
@@ -64,13 +65,13 @@ function dataRoot(repoRoot: string, requested?: string): string {
     input = path.join(boundary, '.agent-infra', 'data-store', config.project);
   }
   const resolved = path.resolve(repoRoot, input);
-  const relative = path.relative(repoRoot, resolved);
-  if (requested !== undefined && (!relative || relative.startsWith('..') || path.isAbsolute(relative))) throw new Error('data root must be inside the repository');
-  const workspace = path.resolve(repoRoot, '.agents', 'workspace');
+  const workspace = resolveProjectTaskWorkspaceRoot(repoRoot);
   const taskRoots = ['active', 'blocked', 'completed', 'archive'].map((state) => path.join(workspace, state));
   if (resolved === workspace || taskRoots.some((taskRoot) => resolved === taskRoot || resolved.startsWith(`${taskRoot}${path.sep}`))) {
     throw new Error('data root cannot be the workspace root or a task directory');
   }
+  const relative = path.relative(repoRoot, resolved);
+  if (requested !== undefined && (!relative || relative.startsWith('..') || path.isAbsolute(relative))) throw new Error('data root must be inside the repository');
   let current = resolved;
   while (current !== boundary) {
     if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error('data root cannot traverse a symlink');

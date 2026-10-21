@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -102,10 +103,10 @@ test('all-state enumeration includes the dated archive while local capture exclu
   const root = createTempDir('process-data-sources-');
   const ids = ['TASK-20260101-000001', 'TASK-20260101-000002', 'TASK-20260101-000003', 'TASK-20260101-000004'];
   const dirs = [
-    path.join(root, '.agents', 'workspace', 'active', ids[0]!),
-    path.join(root, '.agents', 'workspace', 'blocked', ids[1]!),
-    path.join(root, '.agents', 'workspace', 'completed', ids[2]!),
-    path.join(root, '.agents', 'workspace', 'archive', '2026', '01', '01', ids[3]!, 'local')
+    path.join(taskWorkspaceRoot(root),  'active', ids[0]!),
+    path.join(taskWorkspaceRoot(root),  'blocked', ids[1]!),
+    path.join(taskWorkspaceRoot(root),  'completed', ids[2]!),
+    path.join(taskWorkspaceRoot(root),  'archive', '2026', '01', '01', ids[3]!, 'local')
   ];
   for (const [index, directory] of dirs.entries()) {
     fs.mkdirSync(directory, { recursive: true });

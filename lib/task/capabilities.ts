@@ -302,7 +302,7 @@ function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
   return { action: null, reasonCode: 'LIFECYCLE_REVIEWED', evidence: ['latest code review is approved'] };
 }
 
-function buildLifecycleFacts(taskDir: string, content: string, taskState = 'active', executionBusy = false): LifecycleFactsResult {
+function buildLifecycleFacts(taskDir: string, content: string, taskState = 'active', executionBusy = false, repositoryRoot?: string): LifecycleFactsResult {
   try {
     const metadata = parseTypedTaskFrontmatter(content);
     const rework = parseReworkIntentDocument(content);
@@ -393,7 +393,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
         && artifactHashes[input] === receipt.inputSha256
       ) reviewedInputs[family] = input;
       if (family === 'review-code') {
-        const identity = inspectReviewIdentity(taskDir, reviewContent);
+        const identity = inspectReviewIdentity(taskDir, reviewContent, repositoryRoot);
         reviewCodeIdentityValid = identity.status === 'matched'
           && hasArtifactCompletionFact(content, path.join(taskDir, latest), 'review-code.completed')
           && hasArtifactCompletionLog(content, latest, 'review-code.completed');

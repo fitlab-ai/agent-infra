@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { detectRepoRoot } from '../task/resolve-ref.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { configuredShortIdLength, executeShortIdCommand } from '../task/short-id.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
@@ -50,7 +51,7 @@ function taskShortId(args: string[] = []): void {
   if (positional.length > (operation === 'list' ? 0 : 1)) { failure('too many positional arguments'); return; }
   let repoRoot: string | null = null;
   try { repoRoot = detectRepoRoot(); } catch { /* custom active-dir mode */ }
-  const resolvedActiveDir = activeDir ?? (repoRoot ? path.join(repoRoot, '.agents', 'workspace', 'active') : null);
+  const resolvedActiveDir = activeDir ?? (repoRoot ? path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active') : null);
   if (!resolvedActiveDir) { failure('cannot determine active task directory'); return; }
   const width = shortIdLength ?? (repoRoot ? configuredShortIdLength(repoRoot) : 2);
   const result = executeShortIdCommand({

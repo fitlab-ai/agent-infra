@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -21,7 +22,7 @@ import {
   dispatchOrchestrationDelegation,
   readRun
 } from '../../../lib/task/orchestration.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const taskId = 'TASK-20260101-000001';
 const policy = {
@@ -259,9 +260,9 @@ test('Codex child seal pauses when terminal evidence is not terminal', async () 
 });
 
 function fixture() {
-  const root = createTempDir('codex-orchestration-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('codex-orchestration-');
   fixtureRoots.add(root);
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   beginOrResumeOrchestration(taskId, { repoRoot: root, client: 'codex', modelPolicy: policy, id: () => 'run-1' });
@@ -697,7 +698,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     resolveTerminal: async () => ({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' }),
     orchestrationOptions: {
       captureWorkspace: () => 'after',
-      diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000001/analysis.md']
+      diffWorkspace: () => ['task-workspace/active/TASK-20260101-000001/analysis.md']
     }
   });
   assert.equal(sealed.run?.pendingDelegation?.status, 'sealed');
@@ -791,7 +792,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
     store,
     orchestrationOptions: {
       captureWorkspace: () => 'after',
-      diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000001/analysis.md']
+      diffWorkspace: () => ['task-workspace/active/TASK-20260101-000001/analysis.md']
     }
   });
   assert.equal(sealed.run?.pendingDelegation?.status, 'sealed', JSON.stringify(sealed));
@@ -802,7 +803,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
     store,
     orchestrationOptions: {
       captureWorkspace: () => 'after',
-      diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000001/analysis.md']
+      diffWorkspace: () => ['task-workspace/active/TASK-20260101-000001/analysis.md']
     }
   });
   assert.equal(replayed.run?.pendingDelegation?.status, 'sealed', JSON.stringify(replayed));

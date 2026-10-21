@@ -59,7 +59,7 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-su
 ### 2. Verify Prerequisites
 
 Check:
-- `.agents/workspace/active/{task-id}/task.md`
+- `<task-workspace>/active/{task-id}/task.md`
 - a valid PR: prefer explicit `{pr-ref}`, otherwise read verified `pr_delivery_fact.identity.number` from task.md frontmatter
 
 Stop if the task is missing, the validation summary is missing, or no valid PR can be resolved.
@@ -96,7 +96,7 @@ Follow `reference/summary-update.md` to validate the PR binding, obtain canonica
 ```bash
 agent-infra-internal manual-validation transaction {task-id} \
   --artifact {manual-validation-artifact} \
-  --summary-file {summary-body-file} --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
+  --summary-file {summary-body-file} --change-report-file <task-workspace>/active/{task-id}/pr-change-report.json \
   --agent {standard-agent-token} --result no_op
 ```
 

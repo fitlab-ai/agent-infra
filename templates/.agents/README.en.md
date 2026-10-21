@@ -35,24 +35,19 @@ This dual-config approach ensures every AI tool receives appropriate project con
     code-review.yaml            # Code review workflow
     refactoring.yaml            # Refactoring workflow
   rules/                        # Collaboration rule index (see rules/README.md)
-  workspace/                    # Runtime workspace (git-ignored)
-    active/                     # Currently active tasks
-    blocked/                    # Blocked tasks
-    completed/                  # Completed tasks
-    logs/                       # Collaboration logs
-
 .claude/                        # Claude Code specific config
   CLAUDE.md                     # Project instructions for Claude
   commands/                     # Slash commands
   settings.json                 # Claude settings
 ```
 
-The whole `.agents/workspace/` tree is runtime-only and git-ignored. `active/`
-contains current tasks, `blocked/` contains paused tasks, `completed/` contains
-finished tasks, and `archive/` stores archived history. Runtime logs and process
-evidence may also be created below this root. Do not place content here that must
-be shared through Git; collaboration rules, templates, and workflows belong in
-the version-controlled `.agents/` tree.
+The host task workspace root is `~/.agent-infra/task-workspaces/<project-key>`;
+the container root is `/task-workspace`. Resolve the current host root with
+`agent-infra-internal task-workspace resolve --boundary host` and a task's exact
+directory with `agent-infra-internal task-context resolve --task <task-id>`.
+`active/`, `blocked/`, `completed/`, `archive/`, and `active/.short-ids.json` live
+under that root and contain runtime data. The `<task-workspace>` placeholder used
+in these guides means the resolver's returned root; it is not a repository path.
 
 ## Collaboration Model
 
@@ -101,7 +96,7 @@ Each AI tool has different strengths. Use them accordingly:
 ## Quick Start
 
 1. **Read the quick start guide**: See `QUICKSTART.md` for step-by-step instructions.
-2. **Create a task**: Copy `.agents/templates/task.md` to `.agents/workspace/active/`.
+2. **Create a task**: Use the `create-task` workflow; the host writes task data to the project task root.
 3. **Assign to an AI**: Update the `assigned_to` field in the task metadata.
 4. **Run the workflow**: Follow the appropriate workflow in `.agents/workflows/`.
 5. **Hand off**: When switching AIs, create a handoff document from the template.
@@ -386,7 +381,7 @@ No. Claude Code reads from `.claude/CLAUDE.md`, and all other tools read from `A
 
 ### Q: How do tasks get passed between AI tools?
 
-Through handoff documents stored in `.agents/workspace/`. Each handoff includes context, progress, and next steps so the receiving AI can continue seamlessly.
+Through handoff documents stored in `<task-workspace>/`. Each handoff includes context, progress, and next steps so the receiving AI can continue seamlessly.
 
 ### Q: What if an AI tool doesn't support AGENTS.md?
 
@@ -398,4 +393,4 @@ It's not recommended. The workflow model is sequential -- one AI per phase. Para
 
 ### Q: Where are runtime files stored?
 
-In `.agents/workspace/`, which is git-ignored. Only templates and workflow definitions in `.agents/` are version-controlled.
+In `<task-workspace>/`, which is git-ignored. Only templates and workflow definitions in `.agents/` are version-controlled.

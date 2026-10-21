@@ -13,7 +13,7 @@
 - 所有测试通过：{是/否}
 
 产出文件：
-- 实现报告：.agents/workspace/active/{task-id}/{code-artifact}
+- 实现报告：<task-workspace>/active/{task-id}/{code-artifact}
 
 下一步 - 代码审查：
 {next-step-commands}

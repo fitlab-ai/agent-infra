@@ -5,7 +5,9 @@ import path from "node:path";
 
 import {
   exists,
-  read
+  taskWorkspaceProject,
+  read,
+  taskWorkspaceRoot
 } from "../../helpers.ts";
 import {
   assertHasCanonicalPrSyncStructure,
@@ -30,7 +32,7 @@ const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 type TaskMetaCase = {
   name: string;
   skill: string;
-  content(): string;
+  content(project: string): string;
   assertResult(result: Awaited<ReturnType<typeof runValidator>>): void;
 };
 
@@ -118,7 +120,7 @@ const gateCases = [
 
 for (const c of gateCases) {
   test(c.name, () => withTempRoot(c.prefix, async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     c.prepare(taskDir);
     c.assertResult(await runValidator(c.args(taskDir)));
   }));
@@ -128,13 +130,13 @@ const taskMetaCases: TaskMetaCase[] = [
   {
     name: "validate-artifact create-task task-meta accepts a generated branch",
     skill: "create-task",
-    content() {
+    content(project) {
       const now = formatTimestamp(new Date());
       return [
         buildTaskFrontmatter({
           type: "feature",
           workflow: "feature-development",
-          branch: "agent-infra-feature-cli-generic-sandbox",
+          branch: `${project}-feature-cli-generic-sandbox`,
           current_step: "requirement-analysis"
         }),
         "",
@@ -146,7 +148,7 @@ const taskMetaCases: TaskMetaCase[] = [
       ].join("\n");
     },
     assertResult(result) {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
     }
   },
   {
@@ -307,8 +309,8 @@ const taskMetaCases: TaskMetaCase[] = [
 
 for (const c of taskMetaCases) {
   test(c.name, () => withTempRoot("agent-infra-task-meta-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
-    write(path.join(taskDir, "task.md"), c.content());
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
+    write(path.join(taskDir, "task.md"), c.content(taskWorkspaceProject(tempRoot)));
     c.assertResult(await runValidator(["check", "task-meta", taskDir, "--skill", c.skill]));
   }));
 }
@@ -357,7 +359,7 @@ const activityLogCases: ActivityLogCase[] = [
 for (const c of activityLogCases) {
   test(c.name, () => withTempRoot("agent-infra-create-task-activity-", async (tempRoot) => {
     const now = formatTimestamp(new Date());
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     writeCreateTaskDocument(taskDir, {
       branch: "agent-infra-refactor-create-task-gate",
       current_step: "requirement-analysis",
@@ -372,7 +374,7 @@ for (const c of activityLogCases) {
 
 test("validate-artifact artifact check fails when a required section is missing", () => (
   withTempRoot("agent-infra-gate-fail-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildTaskContent());
     writeCodeFixture(taskDir, "missing-section-code.md");
 
@@ -384,7 +386,7 @@ test("validate-artifact artifact check fails when a required section is missing"
 
 test("validate-artifact artifact check accepts an old valid artifact", () => (
   withTempRoot("agent-infra-gate-old-artifact-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildTaskContent());
     writeCodeFixture(taskDir);
     const old = new Date(Date.now() - 45 * 60_000);
@@ -398,7 +400,7 @@ test("validate-artifact artifact check accepts an old valid artifact", () => (
 
 test("validate-artifact activity-log accepts an old valid local timestamp", () => (
   withTempRoot("agent-infra-gate-stale-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     const staleTimestamp = formatTimestampInTimeZone(new Date(Date.now() - 45 * 60_000), localTimeZone);
     write(path.join(taskDir, "task.md"), buildTaskContent(
       { updated_at: staleTimestamp },
@@ -416,7 +418,7 @@ test("validate-artifact activity-log accepts an old valid local timestamp", () =
 
 test("validate-artifact completion-checklist fails when a complete-task item is unchecked", () => (
   withTempRoot("agent-infra-complete-task-checklist-fail-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildCompletedTaskContent([
       "- [x] 所有需求已满足",
       "- [ ] 测试已编写并通过",
@@ -435,7 +437,7 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
 
 test("validate-artifact completion-checklist ignores fenced historical checklists", () => (
   withTempRoot("agent-infra-complete-task-fenced-checklist-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     const fencedHistory = [
       "```text",
       "## 完成检查清单",
@@ -458,7 +460,7 @@ test("validate-artifact completion-checklist ignores fenced historical checklist
 
 test("validate-artifact section parsing honors tilde, longer, and mismatched fence closers", () => (
   withTempRoot("agent-infra-complete-task-fence-variants-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     const checklist = [
       "- [x] 所有需求已满足",
       "- [x] 测试已编写并通过",
@@ -481,7 +483,7 @@ test("validate-artifact section parsing honors tilde, longer, and mismatched fen
 
 test("validate-artifact task-meta accepts a valid workflow warning with escaped pipes", () => (
   withTempRoot("agent-infra-workflow-warning-pass-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), [
       buildTaskContent(),
       "",
@@ -500,7 +502,7 @@ test("validate-artifact task-meta accepts a valid workflow warning with escaped 
 
 test("validate-artifact task-meta rejects invalid workflow warning lifecycle fields", () => (
   withTempRoot("agent-infra-workflow-warning-fail-", async (tempRoot) => {
-    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const taskDir = path.join(taskWorkspaceRoot(tempRoot), "active", "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), [
       buildTaskContent(),
       "",

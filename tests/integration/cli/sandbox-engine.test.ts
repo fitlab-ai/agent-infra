@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -410,11 +411,11 @@ test("volumeArg converts host mount paths for WSL2", async () => {
   assert.equal(
     wsl2Paths.volumeArg(
       "wsl2",
-      "F:\\repo\\.agents\\workspace\\active",
-      "/workspace/.agents/workspace/active",
+      "F:\\Users\\dev\\.agent-infra\\task-workspaces\\demo\\active",
+      "/task-workspace/active",
       ":ro"
     ),
-    "/mnt/f/repo/.agents/workspace/active:/workspace/.agents/workspace/active:ro"
+    "/mnt/f/Users/dev/.agent-infra/task-workspaces/demo/active:/task-workspace/active:ro"
   );
   assert.equal(
     wsl2Paths.volumeArg("native", "/repo/.cache", "/home/devuser/.cache-demo", ":ro"),

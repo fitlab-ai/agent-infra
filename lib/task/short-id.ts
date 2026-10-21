@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
+import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 
 const REGISTRY_NAME = '.short-ids.json';
 const LOCK_NAME = '.short-ids.json.lock';
@@ -85,7 +86,7 @@ function resolveShortIdReadOnly(
   }
 
   const key = normalized.value;
-  const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
+  const registryPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', REGISTRY_NAME);
   if (!fs.existsSync(registryPath)) {
     return shortIdFailure(
       'SHORT_ID_REGISTRY_NOT_FOUND',
@@ -164,8 +165,9 @@ function resolveShortIdReadOnly(
       : `short id '${key}' not found in task short-id registry.`;
     return shortIdFailure('SHORT_ID_NOT_FOUND', message);
   }
-  const activeTask = path.join(repoRoot, '.agents', 'workspace', 'active', taskId, 'task.md');
-  const completedTask = path.join(repoRoot, '.agents', 'workspace', 'completed', taskId, 'task.md');
+  const workspaceRoot = resolveProjectTaskWorkspaceRoot(repoRoot);
+  const activeTask = path.join(workspaceRoot, 'active', taskId, 'task.md');
+  const completedTask = path.join(workspaceRoot, 'completed', taskId, 'task.md');
   let isValidCompletedTask = false;
   try {
     const task = parseTypedTaskFrontmatter(fs.readFileSync(completedTask, 'utf8'));
@@ -300,7 +302,7 @@ function mutateShortIdRegistry(
   taskId: string,
   requested: ShortIdMutationEffect
 ): ShortIdMutationResult {
-  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const activeDir = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active');
   return mutateShortIdRegistryAt(activeDir, configuredShortIdLength(repoRoot), taskId, requested);
 }
 
@@ -369,7 +371,7 @@ function mutateShortIdRegistryAt(
 }
 
 function releaseStaleShortIdRegistry(repoRoot: string, taskId: string): ShortIdMutationResult {
-  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const activeDir = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active');
   return mutateShortIdRegistryAt(
     activeDir,
     configuredShortIdLength(repoRoot),
@@ -433,7 +435,7 @@ function executeShortIdCommand(request: ShortIdCommandRequest): ShortIdCommandRe
 }
 
 function readRegistry(repoRoot: string): RegistrySchema | null {
-  const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
+  const registryPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', REGISTRY_NAME);
   if (!fs.existsSync(registryPath)) return null;
   try {
     const raw = fs.readFileSync(registryPath, 'utf8');
@@ -446,7 +448,7 @@ function readRegistry(repoRoot: string): RegistrySchema | null {
 }
 
 function readBranchFromTaskMd(repoRoot: string, taskId: string): string | null {
-  const taskMdPath = path.join(repoRoot, '.agents', 'workspace', 'active', taskId, 'task.md');
+  const taskMdPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId, 'task.md');
   if (!fs.existsSync(taskMdPath)) return null;
   const content = fs.readFileSync(taskMdPath, 'utf8');
   const m = content.match(/^branch:\s*(.+)$/m);
@@ -468,7 +470,7 @@ function inspectShortIdRegistry(
   repoRoot: string,
   shortIdLength = configuredShortIdLength(repoRoot)
 ): ShortIdRegistryInspection {
-  const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
+  const registryPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', REGISTRY_NAME);
   if (!fs.existsSync(registryPath)) {
     return {
       status: 'missing',

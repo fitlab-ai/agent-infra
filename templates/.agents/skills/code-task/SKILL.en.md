@@ -126,7 +126,7 @@ agent-infra-internal task-artifact {task-id} init --family code --artifact {code
 
 The skeleton contains identity metadata, stable section markers, and required headings only; real implementation and verification content is required before the completion gate can pass. On a preflight or finalization structural error, follow `.agents/rules/local-artifact-repair.md` to correct the formal artifact directly and rerun the same entry point; current structure, qualification, and summary facts are the only gate.
 
-Create `.agents/workspace/active/{task-id}/{code-artifact}`.
+Create `<task-workspace>/active/{task-id}/{code-artifact}`.
 
 > Read `reference/report-template.md` before writing the report.
 

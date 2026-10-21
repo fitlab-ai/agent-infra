@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,10 +12,10 @@ const TASK_ID = 'TASK-20260101-000001';
 function fixture() {
   const root = createTempDir('task-lifecycle-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\ntarget_date:\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { root, dir };
 }
@@ -33,7 +34,7 @@ test('task-lifecycle CLI stays inside its fixture with sandbox control authority
   const result = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'test cancellation'], env);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).taskId, TASK_ID);
-  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.root),  'completed', TASK_ID, 'task.md')), true);
 });
 
 test('task-lifecycle CLI prints one JSON result and uses domain exit codes', () => {
@@ -82,9 +83,9 @@ const RESTORE_TASK_ID = 'TASK-20260202-000002';
 function stagingFixture({ initGit = true } = {}) {
   const root = createTempDir('task-lifecycle-restore-cli-');
   if (initGit) spawnSync('git', ['init', '-q'], { cwd: root });
-  const staging = path.join(root, '.agents', 'workspace', '.restore-staging-1');
+  const staging = path.join(taskWorkspaceRoot(root),  '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${RESTORE_TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: active\ncurrent_step: requirement-analysis\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { root, staging };
 }
@@ -96,7 +97,7 @@ test('task-lifecycle CLI restore applies staging for a task that does not exist 
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.status, 'applied');
   assert.equal(parsed.shortId.shortId, '01');
-  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', RESTORE_TASK_ID, 'task.md')), true);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.root),  'active', RESTORE_TASK_ID, 'task.md')), true);
   assert.equal(fs.existsSync(f.staging), false);
 });
 
@@ -108,7 +109,7 @@ test('task-lifecycle CLI restore rejects a non-numeric staging identity instead 
   assert.equal(result.status, 1);
   assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_STAGING_IDENTITY_INVALID');
   assert.equal(fs.existsSync(f.staging), true);
-  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', RESTORE_TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.root),  'active', RESTORE_TASK_ID)), false);
 });
 
 test('task-lifecycle CLI restore rejects short ids and malformed TASK-ids with LIFECYCLE_IDENTITY_INVALID', () => {
@@ -134,15 +135,15 @@ test('task-lifecycle preserves a missing activity-log failure before moving the 
   const result = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'normal cancel blocked by missing log']);
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_LOG_MISSING');
-  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.root),  'completed', TASK_ID, 'task.md')), false);
 });
 
 test('task-lifecycle rejects an invalid source state before moving the task', () => {
   const f = fixture();
-  fs.mkdirSync(path.join(f.root, '.agents', 'workspace', 'blocked'), { recursive: true });
-  fs.renameSync(f.dir, path.join(f.root, '.agents', 'workspace', 'blocked', TASK_ID));
+  fs.mkdirSync(path.join(taskWorkspaceRoot(f.root),  'blocked'), { recursive: true });
+  fs.renameSync(f.dir, path.join(taskWorkspaceRoot(f.root),  'blocked', TASK_ID));
   const result = run(f.root, [TASK_ID, 'close-codescan', '--agent', 'codex', '--alert-number', '1', '--reason', 'not active']);
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_SOURCE_INVALID');
-  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.root),  'completed', TASK_ID)), false);
 });

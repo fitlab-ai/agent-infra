@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { gitSafeEnv, initIsolatedGitRepo, onPlatforms, taskWorkspaceProject, taskWorkspaceRoot, filePath } from "../../helpers.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import { sha256File } from "../../../lib/task/artifact-receipts.ts";
 import {
@@ -98,7 +98,17 @@ function setupRepo(tempRoot: string) {
   initIsolatedGitRepo(tempRoot);
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
   git(tempRoot, ["config", "user.name", "Codex"]);
-  const taskDir = path.join(tempRoot, "task");
+  for (const skill of ["complete-task", "review-code"]) {
+    const configDir = path.join(tempRoot, ".agents", "skills", skill, "config");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.copyFileSync(filePath(`.agents/skills/${skill}/config/verify.json`), path.join(configDir, "verify.json"));
+  }
+  write(path.join(tempRoot, '.agents', '.airc.json'), JSON.stringify({
+    project: taskWorkspaceProject(tempRoot), delivery: { remote: 'origin', baseRef: 'main' }
+  }) + '\n');
+  git(tempRoot, ['add', '.agents/.airc.json']);
+  git(tempRoot, ['commit', '-qm', 'fixture config']);
+  const taskDir = path.join(taskWorkspaceRoot(tempRoot), 'active', TASK_ID);
   return { taskDir };
 }
 
@@ -355,11 +365,15 @@ test("post-review-commit blocks legacy review-code artifacts without an anchored
 
 test("post-review-commit blocks when the task is not inside a git repository", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-prc-nogit-", async (tempRoot) => {
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot) }));
+    const verifyConfig = path.join(tempRoot, ".agents", "skills", "complete-task", "config");
+    fs.mkdirSync(verifyConfig, { recursive: true });
+    fs.copyFileSync(filePath(".agents/skills/complete-task/config/verify.json"), path.join(verifyConfig, "verify.json"));
     const taskDir = path.join(tempRoot, "task");
     write(path.join(taskDir, "task.md"), buildTask());
     write(path.join(taskDir, "review-code.md"), buildReviewCode("0123456789abcdef0123456789abcdef01234567"));
 
-    const { result, payload } = await runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir, tempRoot);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
   });

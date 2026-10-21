@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,7 +20,7 @@ import {
   prepareDelegation,
   sealDelegation
 } from '../../../lib/task/delegation-receipts.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
@@ -47,9 +48,9 @@ const codexLifecycleProvenance = {
 
 
 function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
-  const root = createTempDir('task-verification-unit-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('task-verification-unit-');
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
   fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });

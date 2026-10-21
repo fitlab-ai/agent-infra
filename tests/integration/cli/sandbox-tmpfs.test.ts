@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -143,7 +144,7 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
 
   for (const directory of [
     config.repoRoot,
-    path.join(config.repoRoot, ".agents", "workspace"),
+    path.join(config.repoRoot, ".agents"),
     path.join(config.shareBase, "common"),
     path.join(config.shareBase, "branches", branchDir),
     path.join(config.shellConfigBase, branchDir),
@@ -204,7 +205,7 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
     ...["active", "completed", "blocked", "archive"].map((state) => ({
       Type: "bind",
       Source: path.join(viewRoot, state),
-      Destination: path.posix.join("/workspace/.agents/workspace", state),
+      Destination: path.posix.join("/task-workspace", state),
       RW: false
     })),
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel"), Destination: "/run/agent-infra/control", RW: true },
@@ -224,7 +225,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
   mounts: Array<Record<string, unknown>>;
 } {
   const branchDir = "feature..demo";
-  const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+  const taskSource = path.join(taskWorkspaceRoot(config.repoRoot),  "active", taskId);
   fs.mkdirSync(taskSource, { recursive: true });
   fs.writeFileSync(
     path.join(taskSource, "task.md"),
@@ -261,15 +262,15 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: gitMetadata.commonDir, Destination: "/run/agent-infra/git", RW: true },
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
     { Type: "bind", Source: gitMetadata.worktreeGitFile, Destination: "/workspace/.git", RW: false },
-    { Type: "bind", Source: path.join(view.root, "active", ".short-ids.json"), Destination: "/workspace/.agents/workspace/active/.short-ids.json", RW: false },
+    { Type: "bind", Source: path.join(view.root, "active", ".short-ids.json"), Destination: "/task-workspace/active/.short-ids.json", RW: false },
     ...["completed", "blocked", "archive"].map((state) => ({
       Type: "bind",
       Source: path.join(view.root, state),
-      Destination: path.posix.join("/workspace/.agents/workspace", state),
+      Destination: path.posix.join("/task-workspace", state),
       RW: false
     })),
-    { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
-    { Type: "bind", Source: completedTaskSource, Destination: `/workspace/.agents/workspace/completed/${taskId}`, RW: true },
+    { Type: "bind", Source: taskSource, Destination: `/task-workspace/active/${taskId}`, RW: true },
+    { Type: "bind", Source: completedTaskSource, Destination: `/task-workspace/completed/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: control.root, Destination: "/run/agent-infra/control-root", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
@@ -294,27 +295,27 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
 function legacyTaskBoundMounts(fixture: { mounts: Array<Record<string, unknown>> }): Array<Record<string, unknown>> {
   const runtimeMask = fixture.mounts.find((mount) => String(mount.Destination).endsWith('/.runtime'));
   const stateDestinations = new Set([
-    "/workspace/.agents/workspace/active/.short-ids.json",
+    "/task-workspace/active/.short-ids.json",
     ...(runtimeMask ? [runtimeMask.Destination] : []),
-    "/workspace/.agents/workspace/completed",
-    "/workspace/.agents/workspace/blocked",
-    "/workspace/.agents/workspace/archive"
+    "/task-workspace/completed",
+    "/task-workspace/blocked",
+    "/task-workspace/archive"
   ]);
   const stateMounts = fixture.mounts.filter((mount) => stateDestinations.has(String(mount.Destination)));
-  const registry = stateMounts.find((mount) => mount.Destination === "/workspace/.agents/workspace/active/.short-ids.json");
+  const registry = stateMounts.find((mount) => mount.Destination === "/task-workspace/active/.short-ids.json");
   return fixture.mounts
     .filter((mount) => !stateMounts.includes(mount))
     .concat({
       Type: "bind",
       Source: path.dirname(String(registry?.Source)),
-      Destination: "/workspace/.agents/workspace",
+      Destination: "/task-workspace",
       RW: false
     });
 }
 
 function moveTaskToCompleted(config: SandboxConfig, taskId: string, mounts?: Array<Record<string, unknown>>): void {
-  const activePath = path.join(config.repoRoot, '.agents', 'workspace', 'active', taskId);
-  const completedRoot = path.join(config.repoRoot, '.agents', 'workspace', 'completed');
+  const activePath = path.join(taskWorkspaceRoot(config.repoRoot),  'active', taskId);
+  const completedRoot = path.join(taskWorkspaceRoot(config.repoRoot),  'completed');
   fs.mkdirSync(completedRoot, { recursive: true });
   const completedPath = path.join(completedRoot, taskId);
   fs.rmSync(completedPath, { recursive: true, force: true });
@@ -322,9 +323,9 @@ function moveTaskToCompleted(config: SandboxConfig, taskId: string, mounts?: Arr
   for (const name of fs.readdirSync(activePath)) {
     fs.renameSync(path.join(activePath, name), path.join(completedPath, name));
   }
-  const taskMount = mounts?.find((mount) => mount.Destination === `/workspace/.agents/workspace/active/${taskId}`);
+  const taskMount = mounts?.find((mount) => mount.Destination === `/task-workspace/active/${taskId}`);
   if (taskMount) taskMount.Source = completedPath;
-  const completedMount = mounts?.find((mount) => mount.Destination === `/workspace/.agents/workspace/completed/${taskId}`);
+  const completedMount = mounts?.find((mount) => mount.Destination === `/task-workspace/completed/${taskId}`);
   if (completedMount) completedMount.Source = completedPath;
 }
 
@@ -359,7 +360,7 @@ test("recovery classification exposes stable workspace topology and task view er
 
   const taskView = healthyRecoverySnapshot();
   taskView.taskView = {
-    path: "/workspace/.agents/workspace/active/TASK-20260814-223553/task.md",
+    path: "/task-workspace/active/TASK-20260814-223553/task.md",
     readable: false
   };
   assert.equal(classifySandboxRecovery(taskView)[0]?.code, "SANDBOX_TASK_VIEW_UNREADABLE");
@@ -470,7 +471,7 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   const tmpDir = createTempDir("agent-infra-recovery-task-view-");
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223553";
-  const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+  const taskSource = path.join(taskWorkspaceRoot(config.repoRoot),  "active", taskId);
   fs.mkdirSync(taskSource, { recursive: true });
   fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\nbranch: feature/demo\n---\n`, "utf8");
   const completedTaskSource = prepareSandboxCompletedTaskMountSource(config.repoRoot, taskId);
@@ -487,12 +488,12 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   const mounts = recoveryFixtureMounts(config).concat({
     Type: "bind",
     Source: taskSource,
-    Destination: `/workspace/.agents/workspace/active/${taskId}`,
+    Destination: `/task-workspace/active/${taskId}`,
     RW: true
   }, {
     Type: "bind",
     Source: completedTaskSource,
-    Destination: `/workspace/.agents/workspace/completed/${taskId}`,
+    Destination: `/task-workspace/completed/${taskId}`,
     RW: true
   }, {
     Type: "bind",
@@ -526,7 +527,7 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
     assert.equal(missing.taskView?.readable, false);
     assert.equal(classifySandboxRecovery(missing).find(
       (finding) => finding.code === "SANDBOX_TASK_VIEW_UNREADABLE"
-    )?.path, `/workspace/.agents/workspace/active/${taskId}/task.md`);
+    )?.path, `/task-workspace/active/${taskId}/task.md`);
 
     taskReadable = true;
     const recovered = snapshot();
@@ -563,7 +564,7 @@ test("completed task-bound recovery keeps the task control root stable after the
       }
     });
     const taskMount = snapshot.mounts.find((mount) =>
-      mount.path === `/workspace/.agents/workspace/active/${taskId}`
+      mount.path === `/task-workspace/active/${taskId}`
     );
 
     assert.equal(snapshot.identityOk, true);
@@ -698,8 +699,8 @@ test("completed container start restores the historical source only while starti
   const taskId = "TASK-20260814-223557";
   taskBoundRecoveryFixture(config, taskId);
   moveTaskToCompleted(config, taskId);
-  const activePath = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
-  const completedPath = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  const activePath = path.join(taskWorkspaceRoot(config.repoRoot),  "active", taskId);
+  const completedPath = path.join(taskWorkspaceRoot(config.repoRoot),  "completed", taskId);
   let startedWithSource = false;
   try {
     startCompletedSandboxContainer({
@@ -1202,7 +1203,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
   const currentMounts = recoveryFixtureMounts(config);
   const workspaceMounts = currentMounts.filter((mount) =>
     typeof mount.Destination === "string"
-      && mount.Destination.startsWith("/workspace/.agents/workspace/")
+      && mount.Destination.startsWith("/task-workspace/")
   );
   const viewRoot = path.dirname(String(workspaceMounts[0]!.Source));
   const legacyMounts = currentMounts
@@ -1210,7 +1211,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
     .concat({
       Type: "bind",
       Source: viewRoot,
-      Destination: "/workspace/.agents/workspace",
+      Destination: "/task-workspace",
       RW: false
     });
   const inspect = () => JSON.stringify([{
@@ -1292,7 +1293,7 @@ test("task-bound recovery keeps the branch-only code and recommends the full tas
   const config = recoveryFixtureConfig(tmpDir);
   let writes = 0;
   const taskId = "TASK-20260814-223553";
-  const activeDir = path.join(config.repoRoot, ".agents", "workspace", "active");
+  const activeDir = path.join(taskWorkspaceRoot(config.repoRoot),  "active");
   fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
   fs.writeFileSync(path.join(activeDir, ".short-ids.json"), `${JSON.stringify({ version: 1, ids: { "7": taskId } })}\n`, "utf8");
   fs.writeFileSync(path.join(activeDir, taskId, "task.md"), `---\nid: ${taskId}\nbranch: feature/demo\n---\n`, "utf8");
@@ -1684,7 +1685,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
   const container = "demo-dev-feature..demo";
   let restarted = false;
   const writes: string[][] = [];
-  const settlingDestination = "/workspace/.agents/workspace/completed";
+  const settlingDestination = "/task-workspace/completed";
 
   try {
     await assert.doesNotReject(() => assertFreshSandboxReady({
@@ -1721,7 +1722,7 @@ test("fresh readiness remains fail-closed after one workspace mount restart", as
   const tmpDir = createTempDir("agent-infra-fresh-readiness-failed-");
   const config = recoveryFixtureConfig(tmpDir);
   let restarts = 0;
-  const settlingDestination = "/workspace/.agents/workspace/completed";
+  const settlingDestination = "/task-workspace/completed";
 
   try {
     await assert.rejects(() => assertFreshSandboxReady({
@@ -1969,7 +1970,7 @@ test("sandbox create gives each branch a distinct Codex app-server package sourc
         tmpDir,
         ["create", branch, "--cpu", "1", "--memory", "1"]
       );
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}\nsignal=${result.signal ?? 'none'}`);
       const runCall = fixture.readDockerCalls().filter((call) => call[0] === "run").at(-1);
       assert.ok(runCall, "expected sandbox create to call docker run");
       const mount = runCall.find((arg, index) =>

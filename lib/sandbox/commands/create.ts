@@ -1454,7 +1454,7 @@ export async function create(
             const completedTaskSource = target.workspace.mode === 'task-bound'
               ? prepareSandboxCompletedTaskMountSource(effectiveConfig.repoRoot, target.workspace.taskId)
               : null;
-            prepareSandboxWorkspaceMountTargets(worktree, target.workspace.mode === 'task-bound' ? target.workspace.taskId : undefined);
+            prepareSandboxWorkspaceMountTargets(effectiveConfig.repoRoot);
             if (previousCutoverSnapshot) {
               assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
               if (previousManifest) {

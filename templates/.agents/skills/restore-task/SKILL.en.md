@@ -14,7 +14,7 @@ Restore local task workspace files from platform Issue comments that contain syn
 ## Boundary / Critical Rules
 
 - Restore files only from comments that match the marker registry in `.agents/rules/issue-sync.md`
-- Restore into a controlled staging directory under `.agents/workspace/`, then let lifecycle validate and place it under `active/{task-id}/`
+- Restore into a controlled staging directory under `<task-workspace>/`, then let lifecycle validate and place it under `active/{task-id}/`
 - Stop immediately if the target directory already exists and ask the user to resolve the conflict first
 - After executing this skill, you **must** immediately update the restored `task.md`
 
@@ -76,7 +76,7 @@ For each file:
 
 Before writing any file, verify that:
 - no formal active, blocked, or completed directory exists for the task id
-- the unique `.agents/workspace/.restore-staging-*` path shares the active workspace filesystem
+- the unique `<task-workspace>/.restore-staging-*` path shares the active workspace filesystem
 
 If the directory already exists, stop immediately and tell the user to handle it manually first.
 

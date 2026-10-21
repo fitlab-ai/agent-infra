@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 
 function git(repoRoot: string, indexFile: string | null, args: string[]): string {
   const env = indexFile ? { ...process.env, GIT_INDEX_FILE: indexFile } : process.env;
@@ -55,7 +56,7 @@ function captureWorktreeTree(repoRoot: string, forcedPath: string | null): strin
 }
 
 function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFileFingerprint[] {
-  const activeRoot = path.join(stateRoot, '.agents', 'workspace', 'active');
+  const activeRoot = path.join(resolveProjectTaskWorkspaceRoot(stateRoot), 'active');
   const roots = taskId ? [path.join(activeRoot, taskId)] : [activeRoot];
   const records: TaskFileFingerprint[] = [];
   const visit = (absolute: string, relative: string): void => {
@@ -67,7 +68,7 @@ function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFil
       return;
     }
     if (!stat.isFile() && !stat.isSymbolicLink()) return;
-    if (/^\.agents\/workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/orchestration\.json$/u.test(relative)) return;
+    if (/^task-workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/orchestration\.json$/u.test(relative)) return;
     const content = stat.isSymbolicLink()
       ? Buffer.from(fs.readlinkSync(absolute))
       : fs.readFileSync(absolute);
@@ -80,7 +81,7 @@ function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFil
   };
   for (const root of roots) {
     if (!fs.existsSync(root)) continue;
-    const relative = path.posix.join('.agents/workspace/active', path.relative(activeRoot, root).split(path.sep).join('/'));
+    const relative = path.posix.join('task-workspace/active', path.relative(activeRoot, root).split(path.sep).join('/'));
     visit(root, relative.replace(/\/$/, ''));
   }
   return records.sort((left, right) => left.path.localeCompare(right.path));

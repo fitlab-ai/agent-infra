@@ -12,6 +12,8 @@ import {
   envWithPrependedPath,
   gitSafeEnv,
   loadFreshEsm,
+  taskWorkspaceProject,
+  taskWorkspaceRoot,
   writeNodeCommandShim
 } from '../../helpers.ts';
 import { worktreeDirCandidates } from '../../../lib/sandbox/constants.ts';
@@ -120,7 +122,7 @@ test('collectSandboxDetail covers the legacy (dash) sanitize candidate', async (
   assert.deepEqual(detail.worktrees, [legacyPath]);
 });
 
-function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: string; binDir: string } {
+function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: string; binDir: string; project: string } {
   const repoRoot = createTempDir('sb-show-cli-');
   const binDir = path.join(repoRoot, 'bin');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
@@ -128,18 +130,19 @@ function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: stri
   fs.mkdirSync(path.join(agentsDir, 'scripts'), { recursive: true });
   const scriptPath = path.join(agentsDir, 'scripts', 'task-short-id.js');
   fs.copyFileSync(path.resolve(process.cwd(), '.agents/scripts/task-short-id.js'), scriptPath);
+  const project = taskWorkspaceProject(repoRoot);
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
     JSON.stringify({
-      project: 'demo',
+      project,
       agentClients: AGENT_CLIENT_IDS.map((id) => ({ id, enabled: true, installInSandbox: true })),
       task: { shortIdLength: 2 }
     })
   );
-  const activeDir = path.join(agentsDir, 'workspace', 'active');
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot, repoRoot), 'active');
   fs.mkdirSync(activeDir, { recursive: true });
   writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), INTERNAL_CLI_PATH);
-  return { repoRoot, activeDir, scriptPath, binDir };
+  return { repoRoot, activeDir, scriptPath, binDir, project };
 }
 
 function hostDirectEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -175,16 +178,16 @@ test('ai sandbox show --help prints usage and exits 0', () => {
 });
 
 test('ai sandbox show <branch> resolves a plain branch name and renders detail', () => {
-  const { repoRoot, binDir } = mkCliFixture();
+  const { repoRoot, binDir, project } = mkCliFixture();
   const out = runShow(['feature-plain'], repoRoot, binDir);
   assert.equal(out.status, 0, out.stderr);
   const combined = `${out.stdout}\n${out.stderr}`;
-  assert.match(combined, /Sandbox detail for demo .* feature-plain/);
+  assert.match(combined, new RegExp(`Sandbox detail for ${project} .* feature-plain`));
   assert.match(combined, /No worktree for this branch/);
 });
 
 test('ai sandbox show <bare-numeric> resolves the branch via the short-id registry', () => {
-  const { repoRoot, activeDir, scriptPath, binDir } = mkCliFixture();
+  const { repoRoot, activeDir, scriptPath, binDir, project } = mkCliFixture();
   const taskId = 'TASK-20260101-000007';
   fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
   fs.writeFileSync(
@@ -193,7 +196,7 @@ test('ai sandbox show <bare-numeric> resolves the branch via the short-id regist
   );
   const alloc = spawnSync('node', [scriptPath, 'alloc', taskId], {
     cwd: repoRoot,
-    env: envWithPrependedPath(hostDirectEnv(), binDir),
+    env: envWithPrependedPath(hostDirectEnv({ HOME: repoRoot, USERPROFILE: repoRoot }), binDir),
     encoding: 'utf8'
   });
   assert.equal(alloc.status, 0, alloc.stderr);
@@ -201,7 +204,7 @@ test('ai sandbox show <bare-numeric> resolves the branch via the short-id regist
 
   const out = runShow(['1'], repoRoot, binDir);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(`${out.stdout}\n${out.stderr}`, /Sandbox detail for demo .* feature-bound/);
+  assert.match(`${out.stdout}\n${out.stderr}`, new RegExp(`Sandbox detail for ${project} .* feature-bound`));
 });
 
 test('ai sandbox show <unknown short id> fails with an actionable registry error', () => {

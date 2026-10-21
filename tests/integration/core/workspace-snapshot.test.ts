@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,14 +22,14 @@ test('task-scoped snapshots isolate ignored active tasks while retaining Git-vis
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  fs.writeFileSync(path.join(root, '.gitignore'), 'task-workspace/\n');
   fs.writeFileSync(path.join(root, 'source.ts'), 'before\n');
   git(root, ['add', '.gitignore', 'source.ts']);
   git(root, ['commit', '-qm', 'baseline']);
   const taskA = 'TASK-20260101-000001';
   const taskB = 'TASK-20260101-000002';
-  const taskADir = path.join(root, '.agents', 'workspace', 'active', taskA);
-  const taskBDir = path.join(root, '.agents', 'workspace', 'active', taskB);
+  const taskADir = path.join(taskWorkspaceRoot(root),  'active', taskA);
+  const taskBDir = path.join(taskWorkspaceRoot(root),  'active', taskB);
   fs.mkdirSync(taskADir, { recursive: true });
   fs.mkdirSync(taskBDir, { recursive: true });
   fs.writeFileSync(path.join(taskADir, 'review-code.md'), 'before\n');
@@ -41,8 +42,8 @@ test('task-scoped snapshots isolate ignored active tasks while retaining Git-vis
   const after = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: taskA });
 
   assert.deepEqual(diffWorkspaceSnapshots(root, before, after), [
-    '.agents/workspace/active/TASK-20260101-000001/review-code.md',
-    'source.ts'
+    'source.ts',
+    'task-workspace/active/TASK-20260101-000001/review-code.md'
   ]);
 });
 
@@ -51,11 +52,11 @@ test('repository-wide context snapshots retain active task coverage', () => {
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  fs.writeFileSync(path.join(root, '.gitignore'), 'task-workspace/\n');
   git(root, ['add', '.gitignore']);
   git(root, ['commit', '-qm', 'baseline']);
-  const taskADir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
-  const taskBDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  const taskADir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001');
+  const taskBDir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000002');
   fs.mkdirSync(taskADir, { recursive: true });
   fs.mkdirSync(taskBDir, { recursive: true });
   fs.writeFileSync(path.join(taskADir, 'analysis.md'), 'before\n');
@@ -66,7 +67,7 @@ test('repository-wide context snapshots retain active task coverage', () => {
   const after = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: null });
 
   assert.deepEqual(diffWorkspaceSnapshots(root, before, after), [
-    '.agents/workspace/active/TASK-20260101-000002/analysis.md'
+    'task-workspace/active/TASK-20260101-000002/analysis.md'
   ]);
 });
 
@@ -75,11 +76,11 @@ test('task-scoped and repository-wide contexts retain their explicit scope', () 
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  fs.writeFileSync(path.join(root, '.gitignore'), 'task-workspace/\n');
   git(root, ['add', '.gitignore']);
   git(root, ['commit', '-qm', 'baseline']);
-  const taskADir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
-  const taskBDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  const taskADir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001');
+  const taskBDir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000002');
   fs.mkdirSync(taskADir, { recursive: true });
   fs.mkdirSync(taskBDir, { recursive: true });
   fs.writeFileSync(path.join(taskADir, 'analysis.md'), 'current task\n');
@@ -89,24 +90,25 @@ test('task-scoped and repository-wide contexts retain their explicit scope', () 
   const repositoryWideAfter = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: null });
 
   assert.deepEqual(diffWorkspaceSnapshots(root, taskScopedBefore, repositoryWideAfter), [
-    '.agents/workspace/active/TASK-20260101-000002/analysis.md'
+    'task-workspace/active/TASK-20260101-000002/analysis.md'
   ]);
 });
 
 test('repository snapshots ignore lifecycle artifacts while detecting Git-visible changes', () => {
   const root = createTempDir('orchestration-repository-snapshot-');
+  taskWorkspaceRoot(root);
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  fs.writeFileSync(path.join(root, '.gitignore'), 'task-workspace/\n');
   fs.writeFileSync(path.join(root, 'source.ts'), 'before\n');
-  git(root, ['add', '.gitignore', 'source.ts']);
+  git(root, ['add', '.gitignore', 'source.ts', '.agents/.airc.json']);
   git(root, ['commit', '-qm', 'baseline']);
 
   const clean = captureRepositorySnapshot(root);
   assert.equal(clean.headTree, clean.worktreeTree);
 
-  const ignoredDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  const ignoredDir = path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260101-000001');
   fs.mkdirSync(ignoredDir, { recursive: true });
   fs.writeFileSync(path.join(ignoredDir, 'task.md'), '# ignored\n');
   assert.equal(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
@@ -137,7 +139,7 @@ test('versioned orchestration snapshots combine a linked worktree with task stat
   git(gitRoot, ['add', 'source.ts']);
   git(gitRoot, ['commit', '-qm', 'baseline']);
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(stateRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(stateRoot),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), 'before\n');
 
@@ -147,7 +149,7 @@ test('versioned orchestration snapshots combine a linked worktree with task stat
   const after = captureWorkspaceSnapshot({ gitRoot, stateRoot, taskId });
 
   assert.deepEqual(diffWorkspaceSnapshots(gitRoot, before, after), [
-    '.agents/workspace/active/TASK-20260101-000001/task.md',
-    'source.ts'
+    'source.ts',
+    'task-workspace/active/TASK-20260101-000001/task.md'
   ]);
 });

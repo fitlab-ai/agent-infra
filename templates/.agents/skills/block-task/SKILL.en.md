@@ -38,7 +38,7 @@ After prerequisites pass, Step 3 declares one lifecycle intent that atomically w
 
 ### 1. Verify Task Exists
 
-Check that the task exists in `.agents/workspace/active/{task-id}/`.
+Check that the task exists in `<task-workspace>/active/{task-id}/`.
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
 
@@ -68,7 +68,7 @@ Confirm `targetState=blocked`, the target path, and the committed short-id effec
 ### 5. Preserve Recovery Identity
 
 ```bash
-ls .agents/workspace/blocked/{task-id}/task.md
+ls <task-workspace>/blocked/{task-id}/task.md
 ```
 
 ### 6. Sync to Issue (Optional)
@@ -111,7 +111,7 @@ Task {task-id} marked as blocked.
 
 Blocking reason: {summary}
 Required to unblock: {what's needed}
-Archived to: .agents/workspace/blocked/{task-id}/
+Archived to: <task-workspace>/blocked/{task-id}/
 
 Optional: clean up this task's sandbox
 (The task is blocked and moved to blocked/; task-bound sandboxes are protected from automatic `ai sandbox rm --unbound` cleanup. If cleanup is necessary, manually verify the container, control manifest, and worktree identity first.)
@@ -129,7 +129,7 @@ Next step - check task status after unblocking:
 
 - [ ] Analyzed and documented the blocking reason
 - [ ] Updated task.md with blocked status and blocking information
-- [ ] Moved task directory to `.agents/workspace/blocked/`
+- [ ] Moved task directory to `<task-workspace>/blocked/`
 - [ ] Verified move succeeded
 - [ ] Informed user how to unblock
 

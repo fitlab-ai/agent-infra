@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -35,9 +36,9 @@ test('internal task-verify resolves task identity and invokes the typed engine',
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     const id = 'TASK-20260101-000001';
-    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    const dir = path.join(taskWorkspaceRoot(root),  'active', id);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled' }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), prFlow: 'disabled' }));
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
     fs.writeFileSync(path.join(dir, 'code.md'), codeArtifact(id, 'code.md'));
     writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), {
@@ -71,7 +72,7 @@ test('code artifact verification applies the local structural contract', () => {
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     const id = 'TASK-20260101-000001';
-    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    const dir = path.join(taskWorkspaceRoot(root),  'active', id);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
     fs.writeFileSync(path.join(dir, 'code.md'), codeArtifact(id, 'code.md'));
@@ -99,7 +100,7 @@ test('review artifact verification uses the schema pattern contract', () => {
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     const id = 'TASK-20260101-000001';
-    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    const dir = path.join(taskWorkspaceRoot(root),  'active', id);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
     const content = renderArtifactSkeleton({ taskId: id, family: 'review-analysis', artifact: 'review-analysis.md' })
@@ -125,9 +126,9 @@ test('required PR delivery gates on normalized merged state and platform availab
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
     spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
-    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    const dir = path.join(taskWorkspaceRoot(root),  'active', id);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
     writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
       skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
@@ -173,13 +174,13 @@ test('required PR delivery gates on normalized merged state and platform availab
 
     const taskPath = path.join(dir, 'task.md');
     const beforeMismatch = fs.readFileSync(taskPath, 'utf8');
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'release' }, prFlow: 'required' }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'release' }, prFlow: 'required' }));
     const mismatchedBase = run();
     assert.equal(mismatchedBase.status, 1, mismatchedBase.stderr || mismatchedBase.stdout);
     assert.equal(JSON.parse(mismatchedBase.stdout).invocations[0].status, 'fail');
     assert.equal(fs.readFileSync(taskPath, 'utf8'), beforeMismatch);
 
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
     const unavailable = run({ GH_FAKE_FAIL: 'network unavailable' });
     assert.equal(unavailable.status, 2);
     assert.equal(JSON.parse(unavailable.stdout).invocations[0].status, 'blocked');
@@ -194,9 +195,9 @@ test('review-pr task-verify reports re-sync after publication write-back as a so
     spawnSync('git', ['init', '-q'], { cwd: root });
     spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const id = 'TASK-20260101-000001';
-    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    const dir = path.join(taskWorkspaceRoot(root),  'active', id);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }));
     const head = 'a'.repeat(40);
     fs.writeFileSync(path.join(dir, 'task.md'), [
       `---`,

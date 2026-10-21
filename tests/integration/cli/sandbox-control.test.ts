@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -86,7 +87,7 @@ function waitForAbsent(filePath: string, timeoutMs: number): void {
 
 async function waitForReceiptLifecycleDoneAsync(root: string, taskId: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(root, '.agents', 'workspace', state, taskId, '.task-finalization.json'));
+  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(taskWorkspaceRoot(root),  state, taskId, '.task-finalization.json'));
   while (Date.now() < deadline) {
     try {
       if (receiptPaths.some((receiptPath) => { try { return (JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as { lifecycle?: unknown }).lifecycle === 'done'; } catch { return false; } })) return;
@@ -100,7 +101,7 @@ async function waitForReceiptLifecycleDoneAsync(root: string, taskId: string, ti
 
 async function waitForReceiptTerminalAsync(root: string, taskId: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(root, '.agents', 'workspace', state, taskId, '.task-finalization.json'));
+  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(taskWorkspaceRoot(root),  state, taskId, '.task-finalization.json'));
   while (Date.now() < deadline) {
     try {
       const receiptPath = receiptPaths.find((candidate) => fs.existsSync(candidate));
@@ -268,7 +269,8 @@ const SANDBOX_CONTROL_ENV_KEYS = [
   'AGENT_INFRA_SANDBOX',
   'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_ROOT_ID', 'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_ROOT_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR',
-  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE'
+  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE',
+  'AGENT_INFRA_TEST_TASK_WORKSPACE_ROOT'
 ] as const;
 
 function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDBOX_CONTROL_ENV_KEYS[number], string>>, callback: () => T): T {
@@ -368,6 +370,7 @@ function runDirectTaskFinalizationAsync(
       AGENT_INFRA_CONTROL_ROOT_DIR: paths.rootDir ?? path.dirname(manifest.channelDir),
       AGENT_INFRA_CONTROL_STATUS_DIR: paths.statusDir ?? manifest.publicStatusDir,
       AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
+      AGENT_INFRA_TEST_TASK_WORKSPACE_ROOT: taskWorkspaceRoot(root),
       AGENT_INFRA_EXECUTOR_MANIFEST: undefined
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -404,6 +407,8 @@ function initializeRepository(root: string): string {
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root) }));
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
   execFileSync('git', ['add', 'source.txt'], { cwd: root });
   execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
@@ -436,7 +441,7 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
   const runtimeDir = path.join(controlRoot, 'runtime');
   for (const directory of [channelDir, publicStatusDir, processingDir, runtimeDir]) fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
     controlRootId: 'a'.repeat(96), channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
@@ -448,11 +453,11 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
 }
 
 function writeFinalizationTaskFixture(root: string, taskId: string): void {
-  const activeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const activeTaskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
   fs.mkdirSync(activeTaskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '08': taskId } })}\n`);
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '08': taskId } })}\n`);
   fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
     skill: 'complete-task',
     checks: { 'required-pr-delivery': null }
@@ -511,12 +516,12 @@ test('sandbox-local completion validates identity through the mounted status nam
 
 test('host sandbox-control recovery resolves one accepted request from managed manifests and audit evidence', () => {
   const root = createTempDir('agent-infra-control-host-recover-');
-  const managedRoot = path.join(root, 'demo');
+  const managedRoot = path.join(root, taskWorkspaceProject(root));
   const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
   const requestId = '12121212-1212-4212-8212-121212121212';
   try {
     const branch = initializeRepository(root);
-    const manifestPath = writeControlManifest(controlRoot, branch, 'host-recovery-generation');
+    const manifestPath = writeControlManifest(root, branch, 'host-recovery-generation', controlRoot);
     const manifest = readSandboxControlManifest(manifestPath);
     const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'recovered\n', stderr: '' });
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({
@@ -536,22 +541,22 @@ test('host sandbox-control recovery resolves one accepted request from managed m
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
 
-    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 100 }).stdout, 'recovered\n');
     const unknownId = '13131313-1313-4313-8313-131313131313';
     assert.equal(
-      recoverSandboxControlFromHost(unknownId, { managedRoot, timeoutMs: 30 }).error?.code,
+      recoverSandboxControlFromHost(unknownId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 30 }).error?.code,
       'SANDBOX_CONTROL_RESULT_UNKNOWN'
     );
     fs.renameSync(path.join(controlRoot, 'audit.ndjson'), path.join(controlRoot, 'audit.ndjson.1'));
     fs.writeFileSync(path.join(controlRoot, 'audit.ndjson'), '');
-    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 100 }).stdout, 'recovered\n');
 
     appendDiagnosticAudit(manifest, 'executor-result-published', {
       requestId, requestFamily: 'task-lifecycle', sandboxTaskId: manifest.taskId, exitCode: 0,
       outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
-    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 }).stdout, 'recovered\n');
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 100 }).stdout, 'recovered\n');
     appendDiagnosticAudit(manifest, 'executor-result-published', {
       requestId, requestFamily: 'task-lifecycle', sandboxTaskId: manifest.taskId, exitCode: 7,
       outputBytes: Buffer.byteLength('conflict\n'), errorBytes: 0,
@@ -599,7 +604,7 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
     fs.symlinkSync(root, homeAlias, 'dir');
     fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      project: 'demo',
+      project: taskWorkspaceProject(root),
       agentClients: ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
         id, enabled: false, installInSandbox: false
       }))
@@ -609,16 +614,16 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
       base: controlBase,
       repoRoot: root,
       worktreeRoot: root,
-      project: 'demo',
+      project: taskWorkspaceProject(root),
       container: 'demo-dev-feature',
       branch,
       identity: { mode: 'task-bound', taskId }
     });
     const controlRoot = sandboxControlPaths({
-      base: controlBase, project: 'demo', container: 'demo-dev-feature',
+      base: controlBase, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
       identity: { mode: 'task-bound', taskId }
     }).root;
-    assert.equal(setup.root, path.join(controlBase, 'demo', 'tasks', taskId));
+    assert.equal(setup.root, path.join(controlBase, taskWorkspaceProject(root), 'tasks', taskId));
     assert.equal(controlRoot, setup.root);
     const authorityEvidence = captureSandboxAuthority('docker-desktop', {
       lockDomain: 'a'.repeat(64),
@@ -683,7 +688,7 @@ test('task-bound host recovery accepts a configured-base ancestor alias', () => 
     fs.symlinkSync(root, homeAlias, 'dir');
     const controlBase = path.join(root, '.agent-infra', 'sandbox-control');
     const setup = materializeSandboxControl({
-      base: controlBase, repoRoot: root, worktreeRoot: root, project: 'demo',
+      base: controlBase, repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root),
       container: 'demo-dev-feature', branch, identity: { mode: 'task-bound', taskId }
     });
     const authorityEvidence = captureSandboxAuthority('docker-desktop', {
@@ -714,11 +719,11 @@ test('task-bound host recovery accepts a configured-base ancestor alias', () => 
       outputBytes: payload.stdoutBytes, errorBytes: payload.stderrBytes,
       outputDigest: payload.stdoutSha256, errorDigest: payload.stderrSha256
     });
-    const managedRoot = path.join(homeAlias, '.agent-infra', 'sandbox-control', 'demo');
+    const managedRoot = path.join(homeAlias, '.agent-infra', 'sandbox-control', taskWorkspaceProject(root));
     const recovered = recoverSandboxControlFromHost(requestId, {
       managedRoot,
       controlBase: path.join(homeAlias, '.agent-infra', 'sandbox-control'),
-      project: 'demo', repoRoot: root, timeoutMs: 100
+      project: taskWorkspaceProject(root), repoRoot: root, timeoutMs: 100
     });
     assert.equal(recovered.stdout, 'alias-root-recovered\n');
   } finally {
@@ -728,13 +733,13 @@ test('task-bound host recovery accepts a configured-base ancestor alias', () => 
 
 test('host sandbox-control recovery waits for an accepted response to become terminal', () => {
   const root = createTempDir('agent-infra-control-host-recover-pending-');
-  const managedRoot = path.join(root, 'demo');
+  const managedRoot = path.join(root, taskWorkspaceProject(root));
   const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
   const requestId = '15151515-1515-4515-8515-151515151515';
   let publisher: ReturnType<typeof spawn> | undefined;
   try {
     const branch = initializeRepository(root);
-    const manifestPath = writeControlManifest(controlRoot, branch, 'host-recovery-pending-generation');
+    const manifestPath = writeControlManifest(root, branch, 'host-recovery-pending-generation', controlRoot);
     const manifest = readSandboxControlManifest(manifestPath);
     const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'recovered after wait\n', stderr: '' });
     const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
@@ -761,10 +766,10 @@ test('host sandbox-control recovery waits for an accepted response to become ter
       responsePath, JSON.stringify(terminalResponse)
     ], { stdio: 'ignore' });
 
-    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 1_000 }).stdout, 'recovered after wait\n');
+    assert.equal(recoverSandboxControlFromHost(requestId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 1_000 }).stdout, 'recovered after wait\n');
     fs.rmSync(responsePath);
     assert.equal(
-      recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 30 }).error?.code,
+      recoverSandboxControlFromHost(requestId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 30 }).error?.code,
       'SANDBOX_CONTROL_RESULT_UNKNOWN'
     );
   } finally {
@@ -785,7 +790,7 @@ test('host sandbox-control recover prints a request-scoped unknown error in the 
     const branch = initializeRepository(root);
     fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      project: 'demo',
+      project: taskWorkspaceProject(root),
       agentClients: ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
         id, enabled: false, installInSandbox: false
       }))
@@ -1513,7 +1518,7 @@ test('sandbox broker startup resolves only after matching status is published', 
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
     controlRootId: 'a'.repeat(96),
@@ -1549,7 +1554,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
     controlRootId: 'a'.repeat(96),
@@ -1574,7 +1579,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     assert.equal(second.pid, first.pid);
     assert.equal(second.startTime, first.startTime);
     fs.writeFileSync(manifestPath, `${JSON.stringify({
-      engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+      engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
       containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
       controlRootId: 'b'.repeat(96),
@@ -1709,6 +1714,27 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     await Promise.all([stopCollectedChild(transientClient), stopCollectedChild(stableClient)]);
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('sandbox control client resolves a visible short id from a nested repository directory', () => {
+  const root = createTempDir('agent-infra-control-short-id-subdir-');
+  const childDirectory = path.join(root, 'packages', 'nested');
+  fs.mkdirSync(childDirectory, { recursive: true });
+  initializeRepository(root);
+  const taskId = 'TASK-20261019-000001';
+  const taskDir = path.join(taskWorkspaceRoot(root), 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
+  fs.writeFileSync(path.join(taskWorkspaceRoot(root), 'active', '.short-ids.json'), JSON.stringify({
+    version: 1, ids: { '01': taskId }
+  }));
+  const child = spawnSync(process.execPath, [
+    '--experimental-strip-types', '--no-warnings', '--input-type=module', '--eval',
+    `import { resolveVisibleActiveShortId } from ${JSON.stringify(new URL('../../../lib/sandbox/control/client.ts', import.meta.url).href)};\nprocess.stdout.write(String(resolveVisibleActiveShortId('01')));`
+  ], { cwd: childDirectory, env: process.env, encoding: 'utf8' });
+  assert.equal(child.error, undefined);
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout, taskId);
 });
 
 test('sandbox control recovery reads the retained terminal response by request id', () => {
@@ -1927,7 +1953,7 @@ test('broker recovery cleans up a normally published large-output terminal', asy
 test('host recovery consumes the production publication audit after broker cleanup', async () => {
   const root = createTempDir('agent-infra-host-recovery-writer-');
   const managedParent = createTempDir('agent-infra-managed-control-');
-  const managedRoot = path.join(managedParent, 'demo');
+    const managedRoot = path.join(managedParent, taskWorkspaceProject(root));
   const controlRoot = path.join(managedRoot, 'demo-dev-feature', '0123456789abcdef');
   const requestId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
   const controller = new AbortController();
@@ -1977,7 +2003,7 @@ test('host recovery consumes the production publication audit after broker clean
     waitForAbsent(processingRequest, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     controller.abort();
     await server;
-    const recovered = recoverSandboxControlFromHost(requestId, { managedRoot, timeoutMs: 100 });
+    const recovered = recoverSandboxControlFromHost(requestId, { managedRoot, project: taskWorkspaceProject(root), timeoutMs: 100 });
     assert.equal(recovered.exitCode, 7);
     assert.equal(recovered.stdout, 'published by broker\n');
     assert.equal(recovered.stderr, 'warning\n');
@@ -2019,7 +2045,7 @@ test('sandbox-local complete leaves the same broker available for a real task-cr
     const branch = initializeRepository(root);
     writeFinalizationTaskFixture(root, taskId);
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      project: 'demo', task: { shortIdLength: 2 }, platform: { type: null },
+      project: taskWorkspaceProject(root), task: { shortIdLength: 2 }, platform: { type: null },
       delivery: { remote: 'origin', baseRef: 'main' }
     }));
     fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
@@ -2045,8 +2071,8 @@ test('sandbox-local complete leaves the same broker available for a real task-cr
     assert.equal(finalization.result.lifecycle.status, 'applied');
     assert.equal(finalization.result.verification.status, 'pass');
     assert.deepEqual(finalization.result.pendingSteps, []);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md')), false);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  'completed', taskId, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  'active', taskId, 'task.md')), false);
     assert.equal(fs.existsSync(path.join(controlRoot, 'broker.json')), true);
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
 
@@ -2091,7 +2117,7 @@ test('sandbox-local complete leaves the same broker available for a real task-cr
     assert.equal(created.control.accepted, true);
     assert.notEqual(created.task.id, taskId);
     assert.equal(created.task.state, 'active');
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', created.task.id, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  'active', created.task.id, 'task.md')), true);
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     assert.equal(fs.existsSync(path.join(controlRoot, 'broker.json')), true);
   } finally {
@@ -2122,8 +2148,8 @@ test('sandbox-local complete rejects mismatched mounted task, root id, or genera
       const result = await runDirectTaskFinalizationAsync(root, manifest, 'TASK-20260809-010203').result;
       assert.equal(result.exitCode, expectedExitCode, `${field}: ${result.stderr || result.stdout}`);
       assert.match(result.stdout, /SANDBOX_CONTROL_IDENTITY_/u, field);
-      assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260809-010203', 'task.md')), true, field);
-      assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', 'TASK-20260809-010203')), false, field);
+      assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  'active', 'TASK-20260809-010203', 'task.md')), true, field);
+      assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  'completed', 'TASK-20260809-010203')), false, field);
       assert.equal(fs.existsSync(path.join(controlRoot, 'quiescing.json')), false, field);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -2146,23 +2172,25 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
   fs.mkdirSync(statusDir);
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
+  const nestedRepoDir = path.join(root, 'packages', 'nested');
+  fs.mkdirSync(nestedRepoDir, { recursive: true });
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   const shortId = '8'.padStart(shortIdLength, '0');
   const otherTaskId = 'TASK-20260809-010204';
-  const otherTaskDir = path.join(root, '.agents', 'workspace', 'active', otherTaskId);
+  const otherTaskDir = path.join(taskWorkspaceRoot(root),  'active', otherTaskId);
   fs.mkdirSync(otherTaskDir);
   fs.writeFileSync(path.join(otherTaskDir, 'task.md'), `---\nid: ${otherTaskId}\n---\n`);
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength } }));
-  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), JSON.stringify({
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength } }));
+  fs.writeFileSync(path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'), JSON.stringify({
     version: 1, ids: { [shortId]: taskId, ['9'.padStart(shortIdLength, '0')]: otherTaskId }
   }));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker',
     repoRoot: root,
     worktreeRoot: root,
-    project: 'demo',
+    project: taskWorkspaceProject(root),
     container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} },
     authorityEvidence: fixtureAuthorityEvidence(),
@@ -2194,9 +2222,9 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
   try {
     waitForFile(path.join(root, 'broker.json'), 5_000);
     waitForHealthyStatus(statusDir, 5_000);
-    // Resolve from a nested directory, as ordinary task-bound CLI commands do.
+    // Resolve from a nested repository directory while the task stays in its external workspace root.
     const previousCwd = process.cwd();
-    process.chdir(taskDir);
+    process.chdir(nestedRepoDir);
     try {
       for (const ref of ['8', shortId, taskId, '9', otherTaskId, '7', '0', '9999', 'not-a-task']) {
         waitForHealthyStatus(statusDir, 5_000);
@@ -2207,11 +2235,12 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
           AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
           AGENT_INFRA_CONTROL_DIR: channelDir,
           AGENT_INFRA_CONTROL_GENERATION: generation,
-          AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
+          AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),
+          AGENT_INFRA_TEST_TASK_WORKSPACE_ROOT: taskWorkspaceRoot(root)
         }, () => spawnSync(process.execPath, [
           '--experimental-strip-types', '--no-warnings', internalCliPath,
           'task-artifact', ref, 'inspect', '--family', 'analysis'
-        ], { cwd: taskDir, env: process.env, encoding: 'utf8', timeout: 10_000 }));
+        ], { cwd: nestedRepoDir, env: process.env, encoding: 'utf8', timeout: 10_000 }));
         assert.equal(result.error, undefined);
         if (['8', shortId, taskId].includes(ref)) {
           assert.equal(result.status, 0, `${ref}: ${result.stderr}${result.stdout}`);
@@ -2322,14 +2351,14 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.mkdirSync(statusDir);
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
-  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
+  fs.mkdirSync(path.join(taskWorkspaceRoot(root),  'active'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 }, platform: { type: null }, delivery: { remote: 'origin', baseRef: 'main' } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 }, platform: { type: null }, delivery: { remote: 'origin', baseRef: 'main' } }));
   fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
       containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'branch-only', taskId: null, token, generation, channelDir: 'channel',
     controlRootId: 'a'.repeat(96),
@@ -2377,7 +2406,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
     assert.equal(result.status, 'applied');
     assert.equal(result.task.state, 'active');
     assert.deepEqual(result.operations.at(-1), { name: 'task:verify', status: 'pass', reasonCode: null });
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  'active', result.task.id, 'task.md')), true);
     const currentManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     assert.equal(currentManifest.mode, 'branch-only');
     assert.equal(currentManifest.taskId, null);
@@ -2423,7 +2452,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   fs.mkdirSync(path.join(processingDir, recoverableId), { recursive: true });
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96),
     channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
@@ -2449,7 +2478,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     phase: 'running', updatedAt: Date.now()
   })}\n`);
   const controlManifest = {
-    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
     authorityEvidence: fixtureAuthorityEvidence(),
     containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound' as const, taskId: 'TASK-20260809-010203',
     token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96), channelDir, publicStatusDir: statusDir, processingDir,
@@ -2641,11 +2670,11 @@ test('broker recovery accepts a task-create no-op for a non-active task', async 
   try {
     const manifestPath = writeControlManifest(root, initializeRepository(root), 'task-create-non-active-generation');
     const manifest = readSandboxControlManifest(manifestPath);
-    fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
-    fs.mkdirSync(path.join(root, '.agents', 'workspace', 'blocked'), { recursive: true });
+    fs.mkdirSync(path.join(taskWorkspaceRoot(root),  'active'), { recursive: true });
+    fs.mkdirSync(path.join(taskWorkspaceRoot(root),  'blocked'), { recursive: true });
     fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
     fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' } }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' } }));
     fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
     fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
     const candidate = {
@@ -2661,9 +2690,9 @@ test('broker recovery accepts a task-create no-op for a non-active task', async 
       taskInput: { sources: [], facts: [], constraints: [], decisions: [], alternatives: [], acceptanceCriteria: [], openQuestions: [] }
     };
     const created = createLocalTask(candidate, { repoRoot: root, agentInfraVersion: 'v0.11.5' });
-    const blocked = path.join(root, '.agents', 'workspace', 'blocked', created.task.id);
+    const blocked = path.join(taskWorkspaceRoot(root),  'blocked', created.task.id);
     mutateShortIdRegistry(root, created.task.id, 'release');
-    fs.renameSync(path.join(root, '.agents', 'workspace', 'active', created.task.id), blocked);
+    fs.renameSync(path.join(taskWorkspaceRoot(root),  'active', created.task.id), blocked);
 
     const output = `${JSON.stringify({
       status: 'no-op', changed: false,

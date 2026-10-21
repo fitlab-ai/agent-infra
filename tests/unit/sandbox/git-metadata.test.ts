@@ -25,6 +25,7 @@ test('sandbox Git metadata projects a linked worktree gitfile without changing t
       '-C', repoRoot,
       '-c', 'user.name=Sandbox Test',
       '-c', 'user.email=sandbox-test@example.com',
+      '-c', 'commit.gpgsign=false',
       'commit', '-q', '-m', 'initial'
     ], { env: gitSafeEnv() });
     execFileSync('git', ['-C', repoRoot, 'worktree', 'add', '--detach', worktreeRoot, 'HEAD'], {

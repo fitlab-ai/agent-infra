@@ -9,6 +9,7 @@ import { parseReviewSummary } from './review-artifacts.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerDocument } from './ledger.ts';
 import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
+import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 import {
   activateDelegation,
   abortActivatedDelegation,
@@ -760,7 +761,8 @@ function routeResolvedTask(
     resolved.taskDir,
     content,
     resolved.state,
-    hasOpenLifecycleExecution(content) || Boolean(run?.pendingDelegation)
+    hasOpenLifecycleExecution(content) || Boolean(run?.pendingDelegation),
+    resolved.repoRoot
   );
   if (!facts.ok) return failed('ORCHESTRATION_CAPABILITY_FACTS_INVALID', facts.message, resolved.taskId);
   const routed = routeFromFacts(facts.facts);
@@ -1041,7 +1043,7 @@ function matchingDelegations(
     return { ok: false, error: failed('ORCHESTRATION_TASK_ID_INVALID', 'taskId must be a canonical TASK-id') };
   }
   const repoRoot = options.repoRoot ?? process.cwd();
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId);
   const run = readRun(taskDir, options);
   const matches = run && run.status === 'running' && run.pendingDelegation && predicate(run.pendingDelegation)
     ? [{ taskId, run }]

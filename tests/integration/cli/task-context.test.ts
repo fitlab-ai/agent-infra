@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,8 +11,8 @@ import { createTempDir, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function fixture(): string {
   const repoRoot = createTempDir('task-context-');
-  fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', 'active'), { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), '{}\n');
+  fs.mkdirSync(path.join(taskWorkspaceRoot(repoRoot),  'active'), { recursive: true });
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(repoRoot) }) + '\n');
   execFileSync('git', ['init', '-q'], { cwd: repoRoot });
   execFileSync('git', ['checkout', '-q', '-b', 'feature/current'], { cwd: repoRoot });
   fs.writeFileSync(path.join(repoRoot, 'README.md'), 'fixture\n');
@@ -21,7 +22,7 @@ function fixture(): string {
 }
 
 function task(repoRoot: string, state: string, id: string, branch: string, body = ''): void {
-  const dir = path.join(repoRoot, '.agents', 'workspace', state, id);
+  const dir = path.join(taskWorkspaceRoot(repoRoot),  state, id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), body || `---\nid: ${id}\nbranch: ${branch}\n---\n`);
 }
@@ -48,7 +49,7 @@ test('resolveTaskContext rejects zero, multiple, detached, and damaged active co
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'TASK_CONTEXT_AMBIGUOUS');
 
-  fs.rmSync(path.join(repoRoot, '.agents', 'workspace', 'active', 'TASK-20260719-000002'), { recursive: true });
+  fs.rmSync(path.join(taskWorkspaceRoot(repoRoot),  'active', 'TASK-20260719-000002'), { recursive: true });
   execFileSync('git', ['checkout', '--detach', '-q'], { cwd: repoRoot });
   result = resolveTaskContext(undefined, { repoRoot });
   assert.equal(result.ok, false);

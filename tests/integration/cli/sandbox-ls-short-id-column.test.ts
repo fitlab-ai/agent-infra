@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import { lookupShortIdByBranch } from '../../../lib/task/short-id.ts';
 
 function mkFixture(): { repoRoot: string; activeDir: string } {
   const repoRoot = createTempDir('sb-ls-shortid-');
-  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot),  'active');
   fs.mkdirSync(activeDir, { recursive: true });
   return { repoRoot, activeDir };
 }

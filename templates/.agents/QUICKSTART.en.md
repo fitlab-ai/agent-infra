@@ -53,16 +53,23 @@ Built-in templates take priority over external templates. Later external templat
 
 ## Creating Your First Task
 
+Resolve the host task root once for these examples:
+
+```bash
+TASK_WORKSPACE_ROOT=$(agent-infra-internal task-workspace resolve --boundary host | node -e 'let input="";process.stdin.setEncoding("utf8");process.stdin.on("data",chunk=>input+=chunk);process.stdin.on("end",()=>process.stdout.write(JSON.parse(input).root));')
+```
+
 1. Copy the task template to the active workspace:
 
 ```bash
-cp .agents/templates/task.md .agents/workspace/active/task-001.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000"
+cp .agents/templates/task.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md"
 ```
 
 2. Fill in the task metadata:
 
 ```yaml
-id: task-001
+id: TASK-20260101-120000
 type: feature          # feature | bugfix | refactor | docs | review
 status: open           # open | in-progress | review | blocked | completed
 assigned_to: claude    # claude | codex | antigravity | opencode | human
@@ -92,7 +99,7 @@ Claude Code excels at codebase exploration and understanding complex relationshi
 agy
 
 # Example prompt:
-# "Based on the analysis in .agents/workspace/active/task-001.md,
+# "Based on the analysis in $TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md,
 #  create a technical design. Define interfaces and outline the approach."
 ```
 
@@ -103,7 +110,7 @@ agy
 codex
 
 # Example prompt:
-# "Implement the changes described in .agents/workspace/active/task-001.md.
+# "Implement the changes described in $TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md.
 #  Follow the design section. Create a new branch for this work."
 ```
 
@@ -130,7 +137,8 @@ claude
 
 ```bash
 # Quick bug fix workflow
-cp .agents/templates/task.md .agents/workspace/active/bugfix-001.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000"
+cp .agents/templates/task.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120000/task.md"
 # Edit the task, then:
 # 1. Use Claude Code to analyze
 # 2. Use Codex/OpenCode to fix
@@ -144,7 +152,8 @@ cp .agents/templates/task.md .agents/workspace/active/bugfix-001.md
 3. **Report**: Generate review report from template.
 
 ```bash
-cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120001"
+cp .agents/templates/review-report.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120001/review-report.md"
 # Use Claude Code to fill in the review
 ```
 
@@ -156,7 +165,8 @@ cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
 4. **Verify** (Claude Code): Ensure no regressions, run tests.
 
 ```bash
-cp .agents/templates/task.md .agents/workspace/active/refactor-001.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120002"
+cp .agents/templates/task.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120002/task.md"
 # Follow the refactoring workflow in .agents/workflows/refactoring.yaml
 ```
 
@@ -165,7 +175,8 @@ cp .agents/templates/task.md .agents/workspace/active/refactor-001.md
 When switching between AI tools, create a handoff document:
 
 ```bash
-cp .agents/templates/handoff.md .agents/workspace/active/handoff-task-001-phase2.md
+mkdir -p "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120003"
+cp .agents/templates/handoff.md "$TASK_WORKSPACE_ROOT/active/TASK-20260101-120003/handoff.md"
 ```
 
 Fill in:

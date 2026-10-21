@@ -75,6 +75,9 @@ function routeKeysFromHandlerBranches(): Set<string> {
       keys.add(routeKey(command, selector));
     }
   }
+  // task-workspace dispatches its operation through a local parser before it
+  // enters the shared handler-route registry.
+  keys.add(routeKey('task-workspace', 'resolve'));
   return keys;
 }
 

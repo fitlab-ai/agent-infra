@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -63,9 +64,9 @@ function summaryFixture(): { root: string; taskId: string; reportPath: string; b
   git(root, ['remote', 'add', 'origin', 'https://github.com/acme/widgets.git']);
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-pr', 'scripts'), { recursive: true });
   fs.copyFileSync(filePath('.agents/skills/create-pr/scripts/change-report.mjs'), path.join(root, '.agents', 'skills', 'create-pr', 'scripts', 'change-report.mjs'));
-  fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active', taskId), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}\n');
-  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md'), [
+  fs.mkdirSync(path.join(taskWorkspaceRoot(root),  'active', taskId), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), platform: { type: 'github' } }) + '\n');
+  fs.writeFileSync(path.join(taskWorkspaceRoot(root),  'active', taskId, 'task.md'), [
     '---',
     `id: ${taskId}`,
     'status: active',
@@ -79,7 +80,7 @@ function summaryFixture(): { root: string; taskId: string; reportPath: string; b
     'branch: feature',
     '---', '', '# Task: Canonical report', '', '## Description', '', 'Implement the canonical report.', '', '## Context', '', '- branch: feature'
   ].join('\n'));
-  const taskPath = path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md');
+  const taskPath = path.join(taskWorkspaceRoot(root),  'active', taskId, 'task.md');
   const taskContent = fs.readFileSync(taskPath, 'utf8');
   const digest = taskIntentDigest(taskContent);
   if (!digest.ok) throw new Error(digest.error.message);
@@ -93,13 +94,13 @@ function summaryFixture(): { root: string; taskId: string; reportPath: string; b
   }, digest.value.sha256, mechanical, candidateValue);
   if (!report.ok) throw new Error(report.error.message);
   assert.equal(report.ok, true);
-  const reportPath = path.join(root, '.agents', 'workspace', 'active', taskId, 'pr-change-report.json');
+  const reportPath = path.join(taskWorkspaceRoot(root),  'active', taskId, 'pr-change-report.json');
   writePrChangeReportAtomic(reportPath, report.value);
   return { root, taskId, reportPath, baseSha, headSha };
 }
 
 function configureOpaquePullRequest(fixture: ReturnType<typeof summaryFixture>, number?: number, extraConfig: Record<string, unknown> = {}): string {
-  const taskDir = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId);
+  const taskDir = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId);
   const taskPath = path.join(taskDir, 'task.md');
   const taskContent = fs.readFileSync(taskPath, 'utf8');
   const fact = encodePrDeliveryFact(buildBoundFact({
@@ -112,6 +113,7 @@ function configureOpaquePullRequest(fixture: ReturnType<typeof summaryFixture>, 
   fs.writeFileSync(taskPath, taskContent.replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(fact)}`));
   const providerSource = path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs');
   fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
+    project: taskWorkspaceProject(fixture.root),
     platform: { type: 'trae', providers: { trae: { source: providerSource, config: {
       repository: 'opaque/project', headSha: fixture.headSha, baseSha: fixture.baseSha,
       ...(number === undefined ? {} : { number }),
@@ -275,7 +277,7 @@ test('PR summary preserves the structured v1 unsupported error from a persisted 
   const fixture = summaryFixture();
   try {
     const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
-    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'task.md');
     fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(legacy)}`));
     const result = await syncPullRequestSummary(fixture.taskId, {
       cwd: fixture.root,
@@ -294,7 +296,7 @@ test('PR summary preserves the structured v1 unsupported error from a persisted 
 test('PR summary passes an opaque bound identity through context and summary validation', async () => {
   const fixture = summaryFixture();
   try {
-    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'task.md');
     const opaqueFact = encodePrDeliveryFact(buildBoundFact({
       identity: {
         resource: { kind: 'id', value: 'pr-42' }, repository: 'opaque/project', url: 'https://opaque.example/changes/pr-42',
@@ -305,6 +307,7 @@ test('PR summary passes an opaque bound identity through context and summary val
     fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(opaqueFact)}`));
     const providerSource = path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs');
     fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
+      project: taskWorkspaceProject(fixture.root),
       platform: { type: 'trae', providers: { trae: { source: providerSource, config: { number: 42 } } } }
     }));
 
@@ -608,7 +611,7 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
   const fixture = summaryFixture();
   try {
     fs.rmSync(fixture.reportPath);
-    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'task.md');
     const taskContent = fs.readFileSync(taskPath, 'utf8');
     const digest = taskIntentDigest(taskContent);
     if (!digest.ok) throw new Error(digest.error.message);
@@ -639,7 +642,7 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
 test('change-report reads task semantics after provider context resolution', async () => {
   const fixture = summaryFixture();
   try {
-    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'task.md');
     const mechanicalFile = path.join(fixture.root, 'mechanical.json');
     const precheckFile = path.join(fixture.root, 'precheck.json');
     const mechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, fixture.headSha);
@@ -687,7 +690,7 @@ test('summary-sync renders the task-bound report and publishes one canonical com
 test('summary-sync rejects a direct final manual-validation writer without coordinator authority', async () => {
   const fixture = summaryFixture();
   try {
-    const artifact = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'manual-validation.md');
+    const artifact = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'manual-validation.md');
     fs.writeFileSync(artifact, '# Manual Validation\n');
     const evidenceDigest = 'a'.repeat(64);
     const transactionId = 'mv-direct-final';
@@ -875,7 +878,7 @@ test('summary-sync rechecks the PR head before returning no-op', async () => {
 test('summary-sync re-reads task semantics after provider context resolution', async () => {
   const fixture = summaryFixture();
   try {
-    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'task.md');
     const updatedTask = fs.readFileSync(taskPath, 'utf8').replace('Implement the canonical report.', 'Implement the updated canonical report.');
     const result = await syncPullRequestSummary(fixture.taskId, {
       cwd: fixture.root,
@@ -921,7 +924,7 @@ test('summary-sync strict mode preserves report failures for watch-pr callers', 
 test('summary-sync strict mode preserves a stale report failure for watch-pr callers', async () => {
   const fixture = summaryFixture();
   try {
-    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root),  'active', fixture.taskId, 'task.md');
     const updatedTask = fs.readFileSync(taskPath, 'utf8').replace('Implement the canonical report.', 'Implement the updated canonical report.');
     const result = await syncPullRequestSummary(fixture.taskId, {
       cwd: fixture.root,

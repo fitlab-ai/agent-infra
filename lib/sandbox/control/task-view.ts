@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveProjectTaskWorkspaceRoot } from '../../task/workspace-root.ts';
 
 export const SANDBOX_TASK_VIEW_STATES = ['not-applicable', 'current', 'finalized-stale', 'unknown'] as const;
 export const SANDBOX_TASK_VIEW_SOURCES = ['active', 'completed', 'unknown'] as const;
@@ -119,8 +120,9 @@ export function taskViewForManifest(params: Readonly<{
   if (params.mode !== 'task-bound' || !params.taskId) {
     return { state: 'not-applicable', taskId: null, observedSource: null, receipt: null, reasonCode: null };
   }
-  const active = path.join(params.repoRoot, '.agents', 'workspace', 'active', params.taskId, 'task.md');
-  const completed = path.join(params.repoRoot, '.agents', 'workspace', 'completed', params.taskId, 'task.md');
+  const taskRoot = resolveProjectTaskWorkspaceRoot(params.repoRoot);
+  const active = path.join(taskRoot, 'active', params.taskId, 'task.md');
+  const completed = path.join(taskRoot, 'completed', params.taskId, 'task.md');
   const activeExists = fs.existsSync(active);
   const completedExists = fs.existsSync(completed);
   if (activeExists === completedExists) {

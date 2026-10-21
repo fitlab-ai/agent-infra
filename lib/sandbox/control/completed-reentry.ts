@@ -4,6 +4,7 @@ import { resolveTaskWorkspace } from '../task-resolver.ts';
 import { assertGitWorktreeBinding } from '../../git/worktree-identity.ts';
 import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../../task/workspace-root.ts';
 import { inspectSandboxControlContainer } from './container-identity.ts';
 import type { SandboxControlManifest } from './protocol.ts';
 import { atomicWriteJson, readSandboxControlStatus } from './state.ts';
@@ -53,7 +54,7 @@ export async function prepareCompletedReentry(
     || previous.receipt.generation !== view.receipt.generation
     || previous.receipt.requestId !== view.receipt.requestId
     || previous.receipt.revision > view.receipt.revision) throw invalid();
-  const completedRoot = fs.realpathSync.native(path.join(manifest.repoRoot, '.agents', 'workspace', 'completed'));
+  const completedRoot = fs.realpathSync.native(path.join(resolveProjectTaskWorkspaceRoot(manifest.repoRoot), 'completed'));
   const source = fs.realpathSync.native(path.join(completedRoot, manifest.taskId));
   if (source !== path.join(completedRoot, manifest.taskId)) throw invalid();
   const stat = fs.statSync(source, { bigint: true });

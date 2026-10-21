@@ -7,16 +7,16 @@ description: >
 
 # Archive Completed Tasks
 
-Archive completed tasks from `.agents/workspace/completed/` into `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/local/` and rebuild a three-level archive index. Local task materials live in `local/` with a path-sorted `contents.sha256`; the TASK root contains no ordinary files.
-- root manifest: `.agents/workspace/archive/manifest.md`
-- yearly manifest: `.agents/workspace/archive/YYYY/manifest.md`
-- monthly manifest: `.agents/workspace/archive/YYYY/MM/manifest.md`
+Archive completed tasks from `<task-workspace>/completed/` into `<task-workspace>/archive/YYYY/MM/DD/TASK-xxx/local/` and rebuild a three-level archive index. Local task materials live in `local/` with a path-sorted `contents.sha256`; the TASK root contains no ordinary files.
+- root manifest: `<task-workspace>/archive/manifest.md`
+- yearly manifest: `<task-workspace>/archive/YYYY/manifest.md`
+- monthly manifest: `<task-workspace>/archive/YYYY/MM/manifest.md`
 
 ## Execution Flow
 
 ### 1. Verify the environment
 
-Confirm that `.agents/workspace/completed/` exists, then choose one of these four invocation modes:
+Confirm that `<task-workspace>/completed/` exists, then choose one of these four invocation modes:
 - no arguments: archive every completed task
 - `--days N`: keep the most recent `N` days and archive older tasks
 - `--before YYYY-MM-DD`: archive only tasks completed before the given date

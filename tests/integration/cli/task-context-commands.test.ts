@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,9 +13,10 @@ function fixture(): { repoRoot: string; taskMd: string } {
   const repoRoot = createTempDir('task-context-cli-');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   spawnSync('git', ['checkout', '-q', '-b', 'feature/current'], { cwd: repoRoot });
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(repoRoot) }));
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot), 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo' }));
   const taskMd = path.join(taskDir, 'task.md');
   fs.writeFileSync(taskMd, `---
 id: ${TASK_ID}
@@ -114,7 +116,7 @@ test('grep defaults to current context and supports --current/--task while -i re
 
 test('implicit context failures never select one of multiple tasks', () => {
   const data = fixture();
-  const other = path.join(data.repoRoot, '.agents', 'workspace', 'active', 'TASK-20260719-000002');
+  const other = path.join(taskWorkspaceRoot(data.repoRoot),  'active', 'TASK-20260719-000002');
   fs.mkdirSync(other, { recursive: true });
   fs.writeFileSync(path.join(other, 'task.md'), '---\nid: TASK-20260719-000002\nbranch: feature/current\n---\n');
   const result = run(data.repoRoot, ['task', 'show']);

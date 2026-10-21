@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
+import { filePath, gitSafeEnv, initIsolatedGitRepo, taskWorkspaceProject, taskWorkspaceRoot } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import { renderArtifactSkeleton } from "../../../lib/task/artifact-schema.ts";
@@ -31,17 +31,20 @@ function git(repoRoot: string, args: string[]) {
 
 function setupReviewRepo(tempRoot: string) {
   initIsolatedGitRepo(tempRoot);
-  write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ delivery: { remote: "origin", baseRef: "main" } }) + "\n");
+  write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ project: taskWorkspaceProject(tempRoot), delivery: { remote: "origin", baseRef: "main" } }) + "\n");
+  const verifyConfig = path.join(tempRoot, ".agents", "skills", "review-code", "config");
+  fs.mkdirSync(verifyConfig, { recursive: true });
+  fs.copyFileSync(filePath(".agents/skills/review-code/config/verify.json"), path.join(verifyConfig, "verify.json"));
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
   git(tempRoot, ["config", "user.name", "Codex"]);
-  write(path.join(tempRoot, ".gitignore"), `${TASK_ID}/\n`);
+  write(path.join(tempRoot, ".gitignore"), ".agents/workspace/\n");
   write(path.join(tempRoot, ".agents/skills/x.md"), "reviewed\n");
   git(tempRoot, ["add", "-A"]);
   git(tempRoot, ["commit", "-qm", "reviewed"]);
   const baseline = git(tempRoot, ["rev-parse", "HEAD"]);
   const snapshot = snapshotReview({ cwd: tempRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, {}) });
   return {
-    taskDir: path.join(tempRoot, TASK_ID),
+    taskDir: path.join(taskWorkspaceRoot(tempRoot), 'active', TASK_ID),
     baseline,
     reviewedFingerprint: snapshot.fingerprint,
     reviewedTree: snapshot.tree

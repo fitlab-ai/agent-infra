@@ -180,7 +180,7 @@ Task information:
 - Issue: #{issue-number} {issue_url}
 
 Output file:
-- Task file: .agents/workspace/active/{task-id}/task.md
+- Task file: <task-workspace>/active/{task-id}/task.md
 
 Next step - run requirements analysis:
 {next-step-commands}
@@ -199,7 +199,7 @@ Task information:
 - Workflow: {workflow}
 
 Output file:
-- Task file: .agents/workspace/active/{task-id}/task.md
+- Task file: <task-workspace>/active/{task-id}/task.md
 
 Next step - run requirements analysis:
 {next-step-commands}
@@ -223,7 +223,7 @@ Issue creation failed:
 - Local task.md was kept and not rolled back
 
 Output file:
-- Task file: .agents/workspace/active/{task-id}/task.md
+- Task file: <task-workspace>/active/{task-id}/task.md
 
 Next step - run requirements analysis:
 {next-step-commands}
@@ -239,7 +239,7 @@ For later platform sync: after fixing auth / network / template issues, manually
 ## Completion Checklist
 
 - [ ] Wrote one candidate and invoked `agent-infra-internal task-create`
-- [ ] The host created `.agents/workspace/active/{task-id}/task.md`
+- [ ] The host created `<task-workspace>/active/{task-id}/task.md`
 - [ ] Wrote and checked `## Task Input` source and state semantics according to `reference/context-capture.md`
 - [ ] The returned task id and short id passed completion verification
 - [ ] Tried cascading Issue creation through `.agents/rules/create-issue.md`; if it failed, kept task.md and recorded the reason

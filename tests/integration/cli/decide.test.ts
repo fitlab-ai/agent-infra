@@ -1,10 +1,11 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { createTempDir, CLI_PATH } from '../../helpers.ts';
+import { createTempDir, CLI_PATH, taskWorkspaceProject } from '../../helpers.ts';
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
@@ -12,11 +13,11 @@ function fixture(rows: string[], implementationRows: string[] = []): { repoRoot:
   const repoRoot = createTempDir('decide-cli-');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(repoRoot),  'active', taskId);
   fs.mkdirSync(path.join(repoRoot, '.agents', 'scripts'), { recursive: true });
   fs.mkdirSync(taskDir, { recursive: true });
   fs.copyFileSync(SHORT_ID_SCRIPT, path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js'));
-  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo' }));
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(repoRoot) }));
   const taskMd = path.join(taskDir, 'task.md');
   fs.writeFileSync(taskMd, `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Human Rulings\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n${implementationRows.join('\n')}\n\n## Activity Log\n`);
   spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });

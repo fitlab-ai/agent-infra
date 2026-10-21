@@ -75,9 +75,9 @@ fi
 
 ## 存储位置
 
-短号是纯本地状态，唯一持久化在注册表 `.agents/workspace/active/.short-ids.json`，task.md 不持有短号：
+短号是纯本地状态，唯一持久化在注册表 `<task-workspace>/active/.short-ids.json`，task.md 不持有短号：
 
-- 路径：`<repo-root>/.agents/workspace/active/.short-ids.json`
+- 路径：`<task-workspace>/active/.short-ids.json`
 - Schema：`{ "version": 1, "ids": { "01": "TASK-20260609-192644", "02": "TASK-…" } }`
 - key 是零填充到 `task.shortIdLength` 位的字符串，value 是完整 `TASK-…` task id
 - 自动 git ignore（active 工作区整体 ignore；无需新增 ignore 条目）

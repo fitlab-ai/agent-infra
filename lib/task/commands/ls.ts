@@ -4,10 +4,11 @@ import { execFileSync } from 'node:child_process';
 import { formatTable } from '../../table.ts';
 import { parseTaskFrontmatter, extractTitle } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../workspace-root.ts';
 
 const USAGE = `Usage: ai task ls [--all | --blocked | --completed]
 
-Lists tasks under .agents/workspace/. Defaults to active tasks only.
+Lists tasks under the project task workspace. Defaults to active tasks only.
   --all         Include active + blocked + completed (excludes archive)
   --blocked     Only blocked tasks
   --completed   Only completed tasks
@@ -73,7 +74,7 @@ type TaskRow = {
 };
 
 function collectTasks(repoRoot: string, state: 'active' | 'blocked' | 'completed'): TaskRow[] {
-  const dir = path.join(repoRoot, '.agents', 'workspace', state);
+  const dir = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), state);
   if (!fs.existsSync(dir)) return [];
   const shortIdByTaskId = state === 'active' || state === 'completed'
     ? loadShortIdByTaskId(repoRoot)
@@ -117,7 +118,7 @@ function ls(args: string[] = []): void {
     rows.push(...collectTasks(repoRoot, state));
   }
   if (rows.length === 0) {
-    process.stdout.write(`No tasks under .agents/workspace/${selection.join('|')}\n`);
+    process.stdout.write(`No tasks under project task workspace state ${selection.join('|')}\n`);
     return;
   }
   const tableRows = rows.map((r, i) => [

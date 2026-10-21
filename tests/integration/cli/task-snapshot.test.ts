@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,10 +11,10 @@ test('internal task-snapshot resolves full and short task refs without writes', 
   const root = createTempDir('task-snapshot-integration-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
-  const active = path.join(root, '.agents', 'workspace', 'active');
+  const active = path.join(taskWorkspaceRoot(root),  'active');
   const dir = path.join(active, id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(active, '.short-ids.json'), JSON.stringify({ version: 1, ids: { '01': id } }));
   fs.writeFileSync(path.join(dir, 'task.md'), '# Task\n');
   const before = fs.readFileSync(path.join(dir, 'task.md'));

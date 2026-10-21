@@ -112,6 +112,7 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'platform-checks', 'resolve-run', 'conditional', 'diagnostic'),
     descriptor('internal', 'platform-checks', 'logs', 'conditional', 'diagnostic'),
     descriptor('internal', 'task-context', 'resolve', 'task-bound', 'diagnostic'),
+    descriptor('internal', 'task-workspace', 'resolve', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'task-ledger', 'decision-next-id', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-ledger', 'stage-status', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-ledger', 'finding-upsert', 'task-bound', 'progress'),
@@ -214,7 +215,7 @@ export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
   'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle',
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
-  'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
+  'platform-checks', 'task-context', 'task-workspace', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
   'task-orchestration', 'task-review', 'task-event', 'task-lifecycle',
   'task-finalization', 'task-platform-recovery', 'task-short-id', 'task-snapshot', 'task-verify', 'task-validate', 'manual-validation'
 ]);

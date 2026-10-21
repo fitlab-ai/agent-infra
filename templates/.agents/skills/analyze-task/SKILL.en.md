@@ -57,7 +57,7 @@ After resolving the artifact context and before this round's first artifact acti
 ### 1. Verify Prerequisites
 
 Check required files:
-- `.agents/workspace/active/{task-id}/task.md` - Task file
+- `<task-workspace>/active/{task-id}/task.md` - Task file
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
 
@@ -119,7 +119,7 @@ Runs after Step 0 state check and Step 3 (questioning is an external-state actio
      - otherwise (no pending question) → pick the single highest-value question (acceptance criteria > scope > ambiguity) and write `## Brainstorming`: `status: asking`, `pending_question: <question>`, `question_count += 1`.
   2. If `start_date` is empty, write today (`date +%F`), then run `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {standard-agent-token} --question {question_count}` so the core updates base metadata and Activity Log.
   3. Issue sync (when a valid `platform_issue_identity` exists, skip on any failure): run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` to update only the **task comment**; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
-  4. Verification (replaces the step 8 artifact gate): `agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
+  4. Verification (replaces the step 8 artifact gate): `agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' <task-workspace>/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
   5. User output: show only the current **single question** plus how to answer/continue (re-trigger `analyze-task {task-ref}` with the answer).
   6. **STOP** and wait for the answer. The next trigger returns to this step.
 
@@ -148,7 +148,7 @@ The skeleton contains identity metadata, stable section markers, and required he
 
 > Steps 6–9 are the **Scenario A (normal output)** path. **Scenario B (ask and early-exit)** already finished its state update, task-comment sync, and verification inside step 4 and STOPped, so it does not enter these steps.
 
-Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
+Create `<task-workspace>/active/{task-id}/{analysis-artifact}`.
 
 ## Output Template
 
@@ -221,7 +221,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ### 7. Update Task Status
 
-Update `.agents/workspace/active/{task-id}/task.md`:
+Update `<task-workspace>/active/{task-id}/task.md`:
 - Record the analysis artifact for this round: `{analysis-artifact}` (Round `{analysis-round}`)
 - If the task template contains a `## Analysis` section, update it to link to `{analysis-artifact}`
 - Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it
@@ -290,7 +290,7 @@ Summary:
 - Risk level: {assessment}
 
 Output file:
-- Analysis report: .agents/workspace/active/{task-id}/{analysis-artifact}
+- Analysis report: <task-workspace>/active/{task-id}/{analysis-artifact}
 
 Next step - continue on the selected path:
 {next-step-commands}
@@ -299,7 +299,7 @@ Next step - continue on the selected path:
 ## Completion Checklist
 
 - [ ] Read and understood the task file and source information
-- [ ] Created analysis document `.agents/workspace/active/{task-id}/{analysis-artifact}`
+- [ ] Created analysis document `<task-workspace>/active/{task-id}/{analysis-artifact}`
 - [ ] Updated `current_step` to requirement-analysis in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Updated `assigned_to` in task.md

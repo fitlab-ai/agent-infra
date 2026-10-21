@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ function fixture() {
   const root = createTempDir('task-artifact-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
-  const dir = path.join(root, '.agents', 'workspace', 'active', id);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis-review\n---\n\n# Task\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), STANDARD_ANALYSIS);

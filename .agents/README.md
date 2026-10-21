@@ -35,22 +35,18 @@
     code-review.yaml            # 代码审查工作流
     refactoring.yaml            # 重构工作流
   rules/                        # 协作规则索引（见 rules/README.md）
-  workspace/                    # 运行时工作区（已被 git ignore）
-    active/                     # 当前活跃任务
-    blocked/                    # 被阻塞的任务
-    completed/                  # 已完成的任务
-    logs/                       # 协作日志
-
 .claude/                        # Claude Code 专属配置
   CLAUDE.md                     # Claude 项目指令
   commands/                     # 斜杠命令
   settings.json                 # Claude 设置
 ```
 
-整个 `.agents/workspace/` 目录树都只保存运行时数据，并被 git ignore。`active/`
-保存当前任务，`blocked/` 保存暂停任务，`completed/` 保存已完成任务，`archive/`
-保存归档历史；运行时日志和过程证据也可能出现在该根目录下。不要在这里存放必须
-通过 Git 共享的内容；协作规则、模板和工作流应放在受版本控制的 `.agents/` 目录中。
+宿主任务根为 `~/.agent-infra/task-workspaces/<project-key>`，容器任务根为
+`/task-workspace`。使用 `agent-infra-internal task-workspace resolve --boundary host`
+取得当前项目的宿主根，使用 `agent-infra-internal task-context resolve --task <task-id>`
+取得某个任务的精确目录。`active/`、`blocked/`、`completed/`、`archive/` 和
+`active/.short-ids.json` 都位于任务根中；这些路径只保存运行时数据，不通过 Git
+共享。文中的 `<task-workspace>` 表示由上述 resolver 返回的根，不是仓库内目录。
 
 ## 协作模型
 
@@ -99,7 +95,7 @@
 ## 快速入门
 
 1. **阅读快速入门指南**：参见 `QUICKSTART.md` 获取分步说明。
-2. **创建任务**：将 `.agents/templates/task.md` 复制到 `.agents/workspace/active/`。
+2. **创建任务**：通过 `create-task` 工作流创建任务；任务数据由宿主写入项目任务根。
 3. **分配给 AI**：更新任务元数据中的 `assigned_to` 字段。
 4. **执行工作流**：按照 `.agents/workflows/` 中相应的工作流执行。
 5. **交接**：切换 AI 时，从模板创建交接文档。
@@ -384,7 +380,7 @@ agent-infra-internal task-verify {task-id} <verification-event> [--artifact <art
 
 ### Q：任务如何在 AI 工具之间传递？
 
-通过存储在 `.agents/workspace/` 中的交接文档。每份交接文档包含上下文、进度和后续步骤，让接收方 AI 能无缝接续。
+通过存储在 `<task-workspace>/` 中的交接文档。每份交接文档包含上下文、进度和后续步骤，让接收方 AI 能无缝接续。
 
 ### Q：如果某个 AI 工具不支持 AGENTS.md 怎么办？
 
@@ -396,4 +392,4 @@ agent-infra-internal task-verify {task-id} <verification-event> [--artifact <art
 
 ### Q：运行时文件存储在哪里？
 
-在 `.agents/workspace/` 中，该目录已被 git ignore。只有 `.agents/` 中的模板和工作流定义受版本控制。
+在 `<task-workspace>/` 中，该目录已被 git ignore。只有 `.agents/` 中的模板和工作流定义受版本控制。

@@ -8,7 +8,7 @@ Read this file and `.agents/rules/next-step-output.md` before presenting the fin
 |------|---------|---------|
 | A Local review complete | the local review round closed and verification passed; formal publication succeeded or has a durable pending record | conclusion, mode, reviewed head SHA, actual publication status, Review URL or recovery action, receipt, next step |
 | B Blocked, requires linking | `resolve-host` returned none or ambiguous | linking guidance (create/link an Issue and task); do not auto-create an Issue; or explicitly choose the one-shot review |
-| C One-shot review | the user explicitly chose a "one-shot review" | non-recoverable notice, artifact directory `.agents/workspace/reviews/{pr-number}/`, Review URL or publication failure |
+| C One-shot review | the user explicitly chose a "one-shot review" | non-recoverable notice, artifact directory `<task-workspace>/reviews/{pr-number}/`, Review URL or publication failure |
 
 ## Presentation Requirements
 

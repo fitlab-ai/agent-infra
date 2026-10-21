@@ -32,9 +32,9 @@ description: >
 ### 1. 验证任务存在
 
 依次检查以下目录：
-- `.agents/workspace/active/{task-id}/`
-- `.agents/workspace/blocked/{task-id}/`
-- `.agents/workspace/completed/{task-id}/`
+- `<task-workspace>/active/{task-id}/`
+- `<task-workspace>/blocked/{task-id}/`
+- `<task-workspace>/completed/{task-id}/`
 
 处理规则：
 - 如果在 `active/` 或 `blocked/` 中找到：继续
@@ -68,7 +68,7 @@ agent-infra-internal task-lifecycle {task-id} cancel --agent {standard-agent-tok
 ### 5. 验证转移
 
 ```bash
-ls .agents/workspace/completed/{task-id}/task.md
+ls <task-workspace>/completed/{task-id}/task.md
 ```
 
 确认任务目录已成功移动。
@@ -117,7 +117,7 @@ agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 
 取消原因：{reason}
 状态标签：{status-label 或 skipped}
-目标路径：.agents/workspace/completed/{task-id}/
+目标路径：<task-workspace>/completed/{task-id}/
 
 可选：清理本任务的沙箱
 （任务已完成并归档，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
@@ -133,7 +133,7 @@ ai sandbox rm {task-id}
 ## 完成检查清单
 
 - [ ] 已记录取消原因并更新 task.md
-- [ ] 已将任务目录移动到 `.agents/workspace/completed/`
+- [ ] 已将任务目录移动到 `<task-workspace>/completed/`
 - [ ] 已在存在 Issue 时完成 Issue 同步
 - [ ] 已运行 gate 校验并通过
 - [ ] 已通过统一 helper 渲染已选场景的下一步命令

@@ -57,7 +57,7 @@ After resolving the artifact context and before this round's first artifact acti
 ### 1. Verify Prerequisites
 
 Check required files:
-- `.agents/workspace/active/{task-id}/task.md` - Task file
+- `<task-workspace>/active/{task-id}/task.md` - Task file
 - At least one analysis artifact: `analysis.md` or `analysis-r{N}.md`
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
@@ -123,11 +123,11 @@ agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan
 
 The skeleton contains identity metadata, stable section markers, and required headings only; real plan content is required before the completion gate can pass. On a structural error, correct the formal artifact directly and rerun `task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}`; current structure, qualification, and summary facts are the only gate.
 
-Create `.agents/workspace/active/{task-id}/{plan-artifact}`.
+Create `<task-workspace>/active/{task-id}/{plan-artifact}`.
 
 ### 7. Update Task Status
 
-Update `.agents/workspace/active/{task-id}/task.md`:
+Update `<task-workspace>/active/{task-id}/task.md`:
 - Record the plan artifact for this round: `{plan-artifact}` (Round `{plan-round}`)
 - If the task template contains a `## Design` section, update it to link to `{plan-artifact}`
 - Mark technical-design as complete in workflow progress and include the actual round when the task template supports it
@@ -193,7 +193,7 @@ Plan summary:
 - Estimated complexity: {assessment}
 
 Output file:
-- Technical plan: .agents/workspace/active/{task-id}/{plan-artifact}
+- Technical plan: <task-workspace>/active/{task-id}/{plan-artifact}
 
 Next step - continue on the selected path:
 {next-step-commands}
@@ -203,7 +203,7 @@ Next step - continue on the selected path:
 
 - [ ] Read and understood the requirements analysis
 - [ ] Considered alternative options
-- [ ] Created the plan document `.agents/workspace/active/{task-id}/{plan-artifact}`
+- [ ] Created the plan document `<task-workspace>/active/{task-id}/{plan-artifact}`
 - [ ] Updated `current_step` to technical-design in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Recorded `{plan-artifact}` as a completed artifact in task.md

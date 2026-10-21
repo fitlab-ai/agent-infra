@@ -45,11 +45,11 @@ description: >
 
 ### 2. 创建任务目录和文件
 
-检查 `.agents/workspace/active/` 中是否已存在该告警的任务。
+检查 `<task-workspace>/active/` 中是否已存在该告警的任务。
 - 如果找到，**默认复用现有任务**，不询问用户；在最终告知中明确「已复用现有任务 `{task-id}`，未重新导入」。如需重新导入，需先归档/删除已有任务
 - 如果未找到，创建新任务
 
-创建目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+创建目录：`<task-workspace>/active/TASK-{yyyyMMdd-HHmmss}/`
 
 任务元数据需包含：
 ```yaml
@@ -116,7 +116,7 @@ agent-infra-internal task-verify {task-id} import-dependabot.completed --format 
 - 任务 ID：{task-id}（短号 {task-ref}）
 
 产出文件：
-- 任务文件：.agents/workspace/active/{task-id}/task.md
+- 任务文件：<task-workspace>/active/{task-id}/task.md
 
 下一步：
 {next-step-commands}

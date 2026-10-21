@@ -3,6 +3,7 @@
 import spawn from 'cross-spawn';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from './process-tree.js';
 import { acquireTestRunLock, releaseTestRunLock, testRunLockEnv } from './test-run-lock.js';
@@ -30,6 +31,13 @@ let activeChild;
 let receivedSignal;
 let terminationPromise;
 let testRunLock;
+const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-home-'));
+const isolatedGitConfig = path.join(isolatedHome, '.gitconfig');
+fs.writeFileSync(isolatedGitConfig, '[user]\n\tname = Agent Infra Test\n\temail = agent-infra-test@example.invalid\n');
+env.HOME = isolatedHome;
+env.USERPROFILE = isolatedHome;
+env.GIT_CONFIG_GLOBAL = isolatedGitConfig;
+env.AGENT_INFRA_TEST_HOME = isolatedHome;
 
 function forwardSignal(signal) {
   receivedSignal ??= signal;
@@ -105,6 +113,7 @@ try {
     process.exitCode = 1;
   }
 } finally {
+  fs.rmSync(isolatedHome, { recursive: true, force: true });
   releaseTestRunLock(testRunLock);
   for (const signal of signals) {
     process.off(signal, forwardSignal);

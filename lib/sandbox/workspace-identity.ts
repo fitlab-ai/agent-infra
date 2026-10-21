@@ -6,6 +6,7 @@ import {
   isRemovedHashShortIdInput,
   normalizeShortIdInput
 } from '../task/short-id.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import {
   TASK_WORKSPACE_STATES,
   listTaskWorkspaces,
@@ -57,7 +58,7 @@ function taskBranch(taskMd: string, taskId: string): string {
 }
 
 function activeRegistry(repoRoot: string): Record<string, string> {
-  const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+  const registryPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', '.short-ids.json');
   if (!fs.existsSync(registryPath)) return {};
   const value = JSON.parse(fs.readFileSync(registryPath, 'utf8')) as unknown;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -74,7 +75,7 @@ function activeRegistry(repoRoot: string): Record<string, string> {
 }
 
 function taskIdentity(repoRoot: string, taskId: string, registry: Record<string, string>): SandboxWorkspaceIdentity {
-  const taskMd = path.join(repoRoot, '.agents', 'workspace', 'active', taskId, 'task.md');
+  const taskMd = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId, 'task.md');
   if (!fs.existsSync(taskMd)) throw new Error(`Active task not found: ${taskId}`);
   const shortIds = Object.entries(registry).filter(([, id]) => id === taskId).map(([shortId]) => shortId);
   if (shortIds.length !== 1) {
@@ -126,14 +127,14 @@ export function resolveSandboxTarget(requestedRef: string, repoRoot: string): Sa
     const taskId = canonicalShortId ? registry[canonicalShortId] : undefined;
     if (!taskId) throw new Error(`Short id '${requestedRef}' not found in active task registry`);
     const workspace = taskIdentity(repoRoot, taskId, registry);
-    return { requestedRef, branch: taskBranch(path.join(repoRoot, '.agents', 'workspace', 'active', taskId, 'task.md'), taskId), workspace };
+    return { requestedRef, branch: taskBranch(path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId, 'task.md'), taskId), workspace };
   }
   if (TASK_ID_RE.test(requestedRef)) {
     const workspace = taskIdentity(repoRoot, requestedRef, registry);
-    return { requestedRef, branch: taskBranch(path.join(repoRoot, '.agents', 'workspace', 'active', requestedRef, 'task.md'), requestedRef), workspace };
+    return { requestedRef, branch: taskBranch(path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', requestedRef, 'task.md'), requestedRef), workspace };
   }
 
-  const activeRoot = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const activeRoot = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active');
   const matches = fs.existsSync(activeRoot)
     ? fs.readdirSync(activeRoot, { withFileTypes: true }).flatMap((entry) => {
       if (!entry.isDirectory() || !TASK_ID_RE.test(entry.name)) return [];

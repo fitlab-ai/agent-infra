@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +17,7 @@ function fixture() {
   const root = createTempDir('task-orchestration-cli-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
-  const dir = path.join(root, '.agents', 'workspace', 'active', id);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\ncurrent_step: requirement-analysis\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
@@ -69,11 +70,11 @@ function approvedRouteFixture(
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
   const id = 'TASK-20260101-000001';
-  const dir = path.join(root, '.agents', 'workspace', 'active', id);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\nfake-gh.cjs\npr.json\ncalls.jsonl\n');
   fs.writeFileSync(path.join(root, 'source.ts'), 'baseline\n');
-  const config = { platform: { type: 'github' }, ...(prFlow === undefined ? {} : { prFlow }) };
+  const config = { project: taskWorkspaceProject(root), platform: { type: 'github' }, ...(prFlow === undefined ? {} : { prFlow }) };
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), `${JSON.stringify(config)}\n`);
   spawnSync('git', ['add', '.'], { cwd: root });
   spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
@@ -369,6 +370,7 @@ test('task-orchestration begin fails closed when model policy is omitted', () =>
 test('task-orchestration falls back to the selected client project policy only', () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({
+    project: taskWorkspaceProject(f.root),
     agentClients: ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
       id,
       enabled: true,

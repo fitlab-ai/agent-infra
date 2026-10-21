@@ -47,7 +47,7 @@ description: >
 
 先解析 task scope：可选的 `--task <ref>` 或 `-t <ref>` 绑定 `{task-id}`；位置 task ref 不再解释。剩余的可选位置参数绑定为 `{target-branch}`。
 
-如果提供了 `{task-id}`，读取 `.agents/workspace/active/{task-id}/task.md` 获取任务信息（例如 `platform_issue_identity`、`type` 等）。
+如果提供了 `{task-id}`，读取 `<task-workspace>/active/{task-id}/task.md` 获取任务信息（例如 `platform_issue_identity`、`type` 等）。
 如果未提供，可从当前 session 上下文获取；仍无法确定 `{task-id}` 时，后续步骤中的任务关联逻辑跳过。
 
 ### 2. 确定目标分支
@@ -86,7 +86,7 @@ description: >
 
 读取最新的上下文产物：`plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md`、`review-code.md` / `review-code-r{N}.md`（存在时）。
 
-基于这些产物聚合 reviewer 摘要，正文只放一次 `<!-- canonical-pr-change-report -->` 占位符，再使用隐藏标记维护唯一且幂等的摘要评论。调用 `summary-sync` 时传入 `--change-report-file .agents/workspace/active/{task-id}/pr-change-report.json`，并继续传递同一个 `--result {primary-result}`；不得根据同步子步骤猜测 PR 是创建还是复用。
+基于这些产物聚合 reviewer 摘要，正文只放一次 `<!-- canonical-pr-change-report -->` 占位符，再使用隐藏标记维护唯一且幂等的摘要评论。调用 `summary-sync` 时传入 `--change-report-file <task-workspace>/active/{task-id}/pr-change-report.json`，并继续传递同一个 `--result {primary-result}`；不得根据同步子步骤猜测 PR 是创建还是复用。
 
 > canonical context、摘要聚合和 `summary-sync` 调用见 `reference/comment-publish.md`（其引用 `.agents/rules/pr-sync.md`）。发布摘要前先读取该 reference。
 

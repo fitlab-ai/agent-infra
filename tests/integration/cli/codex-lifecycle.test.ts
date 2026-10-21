@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +37,9 @@ function fixture() {
   const bin = path.join(root, 'bin');
   const codex = path.join(root, 'codex.mjs');
   const rollout = path.join(root, 'rollout-child.jsonl');
-  fs.mkdirSync(path.join(root, '.agents', 'workspace'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root) }));
+  fs.mkdirSync(taskWorkspaceRoot(root), { recursive: true });
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'session_meta', payload: {
       id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
@@ -121,7 +124,7 @@ function rewriteCompiledLauncher(root: string) {
 
 async function prepareLifecycleTask(root: string, hookDefinitionHash: string) {
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\nbranch: agent-infra-feature-test\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   beginOrResumeOrchestration(taskId, {
@@ -249,7 +252,7 @@ test('codex-lifecycle bridge rejects an unbound managed spawn before creating li
   }));
   assert.equal(spawn.status, 1, `${spawn.stderr}\n${spawn.stdout}`);
   assert.equal(JSON.parse(spawn.stdout).error.code, 'CODEX_LIFECYCLE_FAILED');
-  assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.runtime')), false);
+  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(root),  '.runtime')), false);
 });
 
 test('codex-lifecycle rejects a wrong receipt without lifecycle writes', async () => {

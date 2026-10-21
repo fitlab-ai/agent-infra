@@ -994,19 +994,26 @@ function entryVariantRels(entry, allSet, platform) {
   return rels;
 }
 
-function ensureRuntimeWorkspace(projectRoot) {
+function ensureRuntimeWorkspace(projectRoot, project) {
+  if (typeof project !== 'string' || !project || project === '.' || project === '..' || /[\\/\u0000-\u001f\u007f]/u.test(project)) {
+    throw new Error('Runtime task workspace requires a valid project key in .agents/.airc.json');
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  if (!path.isAbsolute(home)) throw new Error('Runtime task workspace requires an absolute HOME');
+  const workspaceRoot = path.join(home, '.agent-infra', 'task-workspaces', project);
   const directories = [
-    path.join(projectRoot, '.agents'),
-    path.join(projectRoot, '.agents', 'workspace'),
+    path.join(home, '.agent-infra'),
+    path.join(home, '.agent-infra', 'task-workspaces'),
+    workspaceRoot,
     ...['active', 'blocked', 'completed', 'archive'].map((state) =>
-      path.join(projectRoot, '.agents', 'workspace', state)
+      path.join(workspaceRoot, state)
     )
   ];
   for (const directory of directories) {
     if (fs.existsSync(directory)) {
       const stat = fs.lstatSync(directory);
       if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        throw new Error(`Runtime workspace path must be a real directory: ${directory}`);
+        throw new Error(`Runtime task workspace path must be a real directory: ${directory}`);
       }
       continue;
     }
@@ -1024,7 +1031,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const originalConfigText = fs.readFileSync(cfgPath, 'utf8');
   const cfg = JSON.parse(originalConfigText);
-  ensureRuntimeWorkspace(projectRoot);
+  ensureRuntimeWorkspace(projectRoot, cfg.project);
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
   let templateRoot = templateRootOverride;
   if (!templateRoot) {

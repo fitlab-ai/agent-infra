@@ -22,7 +22,7 @@ Comments use `platform-comment`; Issue resources use `platform-issue`:
 ```bash
 agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
 agent-infra-internal platform-comment recover --issue <issue-token> --task-id <TASK-id> \
-  --output <.agents/workspace/.restore-staging-*/task.md> [--cwd <path>]
+  --output <<task-workspace>/.restore-staging-*/task.md> [--cwd <path>]
 agent-infra-internal platform-issue inspect {task-id}
 agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
 agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}

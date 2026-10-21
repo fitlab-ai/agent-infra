@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { createTempDir, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { createTempDir, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv, taskWorkspaceProject } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
@@ -103,13 +104,13 @@ function fixture(step = 'requirement-analysis-review') {
   spawnSync('git', ['init', '-q'], { cwd: root });
   fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents/.airc.json'), JSON.stringify({ delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
+  fs.writeFileSync(path.join(root, '.agents/.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
   spawnSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
   spawnSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
   spawnSync('git', ['add', '.gitignore', '.agents/.airc.json'], { cwd: root });
   spawnSync('git', ['commit', '-qm', 'fixture baseline'], { cwd: root });
   const id = 'TASK-20260101-000001';
-  const dir = path.join(root, '.agents', 'workspace', 'active', id);
+  const dir = path.join(taskWorkspaceRoot(root),  'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(path.join(dir, '.runtime'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\ndelivery_remote: origin\ndelivery_base_ref: main\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
@@ -237,7 +238,7 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxContr
 }
 
 function bindReviewIdentity(root: string, taskId: string, artifact: string): void {
-  const reportPath = path.join(root, '.agents', 'workspace', 'active', taskId, artifact);
+  const reportPath = path.join(taskWorkspaceRoot(root),  'active', taskId, artifact);
   if (!fs.existsSync(reportPath)) return;
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const reviewed = snapshotReview({ cwd: root, mode: 'worktree', baseline: head, diffBase: head, globs: resolvePostReviewGlobs({}, {}) });
@@ -310,11 +311,11 @@ function localArtifact(family: LocalArtifactFamily, suffix = '', artifact = `${f
   return `${content}${suffix}`;
 }
 
-function completionDigestArgs(dir: string, artifact: string, family: LocalArtifactFamily): string[] {
+function completionDigestArgs(repoRoot: string, dir: string, artifact: string, family: LocalArtifactFamily): string[] {
   const file = path.join(dir, artifact);
   const result = finalizeLocalArtifact({
     taskRef: path.basename(dir),
-    repoRoot: path.resolve(dir, '../../../..'),
+    repoRoot,
     family,
     artifact
   });
@@ -517,7 +518,7 @@ test('internal task-event keeps a blocked task state mismatch closed', () => {
   const root = createTempDir('task-event-override-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000002';
-  const dir = path.join(root, '.agents', 'workspace', 'blocked', id);
+  const dir = path.join(taskWorkspaceRoot(root),  'blocked', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: blocked\ncurrent_step: requirement-analysis-review\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## Activity Log\n\n`);
   try {
@@ -543,11 +544,11 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   const repeated = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);
   assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+  const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')]);
   assert.equal(done.status, 0, done.stderr);
   assert.equal(JSON.parse(done.stdout).toStep, 'technical-design');
   const beforeReplay = fs.readFileSync(f.file, 'utf8');
-  const replayed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+  const replayed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')]);
   assert.equal(replayed.status, 0, replayed.stderr);
   assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.deepEqual(fs.readFileSync(f.file, 'utf8'), beforeReplay);
@@ -566,12 +567,12 @@ test('plan completion gate allows a valid plan to resume after review-plan advan
     fs.copyFileSync(path.join(process.cwd(), '.agents', 'skills', 'plan-task', 'config', 'verify.json'), path.join(configDir, 'verify.json'));
     const content = fs.readFileSync(f.file, 'utf8').replace(
       `id: ${f.id}`,
-      `id: ${f.id}\ntype: bugfix\nworkflow: bug-fix\ncreated_at: '2026-01-01 00:00:00+00:00'\nbranch: agent-infra-bugfix-lifecycle-resume-fixture`
+      `id: ${f.id}\ntype: bugfix\nworkflow: bug-fix\ncreated_at: '2026-01-01 00:00:00+00:00'\nbranch: ${taskWorkspaceProject(f.root)}-bugfix-lifecycle-resume-fixture`
     );
     fs.writeFileSync(f.file, content);
     assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']).status, 0);
     fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-    const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+    const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')]);
     assert.equal(completed.status, 0, completed.stderr || completed.stdout);
     assert.equal(run(f.root, [f.id, 'review-plan.started', '--agent', 'codex', '--round', '1']).status, 0);
     fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
@@ -652,7 +653,7 @@ test('completion accepts the skill result when task input changes after started'
   assert.equal(started.status, 0, started.stderr);
   fs.appendFileSync(f.file, '\n## Task Input\n\nChanged after start.\n');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const digestArgs = completionDigestArgs(f.dir, 'plan.md', 'plan');
+  const digestArgs = completionDigestArgs(f.root, f.dir, 'plan.md', 'plan');
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model',
     '--request-id', 'plan-request-1', '--reason-code', 'user-request', '--artifact', 'plan.md', ...digestArgs
@@ -731,7 +732,7 @@ test('local completion rejects a stale finalizer digest before mutating task sta
     assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
     const artifact = path.join(f.dir, 'plan.md');
     fs.writeFileSync(artifact, localArtifact('plan'));
-    const digests = completionDigestArgs(f.dir, 'plan.md', 'plan');
+    const digests = completionDigestArgs(f.root, f.dir, 'plan.md', 'plan');
     const stale = kind === 'artifactSha256'
       ? ['--artifact-sha256', '0'.repeat(64), '--semantic-digest', digests[3]!]
       : ['--artifact-sha256', digests[1]!, '--semantic-digest', '0'.repeat(64)];
@@ -848,7 +849,7 @@ test('completed event preserves source @ content without blocking task state', (
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan', '\n@2x\n'));
   const before = fs.readFileSync(f.file);
-  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')]);
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
   assert.notDeepEqual(fs.readFileSync(f.file), before);
 });
@@ -885,7 +886,7 @@ test('plan event reopens technical design after commit preparation', () => {
 
   fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan', '', 'plan-r2.md'));
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan'),
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.root, f.dir, 'plan-r2.md', 'plan'),
     '--reason-code', 'new-requirement', '--request-id', `${f.id}:plan-rework`, '--initiator', 'human'
   ]);
   assert.equal(completed.status, 0, completed.stdout || completed.stderr);
@@ -917,7 +918,7 @@ test('plan event reopens technical design after code review', () => {
 
   fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan', '', 'plan-r2.md'));
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.root, f.dir, 'plan-r2.md', 'plan')
   ]);
   assert.equal(completed.status, 0, completed.stdout || completed.stderr);
   const completedResult = JSON.parse(completed.stdout);
@@ -980,7 +981,7 @@ test('completed event validates orchestration provenance before writing task sta
 
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'claude-code', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--orchestrated'
+    f.id, 'plan.completed', '--agent', 'claude-code', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--orchestrated'
   ]);
   assert.equal(completed.status, 1);
   assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_TRANSITION_INVALID');
@@ -998,7 +999,7 @@ test('standalone completion ignores a current orchestration run without a pendin
   const runBefore = fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json'));
 
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')
   ]);
 
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
@@ -1022,7 +1023,7 @@ test('standalone completion ignores a legacy delegation receipt without a curren
   const runBefore = fs.readFileSync(runPath);
 
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')
   ]);
 
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
@@ -1040,7 +1041,7 @@ test('orchestrated completion advances one matching activated delegation', () =>
   }), null, 2)}\n`);
 
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--orchestrated'
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--orchestrated'
   ]);
 
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
@@ -1123,7 +1124,7 @@ test('dry-run returns planned without changing task bytes for start and completi
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   const beforeCompletion = fs.readFileSync(f.file);
-  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--dry-run']);
+  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--dry-run']);
   const completedResult = JSON.parse(completed.stdout);
   assert.equal(completedResult.status, 'planned');
   assert.equal(completedResult.operations.length, 5);
@@ -1147,7 +1148,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
   const runBefore = fs.readFileSync(runPath);
 
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--orchestrated', '--dry-run'
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--orchestrated', '--dry-run'
   ]);
 
   assert.equal(completed.status, 1);
@@ -1205,14 +1206,14 @@ test('analysis can restart from code when task requirements expand', () => {
 
   fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
   const completed = run(f.root, [
-    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'),
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.root, f.dir, 'analysis-r2.md', 'analysis'),
     '--reason-code', 'new-requirement', '--request-id', `${f.id}:requirements-expanded`, '--initiator', 'human'
   ]);
   assert.equal(completed.status, 0, completed.stderr);
   assert.equal(JSON.parse(completed.stdout).toStep, 'requirement-analysis');
   const beforeReplay = fs.readFileSync(f.file, 'utf8');
   const replayed = run(f.root, [
-    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'),
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.root, f.dir, 'analysis-r2.md', 'analysis'),
     '--reason-code', 'new-requirement', '--request-id', `${f.id}:requirements-expanded`, '--initiator', 'human'
   ]);
   assert.equal(replayed.status, 0, replayed.stderr);
@@ -1240,7 +1241,7 @@ test('streamlined design rework is consumed after the analysis upgrade step', ()
     fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis').replace('完整路径', '标准路径'));
     const completed = run(f.root, [
       f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
-      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'), '--initiator', 'model',
+      ...completionDigestArgs(f.root, f.dir, 'analysis-r2.md', 'analysis'), '--initiator', 'model',
       '--request-id', `${f.id}:design-rework`, '--reason-code', 'review-finding'
     ]);
     assert.equal(completed.status, 0, completed.stdout || completed.stderr);
@@ -1269,7 +1270,7 @@ test('code completion rejects a missing lifecycle input freeze without writing c
     fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
     const completed = run(f.root, [
       f.id, 'code.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:missing-freeze`, '--reason-code', 'user-request',
-      '--artifact', 'code.md', '--files-modified', '0', '--tests-passed', '0', ...completionDigestArgs(f.dir, 'code.md', 'code')
+      '--artifact', 'code.md', '--files-modified', '0', '--tests-passed', '0', ...completionDigestArgs(f.root, f.dir, 'code.md', 'code')
     ]);
     assert.notEqual(completed.status, 0);
     assert.match(completed.stdout, /lifecycle input context|frozen lifecycle input/i);
@@ -1811,8 +1812,8 @@ test('review-code completion anchors the task branch worktree when the task work
   const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: registeredWorktree, encoding: 'utf8' }).stdout.trim();
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('assigned_to: claude', `assigned_to: claude\nbranch: ${branch}`));
   fs.renameSync(registeredWorktree, sandboxWorktree);
-  const sandboxTaskDir = path.join(sandboxWorktree, '.agents', 'workspace', 'active', f.id);
-  fs.cpSync(f.dir, sandboxTaskDir, { recursive: true });
+  const sandboxTaskDir = path.join(taskWorkspaceRoot(sandboxWorktree),  'active', f.id);
+  assert.equal(sandboxTaskDir, f.dir, 'registered worktrees of the same project share the host task root');
 
   const started = run(sandboxWorktree, [
     f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
@@ -1915,7 +1916,7 @@ test('decision code event clears the review baseline and consumes its input on c
   assert.match(content, /\| II-1 .*\| pending \|\s*\|/);
 
   fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport());
-  const digests = completionDigestArgs(f.dir, 'code-r2.md', 'code');
+  const digests = completionDigestArgs(f.root, f.dir, 'code-r2.md', 'code');
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
@@ -1966,7 +1967,7 @@ test('code completion uses the plan identity bound by code.started', () => {
   const started = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1']);
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport().replace('- **方案输入**：`plan.md`', '本轮输入为 `plan.md`'));
-  const digests = completionDigestArgs(f.dir, 'code-r2.md', 'code');
+  const digests = completionDigestArgs(f.root, f.dir, 'code-r2.md', 'code');
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '1', ...digests
@@ -2005,7 +2006,7 @@ test('code completion keeps its original result counts and permits only exact re
     assert.match(fs.readFileSync(f.file, 'utf8'), /^lifecycle_input_relations: /m);
     fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
     const args = [f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code.md',
-      ...completionDigestArgs(f.dir, 'code.md', 'code')];
+      ...completionDigestArgs(f.root, f.dir, 'code.md', 'code')];
     const completedArgs = [...args, '--files-modified', '1', '--tests-passed', '10'];
     const completed = run(f.root, completedArgs);
     assert.equal(completed.status, 0, completed.stderr || completed.stdout);
@@ -2047,7 +2048,7 @@ test('code completion rejects a plan changed after code started', () => {
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan v2\n');
   fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
-  const digests = completionDigestArgs(f.dir, 'code.md', 'code');
+  const digests = completionDigestArgs(f.root, f.dir, 'code.md', 'code');
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code.md',

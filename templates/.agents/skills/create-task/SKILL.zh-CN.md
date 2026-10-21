@@ -177,7 +177,7 @@ agent-infra-internal task-verify {task-id} create-task.completed --format text
 - Issue：#{issue-number} {issue_url}
 
 产出文件：
-- 任务文件：.agents/workspace/active/{task-id}/task.md
+- 任务文件：<task-workspace>/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
 {next-step-commands}
@@ -196,7 +196,7 @@ agent-infra-internal task-verify {task-id} create-task.completed --format text
 - 工作流：{workflow}
 
 产出文件：
-- 任务文件：.agents/workspace/active/{task-id}/task.md
+- 任务文件：<task-workspace>/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
 {next-step-commands}
@@ -220,7 +220,7 @@ Issue 创建失败：
 - 本地 task.md 已保留，未回滚
 
 产出文件：
-- 任务文件：.agents/workspace/active/{task-id}/task.md
+- 任务文件：<task-workspace>/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
 {next-step-commands}
@@ -236,7 +236,7 @@ Issue 创建失败：
 ## 完成检查清单
 
 - [ ] 只生成一次结构化 candidate 并调用 `agent-infra-internal task-create`
-- [ ] 宿主创建了任务文件 `.agents/workspace/active/{task-id}/task.md`
+- [ ] 宿主创建了任务文件 `<task-workspace>/active/{task-id}/task.md`
 - [ ] 已按 `reference/context-capture.md` 写入并复核 `## 任务输入` 的来源与状态语义
 - [ ] 响应中的任务 ID 和短号已通过完成校验
 - [ ] 已按 `.agents/rules/create-issue.md` 尝试级联创建 Issue；失败时保留 task.md 并记录原因

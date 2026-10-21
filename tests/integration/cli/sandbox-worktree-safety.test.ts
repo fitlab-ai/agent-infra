@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -20,6 +21,7 @@ import {
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
+  isolatedTestHome,
   loadFreshEsm,
   onPlatforms,
   writeSandboxEngineFixture
@@ -72,7 +74,9 @@ function createLinkedWorktree(): {
   fs.mkdirSync(base, { recursive: true });
   git(repo, "init", "-q", "-b", "main");
   fs.writeFileSync(path.join(repo, "tracked.txt"), "initial\n", "utf8");
-  git(repo, "add", "tracked.txt");
+  fs.mkdirSync(path.join(repo, ".agents"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(repo) }) + "\n");
+  git(repo, "add", "tracked.txt", ".agents/.airc.json");
   git(repo, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "initial");
   git(repo, "worktree", "add", "-q", "-b", "feature/safe-delete", worktree, "HEAD");
   return {
@@ -116,9 +120,10 @@ function addActiveTask(
   repoDir: string,
   taskId: string,
   branch: string,
-  shortId = "7"
+  shortId = "7",
+  home?: string
 ): void {
-  const activeRoot = path.join(repoDir, ".agents", "workspace", "active");
+  const activeRoot = path.join(taskWorkspaceRoot(repoDir, home), "active");
   fs.mkdirSync(path.join(activeRoot, taskId), { recursive: true });
   fs.writeFileSync(
     path.join(activeRoot, taskId, "task.md"),
@@ -188,14 +193,14 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
   return {
     repoRoot: fixture.repoDir,
     configPath: path.join(fixture.repoDir, ".agents", ".airc.json"),
-    project: "demo",
+    project: fixture.project,
     org: "fitlab-ai",
     home: tmpDir,
-    containerPrefix: "demo-dev",
-    imageName: "demo-sandbox:latest",
-    worktreeBase: path.join(tmpDir, ".agent-infra", "worktrees", "demo"),
-    shareBase: path.join(tmpDir, ".agent-infra", "share", "demo"),
-    shellConfigBase: path.join(tmpDir, ".agent-infra", "config", "demo"),
+    containerPrefix: `${fixture.project}-dev`,
+    imageName: `${fixture.project}-sandbox:latest`,
+    worktreeBase: path.join(tmpDir, ".agent-infra", "worktrees", fixture.project),
+    shareBase: path.join(tmpDir, ".agent-infra", "share", fixture.project),
+    shellConfigBase: path.join(tmpDir, ".agent-infra", "config", fixture.project),
     workspaceViewBase: path.join(tmpDir, ".agent-infra", "workspace-views"),
     controlBase: path.join(tmpDir, ".agent-infra", "sandbox-control"),
     dotfilesDir: path.join(tmpDir, ".agent-infra", "dotfiles"),
@@ -234,8 +239,8 @@ function writeTaskBoundCleanupEvidence(
   workspaceViewRoots: never[];
 } } {
   const taskDir = state === "archive"
-    ? path.join(config.repoRoot, ".agents", "workspace", "archive", "2026", "08", "24", taskId, "local")
-    : path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+    ? path.join(taskWorkspaceRoot(config.repoRoot, config.home), "archive", "2026", "08", "24", taskId, "local")
+    : path.join(taskWorkspaceRoot(config.repoRoot, config.home), "completed", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
     path.join(taskDir, "task.md"),
@@ -359,12 +364,12 @@ function writeTaskBoundCleanupEvidence(
 }
 
 function makeCompletedUnboundDigestMismatch(config: SandboxConfig, taskId: string): void {
-  const receiptPath = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, ".task-finalization.json");
+  const receiptPath = path.join(taskWorkspaceRoot(config.repoRoot, config.home), "completed", taskId, ".task-finalization.json");
   const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
   delete receipt.controlBinding;
   fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`, "utf8");
   fs.writeFileSync(
-    path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, "plan.md"),
+    path.join(taskWorkspaceRoot(config.repoRoot, config.home), "completed", taskId, "plan.md"),
     "# Plan changed\n",
     "utf8"
   );
@@ -672,7 +677,9 @@ test("recovered worktree safety resolves the common Git directory from a linked 
     fs.mkdirSync(worktreeBase, { recursive: true });
     git(mainRepo, "init", "-q", "-b", "main");
     fs.writeFileSync(path.join(mainRepo, "tracked.txt"), "initial\n", "utf8");
-    git(mainRepo, "add", "tracked.txt");
+    fs.mkdirSync(path.join(mainRepo, ".agents"), { recursive: true });
+    fs.writeFileSync(path.join(mainRepo, ".agents", ".airc.json"), JSON.stringify({ project: taskWorkspaceProject(mainRepo) }) + "\n");
+    git(mainRepo, "add", "tracked.txt", ".agents/.airc.json");
     git(mainRepo, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "initial");
     git(mainRepo, "worktree", "add", "-q", "-b", "management", repoRoot, "HEAD");
     git(mainRepo, "worktree", "add", "-q", "-b", "feature/safe-delete", worktree, "HEAD");
@@ -989,10 +996,10 @@ test("sandbox rm releases a stale short id after task-bound cleanup", onPlatform
   const branch = "feature/stale-short-id";
   const taskId = "TASK-20260824-000015";
   try {
-    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
-    const config = rmOneConfig(fixture, tmpDir);
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: taskWorkspaceProject(path.join(tmpDir, "repo")) });
+    const config = rmOneConfig(fixture, isolatedTestHome());
     const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch, "archive");
-    const registryPath = path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json");
+    const registryPath = path.join(taskWorkspaceRoot(config.repoRoot), "active", ".short-ids.json");
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
     fs.writeFileSync(
       registryPath,
@@ -1024,17 +1031,18 @@ test("sandbox rm preserves a stale short id when container removal cannot be con
   const tmpDir = createTempDir("agent-infra-rm-unconfirmed-short-id-");
   const branch = "feature/unconfirmed-short-id";
   const taskId = "TASK-20260824-000017";
-  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const project = taskWorkspaceProject(path.join(tmpDir, "repo"));
+  const container = `${project}-dev-${branch.replaceAll("/", "..")}`;
   const previousRmId = process.env.DOCKER_EXIT_FOR_RM_ID;
   try {
     process.env.DOCKER_EXIT_FOR_RM_ID = container;
     const fixture = writeSandboxEngineFixture(tmpDir, {
-      project: "demo",
-      dockerStdoutForPs: `${container}\tUp 1 minute\tdemo.sandbox=true\n`
+      project,
+      dockerStdoutForPs: `${container}\tUp 1 minute\t${project}.sandbox=true\n`
     });
-    const config = rmOneConfig(fixture, tmpDir);
+    const config = rmOneConfig(fixture, isolatedTestHome());
     const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
-    const registryPath = path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json");
+    const registryPath = path.join(taskWorkspaceRoot(config.repoRoot), "active", ".short-ids.json");
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
     fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { "07": taskId } })}\n`, "utf8");
 
@@ -1072,11 +1080,11 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     const config = rmOneConfig(fixture, tmpDir);
     const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
-    const completedDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
-    const activeDir = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+    const completedDir = path.join(taskWorkspaceRoot(config.repoRoot, config.home), "completed", taskId);
+    const activeDir = path.join(taskWorkspaceRoot(config.repoRoot, config.home), "active", taskId);
     fs.mkdirSync(path.dirname(activeDir), { recursive: true });
     fs.renameSync(completedDir, activeDir);
-    addActiveTask(config.repoRoot, taskId, branch, "07");
+    addActiveTask(config.repoRoot, taskId, branch, "07", config.home);
 
     const activeIntentPath = path.join(activeDir, ".checkpoint-intent.json");
     const intentBytes = fs.readFileSync(activeIntentPath);
@@ -1095,7 +1103,7 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
     assert.deepEqual(fs.readFileSync(activeIntentPath), intentBytes);
     assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
     assert.deepEqual(
-      JSON.parse(fs.readFileSync(path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json"), "utf8")).ids,
+      JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(config.repoRoot, config.home), "active", ".short-ids.json"), "utf8")).ids,
       { "07": taskId }
     );
     assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), []);

@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -77,7 +78,7 @@ function mockClient(options: {
 }
 
 function writeReviewArtifact(root: string, body: string, artifact = 'pr-review.md'): string {
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', IDENTITY.scope);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', IDENTITY.scope);
   const file = path.join(taskDir, artifact);
   const bodyFile = artifact.replace(/^pr-review/u, 'pr-review-body');
   fs.writeFileSync(file, `# PR review\n\n**Body file**: \`${bodyFile}\`\n`);
@@ -113,7 +114,7 @@ test('publishPrReview generates the marker on first publish and the body starts 
 test('task-scoped PR review publication is recorded by the shared platform queue', async () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const body = '## Findings\n- task-scoped review';
@@ -153,7 +154,7 @@ test('task-scoped PR review publication is recorded by the shared platform queue
 test('task-scoped PR review publication rejects a missing report before queueing or publishing', async () => {
   const root = fixture();
   const taskId = IDENTITY.scope;
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const body = '## Findings\n- body without report';
@@ -183,7 +184,7 @@ test('task-scoped PR review publication rejects a missing report before queueing
 test('task-scoped PR review publication rejects a report that references another body file', async () => {
   const root = fixture();
   const taskId = IDENTITY.scope;
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const body = '## Findings\n- wrong report reference';
@@ -214,7 +215,7 @@ test('task-scoped PR review publication rejects a report that references another
 test('PR review recovery recognizes an accepted review before retrying its queued write', async () => {
   const root = fixture();
   const taskId = IDENTITY.scope;
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const resource = { kind: 'number' as const, value: 42 };
@@ -250,7 +251,7 @@ test('PR review recovery recognizes an accepted review before retrying its queue
 test('PR review recovery fails closed when its canonical body changes after queuing', async () => {
   const root = fixture();
   const taskId = IDENTITY.scope;
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const resource = { kind: 'number' as const, value: 42 };
@@ -286,7 +287,7 @@ test('PR review recovery fails closed when its canonical body changes after queu
 test('PR review recovery stops when the journal target differs from its persisted resource identity', async () => {
   const root = fixture();
   const taskId = IDENTITY.scope;
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const intentResource = { kind: 'number' as const, value: 42 };
@@ -320,7 +321,7 @@ test('PR review recovery stops when the journal target differs from its persiste
 test('PR review recovery rejects the same PR identity in a different provider scope before listing or writing', async () => {
   const root = fixture('other/widgets');
   const taskId = IDENTITY.scope;
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const resource = { kind: 'number' as const, value: 42 };

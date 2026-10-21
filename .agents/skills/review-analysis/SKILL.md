@@ -56,7 +56,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 ### 1. 验证前置条件
 
 要求存在：
-- `.agents/workspace/active/{task-id}/task.md`
+- `<task-workspace>/active/{task-id}/task.md`
 - 至少一个分析产物：`analysis.md` 或 `analysis-r{N}.md`
 
 ### 2. 解析审查上下文
@@ -84,7 +84,7 @@ agent-infra-internal task-artifact {task-id} init --family review-analysis --art
 
 骨架不生成审查结论、发现或计数；完成审查内容后才能进入 summary finalizer。结构错误时，遵循 `.agents/rules/local-artifact-repair.md` 直接修正正式审查产物并重跑原 finalizer；当前产物内容是唯一输入。
 
-创建 `.agents/workspace/active/{task-id}/{review-artifact}`。
+创建 `<task-workspace>/active/{task-id}/{review-artifact}`。
 
 > 报告格式见 `reference/report-template.md`。写报告前先读取 `reference/report-template.md`。
 

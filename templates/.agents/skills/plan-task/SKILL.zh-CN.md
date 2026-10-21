@@ -60,7 +60,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agents/workspace/active/{task-id}/task.md` - 任务文件
+- `<task-workspace>/active/{task-id}/task.md` - 任务文件
 - 至少一个分析产物：`analysis.md` 或 `analysis-r{N}.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
@@ -126,11 +126,11 @@ agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan
 
 骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实方案内容后才能通过完成门禁。finalizer 返回结构错误时，直接修正正式产物后重跑 `task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}`；当前结构、资格和摘要事实是唯一门禁。
 
-创建 `.agents/workspace/active/{task-id}/{plan-artifact}`。
+创建 `<task-workspace>/active/{task-id}/{plan-artifact}`。
 
 ### 7. 更新任务状态
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
+更新 `<task-workspace>/active/{task-id}/task.md`：
 - 仅更新工作量、审查响应等本技能拥有的业务内容；产物链接、阶段与完成日志由 completed 事件统一登记
 - 在追加工作流 Activity Log 条目之前，基于技术方案（实施步骤数、涉及文件、测试矩阵范围、集成面）重估 `effort`。若重估值与 `task.md` 当前值不一致：
   - 用新值覆盖 frontmatter 的 `effort` 字段
@@ -187,7 +187,7 @@ agent-infra-internal task-verify {task-id} plan.completed --artifact {plan-artif
 - 预估复杂度：{评估}
 
 产出文件：
-- 技术方案：.agents/workspace/active/{task-id}/{plan-artifact}
+- 技术方案：<task-workspace>/active/{task-id}/{plan-artifact}
 
 下一步 - 按所选路径继续：
 {next-step-commands}
@@ -197,7 +197,7 @@ agent-infra-internal task-verify {task-id} plan.completed --artifact {plan-artif
 
 - [ ] 阅读并理解了需求分析
 - [ ] 考虑了备选方案
-- [ ] 创建了计划文档 `.agents/workspace/active/{task-id}/{plan-artifact}`
+- [ ] 创建了计划文档 `<task-workspace>/active/{task-id}/{plan-artifact}`
 - [ ] 更新了 task.md 中的 `current_step` 为 technical-design
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 在 task.md 中记录了 `{plan-artifact}` 为已完成产物

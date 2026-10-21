@@ -24,7 +24,7 @@
 
 ```text
 任务 {task-id} 审查结果已生成，但生命周期未推进。
-- 审查产物：.agents/workspace/active/{task-id}/{review-artifact}
+- 审查产物：<task-workspace>/active/{task-id}/{review-artifact}
 - 最后有效 summary/findings：{last-readable-review-result}
 - 本地修复次数：{repairAttempts}
 - 最后诊断：{last-structured-diagnostic}
@@ -43,7 +43,7 @@
 ```text
 任务 {task-id} 技术方案审查完成。结论：通过。
 - 阻塞项：0 | 主要问题：0 | 次要问题：0 | 人工裁决：{h}
-[- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}]
+[- 审查报告：<task-workspace>/active/{task-id}/{review-artifact}]
 
 下一步 - 编写代码：
 {next-step-commands}
@@ -59,7 +59,7 @@
 ```text
 任务 {task-id} 技术方案审查完成。结论：需要修改。
 - 阻塞项：0 | 主要问题：{n} | 次要问题：{n} | 人工裁决：{h}
-- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
+- 审查报告：<task-workspace>/active/{task-id}/{review-artifact}
 
 下一步 - 修订技术方案：
 {next-step-commands}
@@ -75,7 +75,7 @@
 ```text
 任务 {task-id} 技术方案审查完成。结论：需要修改。
 - 阻塞项：{n} | 主要问题：{n} | 次要问题：{n} | 人工裁决：{h}
-- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
+- 审查报告：<task-workspace>/active/{task-id}/{review-artifact}
 
 下一步 - 修订技术方案：
 {next-step-commands}
@@ -91,7 +91,7 @@
 ```text
 任务 {task-id} 技术方案审查完成。结论：拒绝，需要重新设计。
 - 阻塞项：{n} | 主要问题：{n} | 次要问题：{n} | 人工裁决：{h}
-- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
+- 审查报告：<task-workspace>/active/{task-id}/{review-artifact}
 
 下一步 - 重新设计：
 {next-step-commands}

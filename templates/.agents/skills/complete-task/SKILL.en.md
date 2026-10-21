@@ -50,7 +50,7 @@ On the normal path, complete business updates, platform sync, and the pre-comple
 
 ### 1. Verify Task Exists
 
-Check that the task exists in `.agents/workspace/active/{task-id}/`.
+Check that the task exists in `<task-workspace>/active/{task-id}/`.
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
 
@@ -209,7 +209,7 @@ Task {task-id} completed; task directory moved to completed/.
 Task info:
 - Title: {title}
 - Completed at: {timestamp}
-- Target path: .agents/workspace/completed/{task-id}/
+- Target path: <task-workspace>/completed/{task-id}/
 
 Deliverables:
 - {List of key outputs: files modified, tests added, etc.}
@@ -227,7 +227,7 @@ ai sandbox rm {task-id}  # or use the task's retained short id
 
 - [ ] Verified all workflow steps are complete
 - [ ] Updated task.md with completed status and timestamp
-- [ ] Moved task directory to `.agents/workspace/completed/`
+- [ ] Moved task directory to `<task-workspace>/completed/`
 - [ ] Verified move succeeded
 - [ ] Informed user of completion
 
@@ -242,7 +242,7 @@ ai sandbox rm {task-id}  # or use the task's retained short id
 
 2. **Rollback**: If a task was incorrectly moved:
    ```bash
-   mv .agents/workspace/completed/{task-id} .agents/workspace/active/{task-id}
+   mv <task-workspace>/completed/{task-id} <task-workspace>/active/{task-id}
    ```
    Then update task.md status back to `active`.
 

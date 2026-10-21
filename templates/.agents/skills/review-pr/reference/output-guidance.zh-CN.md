@@ -8,7 +8,7 @@
 |------|----------|----------|
 | A 本地审查完成 | 本地审查轮次闭合且校验通过；正式 Review 已发布或有持久化待恢复记录 | 结论、模式、被审 head SHA、实际发布状态、Review URL 或恢复动作、receipt、下一步 |
 | B 阻塞要求关联 | `resolve-host` 返回 none 或 ambiguous | 关联指引（创建/关联 Issue 与 task），不自动创建 Issue；或显式选择一次性检视 |
-| C 一次性检视 | 用户显式选择「仅一次性检视」 | 不可恢复提示、产物目录 `.agents/workspace/reviews/{pr-number}/`、Review URL 或发布失败 |
+| C 一次性检视 | 用户显式选择「仅一次性检视」 | 不可恢复提示、产物目录 `<task-workspace>/reviews/{pr-number}/`、Review URL 或发布失败 |
 
 ## 呈现要求
 

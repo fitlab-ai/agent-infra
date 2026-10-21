@@ -81,7 +81,7 @@ agent-infra-internal task-artifact {task-id} init --family review-plan --artifac
 
 The skeleton contains identity metadata, stable section markers, and required headings only; complete review content is required before summary finalization. On a structural error, follow `.agents/rules/local-artifact-repair.md` to correct the formal review artifact directly and rerun the original finalizer; current artifact content is the only input.
 
-Create `.agents/workspace/active/{task-id}/{review-artifact}`.
+Create `<task-workspace>/active/{task-id}/{review-artifact}`.
 
 > Read `reference/report-template.md` before writing the report.
 

@@ -517,6 +517,7 @@ function reworkIntentMutationForCompletion(
 function buildCompletionReceipt(
   content: string,
   taskDir: string,
+  repositoryRoot: string | undefined,
   family: EventFamily,
   artifact: ArtifactIdentity,
   completedAt: string,
@@ -525,7 +526,7 @@ function buildCompletionReceipt(
 ): { ok: true; receipts: readonly ArtifactReceipt[] } | { ok: false; message: string } | null {
   if (!['analyze', 'plan', 'code'].includes(family) && !family.startsWith('review-')) return null;
   if (family === 'review-code') {
-    const identity = inspectReviewIdentity(taskDir, fs.readFileSync(artifact.path, 'utf8'));
+    const identity = inspectReviewIdentity(taskDir, fs.readFileSync(artifact.path, 'utf8'), repositoryRoot);
     if (identity.status !== 'matched') return { ok: false, message: `review-code identity is ${identity.status}: ${identity.message}` };
   }
   const event = family === 'analyze' ? 'analysis.completed'
@@ -755,7 +756,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   }
   if (eventIdentity.phase === 'started') {
     const trigger = eventTrigger(normalized, eventIdentity.family);
-    const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state);
+    const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state, false, resolved.repoRoot);
     if (!facts.ok) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${facts.code}: ${facts.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     const capability = canStart(lifecycleAction(eventIdentity.family), facts.facts, trigger);
     const safetyFailure = capability.reasonCode === 'TASK_NOT_ACTIVE'
@@ -802,7 +803,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   let currentFact: CompletionFact | null = null;
   let completionRework: ReturnType<typeof reworkIntentMutation> | null = null;
   if (eventIdentity.phase === 'completed' && completedArtifact) {
-    const receipt = buildCompletionReceipt(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter, normalized);
+    const receipt = buildCompletionReceipt(content, resolved.taskDir, resolved.repoRoot, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter, normalized);
     if (receipt && !receipt.ok) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: receipt.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }

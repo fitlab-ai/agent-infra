@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import {
   normalizeShortIdInput,
   lookupShortIdByBranch
 } from '../../../lib/task/short-id.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 type ShortIdCase = {
   input: string;
@@ -67,8 +68,8 @@ for (const c of NORMALIZE_CASES) {
 }
 
 function mkRegistryFixture(): { repoRoot: string; activeDir: string } {
-  const repoRoot = createTempDir('shortid-lookup-');
-  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const { repoRoot } = createTaskWorkspaceFixture('shortid-lookup-');
+  const activeDir = path.join(taskWorkspaceRoot(repoRoot),  'active');
   fs.mkdirSync(activeDir, { recursive: true });
   return { repoRoot, activeDir };
 }

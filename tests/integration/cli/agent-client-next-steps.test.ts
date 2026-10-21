@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -42,7 +43,7 @@ function runLaunchCarrier(root: string, args: string[]) {
 test('agent-client launch-carrier invokes the selected adapter and fails without workspace mutation when unsupported', () => {
   const root = fixture({ project: 'demo', agentClients: canonical(['codex']) });
   const taskId = 'TASK-20261006-000008';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
   const runPath = path.join(taskDir, '.runtime', 'orchestration.json');
   fs.mkdirSync(path.dirname(runPath), { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);

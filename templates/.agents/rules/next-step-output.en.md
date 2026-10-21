@@ -17,7 +17,7 @@ This file defines three **independent** rules for a skill's "notify-user / Next 
 
 - **Next-step TUI commands** (`/analyze-task`, `/{{project}}:review-code`, `$create-pr`, etc., including commands inside Markdown table cells) → always use `{task-ref}` (short id).
 - **"Task info" / "Task status" structured field lines** → show full id and short id together: `- Task ID: {task-id} (short id {task-ref})`.
-- **Report titles** (`Task {task-id} ... completed`) and **artifact paths** (`.agents/workspace/active/{task-id}/...`) → keep the full `{task-id}` (physical path and archive key, must not change).
+- **Report titles** (`Task {task-id} ... completed`) and **artifact paths** (`<task-workspace>/active/{task-id}/...`) → keep the full `{task-id}` (physical path and archive key, must not change).
 
 ## Unified Client Command Rendering
 
@@ -39,7 +39,7 @@ agent-infra-internal agent-client next-steps \
 
 ## Obtaining the short id (`{task-ref}`)
 
-The single source of truth for short ids is the registry `.agents/workspace/active/.short-ids.json` (via `task-short-id.js`). **Never** read the `short_id` field from task.md frontmatter (that field is not authoritative).
+The single source of truth for short ids is the registry `<task-workspace>/active/.short-ids.json` (via `task-short-id.js`). **Never** read the `short_id` field from task.md frontmatter (that field is not authoritative).
 
 Once the full `$task_id` is resolved, use the snippet below to look up the short id; it returns bare `NN` on hit and falls back to the full `TASK-id` on miss:
 

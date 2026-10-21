@@ -200,4 +200,4 @@ steps:
       - Task workspace
     outputs:
       - Pull request (only on the PR path)
-      - Completed task workspace under .agents/workspace/completed/ after merge and final gates
+      - Completed task under `completed/{task-id}` in the host root returned by `task-workspace resolve`

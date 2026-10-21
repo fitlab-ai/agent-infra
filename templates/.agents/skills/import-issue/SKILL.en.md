@@ -63,7 +63,7 @@ Strip only the first layer, and only when the leading token is a `prefix-types` 
 
 ### 2. Check for an Existing Task
 
-2.1 Search `.agents/workspace/active/` for an existing task linked to this Issue.
+2.1 Search `<task-workspace>/active/` for an existing task linked to this Issue.
 - If found, **reuse the existing task by default** (Scenario A); do not ask the user. State clearly in the final notice: "Reused existing task `{task-id}`; not re-imported." If the user wants to re-import, they must first archive or delete the existing task and run this skill again
 - If not found, continue to 2.2
 
@@ -93,7 +93,7 @@ date +%Y%m%d-%H%M%S
 
 3.2 Write the task directory and `task.md`.
 
-- Create the directory: `.agents/workspace/active/{task-id}/`
+- Create the directory: `<task-workspace>/active/{task-id}/`
 - Use the `.agents/templates/task.md` template to create `task.md`
 - For Scenario C, prefer `type`, `workflow`, `branch`, and `milestone` from the remote frontmatter; infer missing or damaged fields from Issue labels and current rules
 - Always write `current_step` as `requirement-analysis`; do not restore the remote original `current_step`
@@ -132,7 +132,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-Update `.agents/workspace/active/{task-id}/task.md`:
+Update `<task-workspace>/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
@@ -193,7 +193,7 @@ Task information:
 - Workflow: {workflow}
 
 Output file:
-- Task file: .agents/workspace/active/{task-id}/task.md
+- Task file: <task-workspace>/active/{task-id}/task.md
 
 Next step - run requirements analysis:
 {next-step-commands}
@@ -203,7 +203,7 @@ Next step - run requirements analysis:
 
 ## Completion Checklist
 
-- [ ] Created the task file `.agents/workspace/active/{task-id}/task.md`
+- [ ] Created the task file `<task-workspace>/active/{task-id}/task.md`
 - [ ] Provider wrote the Issue identity to `platform_issue_identity` in task.md
 - [ ] Updated `current_step` to requirement-analysis
 - [ ] Updated `updated_at` to the current time

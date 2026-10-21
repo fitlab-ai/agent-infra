@@ -26,7 +26,7 @@ Before generating the PR review report, read `.agents/rules/evidence-reporting.m
 - Review depth is driven by evidence completeness and change risk, never by the submitter's identity
 - After executing this skill you **must** immediately update task.md (via the `task-activity` typed intent)
 - Never run `git add` or `git commit` automatically
-- The one-shot path (no task/Issue) uses `.agents/workspace/reviews/{pr-number}/` with `recoverable: false` and carries no recovery promise
+- The one-shot path (no task/Issue) uses `<task-workspace>/reviews/{pr-number}/` with `recoverable: false` and carries no recovery promise
 
 ## Common Rationalizations and Rebuttals
 
@@ -62,7 +62,7 @@ agent-infra-internal pr-review-grade resolve-host --pr {pr-number} [--cwd <path>
 
 - **Unique host**: bind `{task-id}`, call `task-activity pr-review-inspect` to obtain the canonical round, prepared/open state, and latest successful review identity, then start this round using the recovery rules below (go to step 2).
 - **Ambiguous hosts**: `resolve-host` returns `ambiguous` and `decide` refuses to classify (fail closed). Stop and ask a human to pin the unique host; do not enter evidence classification.
-- **No host**: block by default and require linking an Issue/task first (show linking guidance); never auto-create/import an Issue. Only when the user explicitly chooses a "one-shot review" do process files land in `.agents/workspace/reviews/{pr-number}/` (`recoverable: false`).
+- **No host**: block by default and require linking an Issue/task first (show linking guidance); never auto-create/import an Issue. Only when the user explicitly chooses a "one-shot review" do process files land in `<task-workspace>/reviews/{pr-number}/` (`recoverable: false`).
 
 After the task-anchored path resolves the host and remote head, run:
 

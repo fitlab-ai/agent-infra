@@ -5,6 +5,7 @@ import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resourceIdentityEquals, resourceIdentityNumber } from '../platform/resource-identity.ts';
 import type { ResourceIdentity } from '../platform/resource-identity.ts';
+import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 
 // ---------------------------------------------------------------------------
@@ -61,7 +62,7 @@ export function extractClosingIssueNumbers(body: string): number[] {
 }
 
 /**
- * Scan `.agents/workspace/active/{task-id}/task.md` files for tasks bound to the
+ * Scan active project task workspace task.md files for tasks bound to the
  * PR number or to one of the PR's closing issues. A task is emitted at most once;
  * a verified fact identity hit takes priority over the issue-identity reverse lookup.
  */
@@ -71,7 +72,7 @@ export function collectHostCandidates(input: {
   closingIssues: number[];
   workspaceRoot: string;
 }): HostCandidate[] {
-  const activeRoot = path.join(input.workspaceRoot, '.agents', 'workspace', 'active');
+  const activeRoot = path.join(resolveProjectTaskWorkspaceRoot(input.workspaceRoot), 'active');
   const candidates: HostCandidate[] = [];
   let entries: fs.Dirent[];
   try {

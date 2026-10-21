@@ -33,9 +33,9 @@ After prerequisites pass, Step 3 declares one lifecycle intent that atomically c
 ### 1. Verify Task Exists
 
 Check these directories in order:
-- `.agents/workspace/active/{task-id}/`
-- `.agents/workspace/blocked/{task-id}/`
-- `.agents/workspace/completed/{task-id}/`
+- `<task-workspace>/active/{task-id}/`
+- `<task-workspace>/blocked/{task-id}/`
+- `<task-workspace>/completed/{task-id}/`
 
 Handling rules:
 - If found in `active/` or `blocked/`: continue
@@ -69,7 +69,7 @@ Confirm `targetState=completed`, terminal fields, and the short-id effect from t
 ### 5. Verify the Move
 
 ```bash
-ls .agents/workspace/completed/{task-id}/task.md
+ls <task-workspace>/completed/{task-id}/task.md
 ```
 
 Confirm the task directory was moved successfully.
@@ -120,7 +120,7 @@ Task {task-id} cancelled; task directory moved to completed/.
 
 Cancellation reason: {reason}
 Status label: {status-label or skipped}
-Target path: .agents/workspace/completed/{task-id}/
+Target path: <task-workspace>/completed/{task-id}/
 
 Optional: clean up this task's sandbox
 (The task is completed and archived; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
@@ -136,7 +136,7 @@ Next step - inspect the moved task:
 ## Completion Checklist
 
 - [ ] Recorded the cancellation reason and updated task.md
-- [ ] Moved the task directory into `.agents/workspace/completed/`
+- [ ] Moved the task directory into `<task-workspace>/completed/`
 - [ ] Completed Issue sync when an Issue exists
 - [ ] Ran and passed the verification gate
 - [ ] Showed the full next-step command set to the user

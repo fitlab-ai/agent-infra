@@ -1,3 +1,4 @@
+import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -341,11 +342,11 @@ const TASK_ID = 'TASK-20260809-010203';
 
 function taskFixture(activityLog = true, repository = false): { root: string; taskDir: string } {
   const root = createTempDir('task-control-dual-mode-');
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  const taskDir = path.join(taskWorkspaceRoot(root),  'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: taskWorkspaceProject(root), task: { shortIdLength: 2 } }));
   fs.writeFileSync(
-    path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'),
+    path.join(taskWorkspaceRoot(root),  'active', '.short-ids.json'),
     `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`
   );
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
@@ -540,8 +541,8 @@ test('direct-host and sandbox executor share lifecycle results', async () => {
     const directLifecycle = await dispatchTaskControlOperation(direct.direct, lifecycleOperation());
     const sandboxLifecycle = await dispatchTaskControlOperation(sandbox.sandbox, lifecycleOperation());
     assert.deepEqual(comparableLifecycle(directLifecycle), comparableLifecycle(sandboxLifecycle));
-    assert.equal(fs.readFileSync(path.join(directFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
-    assert.equal(fs.readFileSync(path.join(sandboxFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
+    assert.equal(fs.readFileSync(path.join(taskWorkspaceRoot(directFixture.root),  'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
+    assert.equal(fs.readFileSync(path.join(taskWorkspaceRoot(sandboxFixture.root),  'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
 
   } finally {
     fs.rmSync(directFixture.root, { recursive: true, force: true });
@@ -583,7 +584,7 @@ test('direct-host and sandbox executor protect the same task-bound control root 
       const result = await dispatchTaskControlOperation(context, lifecycleOperation());
       assert.equal((result as { status: string }).status, 'failed');
       assert.equal((result as { error?: { code?: string } }).error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
-      assert.equal(fs.existsSync(path.join(fixture.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+      assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(fixture.root),  'active', TASK_ID, 'task.md')), true);
     }
   } finally {
     fs.rmSync(directFixture.root, { recursive: true, force: true });
@@ -615,8 +616,8 @@ test('direct-host and sandbox client transport preserve lifecycle results', asyn
     assert.equal((directLifecycle as { error?: { code?: string } }).error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
     assert.equal(sandboxLifecycle.status, 1, sandboxLifecycle.stderr || JSON.stringify(sandboxLifecycle.payload));
     assert.deepEqual(comparableLifecycle(directLifecycle), comparableLifecycle(sandboxLifecycle.payload));
-    assert.equal(fs.existsSync(path.join(directFixture.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
-    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(directFixture.root),  'active', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(sandbox.root),  'active', TASK_ID, 'task.md')), true);
   } finally {
     await stopSandboxFixtureBroker(broker);
     fs.rmSync(directFixture.root, { recursive: true, force: true });
@@ -642,7 +643,7 @@ test('sandbox executor accepts a control root alias while preserving lifecycle t
     assert.equal(result.status, 1, result.stderr || JSON.stringify(result.payload));
     assert.equal(result.payload.status, 'failed');
     assert.equal((result.payload.error as { code?: string }).code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
-    assert.equal(fs.existsSync(path.join(sandbox.root, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+    assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(sandbox.root),  'active', TASK_ID, 'task.md')), true);
   } finally {
     await stopSandboxFixtureBroker(broker);
     fs.rmSync(sandbox.root, { recursive: true, force: true });

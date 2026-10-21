@@ -1,3 +1,4 @@
+import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,7 +24,7 @@ import type {
   RiskFactors
 } from '../../../lib/pr-review/evidence-grading.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
-import { createTempDir } from '../../helpers.ts';
+import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const UNIQUE_HOST: HostResolution = {
   kind: 'unique', taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', issueNumber: 7, prNumber: 42
@@ -102,9 +103,9 @@ test('extractClosingIssueNumbers parses Closes/Fixes lists with case and separat
 });
 
 test('collectHostCandidates scans active tasks and prioritizes verified fact identity hits', () => {
-  const root = createTempDir('evidence-host-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('evidence-host-');
   try {
-    const active = path.join(root, '.agents', 'workspace', 'active');
+    const active = path.join(taskWorkspaceRoot(root),  'active');
     const writeTask = (taskId: string, frontmatter: string) => {
       const dir = path.join(active, taskId);
       fs.mkdirSync(dir, { recursive: true });
@@ -130,7 +131,7 @@ test('collectHostCandidates scans active tasks and prioritizes verified fact ide
 });
 
 test('collectHostCandidates tolerates a missing workspace root', () => {
-  const root = createTempDir('evidence-empty-');
+  const { repoRoot: root } = createTaskWorkspaceFixture('evidence-empty-');
   try {
     assert.deepEqual(collectHostCandidates({ prNumber: 42, closingIssues: [7], workspaceRoot: root }), []);
   } finally {
