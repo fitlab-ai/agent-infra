@@ -72,13 +72,6 @@ function cleanupFixture(root: string): void {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-function workspaceSymlinkFixture(home = fixtureHome) {
-  return {
-    root: fixture(home),
-    outside: createTempDir('agent-infra-task-create-outside-')
-  };
-}
-
 function taskRoot(root: string): string {
   const project = (JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')) as { project: string }).project;
   return path.join(fixtureHome, '.agent-infra', 'task-workspaces', project);
@@ -288,7 +281,8 @@ test('local task creation safely restores missing runtime workspace directories'
 });
 
 test('local task creation rejects a symbolic-link workspace without writing outside the repository', onPlatforms('linux', 'darwin'), () => {
-  const { root, outside } = workspaceSymlinkFixture();
+  const root = fixture();
+  const outside = createTempDir('agent-infra-task-create-outside-');
   try {
     fs.rmSync(taskRoot(root), { recursive: true });
     fs.symlinkSync(outside, taskRoot(root));
@@ -302,7 +296,8 @@ test('local task creation rejects a symbolic-link workspace without writing outs
 
 test('local task creation uses the OS home and rejects a linked managed root when HOME is unset', onPlatforms('linux', 'darwin'), (t) => {
   const home = createTempDir('agent-infra-task-create-home-');
-  const { root, outside } = workspaceSymlinkFixture(home);
+  const root = fixture(home);
+  const outside = createTempDir('agent-infra-task-create-outside-');
   const previousHome = process.env.HOME;
   delete process.env.HOME;
   t.mock.method(os, 'homedir', () => home);
