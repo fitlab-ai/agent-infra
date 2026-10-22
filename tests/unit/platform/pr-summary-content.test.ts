@@ -20,6 +20,13 @@ test('PR summary structure accepts truthful not-yet-run states and zero counts',
   assert.match(rendered, /canonical-pr-change-report/);
 });
 
+test('PR manual-validation renderer preserves none and unavailable states', () => {
+  const none = renderPrSummaryContent({ ...content, manualValidation: { state: 'none', detail: 'The canonical task facts mark manual validation as not applicable.' } });
+  const unavailable = renderPrSummaryContent({ ...content, manualValidation: { state: 'unavailable', detail: 'The existing validation source could not be read.' } });
+  assert.match(none, /### ✅ 无需人工校验[\s\S]*?状态：none/u);
+  assert.match(unavailable, /### ⚠️ 人工校验状态不可用[\s\S]*?状态：unavailable/u);
+});
+
 test('PR summary structure rejects missing or invalid fields', () => {
   assert.throws(() => parsePrSummaryContent({ ...content, risks: ' ' }), /risks/);
   assert.throws(() => parsePrSummaryContent({ ...content, humanDecisions: { open: -1, resolved: 0, detail: 'x' } }), /non-negative/);

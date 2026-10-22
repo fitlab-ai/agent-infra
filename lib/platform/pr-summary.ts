@@ -39,6 +39,7 @@ import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProj
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import { parsePrSummaryContent, renderPrSummaryContent } from './pr-summary-content.ts';
+import { parseLedgerDocument } from '../task/ledger.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -513,9 +514,7 @@ async function syncPullRequestSummary(
   options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; skipQueue?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
-  let summaryBody: string;
-  try { summaryBody = renderPrSummaryContent(parsePrSummaryContent(JSON.parse(options.body))); }
-  catch (error) { return { ...platformResult('failed', { error: { code: 'PR_SUMMARY_CONTENT_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }), result: null, warnings: [] }; }
+  let summaryBody = '';
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
     const prNumber = output.resource.kind === 'pull-request' && output.resource.number
@@ -548,6 +547,7 @@ async function syncPullRequestSummary(
     : softenFailure(output);
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return softenFailure(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
+  knownPrNumber = boundPrNumberForWarning(resolved.taskMdPath);
   const fail = (status: PlatformResult['status'], context: PlatformResult, error: PlatformResult['error'], prNumber = knownPrNumber): PullRequestSummaryResult => {
     const output = basePlatformResult(status, context, resolved.taskId, prNumber, error);
     return options.strict || isHardSummaryFailure(error)
@@ -555,8 +555,16 @@ async function syncPullRequestSummary(
       : { ...softenFailure(output) };
   };
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
   if (fact.status === 'invalid') return preserveFailure(platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }));
+  try { summaryBody = renderPrSummaryContent(preparePrSummaryContent(JSON.parse(options.body), taskContent)); }
+  catch (error) {
+    return preserveFailure(platformResult('failed', {
+      resource: { kind: 'pull-request', number: knownPrNumber },
+      error: { code: 'PR_SUMMARY_CONTENT_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    }));
+  }
   if (!options.changeReportFile) return preserveFailure(platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_MISSING', message: 'summary-sync requires --change-report-file', retryable: false } }));
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -803,6 +811,25 @@ async function syncPullRequestSummary(
   } catch (error) {
     return fail('failed', context, { code: 'PR_SUMMARY_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false });
   }
+}
+
+export function preparePrSummaryContent(value: unknown, taskContent: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return parsePrSummaryContent(value);
+  const input = { ...(value as Record<string, unknown>) };
+  const ledger = parseLedgerDocument(taskContent);
+  if (ledger.present) {
+    const decisions = ledger.rows.filter((row) => row.id.startsWith('HD-'));
+    const open = decisions.filter((row) => row.status === 'needs-human-decision').length;
+    const resolved = decisions.filter((row) => row.status === 'human-decided').length;
+    const current = input.humanDecisions && typeof input.humanDecisions === 'object' && !Array.isArray(input.humanDecisions)
+      ? { ...(input.humanDecisions as Record<string, unknown>) }
+      : {};
+    if (!Number.isSafeInteger(current.open) || Number(current.open) < 0) current.open = open;
+    if (!Number.isSafeInteger(current.resolved) || Number(current.resolved) < 0) current.resolved = resolved;
+    if (typeof current.detail !== 'string' || !current.detail.trim()) current.detail = `Task decision ledger: ${open} open, ${resolved} resolved.`;
+    input.humanDecisions = current;
+  }
+  return parsePrSummaryContent(input);
 }
 
 export {

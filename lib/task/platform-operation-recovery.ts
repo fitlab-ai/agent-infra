@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { inspectPlatformCommentOperation, normalizeCommentContent, syncPlatformComment } from '../platform/issue-comments.ts';
+import { parseDeliverySummaryContent, renderDeliverySummaryContent, parseCancelSummaryContent, renderCancelSummaryContent } from '../platform/issue-summary-content.ts';
+import { enumerateArtifacts } from './artifacts.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
 import { resolvePlatformProviderContext } from '../platform/context.ts';
 import { providerOperationContext, providerError, unsupportedProviderOperation } from '../platform/provider-bridge.ts';
@@ -54,14 +56,35 @@ function result(status: RecoveryResult['status'], recovered: string[], pending: 
 function summaryPayload(taskDir: string, taskId: string): { body: string; sha256: string } | null {
   const file = path.join(taskDir, '.delivery-summary.json');
   if (!fs.existsSync(file)) return null;
-  const data = JSON.parse(fs.readFileSync(file, 'utf8')) as { taskId?: unknown; body?: unknown; sha256?: unknown };
-  const canonical = typeof data.body === 'string' ? canonicalizeSummaryBody(data.body) : null;
-  if (data.taskId !== taskId || typeof data.body !== 'string' || typeof data.sha256 !== 'string'
-    || !canonical?.ok || canonical.value !== data.body
-    || createHash('sha256').update(data.body).digest('hex') !== data.sha256) {
+  const data = JSON.parse(fs.readFileSync(file, 'utf8')) as { taskId?: unknown; content?: unknown; contentSha256?: unknown };
+  let content;
+  try { content = parseDeliverySummaryContent(data.content); }
+  catch { content = null; }
+  if (data.taskId !== taskId || !content || content.taskId !== taskId || typeof data.contentSha256 !== 'string'
+    || createHash('sha256').update(JSON.stringify(content)).digest('hex') !== data.contentSha256) {
     throw Object.assign(new Error('delivery summary staging record is invalid'), { code: 'SUMMARY_STAGING_INVALID' });
   }
-  return { body: data.body, sha256: data.sha256 };
+  const canonical = canonicalizeSummaryBody(renderDeliverySummaryContent(content));
+  if (!canonical?.ok) throw Object.assign(new Error('delivery summary staging body is not canonical'), { code: 'SUMMARY_STAGING_INVALID' });
+  return { body: canonical.value, sha256: createHash('sha256').update(canonical.value).digest('hex') };
+}
+
+function cancellationPayload(taskDir: string, taskId: string): string | null {
+  const taskPath = path.join(taskDir, 'task.md');
+  if (!fs.existsSync(taskPath)) return null;
+  const taskContent = fs.readFileSync(taskPath, 'utf8');
+  const frontmatter = parseTaskFrontmatter(taskContent);
+  const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim() || taskId;
+  const artifacts = enumerateArtifacts(taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
+  const content = parseCancelSummaryContent({
+    taskId,
+    title,
+    outcome: 'cancelled',
+    reason: frontmatter.cancel_reason,
+    cancelledAt: frontmatter.cancelled_at,
+    lastCompletedArtifact: artifacts.at(-1) ?? null
+  });
+  return renderCancelSummaryContent(content);
 }
 
 async function replayComment(taskId: string, taskDir: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
@@ -72,7 +95,12 @@ async function replayComment(taskId: string, taskDir: string, operation: ReturnT
     return syncPlatformComment(taskId, { kind: 'artifact', artifact: operation.target, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   }
   if (operation.kind === 'summary-comment') {
-    const summary = summaryPayload(taskDir, taskId);
+    let summary;
+    try { summary = summaryPayload(taskDir, taskId); }
+    catch (error) {
+      const value = error as { code?: string; message?: string };
+      return platformResult('failed', { error: { code: value.code || 'SUMMARY_STAGING_INVALID', message: value.message || String(error), retryable: false } });
+    }
     if (!summary) return platformResult('failed', { error: { code: 'SUMMARY_STAGING_MISSING', message: 'delivery summary staging record is unavailable', retryable: false } });
     return syncPlatformComment(taskId, {
       kind: 'summary', body: summary.body, agent, cwd,
@@ -80,7 +108,13 @@ async function replayComment(taskId: string, taskDir: string, operation: ReturnT
     });
   }
   if (operation.kind === 'cancel-comment') {
-    return syncPlatformComment(taskId, { kind: 'cancel', agent, cwd, client, dependency: operation.dependency, skipQueue: true });
+    let body: string | null;
+    try { body = cancellationPayload(taskDir, taskId); }
+    catch (error) {
+      return platformResult('failed', { error: { code: 'CANCEL_SUMMARY_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } });
+    }
+    if (!body) return platformResult('failed', { error: { code: 'CANCEL_SUMMARY_INVALID', message: 'Cancellation facts are unavailable for recovery', retryable: false } });
+    return syncPlatformComment(taskId, { kind: 'cancel', body, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   }
   return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_UNSUPPORTED', message: `operation kind '${operation.kind}' has no registered recovery handler`, retryable: false } });
 }
@@ -192,12 +226,12 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
   if (!summary) return platformResult('blocked', { error: {
     code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
   } });
-  let manualValidationHeading = false;
+  let finalManualValidation = false;
   try {
     const content = parsePrSummaryContent(JSON.parse(summary.body));
-    manualValidationHeading = ['pending', 'passed'].includes(content.manualValidation.state);
+    finalManualValidation = content.manualValidation.state === 'passed';
   } catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary content is invalid', retryable: false } }); }
-  if (manualValidationHeading && !summary.manualValidation) return platformResult('blocked', { error: {
+  if (finalManualValidation && !summary.manualValidation) return platformResult('blocked', { error: {
     code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'Queued manual-validation summary has no persisted transaction context', retryable: false
   } });
   const resolved = await resolvePlatformProviderContext({ cwd, client });
@@ -364,9 +398,16 @@ async function recoverPlatformOperationsOnce(
           : operation.kind === 'artifact-comment'
           ? { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
           : operation.kind === 'summary-comment' ? (() => {
-            const summary = summaryPayload(resolved.taskDir, resolved.taskId);
-            return summary ? { kind: 'summary' as const, body: summary.body, agent: options.agent, cwd: resolved.repoRoot, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency } : null;
-          })() : { kind: 'cancel' as const, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency };
+            try {
+              const summary = summaryPayload(resolved.taskDir, resolved.taskId);
+              return summary ? { kind: 'summary' as const, body: summary.body, agent: options.agent, cwd: resolved.repoRoot, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency } : null;
+            } catch { return null; }
+          })() : (() => {
+            try {
+              const body = cancellationPayload(resolved.taskDir, resolved.taskId);
+              return body ? { kind: 'cancel' as const, body, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency } : null;
+            } catch { return null; }
+          })();
       const current = commentOptions ? inspectPlatformCommentOperation(resolved.taskId, commentOptions) : null;
       if (!current) {
         pending.push(operation.id);

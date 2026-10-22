@@ -745,7 +745,19 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
       ids.splice(0, ids.length, providerCommentId((written.value as { remoteId: string }).remoteId, loaded.value.provider));
       operations.push({ name: `comment:${desired[0]!.marker}`, status: 'applied', reasonCode: 'SUMMARY_REPOSITIONED' });
       const reconciled = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
-      if (!reconciled.ok || !summaryPosition(reconciled.value, resolved.taskId).ok) {
+      const finalSummaries = reconciled.ok
+        ? reconciled.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === MARKERS.summary(resolved.taskId))
+        : [];
+      if (!reconciled.ok || finalSummaries.length !== 1 || !desired[0]
+        || normalizeCommentContent(finalSummaries[0]!.body) !== normalizeCommentContent(desired[0].body)) {
+        const error = reconciled.ok
+          ? { code: 'SUMMARY_BODY_READBACK_FAILED', message: 'Remote summary body did not match the final rendered delivery summary', retryable: true }
+          : reconciled.error;
+        return platformResult(isRetryable(error) ? 'blocked' : 'failed', {
+          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error
+        });
+      }
+      if (!summaryPosition(reconciled.value, resolved.taskId).ok) {
         const error = reconciled.ok
           ? { code: 'SUMMARY_POSITION_UNVERIFIED', message: 'Summary comment is not provably last among task-managed comments', retryable: true }
           : reconciled.error;

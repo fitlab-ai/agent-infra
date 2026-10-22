@@ -12,7 +12,8 @@ import {
   reconcileSummaryComment,
   summaryContext,
   syncPullRequestSummary as syncTypedPullRequestSummary,
-  warningResultForPrimary
+  warningResultForPrimary,
+  preparePrSummaryContent
 } from '../../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import type { PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
@@ -292,10 +293,80 @@ test('queued PR summary recovery replays the desired summary through the configu
   }
 });
 
+test('queued ordinary manual-validation pending summary replays without a coordinator transaction', async () => {
+  const fixture = summaryFixture();
+  const commentWrites = { value: 0 };
+  try {
+    const content = JSON.parse(summaryPayload('Summary'));
+    content.manualValidation = { state: 'pending', detail: 'Manual validation has not run yet.' };
+    const body = JSON.stringify(content);
+    const report = readPrChangeReport(fixture.reportPath);
+    assert.equal(report.ok, true);
+    if (!report.ok) return;
+    const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(JSON.parse(body))), report.value);
+    assert.equal(rendered.ok, true);
+    if (!rendered.ok) return;
+    const desired = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
+    const operation = recordPlatformOperation({
+      taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
+      target: JSON.stringify({ kind: 'number', value: 42 }),
+      expectedDigest: createHash('sha256').update(desired).digest('hex'), dependency: 'deferred', state: 'queued',
+      pullRequestSummary: { body, changeReportFile: fixture.reportPath }
+    });
+
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
+      agent: 'codex', cwd: fixture.root,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites })
+    });
+    const persisted = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
+    assert.equal(recovered.status, 'applied');
+    assert.equal(commentWrites.value, 1);
+    assert.equal(persisted?.state, 'succeeded');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('PR summary warning result preserves the primary lifecycle outcome', () => {
   assert.equal(warningResultForPrimary('pr_created'), 'pr_created_with_warnings');
   assert.equal(warningResultForPrimary('pr_reused'), 'pr_reused_with_warnings');
   assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
+});
+
+test('PR summary fills missing decision counts from the current task ledger', () => {
+  const { humanDecisions: _omitted, ...withoutDecisions } = JSON.parse(summaryPayload('Summary.')) as Record<string, unknown>;
+  const taskContent = [
+    '## 审查分歧账本', '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|',
+    '| HD-1 | code | - | decision | needs-human-decision | code-r2.md#HD-1 |',
+    '| HD-2 | code | - | decision | human-decided | task.md#HD-2 |'
+  ].join('\n');
+  const prepared = preparePrSummaryContent(withoutDecisions, taskContent);
+  assert.deepEqual(prepared.humanDecisions, { open: 1, resolved: 1, detail: 'Task decision ledger: 1 open, 1 resolved.' });
+});
+
+test('invalid typed summary preserves primary-result warning routing unless strict', async () => {
+  const fixture = summaryFixture();
+  try {
+    const body = JSON.stringify({ overview: 'Missing required summary fields.' });
+    const normal = await syncTypedPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body, primaryResult: 'pr_created'
+    });
+    assert.equal(normal.status, 'applied');
+    assert.equal(normal.result, 'pr_created_with_warnings');
+    assert.equal(normal.warnings[0]?.code, 'PR_SUMMARY_CONTENT_INVALID');
+    assert.equal(normal.warnings[0]?.target, 'pull-request:42');
+
+    const strict = await syncTypedPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body, primaryResult: 'pr_created', strict: true
+    });
+    assert.equal(strict.status, 'failed');
+    assert.equal(strict.result, null);
+    assert.equal(strict.warnings.length, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test('PR summary preserves the structured v1 unsupported error from a persisted fact', async () => {
@@ -605,7 +676,7 @@ test('queued manual-validation summary recovery rechecks the persisted transacti
   }
 });
 
-test('queued manual-validation summary without transaction context fails closed', async () => {
+test('queued ordinary manual-validation pending summary without transaction context replays', async () => {
   const fixture = summaryFixture();
   const callsPath = path.join(fixture.root, 'provider-calls.log');
   try {
@@ -615,10 +686,9 @@ test('queued manual-validation summary without transaction context fails closed'
 
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', { agent: 'codex', cwd: fixture.root });
 
-    assert.equal(recovered.status, 'blocked');
-    assert.equal(recovered.error?.code, 'MANUAL_VALIDATION_TRANSACTION_REQUIRED');
-    assert.equal(fs.existsSync(callsPath), false);
-    assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
+    assert.equal(recovered.status, 'applied');
+    assert.equal(fs.existsSync(callsPath), true);
+    assert.equal(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

@@ -19,7 +19,7 @@ import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-in
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
-import { parseCancelSummaryContent, parseDeliverySummaryContent, renderCancelSummaryContent, renderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
+import { prepareCancelSummaryContent, prepareDeliverySummaryContent, renderCancelSummaryContent, renderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment recover --issue <token> --task-id <TASK-id> --output <staging-task.md> [--cwd <path>]
@@ -164,19 +164,17 @@ async function platformComment(args: string[] = []): Promise<void> {
     const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
     if (!resolved.ok || resolved.state !== 'active') { fail('stage-summary requires an active task'); return; }
     const target = path.join(resolved.taskDir, '.delivery-summary.json');
-    let content: ReturnType<typeof parseDeliverySummaryContent>;
+    let content;
     try {
       const supplied = JSON.parse(body) as Record<string, unknown>;
       const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
       const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
-      if (typeof supplied.taskId !== 'string' || !supplied.taskId) supplied.taskId = resolved.taskId;
-      if (supplied.taskId !== resolved.taskId) throw new Error('taskId does not match the active task');
-      if (typeof supplied.title !== 'string' || !supplied.title.trim()) supplied.title = title;
-      if (!Array.isArray(supplied.artifacts)) supplied.artifacts = enumerateArtifacts(resolved.taskDir)
-        .filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
-      if (!supplied.verification) supplied.verification = { state: 'not-run', detail: 'Final verification has not run at summary staging.' };
-      content = parseDeliverySummaryContent(supplied);
-      if (content.taskId !== resolved.taskId) throw new Error('taskId does not match the active task');
+      content = prepareDeliverySummaryContent(supplied, {
+        taskId: resolved.taskId,
+        title: title || resolved.taskId,
+        artifacts: enumerateArtifacts(resolved.taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name),
+        verificationFallback: { state: 'not-run', detail: 'Final verification has not run at summary staging.' }
+      });
     } catch (error) { fail(`unable to stage summary: ${error instanceof Error ? error.message : String(error)}`); return; }
     const canonical = canonicalizeSummaryBody(renderDeliverySummaryContent(content));
     if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
@@ -223,18 +221,21 @@ async function platformComment(args: string[] = []): Promise<void> {
       const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
       const taskFrontmatter = parseTaskFrontmatter(taskContent);
       const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
-      if (kind === 'cancel') {
-        if (typeof input.taskId !== 'string' || !input.taskId) input.taskId = resolved.taskId;
-        if (typeof input.title !== 'string' || !input.title.trim()) input.title = title;
-        if (typeof input.reason !== 'string' || !input.reason.trim()) input.reason = taskFrontmatter.cancel_reason;
-        if (typeof input.cancelledAt !== 'string' || !input.cancelledAt.trim()) input.cancelledAt = taskFrontmatter.cancelled_at;
-        if (input.lastCompletedArtifact === undefined) input.lastCompletedArtifact = enumerateArtifacts(resolved.taskDir)
-          .filter((artifact) => artifact.name !== 'task.md').at(-1)?.name ?? null;
-        if (input.taskId !== resolved.taskId) throw new Error('taskId does not match the task');
-      }
+      const artifacts = enumerateArtifacts(resolved.taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
       const rendered = kind === 'summary'
-        ? renderDeliverySummaryContent(parseDeliverySummaryContent(input))
-        : renderCancelSummaryContent(parseCancelSummaryContent(input));
+        ? renderDeliverySummaryContent(prepareDeliverySummaryContent(input, {
+          taskId: resolved.taskId,
+          title: title || resolved.taskId,
+          artifacts,
+          ...(resolved.state === 'active' ? { verificationFallback: { state: 'not-run', detail: 'Final verification has not run at summary staging.' } } : {})
+        }))
+        : renderCancelSummaryContent(prepareCancelSummaryContent(input, {
+          taskId: resolved.taskId,
+          title: title || resolved.taskId,
+          reason: typeof taskFrontmatter.cancel_reason === 'string' ? taskFrontmatter.cancel_reason : '',
+          cancelledAt: typeof taskFrontmatter.cancelled_at === 'string' ? taskFrontmatter.cancelled_at : '',
+          lastCompletedArtifact: artifacts.at(-1) ?? null
+        }));
       body = rendered;
     } catch (error) { fail(`invalid ${kind} summary structure: ${error instanceof Error ? error.message : String(error)}`); return; }
   }

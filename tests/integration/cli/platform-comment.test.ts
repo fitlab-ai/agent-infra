@@ -262,6 +262,54 @@ test('stage-summary stores the canonical body and digest used for delivery comme
   }
 });
 
+test('summary and cancellation journal entries replay from durable typed task facts', () => {
+  const f = fixture();
+  const taskDir = path.join(taskWorkspaceRoot(f.root), 'active', f.taskId);
+  const journalPath = path.join(taskDir, '.platform-operations.json');
+  const markUnknown = () => {
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<Record<string, unknown>> };
+    const last = journal.operations.at(-1)!;
+    last.state = 'unknown';
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  };
+  try {
+    const stagedBody = path.join(f.root, 'staged-summary.json');
+    fs.writeFileSync(stagedBody, JSON.stringify({ summary: 'Durable completion.', artifacts: [], verification: { state: 'not-run', detail: 'Final checks have not run.' } }));
+    assert.equal(runComment(['stage-summary', f.taskId, '--body-file', stagedBody], f).status, 0);
+    const summaryBody = path.join(f.root, 'summary-sync.json');
+    fs.writeFileSync(summaryBody, deliveryPayload(f.taskId, 'Durable completion.'));
+    assert.equal(runComment(['sync', f.taskId, '--kind', 'summary', '--body-file', summaryBody, '--agent', 'codex'], f).status, 0);
+    markUnknown();
+    fs.rmSync(stagedBody);
+    fs.rmSync(summaryBody);
+    const summaryRecovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+      cwd: f.root, env: f.env, encoding: 'utf8'
+    });
+    assert.equal(summaryRecovery.status, 0, summaryRecovery.stderr || summaryRecovery.stdout);
+    assert.equal(JSON.parse(summaryRecovery.stdout).status, 'applied');
+
+    const taskPath = path.join(taskDir, 'task.md');
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace('status: active', [
+      'status: cancelled', 'cancel_reason: no longer needed', 'cancelled_at: 2026-10-22T00:00:00.000Z'
+    ].join('\n')));
+    const cancelBody = path.join(f.root, 'cancel.json');
+    fs.writeFileSync(cancelBody, JSON.stringify({
+      taskId: f.taskId, title: 'Task', outcome: 'cancelled', reason: 'no longer needed',
+      cancelledAt: '2026-10-22T00:00:00.000Z', lastCompletedArtifact: null
+    }));
+    assert.equal(runComment(['sync', f.taskId, '--kind', 'cancel', '--body-file', cancelBody, '--agent', 'codex'], f).status, 0);
+    markUnknown();
+    fs.rmSync(cancelBody);
+    const cancelRecovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+      cwd: f.root, env: f.env, encoding: 'utf8'
+    });
+    assert.equal(cancelRecovery.status, 0, cancelRecovery.stderr || cancelRecovery.stdout);
+    assert.equal(JSON.parse(cancelRecovery.stdout).status, 'applied');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('ordinary summary sync refuses to re-post an out-of-order summary without finalization authorization', () => {
   const f = fixture();
   try {

@@ -40,12 +40,18 @@ export function parsePrSummaryContent(value: unknown): PrSummaryContent {
 
 export function renderPrSummaryContent(value: PrSummaryContent): string {
   const content = parsePrSummaryContent(value);
+  const manualValidationHeading = content.manualValidation.state === 'pending' ? '⏳ 人工验证待收尾'
+    : content.manualValidation.state === 'passed' ? '✅ 人工验证已通过'
+      : ['none', 'not-required'].includes(content.manualValidation.state) ? '✅ 无需人工校验'
+        : content.manualValidation.state === 'unavailable' ? '⚠️ 人工校验状态不可用'
+          : content.manualValidation.state === 'not-observed' ? 'ℹ️ 尚未读取人工校验状态'
+            : `人工校验状态：${content.manualValidation.state}`;
   return [
     '## 审查摘要', '', content.overview, '',
     '### 关键技术决策', '', '（见审查历程）', '',
     '### 审查历程', '', `状态：${content.review.state}`, '', content.review.detail, '',
     '### 测试结果', '', `状态：${content.tests.state}`, '', content.tests.detail, '',
-    `### ${content.manualValidation.state === 'pending' ? '⏳ 人工验证待收尾' : content.manualValidation.state === 'passed' ? '✅ 人工验证已通过' : content.manualValidation.state === 'not-required' ? '✅ 无需人工校验' : '⚠️ 需人工校验'}`, '', content.manualValidation.detail,
+    `### ${manualValidationHeading}`, '', `状态：${content.manualValidation.state}`, '', content.manualValidation.detail,
     ...(content.manualValidation.state === 'passed' ? ['', MANUAL_VALIDATION_RECEIPT_PLACEHOLDER] : []), '',
     '### 人工决策', '', `未解决：${content.humanDecisions.open}；已解决：${content.humanDecisions.resolved}`, '', content.humanDecisions.detail, '',
     '### 风险', '', content.risks, '', CANONICAL_REPORT_PLACEHOLDER, ''

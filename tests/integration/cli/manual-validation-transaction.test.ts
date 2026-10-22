@@ -493,7 +493,7 @@ test('opaque PR identity recovers a failed final summary promotion on coordinato
   assert.equal(retry.receipt?.prHeadSha, fixture.headSha);
 });
 
-test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {
+test('coordinator replaces the Chinese manual-validation section and preserves canonical report order', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
   fs.writeFileSync(fixture.summaryPath, JSON.stringify(manualSummaryContent()));
@@ -505,24 +505,14 @@ test('coordinator replaces the Chinese manual-validation status section in place
 
   assert.equal(result.status, 'applied', JSON.stringify(result));
   const body = state.comments[0]?.body ?? '';
-  assert.match(body, /### ✅ 人工验证已通过\n\n在生产环境完成权限校验。\n\n<!-- manual-validation-receipt: [^\n]+ -->\n\n### 人工决策/m);
+  assert.match(body, /### ✅ 人工验证已通过\n\n状态：passed\n\n在生产环境完成权限校验。\n\n<!-- manual-validation-receipt: [^\n]+ -->/m);
   assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
-});
-
-test('coordinator preserves a canonical report placeholder after the manual-validation section', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  fs.writeFileSync(fixture.summaryPath, JSON.stringify(manualSummaryContent()));
-  const state: FakeGitHubState = { comments: [], writes: 0 };
-
-  const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
-    client: fakeClient(fixture.baseSha, fixture.headSha, state)
-  });
-
-  assert.equal(result.status, 'applied', JSON.stringify(result));
-  const body = state.comments[0]?.body ?? '';
-  assert.match(body, /^### ✅ 人工验证已通过$/mu);
-  assert.match(body, /^### PR 代码增减$/mu);
-  assert.ok(body.indexOf('### ✅ 人工验证已通过') < body.indexOf('在生产环境完成权限校验。'));
-  assert.ok(body.indexOf('- 在生产环境完成权限校验。') < body.indexOf('### PR 代码增减'));
+  const statusIndex = body.indexOf('### ✅ 人工验证已通过');
+  const stateIndex = body.indexOf('状态：passed');
+  const detailIndex = body.indexOf('在生产环境完成权限校验。');
+  const receiptIndex = body.indexOf('<!-- manual-validation-receipt:');
+  const decisionsIndex = body.indexOf('### 人工决策');
+  const reportIndex = body.indexOf('### PR 代码增减');
+  assert.ok(statusIndex >= 0 && stateIndex >= 0 && detailIndex >= 0 && receiptIndex >= 0 && decisionsIndex >= 0 && reportIndex >= 0);
+  assert.ok(statusIndex < stateIndex && stateIndex < detailIndex && detailIndex < receiptIndex && receiptIndex < decisionsIndex && decisionsIndex < reportIndex);
 });
