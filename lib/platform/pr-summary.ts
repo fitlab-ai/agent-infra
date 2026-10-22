@@ -515,6 +515,7 @@ async function syncPullRequestSummary(
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let summaryBody = '';
+  let preparedSummaryContent: ReturnType<typeof preparePrSummaryContent>;
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
     const prNumber = output.resource.kind === 'pull-request' && output.resource.number
@@ -558,7 +559,10 @@ async function syncPullRequestSummary(
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
   if (fact.status === 'invalid') return preserveFailure(platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }));
-  try { summaryBody = renderPrSummaryContent(preparePrSummaryContent(JSON.parse(options.body), taskContent)); }
+  try {
+    preparedSummaryContent = preparePrSummaryContent(JSON.parse(options.body), taskContent);
+    summaryBody = renderPrSummaryContent(preparedSummaryContent);
+  }
   catch (error) {
     return preserveFailure(platformResult('failed', {
       resource: { kind: 'pull-request', number: knownPrNumber },
@@ -793,7 +797,7 @@ async function syncPullRequestSummary(
         expectedDigest: createHash('sha256').update(desired).digest('hex'),
         dependency: 'deferred' as const,
         pullRequestSummary: {
-          body: options.body,
+          body: JSON.stringify(preparedSummaryContent),
           changeReportFile: options.changeReportFile!,
           ...(manual?.transactionId ? { manualValidation: { ...manual, transactionId: manual.transactionId } } : {})
         }

@@ -523,6 +523,49 @@ test('comment sync refuses duplicate registered markers without writing', async 
   assert.equal(result.error?.code, 'COMMENT_MARKER_CONFLICT');
 });
 
+test('authorized summary reposition blocks when the final remote body readback is corrupted', async () => {
+  const root = syncFixture();
+  const statePath = path.join(root, 'provider-comments.json');
+  const providerSource = path.resolve('tests/fixtures/platform-providers/summary-reposition-provider.mjs');
+  const fixtureProject = JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).project as string;
+  fs.writeFileSync(statePath, JSON.stringify({ comments: [], nextId: 1, nextSequence: 1, writeCount: 0 }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    project: fixtureProject,
+    platform: { type: 'trae', providers: { trae: { source: providerSource, config: { statePath, corruptSecondWrite: true } } } }
+  }));
+  const body = 'Delivery summary for finalization.';
+  const options = {
+    kind: 'summary' as const, agent: 'codex', cwd: root, body,
+    summaryAuthorization: { sha256: createHash('sha256').update(body).digest('hex') }
+  };
+  try {
+    const first = await syncPlatformComment('TASK-20260101-000001', options);
+    assert.equal(first.status, 'applied', JSON.stringify(first));
+
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
+      comments: Array<{ id: string; author: { name: string }; body: string; createdAt: string; updatedAt: string; createdSequence: number }>;
+      nextId: number; nextSequence: number; writeCount: number;
+    };
+    state.comments.push({
+      id: 'later-task-comment', author: { name: 'codex' },
+      body: `<!-- sync-issue:TASK-20260101-000001:task -->\nTask snapshot`,
+      createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z',
+      createdSequence: state.nextSequence++
+    });
+    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+    const repositioned = await syncPlatformComment('TASK-20260101-000001', options);
+    assert.equal(repositioned.status, 'blocked');
+    assert.equal(repositioned.error?.code, 'SUMMARY_BODY_READBACK_FAILED');
+    const finalState = JSON.parse(fs.readFileSync(statePath, 'utf8')) as typeof state;
+    const summaries = finalState.comments.filter((comment) => comment.body.startsWith(`<!-- sync-issue:TASK-20260101-000001:summary -->`));
+    assert.equal(summaries.length, 1);
+    assert.match(summaries[0]!.body, /corrupted$/u);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('artifact sync isolates sibling stems and becomes a no-op on replay', async () => {
   const root = syncFixture();
   const siblingBody = `${MARKERS.artifact('TASK-20260101-000001', 'analysis-r2')}\nexisting sibling`;

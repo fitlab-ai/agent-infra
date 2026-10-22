@@ -293,6 +293,41 @@ test('queued PR summary recovery replays the desired summary through the configu
   }
 });
 
+test('PR summary persists corrected typed content for unknown-operation recovery', async () => {
+  const fixture = summaryFixture();
+  const callsPath = path.join(fixture.root, 'provider-calls.log');
+  try {
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'task.md');
+    fs.appendFileSync(taskPath, [
+      '', '## Review Disagreement Ledger', '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|', ''
+    ].join('\n'));
+    configureOpaquePullRequest(fixture, 42, { callsPath });
+    const { humanDecisions: _omitted, ...incomplete } = JSON.parse(summaryPayload('Summary with omitted ledger counts.')) as Record<string, unknown>;
+    const first = await syncTypedPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body: JSON.stringify(incomplete),
+      changeReportFile: fixture.reportPath, primaryResult: 'no_op', strict: true
+    });
+    assert.equal(first.status, 'applied', JSON.stringify(first));
+
+    const journalPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, '.platform-operations.json');
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<Record<string, unknown> & { pullRequestSummary: { body: string } }> };
+    const operation = journal.operations.at(-1)!;
+    const persisted = JSON.parse(operation.pullRequestSummary.body) as { humanDecisions: { open: number; resolved: number; detail: string } };
+    assert.deepEqual(persisted.humanDecisions, { open: 0, resolved: 0, detail: 'Task decision ledger: 0 open, 0 resolved.' });
+    operation.state = 'unknown';
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', { agent: 'codex', cwd: fixture.root });
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
+    assert.match(fs.readFileSync(callsPath, 'utf8'), /write/u);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('queued ordinary manual-validation pending summary replays without a coordinator transaction', async () => {
   const fixture = summaryFixture();
   const commentWrites = { value: 0 };
