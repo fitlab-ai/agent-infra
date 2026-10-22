@@ -18,8 +18,7 @@ description: >
 
 生成收尾报告或同步内容时，先读取 `.agents/rules/evidence-reporting.md`。成功检查记录命令、范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议保留复现入口、准确位置和决定性摘录。
 
-- 本命令更新任务元数据并物理移动任务目录
-- 除非强制执行，不要转移有未完成工作流步骤的任务
+- 本命令由宿主更新任务元数据并原子移动任务目录
 - 入口接受可选 `--external-pr <N>`；仅用于外部交付候选歧义时的显式选择，不绕过身份或平台门禁
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -224,32 +223,18 @@ ai sandbox rm {task-id}  # 或使用本任务仍保留的短号
 
 ## 完成检查清单
 
-- [ ] 验证了所有工作流步骤已完成
-- [ ] 更新了 task.md 的完成状态和时间戳
-- [ ] 将任务目录移动到 `<task-workspace>/completed/`
-- [ ] 验证了转移成功
-- [ ] 告知了用户完成情况
+- [ ] 满足了硬性前置条件并通过预完成门禁
+- [ ] 宿主 finalization 返回 `result=completed` 或 `result=completed_with_warnings`
+- [ ] 完成校验通过
+- [ ] 已向用户报告结构化完成结果和适用的警告
 
 ## 注意事项
 
-1. **过早完成**：不要转移有未完成步骤的任务。未完成的情况示例：
-   - 代码已编写但未提交
-   - 代码已提交但未审查
-   - 审查发现阻塞项但未修复
-   - PR 已创建但未合并
-   - 人工校验项未完成
-
-2. **回滚**：如果任务被错误转移：
-   ```bash
-   mv <task-workspace>/completed/{task-id} <task-workspace>/active/{task-id}
-   ```
-   然后将 task.md 中的状态改回 `active`。
-
-3. **多贡献者**：如果多个 AI 代理参与了任务，确保所有贡献都已提交后再完成。
+- 如果多个 AI 代理参与任务，确保所有贡献都包含在本地 checkpoint 中。
 
 ## 错误处理
 
 - 任务未找到：提示 "Task {task-id} not found in active directory"
-- 已完成：提示 "Task {task-id} is already in completed directory"
-- 任务被阻塞：提示 "Task {task-id} is blocked. Unblock it first by moving to active/"
-- 移动失败：提示错误并建议手动移动
+- 已完成：仅当存在匹配的 Complete Task Activity Log 时进入 `finalization-retry`；否则说明终态身份不完整并停止
+- 任务被阻塞：满足记录的解除条件后，通过 `task-lifecycle activate` 恢复任务，再重试
+- finalization 失败或阻塞：保留源数据和 receipt，根据结构化错误通过同一 finalization 入口恢复；不要手工改写终态或移动任务目录
