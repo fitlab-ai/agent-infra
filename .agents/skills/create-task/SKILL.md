@@ -92,24 +92,6 @@ agent-infra-internal task-create --input "$candidate_file"
 
 宿主负责 TASK-id/时间戳/版本戳、workflow/branch 派生、模板渲染、原子持久化、短号、Issue 与 warning。技能不得自行 `mkdir`、复制任务模板、分配短号或直接调用平台子命令。
 
-任务元数据（task.md YAML front matter）：
-```yaml
-id: TASK-{yyyyMMdd-HHmmss}
-type: feature|bugfix|refactor|docs|chore
-branch: <project>-<type>-<slug>
-workflow: feature-development|bug-fix|refactoring
-status: active
-created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
-updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
-agent_infra_version: {agent_infra_version}
-priority:                  # 必填；由 AI 从标题/描述推断；Urgent | High | Medium | Low
-effort:                    # 必填；由 AI 从标题/描述推断；High | Medium | Low
-start_date:                # 可选；YYYY-MM-DD
-target_date:               # 可选；YYYY-MM-DD
-current_step: requirement-analysis
-assigned_to: {当前 AI 代理}
-```
-
 priority / effort 必填：由 AI 从任务标题与描述推断后填入（候选值见 `.agents/rules/issue-fields.md`；中文输入按本地化映射规范化）。start_date / target_date 创建时保持留空：`start_date` 由 analyze 阶段写入、`target_date` 由 complete 阶段写入；不要臆测日期。
 
 ### 3. 处理结构化结果
