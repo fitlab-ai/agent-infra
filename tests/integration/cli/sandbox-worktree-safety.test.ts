@@ -949,6 +949,150 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
   }
 });
 
+test("sandbox rm adds owner-write to read-only tool directories and retries once", onPlatforms("linux", "darwin"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const tmpDir = createTempDir("agent-infra-rm-readonly-tool-");
+  const branch = "feature/readonly-tool";
+  const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "feature..readonly-tool");
+  const nestedDirectory = path.join(candidate, "pkg", "mod");
+  const originalRmSync = fs.rmSync;
+  let attempts = 0;
+  let retryObservedWritableDirectory = false;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    const inspection = safety.inspectWorktree(worktree);
+    assert.equal(inspection.status, "clean");
+    fs.mkdirSync(nestedDirectory, { recursive: true });
+    fs.writeFileSync(path.join(nestedDirectory, "module.zip"), "module\n", "utf8");
+    fs.chmodSync(path.join(nestedDirectory, "module.zip"), 0o444);
+    fs.chmodSync(path.join(candidate, "pkg"), 0o555);
+    fs.chmodSync(nestedDirectory, 0o555);
+    fs.chmodSync(candidate, 0o555);
+
+    fs.rmSync = ((target, options) => {
+      if (path.resolve(String(target)) === candidate && attempts++ === 0) {
+        const error = Object.assign(new Error("Directory not empty"), { code: "ENOTEMPTY" });
+        throw error;
+      }
+      if (path.resolve(String(target)) === candidate && attempts === 2) {
+        retryObservedWritableDirectory = (fs.statSync(nestedDirectory).mode & 0o200) !== 0;
+      }
+      return originalRmSync(target, options);
+    }) as typeof fs.rmSync;
+
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      assumeYes: true,
+      permits: new Map([[path.resolve(worktree), safety.createCleanPermit(inspection.snapshot)]]),
+      target: {
+        branch,
+        effectiveBranch: branch,
+        engine: "docker-desktop",
+        matchedContainers: [],
+        existingWorktrees: [worktree],
+        toolCandidates: [{ tool: {} as never, candidates: [candidate] }],
+        workspace: { mode: "branch-only" },
+        controlRoots: [],
+        workspaceViewRoots: []
+      }
+    }));
+
+    assert.equal(attempts, 2);
+    assert.equal(retryObservedWritableDirectory, true);
+    assert.equal(fs.existsSync(candidate), false);
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+  } finally {
+    fs.rmSync = originalRmSync;
+    if (fs.existsSync(nestedDirectory)) fs.chmodSync(nestedDirectory, 0o755);
+    if (fs.existsSync(path.join(candidate, "pkg"))) fs.chmodSync(path.join(candidate, "pkg"), 0o755);
+    if (fs.existsSync(candidate)) fs.chmodSync(candidate, 0o755);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm continues cleanup and reports tool directories that remain after retry", onPlatforms("linux", "darwin"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const tmpDir = createTempDir("agent-infra-rm-tool-failure-");
+  const branch = "feature/tool-failure";
+  const taskId = "TASK-20260824-000021";
+  const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "feature..tool-failure");
+  const removableCandidate = path.join(tmpDir, ".agent-infra", "sandboxes", "node", "demo", "feature..tool-failure");
+  let registryPath: string;
+  const originalRmSync = fs.rmSync;
+  let failedCandidateAttempts = 0;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    addActiveTask(fixture.repoDir, taskId, branch, "07", tmpDir);
+    registryPath = path.join(taskWorkspaceRoot(fixture.repoDir, tmpDir), "active", ".short-ids.json");
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+    const inspection = safety.inspectWorktree(worktree);
+    assert.equal(inspection.status, "clean");
+    fs.mkdirSync(candidate, { recursive: true });
+    fs.writeFileSync(path.join(candidate, "keep.txt"), "remaining\n", "utf8");
+    fs.mkdirSync(removableCandidate, { recursive: true });
+    fs.writeFileSync(path.join(removableCandidate, "remove.txt"), "remove\n", "utf8");
+    fs.mkdirSync(share, { recursive: true });
+
+    fs.rmSync = ((target, options) => {
+      if (path.resolve(String(target)) === candidate) {
+        failedCandidateAttempts += 1;
+        const error = Object.assign(new Error("Directory not empty"), { code: "ENOTEMPTY" });
+        throw error;
+      }
+      return originalRmSync(target, options);
+    }) as typeof fs.rmSync;
+
+    await withFixtureDocker(fixture, () => assert.rejects(
+      rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "active"
+        },
+        permits: new Map([[path.resolve(worktree), safety.createCleanPermit(inspection.snapshot)]]),
+        target: {
+          branch,
+          effectiveBranch: branch,
+          engine: "docker-desktop",
+          matchedContainers: [],
+          existingWorktrees: [worktree],
+          toolCandidates: [
+            { tool: {} as never, candidates: [candidate] },
+            { tool: {} as never, candidates: [removableCandidate] }
+          ],
+          workspace: { mode: "task-bound", taskId },
+          controlRoots: [],
+          workspaceViewRoots: []
+        }
+      }),
+      (error: unknown) => {
+        assert.match(String(error), /tool-failure/);
+        assert.match(String(error), /ENOTEMPTY/);
+        return true;
+      }
+    ));
+
+    assert.equal(failedCandidateAttempts, 2);
+    assert.equal(fs.existsSync(candidate), true);
+    assert.equal(fs.existsSync(removableCandidate), false);
+    assert.equal(fs.existsSync(share), false);
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, "utf8")).ids, { "07": taskId });
+  } finally {
+    fs.rmSync = originalRmSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm preserves another registered worktree", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");

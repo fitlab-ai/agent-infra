@@ -73,6 +73,41 @@ function isMissingPathError(error: unknown): boolean {
     && (error as { code?: unknown }).code === 'ENOENT');
 }
 
+function removalErrorCode(error: unknown): string | null {
+  return error && typeof error === 'object' && 'code' in error
+    && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : null;
+}
+
+function removalErrorMessage(error: unknown): string {
+  const code = removalErrorCode(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return code ? `${code}: ${message}` : message;
+}
+
+function addOwnerWriteToDirectories(root: string): void {
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if (isMissingPathError(error)) continue;
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
+
+    fs.chmodSync(current, stat.mode | 0o200);
+    for (const entry of fs.readdirSync(current)) pending.push(path.join(current, entry));
+  }
+}
+
+function isPermissionRemovalError(error: unknown): boolean {
+  return ['EACCES', 'EPERM', 'ENOTEMPTY'].includes(removalErrorCode(error) ?? '');
+}
+
 function canonicalPath(input: string): string {
   try { return fs.realpathSync.native(input); }
   catch { return path.resolve(input); }
@@ -1011,7 +1046,26 @@ async function removeUncheckedSandbox(
     fs.rmSync(root, { recursive: true, force: true });
     removeEmptyManagedParent(path.join(config.workspaceViewBase, config.project), root);
   }
-  for (const candidate of toolCandidates.flatMap(({ candidates }) => candidates)) fs.rmSync(candidate, { recursive: true, force: true });
+  const toolRemovalFailures: string[] = [];
+  for (const candidate of toolCandidates.flatMap(({ candidates }) => candidates)) {
+    try {
+      fs.rmSync(candidate, { recursive: true, force: true });
+      continue;
+    } catch (initialError) {
+      if (isPermissionRemovalError(initialError)) {
+        try {
+          addOwnerWriteToDirectories(candidate);
+          fs.rmSync(candidate, { recursive: true, force: true });
+          continue;
+        } catch (retryError) {
+          toolRemovalFailures.push(`${candidate}: ${removalErrorMessage(initialError)}; retry failed: ${removalErrorMessage(retryError)}`);
+        }
+      } else {
+        toolRemovalFailures.push(`${candidate}: ${removalErrorMessage(initialError)}`);
+      }
+    }
+    if (!fs.existsSync(candidate)) toolRemovalFailures.pop();
+  }
   for (const shell of shellConfigDirCandidates(config, effectiveBranch)) fs.rmSync(shell, { recursive: true, force: true });
   if (shouldRemoveShare) fs.rmSync(sharePath, { recursive: true, force: true });
   if (shouldRemoveWorktree) {
@@ -1024,6 +1078,9 @@ async function removeUncheckedSandbox(
   if (shouldDeleteBranch) {
     assertBranchRemovalIdentity(config, effectiveBranch, worktreePermits);
     runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
+  }
+  if (toolRemovalFailures.length > 0) {
+    throw new Error(`SANDBOX_TOOL_CLEANUP_INCOMPLETE:\n${toolRemovalFailures.map((failure) => `  - ${failure}`).join('\n')}`);
   }
   releaseTaskBoundSandboxIdentity(config.repoRoot, target.workspace);
 
