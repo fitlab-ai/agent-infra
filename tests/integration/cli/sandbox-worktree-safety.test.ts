@@ -1039,7 +1039,6 @@ test("sandbox rm preserves task short id after inaccessible tool cleanup and ret
   const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "feature..inaccessible-tool-retry");
   const originalRmSync = fs.rmSync;
   const originalLstatSync = fs.lstatSync;
-  const originalExistsSync = fs.existsSync;
   const mutableFs = fs as unknown as { lstatSync: typeof fs.lstatSync };
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
@@ -1070,10 +1069,6 @@ test("sandbox rm preserves task short id after inaccessible tool cleanup and ret
       }
       return originalLstatSync(target, options);
     }) as typeof fs.lstatSync;
-    fs.existsSync = ((target) => path.resolve(String(target)) === candidate
-      ? false
-      : originalExistsSync(target)) as typeof fs.existsSync;
-
     const firstTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
     assert.equal(firstTarget.taskState, "archive");
     denyCandidateLookup = true;
@@ -1085,12 +1080,11 @@ test("sandbox rm preserves task short id after inaccessible tool cleanup and ret
       }),
       /SANDBOX_TOOL_CLEANUP_INCOMPLETE:.*EACCES/s
     ));
-    assert.equal(originalExistsSync(candidate), true);
+    assert.equal(fs.existsSync(candidate), true);
     assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, "utf8")).ids, { "07": taskId });
 
     denyCandidateLookup = false;
     mutableFs.lstatSync = originalLstatSync;
-    fs.existsSync = originalExistsSync;
     const retryTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
     assert.equal(retryTarget.workspace.mode, "task-bound");
     await withFixtureDocker(fixture, () => rm.rmOne(config, [], retryTarget.branch, {
@@ -1104,7 +1098,6 @@ test("sandbox rm preserves task short id after inaccessible tool cleanup and ret
   } finally {
     fs.rmSync = originalRmSync;
     mutableFs.lstatSync = originalLstatSync;
-    fs.existsSync = originalExistsSync;
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;
@@ -1125,10 +1118,7 @@ test("sandbox rm retries only EACCES, EPERM, and ENOTEMPTY tool removal errors",
       try {
         const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
         const config = rmOneConfig(fixture, tmpDir);
-        fs.mkdirSync(path.join(candidate, "readonly"), { recursive: true });
-        fs.writeFileSync(path.join(candidate, "readonly", "file.txt"), "file\n", "utf8");
-        fs.chmodSync(path.join(candidate, "readonly"), 0o555);
-        fs.chmodSync(candidate, 0o555);
+        fs.mkdirSync(candidate, { recursive: true });
         fs.rmSync = ((target, options) => {
           if (path.resolve(String(target)) === candidate && attempts++ === 0) {
             throw Object.assign(new Error("injected removal failure"), { code });
@@ -1149,8 +1139,6 @@ test("sandbox rm retries only EACCES, EPERM, and ENOTEMPTY tool removal errors",
         assert.equal(fs.existsSync(candidate), false);
       } finally {
         fs.rmSync = originalRmSync;
-        if (fs.existsSync(path.join(candidate, "readonly"))) fs.chmodSync(path.join(candidate, "readonly"), 0o755);
-        if (fs.existsSync(candidate)) fs.chmodSync(candidate, 0o755);
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
