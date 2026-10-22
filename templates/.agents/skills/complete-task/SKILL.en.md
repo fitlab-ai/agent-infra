@@ -18,8 +18,7 @@ Host finalization uses receipt v4 with an immutable `receiptId`, monotonic `revi
 
 Before generating a completion report or synchronized content, read `.agents/rules/evidence-reporting.md`. Successful checks record the command, scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt.
 
-- This command updates task metadata AND physically moves the task directory
-- Do not move a task that has incomplete workflow steps unless forced
+- Host finalization updates task metadata and atomically moves the task directory
 - The entry point accepts optional `--external-pr <N>` only to select among ambiguous external-delivery candidates; it never bypasses identity or platform gates
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
@@ -225,32 +224,18 @@ ai sandbox rm {task-id}  # or use the task's retained short id
 
 ## Completion Checklist
 
-- [ ] Verified all workflow steps are complete
-- [ ] Updated task.md with completed status and timestamp
-- [ ] Moved task directory to `<task-workspace>/completed/`
-- [ ] Verified move succeeded
-- [ ] Informed user of completion
+- [ ] Hard prerequisites are satisfied and the pre-completion gate passes
+- [ ] Host finalization returns `result=completed` or `result=completed_with_warnings`
+- [ ] Completion verification passes
+- [ ] The structured completion result and applicable warnings are reported to the user
 
 ## Notes
 
-1. **Premature completion**: Do not move a task that has incomplete steps. Examples of incomplete situations:
-   - Code is written but not committed
-   - Code is committed but not reviewed
-   - Review found blockers that haven't been fixed
-   - PR is created but not merged
-   - Manual validation items are incomplete
-
-2. **Rollback**: If a task was incorrectly moved:
-   ```bash
-   mv <task-workspace>/completed/{task-id} <task-workspace>/active/{task-id}
-   ```
-   Then update task.md status back to `active`.
-
-3. **Multiple contributors**: If multiple AI agents worked on the task, ensure all contributions are committed before completing.
+- When multiple AI agents contributed, ensure all contributions are included in the local checkpoint.
 
 ## Error Handling
 
 - Task not found: Prompt "Task {task-id} not found in active directory"
-- Already completed: Prompt "Task {task-id} is already in completed directory"
-- Task is blocked: Prompt "Task {task-id} is blocked. Unblock it first by moving to active/"
-- Move failed: Prompt error and suggest manual move
+- Already completed: Enter `finalization-retry` only when a matching Complete Task Activity Log exists; otherwise report incomplete terminal identity and stop
+- Task is blocked: Satisfy the recorded unblock condition, then reactivate it through `task-lifecycle activate` before retrying
+- Finalization failed or blocked: Preserve source data and the receipt, then recover through the same finalization entry point using its structured error; do not manually rewrite terminal state or move the task directory
