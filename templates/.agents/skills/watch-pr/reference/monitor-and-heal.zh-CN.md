@@ -15,9 +15,9 @@
 
 每轮 readiness 之前，以及外部 push、自愈 commit 或 rebase 成功改变 PR head 之后，必须重新执行 `summary-context` → 机械报告与六项 precheck → `platform-pr change-report` → 含一次 `<!-- canonical-pr-change-report -->` 的 `summary-sync --change-report-file ... --result no_op --strict`。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不允许 warning 穿透到 ready/complete 路由。core 以权威 PR snapshot、任务意图 digest 和完整 patch 重新校验 sidecar；报告缺失、stale、invalid、占位符绕过或发布竞态时，不得继续 ready/complete 路由，转入求助出口并登记 warning。
 
-每轮重建 precheck 时，六项 `rationale` 都必须是对应检查的实际高层结论，并各带至少一条路径、行号和简短 `detail` 证据；`change-composition` 要说明职责集中位置，兼容、旧路径、冗余和范围检查要分别说明实际结果，禁止复用泛化套话。理由和证据详情遵循当前已部署技能的语言，中文技能必须使用中文。
+每轮重建 precheck 时，除执行下方功能级报告门槛外，六项 `rationale` 都必须陈述对应检查的实际结论，并至少带一条含路径、行号和简短 `detail` 的证据；兼容、旧路径、冗余和范围检查分别说明，不复用泛化套话。理由和证据遵循当前部署语言，中文技能必须使用中文。
 
-按逻辑变化组使用现有六项 `rationale` 和 `Evidence[]` 说明目标/验收对应、行为增减、必要性、冗余或重复、范围、相关测试及测试充分性。列出可定位的代码/测试/文档证据；缺证据时明确写未确认。renderer 会展示每项的全部 evidence。源码行数、执行/调用次数和流程统一是不同结论：diff 行数不能证明执行次数或流程行为变化；CI 全绿也不能证明必要性。不得由分析建议自行扩大自愈或重构权限。
+功能分组、逐组字段、行数唯一归属及 `needs-review` 条件统一遵循 `.agents/skills/create-pr/reference/change-report.md` 的 candidate 内容契约。每次刷新都重新按当前任务目标和 patch 建立功能组，不沿用上一 head 的说明代替本轮证据。完整 PR 统计与上一有效 head → 当前 head 的增量分开核算；没有可验证的上一 head 时明确标为未确认。任何功能组缺少目标对应、行为增减、必要性、行数对账、测试覆盖/成本或定位证据时，将 `target-alignment` 或 `change-composition` 标为 `needs-review` 并指出缺口。沿用现有 `nextAction=review-code` 路由；不得以结构完整或 CI 全绿继续 `watch-pr`。
 
 完整 PR 的范围继续绑定当前权威 base/head/merge-base/patch 与完整统计。增量单独绑定上一有效报告 head → 当前 head：在覆盖旧 sidecar 前，用 `readPrChangeReport` 校验旧报告，只在 repository/resource identity 匹配当前 PR 时采用旧 `identity.head.sha`。对两个 head 做 tree-to-tree diff 并明确列出 SHA，不用 merge-base 替代端点差异，不把增量 totals 加到完整 PR totals。没有旧报告、报告无效或身份不符时标注上一 head 未确认，不从全量推算或填零。两个 SHA 相同只报告 head 未变化；rebase 后仍比较原 head 和新 head 的树差异。sidecar 无效只使增量不可确认，不改变现有 full-PR 报告流程。
 
