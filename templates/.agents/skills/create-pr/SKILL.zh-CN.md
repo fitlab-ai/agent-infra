@@ -86,7 +86,7 @@ description: >
 
 读取最新的上下文产物：`plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md`、`review-code.md` / `review-code-r{N}.md`（存在时）。
 
-基于这些产物聚合 reviewer 摘要，正文只放一次 `<!-- canonical-pr-change-report -->` 占位符，再使用隐藏标记维护唯一且幂等的摘要评论。调用 `summary-sync` 时传入 `--change-report-file <task-workspace>/active/{task-id}/pr-change-report.json`，并继续传递同一个 `--result {primary-result}`；不得根据同步子步骤猜测 PR 是创建还是复用。
+基于这些产物组装结构化 reviewer 摘要 JSON，包含概览、测试、Review、人工校验、待决事项和风险；将合法未启动状态如实传入，不提前写入后续验证或事件结果。使用隐藏标记维护唯一且幂等的摘要评论；核心 renderer 负责生成固定摘要段落和 change report。调用 `summary-sync` 时传入摘要 JSON 与 `--change-report-file <task-workspace>/active/{task-id}/pr-change-report.json`，并继续传递同一个 `--result {primary-result}`；不得根据同步子步骤猜测 PR 是创建还是复用。
 
 > canonical context、摘要聚合和 `summary-sync` 调用见 `reference/comment-publish.md`（其引用 `.agents/rules/pr-sync.md`）。发布摘要前先读取该 reference。
 

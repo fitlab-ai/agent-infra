@@ -79,7 +79,7 @@ ls <task-workspace>/completed/{task-id}/task.md
 
 如果存在有效的 `platform_issue_identity`，以下操作均须取得 `applied` / `no-op` 且无错误后才能宣称取消全部完成；失败时保留本地终态和待恢复记录，修复后以同一任务重试本技能：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
-- 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
+- 将取消摘要字段写成 JSON 临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`。字段为 `taskId`、`title`、`outcome:"cancelled"`、`reason`、`cancelledAt`、`lastCompletedArtifact`；值来自当前任务身份、标题、已记录取消原因与时间、当前 artifact registry。无已完成产物时 `lastCompletedArtifact` 为 `null`。
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
 取消评论至少包含：

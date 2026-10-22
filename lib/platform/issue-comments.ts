@@ -696,6 +696,14 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
       });
     }
     const position = summaryPosition(refreshed.value, resolved.taskId);
+    const expectedBody = desired[0]?.body;
+    const matchingSummary = refreshed.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === MARKERS.summary(resolved.taskId));
+    if (matchingSummary.length !== 1 || !expectedBody || normalizeCommentContent(matchingSummary[0]!.body) !== normalizeCommentContent(expectedBody)) {
+      return platformResult('blocked', {
+        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
+        error: { code: 'SUMMARY_BODY_READBACK_FAILED', message: 'Remote summary body did not match the rendered delivery summary', retryable: true }
+      });
+    }
     if (!position.ok && !position.known) {
       return platformResult('blocked', {
         ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
@@ -745,6 +753,20 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
           ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error
         });
       }
+    }
+  }
+  if (options.kind === 'cancel') {
+    const refreshed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
+    if (!refreshed.ok) return platformResult(isRetryable(refreshed.error) ? 'blocked' : 'failed', {
+      ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: refreshed.error
+    });
+    const marker = MARKERS.cancel(resolved.taskId);
+    const matches = refreshed.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === marker);
+    if (matches.length !== 1 || !desired[0] || normalizeCommentContent(matches[0]!.body) !== normalizeCommentContent(desired[0].body)) {
+      return platformResult('blocked', {
+        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
+        error: { code: 'SUMMARY_BODY_READBACK_FAILED', message: 'Remote cancellation body did not match the rendered cancellation summary', retryable: true }
+      });
     }
   }
   const changed = operations.some((operation) => operation.status === 'applied');

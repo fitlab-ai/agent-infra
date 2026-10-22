@@ -89,7 +89,7 @@ export default async function createPlatformProvider(input) {
       },
       async write(request) {
         if (config.callsPath) fs.appendFileSync(config.callsPath, 'write\n');
-        if (config.failFinalOnce && !failedFinalWrite && /^###\s+✅\s+Manual Validation Passed\s*$/mu.test(request.body)) {
+        if (config.failFinalOnce && !failedFinalWrite && /^###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)\s*$/mu.test(request.body)) {
           failedFinalWrite = true;
           return { ok: false, error: { code: 'INJECTED_FINAL_SUMMARY_WRITE', message: 'Injected retryable final summary failure', retryable: true } };
         }

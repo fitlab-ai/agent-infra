@@ -11,11 +11,31 @@ import {
   reportWrite,
   reconcileSummaryComment,
   summaryContext,
-  syncPullRequestSummary,
+  syncPullRequestSummary as syncTypedPullRequestSummary,
   warningResultForPrimary
 } from '../../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import type { PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
+import { parsePrSummaryContent, renderPrSummaryContent } from '../../../../lib/platform/pr-summary-content.ts';
+
+function summaryPayload(body: string): string {
+  let manualState = 'not-required';
+  if (/Manual Validation Pending|人工验证待收尾/u.test(body)) manualState = 'pending';
+  if (/Manual Validation Passed|人工验证已通过/u.test(body)) manualState = 'passed';
+  return JSON.stringify({
+    overview: body.replace(/<!--\s*canonical-pr-change-report\s*-->/gu, '').replace(/###\s+(?:⏳\s+人工验证待收尾|✅\s+人工验证已通过).*$/su, '').trim() || 'Summary fixture.',
+    tests: { state: 'not-started', detail: 'CI has not started in this fixture.' },
+    review: { state: 'not-observed', detail: 'Remote reviews were not observed in this fixture.' },
+    manualValidation: { state: manualState, detail: 'Manual validation fixture state.' },
+    humanDecisions: { open: 0, resolved: 0, detail: 'No task decisions in this fixture.' },
+    risks: 'No additional risks in this fixture.'
+  });
+}
+
+async function syncPullRequestSummary(taskRef: string, options: Parameters<typeof syncTypedPullRequestSummary>[1]) {
+  const body = options.body.startsWith('{') ? options.body : summaryPayload(options.body);
+  return syncTypedPullRequestSummary(taskRef, { ...options, body });
+}
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
 import { createManualValidationReceipt, manualValidationFinalSummaryDigest, writeManualValidationReceiptAtomic } from '../../../../lib/task/manual-validation-receipt.ts';
 import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../../lib/task/manual-validation-transaction.ts';
@@ -141,7 +161,7 @@ function queueOpaqueSummary(
 ) {
   const report = readPrChangeReport(fixture.reportPath);
   if (!report.ok) throw new Error(report.error.message);
-  const rendered = replaceCanonicalReportPlaceholder(body, report.value);
+  const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(JSON.parse(summaryPayload(body)))), report.value);
   if (!rendered.ok) throw new Error(rendered.error.message);
   const desired = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
   return recordPlatformOperation({
@@ -149,7 +169,7 @@ function queueOpaqueSummary(
     target: JSON.stringify({ kind: 'id', value: 'pr-42' }),
     expectedDigest: createHash('sha256').update(desired).digest('hex'), dependency: 'deferred', state: 'queued',
     pullRequestSummary: {
-      body, changeReportFile: fixture.reportPath,
+      body: summaryPayload(body), changeReportFile: fixture.reportPath,
       ...(manualValidation ? { manualValidation } : {})
     }
   });
@@ -174,6 +194,7 @@ function resolvedContextClient(
 ): GitHubClient {
   let repositoryCalls = 0;
   let pullRequestCalls = 0;
+  const remoteComments = [...(options.comments || [])];
   return {
     version: () => ({ ok: true, value: '2.72.0' }),
     json: (args: string[], request?: { input?: string }) => {
@@ -201,7 +222,11 @@ function resolvedContextClient(
       if (args.some((value: string) => value.includes('/issues/42/comments'))) {
         if (args.includes('POST') || args.includes('PATCH')) {
           if (options.commentWrites) options.commentWrites.value += 1;
-          if (options.writtenBodies && request?.input) options.writtenBodies.push(JSON.parse(request.input).body);
+          const body = request?.input ? JSON.parse(request.input).body as string : '';
+          if (options.writtenBodies && request?.input) options.writtenBodies.push(body);
+          const current = remoteComments.find((comment) => comment.body.includes(`<!-- sync-pr:TASK-20260101-000042:summary -->`));
+          if (current) current.body = body;
+          else remoteComments.push({ id: 9, body });
           return { ok: true, value: { id: 9 } };
         }
         if (failure === 'duplicate') {
@@ -210,7 +235,7 @@ function resolvedContextClient(
         }
         return failure === 'comments'
           ? { ok: false, error: { code: 'COMMENT_LIST_FAILED', message: 'comment API failed', retryable: true } }
-          : { ok: true, value: [options.comments || []] };
+          : { ok: true, value: [remoteComments] };
       }
       throw new Error(`unexpected GitHub call: ${args.join(' ')}`);
     },
@@ -235,11 +260,11 @@ test('queued PR summary recovery replays the desired summary through the configu
   const fixture = summaryFixture();
   const commentWrites = { value: 0 };
   try {
-    const body = '## Summary\n\n<!-- canonical-pr-change-report -->';
+    const body = summaryPayload('## Summary');
     const report = readPrChangeReport(fixture.reportPath);
     assert.equal(report.ok, true);
     if (!report.ok) return;
-    const rendered = replaceCanonicalReportPlaceholder(body, report.value);
+    const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(JSON.parse(body))), report.value);
     assert.equal(rendered.ok, true);
     if (!rendered.ok) return;
     const desired = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
@@ -758,34 +783,6 @@ test('summary-sync sanitizes the template around the canonical placeholder and p
     assert.match(writtenBodies[0]!, /<code>README\.md<\/code>/);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('summary-sync rejects missing, duplicated, fenced, and nested placeholders before writing', async () => {
-  for (const body of [
-    'Summary',
-    '<!-- canonical-pr-change-report -->\n<!-- canonical-pr-change-report -->',
-    '```\n<!-- canonical-pr-change-report -->\n```',
-    '<!-- wrapper <!-- canonical-pr-change-report --> -->'
-  ]) {
-    const fixture = summaryFixture();
-    const commentWrites = { value: 0 };
-    try {
-      const result = await syncPullRequestSummary(fixture.taskId, {
-        cwd: fixture.root,
-        agent: 'codex',
-        body,
-        changeReportFile: fixture.reportPath,
-        primaryResult: 'no_op',
-        strict: true,
-        client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites })
-      });
-      assert.equal(result.status, 'failed');
-      assert.equal(result.error?.code, 'PR_SUMMARY_BODY_CONTRACT_INVALID');
-      assert.equal(commentWrites.value, 0);
-    } finally {
-      fs.rmSync(fixture.root, { recursive: true, force: true });
-    }
   }
 });
 

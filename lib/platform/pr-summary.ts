@@ -38,6 +38,7 @@ import type {
 import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
+import { parsePrSummaryContent, renderPrSummaryContent } from './pr-summary-content.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -512,6 +513,9 @@ async function syncPullRequestSummary(
   options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; skipQueue?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
+  let summaryBody: string;
+  try { summaryBody = renderPrSummaryContent(parsePrSummaryContent(JSON.parse(options.body))); }
+  catch (error) { return { ...platformResult('failed', { error: { code: 'PR_SUMMARY_CONTENT_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }), result: null, warnings: [] }; }
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
     const prNumber = output.resource.kind === 'pull-request' && output.resource.number
@@ -580,7 +584,7 @@ async function syncPullRequestSummary(
       if (!initial.ok) return fail(initial.status, context, initial.error);
       const manual = options.manualValidation;
       let manualEvidenceDigest: string | null = null;
-      const hasFinalManualValidation = /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(options.body);
+      const hasFinalManualValidation = /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(summaryBody);
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
@@ -611,7 +615,7 @@ async function syncPullRequestSummary(
           const { receipt, transaction } = completion.value;
           manualEvidenceDigest = receipt.evidenceDigest;
           if (transaction.phase !== 'final-promotion-in-progress' || !transaction.eventAppended) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'final summary requires a receipt-backed promotion intent', retryable: false }, prNumber);
-          if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
+          if (!manualValidationFinalSummaryProjectionMatches(summaryBody, receipt)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
         }
       }
       const expectedReportPath = taskReportPath(resolved.taskDir);
@@ -622,7 +626,7 @@ async function syncPullRequestSummary(
       const checked = currentReportCheck(report.value, initial.value, taskContent, resolved.repoRoot);
       if (!checked.ok) return fail('failed', context, checked.error);
       const placeholder = CANONICAL_REPORT_PLACEHOLDER;
-      const split = splitDocumentPlaceholder(options.body, placeholder);
+      const split = splitDocumentPlaceholder(summaryBody, placeholder);
       if (!split.ok) return fail('failed', context, {
         code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
         message: split.error.message,
@@ -721,6 +725,25 @@ async function syncPullRequestSummary(
             mutation: { idempotencyKey: `pr-summary-restore:${resolved.taskId}` }
           })
           : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Previous summary body is unavailable for restoration', retryable: true } };
+      const remoteSummary = loaded.value.provider.comments?.list
+        ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: prIdentity })
+        : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
+      const remoteMatches = remoteSummary.ok
+        ? remoteSummary.value.filter((comment) => comment.body.includes(summaryMarker(resolved.taskId)))
+        : [];
+      if (!remoteSummary.ok || remoteMatches.length !== 1 || normalizeCommentContent(remoteMatches[0]!.body) !== normalizeCommentContent(desired)) {
+        const compensated = await compensateWrittenSummary();
+        if (!compensated.ok) return fail('blocked', context, {
+          code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
+          message: `Summary body readback failed and compensation failed: ${compensated.error.message}`,
+          retryable: true
+        }, prNumber);
+        return fail('blocked', context, {
+          code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED',
+          message: remoteSummary.ok ? 'Remote summary body did not match the canonical rendered body; the previous summary was restored or the new comment was deleted' : `Remote summary body could not be read: ${remoteSummary.error.message}; the previous summary was restored or the new comment was deleted`,
+          retryable: true
+        }, prNumber);
+      }
       if (!after.ok) {
         const compensated = await compensateWrittenSummary();
         if (!compensated.ok) return fail('blocked', context, {

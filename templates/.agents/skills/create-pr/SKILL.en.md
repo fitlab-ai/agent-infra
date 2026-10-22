@@ -86,7 +86,7 @@ The core renderer owns the report section. It is part of the reviewer summary be
 
 Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md`.
 
-Aggregate a reviewer-facing summary from those artifacts with exactly one `<!-- canonical-pr-change-report -->` placeholder, and maintain a single idempotent summary comment via the hidden marker. Pass `--change-report-file <task-workspace>/active/{task-id}/pr-change-report.json` and the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
+Assemble a structured reviewer summary JSON from those artifacts with overview, tests, review, manual validation, open decisions, and risks. Report valid not-started states honestly; do not include later validation or event results in advance. Maintain one idempotent summary comment via the hidden marker; the core renderer generates the fixed summary sections and change report. Pass the summary JSON, `--change-report-file <task-workspace>/active/{task-id}/pr-change-report.json`, and the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
 
 > Canonical context, aggregation, and the `summary-sync` call live in `reference/comment-publish.md`, which points to `.agents/rules/pr-sync.md`. Read that reference before publishing.
 

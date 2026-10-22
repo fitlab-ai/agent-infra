@@ -13,7 +13,7 @@
 
 ## 摘要刷新边界
 
-每轮 readiness 之前，以及外部 push、自愈 commit 或 rebase 成功改变 PR head 之后，必须重新执行 `summary-context` → 机械报告与六项 precheck → `platform-pr change-report` → 含一次 `<!-- canonical-pr-change-report -->` 的 `summary-sync --change-report-file ... --result no_op --strict`。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不允许 warning 穿透到 ready/complete 路由。core 以权威 PR snapshot、任务意图 digest 和完整 patch 重新校验 sidecar；报告缺失、stale、invalid、占位符绕过或发布竞态时，不得继续 ready/complete 路由，转入求助出口并登记 warning。
+每轮 readiness 之前，以及外部 push、自愈 commit 或 rebase 成功改变 PR head 之后，必须重新执行 `summary-context` → 机械报告与六项 precheck → `platform-pr change-report` → 按 `.agents/rules/pr-sync.md` 更新完整 PR 摘要 JSON 并调用 `summary-sync --change-report-file ... --result no_op --strict`。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不允许 warning 穿透到 ready/complete 路由。core 以权威 PR snapshot、任务意图 digest 和完整 patch 重新校验 sidecar，并回读远端正文；报告缺失、stale、invalid、结构不完整或发布竞态时，不得继续 ready/complete 路由，转入求助出口并登记 warning。
 
 每轮重建 precheck 时，除执行下方功能级报告门槛外，六项 `rationale` 都必须陈述对应检查的实际结论，并至少带一条含路径、行号和简短 `detail` 的证据；兼容、旧路径、冗余和范围检查分别说明，不复用泛化套话。理由和证据遵循当前部署语言，中文技能必须使用中文。
 

@@ -17,6 +17,9 @@ import { recoverTaskFromComments } from '../platform/task-recovery.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { enumerateArtifacts } from '../task/artifacts.ts';
+import { parseTaskFrontmatter } from '../task/frontmatter.ts';
+import { parseCancelSummaryContent, parseDeliverySummaryContent, renderCancelSummaryContent, renderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment recover --issue <token> --task-id <TASK-id> --output <staging-task.md> [--cwd <path>]
@@ -158,13 +161,26 @@ async function platformComment(args: string[] = []): Promise<void> {
     let body: string;
     try { body = readBodyFile(parsed.values.bodyFile, cwd); }
     catch (error) { fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`); return; }
-    const canonical = canonicalizeSummaryBody(body);
-    if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
-    body = canonical.value;
     const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
     if (!resolved.ok || resolved.state !== 'active') { fail('stage-summary requires an active task'); return; }
     const target = path.join(resolved.taskDir, '.delivery-summary.json');
-    const value = { taskId: resolved.taskId, body, sha256: createHash('sha256').update(body).digest('hex') };
+    let content: ReturnType<typeof parseDeliverySummaryContent>;
+    try {
+      const supplied = JSON.parse(body) as Record<string, unknown>;
+      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
+      if (typeof supplied.taskId !== 'string' || !supplied.taskId) supplied.taskId = resolved.taskId;
+      if (supplied.taskId !== resolved.taskId) throw new Error('taskId does not match the active task');
+      if (typeof supplied.title !== 'string' || !supplied.title.trim()) supplied.title = title;
+      if (!Array.isArray(supplied.artifacts)) supplied.artifacts = enumerateArtifacts(resolved.taskDir)
+        .filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
+      if (!supplied.verification) supplied.verification = { state: 'not-run', detail: 'Final verification has not run at summary staging.' };
+      content = parseDeliverySummaryContent(supplied);
+      if (content.taskId !== resolved.taskId) throw new Error('taskId does not match the active task');
+    } catch (error) { fail(`unable to stage summary: ${error instanceof Error ? error.message : String(error)}`); return; }
+    const canonical = canonicalizeSummaryBody(renderDeliverySummaryContent(content));
+    if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
+    const value = { taskId: resolved.taskId, content, contentSha256: createHash('sha256').update(JSON.stringify(content)).digest('hex') };
     const previous = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
     const next = `${JSON.stringify(value)}\n`;
     if (previous === next) {
@@ -198,6 +214,29 @@ async function platformComment(args: string[] = []): Promise<void> {
   } catch (error) {
     fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     return;
+  }
+  if (kind === 'summary' || kind === 'cancel') {
+    try {
+      const input = JSON.parse(body!) as Record<string, unknown>;
+      const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
+      if (!resolved.ok) throw new Error(resolved.message);
+      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const taskFrontmatter = parseTaskFrontmatter(taskContent);
+      const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
+      if (kind === 'cancel') {
+        if (typeof input.taskId !== 'string' || !input.taskId) input.taskId = resolved.taskId;
+        if (typeof input.title !== 'string' || !input.title.trim()) input.title = title;
+        if (typeof input.reason !== 'string' || !input.reason.trim()) input.reason = taskFrontmatter.cancel_reason;
+        if (typeof input.cancelledAt !== 'string' || !input.cancelledAt.trim()) input.cancelledAt = taskFrontmatter.cancelled_at;
+        if (input.lastCompletedArtifact === undefined) input.lastCompletedArtifact = enumerateArtifacts(resolved.taskDir)
+          .filter((artifact) => artifact.name !== 'task.md').at(-1)?.name ?? null;
+        if (input.taskId !== resolved.taskId) throw new Error('taskId does not match the task');
+      }
+      const rendered = kind === 'summary'
+        ? renderDeliverySummaryContent(parseDeliverySummaryContent(input))
+        : renderCancelSummaryContent(parseCancelSummaryContent(input));
+      body = rendered;
+    } catch (error) { fail(`invalid ${kind} summary structure: ${error instanceof Error ? error.message : String(error)}`); return; }
   }
   finish(await syncPlatformComment(taskRef!, {
     kind: kind as CommentKind,

@@ -46,6 +46,10 @@ function runComment(args: string[], f: ReturnType<typeof fixture>) {
   });
 }
 
+function deliveryPayload(taskId: string, summary: string) {
+  return JSON.stringify({ taskId, title: 'Fixture task', summary, artifacts: [], verification: { state: 'not-run', detail: 'Final verification has not run.' } });
+}
+
 test('platform internal commands expose stable JSON and idempotent task comment sync', () => {
   const f = fixture();
   const context = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-context', 'resolve'], {
@@ -210,7 +214,7 @@ test('summary sync creates, updates and converges on one marker while preserving
   const f = fixture();
   try {
     const bodyPath = path.join(f.root, 'summary.md');
-    fs.writeFileSync(bodyPath, 'Decision recorded; verification pending.\n');
+    fs.writeFileSync(bodyPath, deliveryPayload(f.taskId, 'Decision recorded; verification pending.'));
     const args = ['sync', f.taskId, '--kind', 'summary', '--body-file', bodyPath, '--agent', 'codex'];
 
     const created = runComment(args, f);
@@ -220,7 +224,7 @@ test('summary sync creates, updates and converges on one marker while preserving
     assert.equal(comments.length, 1);
     assert.match(comments[0]!.body, /Decision recorded; verification pending\./);
 
-    fs.writeFileSync(bodyPath, 'Original failure: FAILURE_CODE. Decision: PRC-1. Result: human override.\n');
+    fs.writeFileSync(bodyPath, deliveryPayload(f.taskId, 'Original failure: FAILURE_CODE. Decision: PRC-1. Result: human override.'));
     const updated = runComment(args, f);
     assert.equal(updated.status, 0, updated.stderr || updated.stdout);
     assert.equal(JSON.parse(updated.stdout).status, 'applied');
@@ -241,14 +245,18 @@ test('stage-summary stores the canonical body and digest used for delivery comme
   const f = fixture();
   try {
     const bodyPath = path.join(f.root, 'summary.md');
-    fs.writeFileSync(bodyPath, 'Durable <delivery> summary.\r\n');
+    fs.writeFileSync(bodyPath, JSON.stringify({ summary: 'Durable <delivery> summary.' }));
     const args = ['stage-summary', f.taskId, '--body-file', bodyPath];
     assert.equal(runComment(args, f).status, 0);
     assert.equal(runComment(args, f).status, 0);
     const staged = JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.root),  'active', f.taskId, '.delivery-summary.json'), 'utf8'));
     assert.equal(staged.taskId, f.taskId);
-    assert.equal(staged.body, 'Durable &lt;delivery&gt; summary.\n');
-    assert.equal(staged.sha256, createHash('sha256').update(staged.body).digest('hex'));
+    assert.equal(staged.content.summary, 'Durable <delivery> summary.');
+    assert.equal(staged.content.taskId, f.taskId);
+    assert.equal(staged.content.title, 'Task');
+    assert.deepEqual(staged.content.artifacts, []);
+    assert.equal(staged.content.verification.state, 'not-run');
+    assert.equal(staged.contentSha256, createHash('sha256').update(JSON.stringify(staged.content)).digest('hex'));
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -258,7 +266,7 @@ test('ordinary summary sync refuses to re-post an out-of-order summary without f
   const f = fixture();
   try {
     const bodyPath = path.join(f.root, 'summary.md');
-    fs.writeFileSync(bodyPath, 'Delivery summary.\n');
+    fs.writeFileSync(bodyPath, deliveryPayload(f.taskId, 'Delivery summary.'));
     const summaryArgs = ['sync', f.taskId, '--kind', 'summary', '--body-file', bodyPath, '--agent', 'codex'];
     assert.equal(runComment(summaryArgs, f).status, 0);
     assert.equal(runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f).status, 0);

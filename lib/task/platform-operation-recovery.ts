@@ -10,6 +10,7 @@ import { providerOperationContext, providerError, unsupportedProviderOperation }
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
 import { bindPlatformPullRequest, inspectPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
 import { syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { parsePrSummaryContent } from '../platform/pr-summary-content.ts';
 import { publishPrReview, readReviewBodyFile } from '../platform/pr-review.ts';
 import type { PlatformClient } from '../platform/context.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
@@ -191,7 +192,11 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
   if (!summary) return platformResult('blocked', { error: {
     code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
   } });
-  const manualValidationHeading = /^###\s+(?:⏳\s+(?:Manual Validation Pending|人工验证待收尾)|✅\s+(?:Manual Validation Passed|人工验证已通过))\s*$/mu.test(summary.body);
+  let manualValidationHeading = false;
+  try {
+    const content = parsePrSummaryContent(JSON.parse(summary.body));
+    manualValidationHeading = ['pending', 'passed'].includes(content.manualValidation.state);
+  } catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary content is invalid', retryable: false } }); }
   if (manualValidationHeading && !summary.manualValidation) return platformResult('blocked', { error: {
     code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'Queued manual-validation summary has no persisted transaction context', retryable: false
   } });

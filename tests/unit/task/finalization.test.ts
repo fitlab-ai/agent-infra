@@ -27,6 +27,8 @@ import { verifyTaskEvent, type TaskVerificationResult } from '../../../lib/task/
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-08-24 12:00:00+00:00', agentInfraVersion: 'v0.9.9' };
+const deliveryContent = { taskId: TASK_ID, title: 'Task delivery', summary: 'Delivered summary.', artifacts: [], verification: { state: 'not-run', detail: 'Final verification has not run yet.' } };
+const deliveryStage = { taskId: TASK_ID, content: deliveryContent, contentSha256: createHash('sha256').update(JSON.stringify(deliveryContent)).digest('hex') };
 
 function fixture(): { repoRoot: string; taskDir: string } {
   const { repoRoot, project } = createTaskWorkspaceFixture('task-finalization-');
@@ -223,7 +225,7 @@ test('host finalization waits for completion backfill before lifecycle and repea
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   const calls: string[] = [];
   const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
@@ -360,7 +362,7 @@ test('final task comment uses the warning projection after summary recovery', as
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   let summaryCalls = 0;
   const taskProjections: string[] = [];
@@ -422,7 +424,7 @@ test('completed finalization schedules backfill from an eligible task artifact w
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# analysis\n');
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   let backfillCalls = 0;
   const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
@@ -457,7 +459,7 @@ test('completed finalization fails closed when an artifact warning references a 
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   let backfillCalls = 0;
   let verifyCalls = 0;
@@ -927,9 +929,7 @@ test('host finalization seals a staged summary after core verification and retai
   const staged = 'Delivered summary.\n';
   const stagingPath = path.join(f.taskDir, '.delivery-summary.json');
   fs.writeFileSync(stagingPath, `${JSON.stringify({
-    taskId: TASK_ID,
-    body: staged,
-    sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   const kinds: string[] = [];
   const timeline: string[] = [];
@@ -962,7 +962,7 @@ test('host finalization skips terminal verification and summary when no recovery
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   const kinds: string[] = [];
   let verifyCalls = 0;
@@ -988,7 +988,7 @@ test('host finalization records a terminal verification exception and recovers o
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   let verifyCalls = 0;
   const verificationEvents: string[] = [];
@@ -1115,7 +1115,7 @@ test('host finalization reports lifecycle changes when verification and receipt 
   const staged = 'Delivered summary.\n';
   const receiptDirectory = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   const comments: string[] = [];
   let verifyCalls = 0;
@@ -1159,7 +1159,7 @@ test('host finalization resolves a summary warning after a successful retry', as
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   let summaryCalls = 0;
   const calls: string[] = [];
@@ -1333,7 +1333,7 @@ test('host finalization projects every stable warning key for a step before reso
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+    ...deliveryStage
   })}\n`);
   let commentCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {

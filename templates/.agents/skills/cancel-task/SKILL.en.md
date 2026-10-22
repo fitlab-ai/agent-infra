@@ -83,7 +83,7 @@ If a valid `platform_issue_identity` exists, require `applied` / `no-op` without
 - Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
-The cancellation comment must include at least:
+The cancellation comment JSON fields are `taskId`, `title`, `outcome:"cancelled"`, `reason`, `cancelledAt`, and `lastCompletedArtifact`, sourced from task identity, task.md, the recorded cancellation reason/time, and the current artifact registry (`null` when no completed artifact exists). It must include at least:
 - the cancellation reason
 - the selected `status:` label
 

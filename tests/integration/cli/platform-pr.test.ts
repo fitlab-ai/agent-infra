@@ -173,6 +173,12 @@ test('platform-pr summary-sync validates required report input before invoking t
 test('platform-pr summary-sync strict mode keeps report failures non-zero without changing default warnings', () => {
   const fixture = createFixture(boundFixture(1));
   try {
+    fs.writeFileSync(path.join(fixture.root, 'body.md'), JSON.stringify({
+      overview: 'Fixture summary.', tests: { state: 'not-started', detail: 'CI has not started.' },
+      review: { state: 'not-observed', detail: 'No remote review was observed.' },
+      manualValidation: { state: 'pending', detail: 'Manual validation is pending.' },
+      humanDecisions: { open: 0, resolved: 0, detail: 'No decisions are recorded.' }, risks: 'No additional risks are recorded.'
+    }));
     const args = [
       'summary-sync', fixture.taskId, '--agent', 'codex', '--body-file', 'body.md',
       '--change-report-file', path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'pr-change-report.json'), '--result', 'no_op'

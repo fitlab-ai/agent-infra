@@ -24,6 +24,10 @@ import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000042';
 
+function manualSummaryContent() {
+  return { overview: '实现摘要。', tests: { state: 'not-started', detail: 'CI 尚未启动。' }, review: { state: 'not-observed', detail: '未读取远端 Review。' }, manualValidation: { state: 'required', detail: '在生产环境完成权限校验。' }, humanDecisions: { open: 0, resolved: 0, detail: '无待处理裁决。' }, risks: '无额外风险记录。' };
+}
+
 type Fixture = {
   root: string;
   taskId: string;
@@ -195,7 +199,7 @@ function createFixture(): Fixture {
   fs.writeFileSync(taskPath, upsertSection(fs.readFileSync(taskPath, 'utf8'), taskWithReceipt).content);
 
   const summaryPath = path.join(root, 'summary.md');
-  fs.writeFileSync(summaryPath, '## Summary\n\n<!-- canonical-pr-change-report -->\n');
+  fs.writeFileSync(summaryPath, JSON.stringify(manualSummaryContent()));
   const reportPath = path.join(taskDir, 'pr-change-report.json');
   const digest = taskIntentDigest(fs.readFileSync(taskPath, 'utf8'));
   if (!digest.ok) throw new Error(digest.error.message);
@@ -492,20 +496,7 @@ test('opaque PR identity recovers a failed final summary promotion on coordinato
 test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  fs.writeFileSync(fixture.summaryPath, [
-    '## 审查摘要',
-    '',
-    '### ⚠️ 需人工校验',
-    '',
-    '- 在生产环境完成权限校验。',
-    '',
-    '### 关键技术决策',
-    '',
-    '- 保持最小权限。',
-    '',
-    '<!-- canonical-pr-change-report -->',
-    ''
-  ].join('\n'));
+  fs.writeFileSync(fixture.summaryPath, JSON.stringify(manualSummaryContent()));
   const state: FakeGitHubState = { comments: [], writes: 0 };
 
   const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
@@ -514,23 +505,14 @@ test('coordinator replaces the Chinese manual-validation status section in place
 
   assert.equal(result.status, 'applied', JSON.stringify(result));
   const body = state.comments[0]?.body ?? '';
-  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n<!-- manual-validation-receipt: [^\n]+ -->\n- 在生产环境完成权限校验。\n\n### 关键技术决策/m);
+  assert.match(body, /### ✅ 人工验证已通过\n\n在生产环境完成权限校验。\n\n<!-- manual-validation-receipt: [^\n]+ -->\n\n### 人工决策/m);
   assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
 });
 
 test('coordinator preserves a canonical report placeholder after the manual-validation section', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  fs.writeFileSync(fixture.summaryPath, [
-    '## 审查摘要',
-    '',
-    '### ⚠️ 需人工校验',
-    '',
-    '- 在生产环境完成权限校验。',
-    '',
-    '<!-- canonical-pr-change-report -->',
-    ''
-  ].join('\n'));
+  fs.writeFileSync(fixture.summaryPath, JSON.stringify(manualSummaryContent()));
   const state: FakeGitHubState = { comments: [], writes: 0 };
 
   const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
@@ -541,6 +523,6 @@ test('coordinator preserves a canonical report placeholder after the manual-vali
   const body = state.comments[0]?.body ?? '';
   assert.match(body, /^### ✅ 人工验证已通过$/mu);
   assert.match(body, /^### PR 代码增减$/mu);
-  assert.ok(body.indexOf('### ✅ 人工验证已通过') < body.indexOf('- 在生产环境完成权限校验。'));
+  assert.ok(body.indexOf('### ✅ 人工验证已通过') < body.indexOf('在生产环境完成权限校验。'));
   assert.ok(body.indexOf('- 在生产环境完成权限校验。') < body.indexOf('### PR 代码增减'));
 });

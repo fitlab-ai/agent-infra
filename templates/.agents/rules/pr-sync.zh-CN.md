@@ -18,14 +18,9 @@ PR 摘要的语义聚合由模型完成；任务意图 digest、完整三点 dif
 agent-infra-internal platform-pr summary-context {task-id}
 ```
 
-只使用返回的 canonical latest `plan*`、`review-plan*`、`code*`、`review-code*`、`manual-validation*`（包括 `manual-validation.md`）。模型据此生成 reviewer 摘要正文，至少包含：
+只使用返回的 canonical latest `plan*`、`review-plan*`、`code*`、`review-code*`、`manual-validation*`（包括 `manual-validation.md`）。模型生成 PR 专属 JSON payload：`overview:string`、`tests:{state,detail}`、`review:{state,detail}`、`manualValidation:{state,detail}`、`humanDecisions:{open,resolved,detail}`、`risks:string`。说明字段为非空字符串，计数为非负整数；结构校验不评价内容语义。
 
-- 变更摘要与实现范围
-- 测试结果
-- 审查历程与当前结论
-- 人工校验三态：`### ⚠️ 需人工校验`、`### ✅ 人工验证已通过` 或 `### ✅ 无需人工校验`
-- 变更摘要、实现范围、测试结果、审查历程和人工校验三态
-- 一个 `<!-- canonical-pr-change-report -->` 占位符；`### PR 代码增减` 由 core renderer 基于权威 diff 生成，调用方不自行写标题或统计
+测试尚未启动用 `not-started`/`pending`，暂无远端 Review 用 `none`/`not-observed`/`not-published`，待人工校验用 `pending`，不得渲染为通过或零值。决策计数来自当前任务账本。renderer 固定生成完整章节并加入一个 canonical 报告占位符；代码增减仍由现有 report renderer 输出。
 
 保留人工校验项时，每条写明校验内容、定位和只能人工完成的原因。
 
@@ -54,7 +49,7 @@ precheck 必须覆盖六项固定检查并提供文件证据；`formalReview` �
 
 ## 发布
 
-把聚合后的纯正文写入 `{summary-body-file}`，不要自行添加 marker 或 commit SHA：
+把聚合后的 JSON payload 写入 `{summary-body-file}`，不要自行添加 marker 或 commit SHA：
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
@@ -63,7 +58,7 @@ agent-infra-internal platform-pr summary-sync {task-id} \
   --result {primary-result}
 ```
 
-正文必须恰好包含一次 `<!-- canonical-pr-change-report -->`，不得自行拼接报告标题/JSON、marker 或 last-commit。core 会重新校验任务意图 digest、绑定 PR identity、完整 patch SHA 和机械统计，由 renderer 生成报告段，再包装唯一 `<!-- sync-pr:{task-id}:summary -->` 和权威 `<!-- last-commit: ... -->`，分页查找 PR 普通评论：不存在则创建、正文变化则原地更新、无差异则 no-op、重复 marker 或报告失配则稳定失败。正文通过文件输入，调用方不得拼 shell/heredoc。
+core 校验结构后插入报告占位符，重新校验任务意图 digest、PR identity、完整 patch SHA 和机械统计，生成报告段，再包装 marker 与权威 HEAD。发布后使用 `comments.list` 回读并要求唯一 marker 和正文完全匹配；不符或读取失败沿用现有 coordinator/recovery。payload 通过文件输入，调用方不得拼 shell/heredoc。
 
 ## 结果回传
 

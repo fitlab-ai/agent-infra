@@ -3,9 +3,10 @@ import path from 'node:path';
 
 import { locateActivityLog, pairEntries } from '../task/activity-log.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { parsePrSummaryContent, renderPrSummaryContent } from '../platform/pr-summary-content.ts';
 import { applyTaskEvent } from '../task/events.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
-import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, createManualValidationReceipt, manualValidationFinalSummaryDigest, manualValidationFinalSummaryProjectionMatches, readManualValidationReceipt, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
+import { createManualValidationReceipt, manualValidationFinalSummaryDigest, manualValidationFinalSummaryProjectionMatches, readManualValidationReceipt, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
 import { archiveManualValidationGeneration, createManualValidationTransaction, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationReceipt } from '../task/manual-validation-receipt.ts';
@@ -42,23 +43,15 @@ function printFailure(format: OutputFormat, error: { code: string; message: stri
   process.exitCode = 1;
 }
 
-const MANUAL_VALIDATION_STATUS_HEADING = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))\s*$/mu;
-
 function manualSummaryBody(body: string, phase: 'pending' | 'final'): string {
-  const chinese = /###\s+(?:⚠️\s+需人工校验|✅\s+(?:人工验证已通过|无需人工校验)|⏳\s+人工验证待收尾)\s*$/mu.test(body);
-  const heading = phase === 'pending'
-    ? chinese ? '### ⏳ 人工验证待收尾' : '### ⏳ Manual Validation Pending'
-    : chinese ? '### ✅ 人工验证已通过' : '### ✅ Manual Validation Passed';
-  const marker = phase === 'final'
-    ? `\n\n${MANUAL_VALIDATION_RECEIPT_PLACEHOLDER}`
-    : '';
-  if (MANUAL_VALIDATION_STATUS_HEADING.test(body)) {
-    return `${body.replace(MANUAL_VALIDATION_STATUS_HEADING, `${heading}${marker}`).replace(/\s+$/u, '')}\n`;
-  }
-  const fallback = phase === 'pending'
-    ? chinese ? '人工验证正在等待最终完成。' : 'Manual validation is awaiting final promotion.'
-    : chinese ? '人工验证已通过。' : 'Manual validation passed.';
-  return `${body.replace(/\s+$/u, '')}\n\n${heading}${marker}\n\n${fallback}\n`;
+  const content = JSON.parse(body) as Record<string, unknown>;
+  const manual = content.manualValidation as Record<string, unknown>;
+  manual.state = phase === 'pending' ? 'pending' : 'passed';
+  return JSON.stringify(content);
+}
+
+function renderedManualSummaryBody(body: string, phase: 'pending' | 'final'): string {
+  return renderPrSummaryContent(parsePrSummaryContent(JSON.parse(manualSummaryBody(body, phase))));
 }
 
 function openManualValidationStarted(taskMdPath: string): { present: boolean; transactionId: string | null } {
@@ -146,7 +139,7 @@ async function executeManualValidationTransactionAtResolvedTask(
     evidenceDigest,
     summaryPreimage: preimage,
     pendingSummaryDigest: summaryPreimageDigest(pendingBody),
-    finalSummaryDigest: manualValidationFinalSummaryDigest(manualSummaryBody(finalBodyWithoutReceipt, 'final')),
+    finalSummaryDigest: manualValidationFinalSummaryDigest(renderedManualSummaryBody(finalBodyWithoutReceipt, 'final')),
     artifact: values.artifact!,
     attempt: 1,
     createdAt: new Date().toISOString(),
