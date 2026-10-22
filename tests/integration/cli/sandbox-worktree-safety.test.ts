@@ -956,9 +956,11 @@ test("sandbox rm adds owner-write to read-only tool directories and retries once
   const branch = "feature/readonly-tool";
   const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "feature..readonly-tool");
   const nestedDirectory = path.join(candidate, "pkg", "mod");
+  const adjacentDirectory = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "adjacent");
   const originalRmSync = fs.rmSync;
   let attempts = 0;
   let retryObservedWritableDirectory = false;
+  let retryPreservedPermissionBoundaries = false;
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     const config = rmOneConfig(fixture, tmpDir);
@@ -966,8 +968,13 @@ test("sandbox rm adds owner-write to read-only tool directories and retries once
     const inspection = safety.inspectWorktree(worktree);
     assert.equal(inspection.status, "clean");
     fs.mkdirSync(nestedDirectory, { recursive: true });
+    fs.mkdirSync(adjacentDirectory, { recursive: true });
     fs.writeFileSync(path.join(nestedDirectory, "module.zip"), "module\n", "utf8");
+    fs.writeFileSync(path.join(adjacentDirectory, "retained.zip"), "retained\n", "utf8");
+    fs.symlinkSync(adjacentDirectory, path.join(candidate, "adjacent-link"), "dir");
     fs.chmodSync(path.join(nestedDirectory, "module.zip"), 0o444);
+    fs.chmodSync(path.join(adjacentDirectory, "retained.zip"), 0o444);
+    fs.chmodSync(adjacentDirectory, 0o555);
     fs.chmodSync(path.join(candidate, "pkg"), 0o555);
     fs.chmodSync(nestedDirectory, 0o555);
     fs.chmodSync(candidate, 0o555);
@@ -979,6 +986,13 @@ test("sandbox rm adds owner-write to read-only tool directories and retries once
       }
       if (path.resolve(String(target)) === candidate && attempts === 2) {
         retryObservedWritableDirectory = (fs.statSync(nestedDirectory).mode & 0o200) !== 0;
+        retryPreservedPermissionBoundaries = (fs.statSync(candidate).mode & 0o777) === 0o755
+          && (fs.statSync(path.join(candidate, "pkg")).mode & 0o777) === 0o755
+          && (fs.statSync(nestedDirectory).mode & 0o777) === 0o755
+          && (fs.statSync(path.join(nestedDirectory, "module.zip")).mode & 0o777) === 0o444
+          && (fs.statSync(adjacentDirectory).mode & 0o777) === 0o555
+          && (fs.statSync(path.join(adjacentDirectory, "retained.zip")).mode & 0o777) === 0o444
+          && fs.lstatSync(path.join(candidate, "adjacent-link")).isSymbolicLink();
       }
       return originalRmSync(target, options);
     }) as typeof fs.rmSync;
@@ -1001,7 +1015,9 @@ test("sandbox rm adds owner-write to read-only tool directories and retries once
 
     assert.equal(attempts, 2);
     assert.equal(retryObservedWritableDirectory, true);
+    assert.equal(retryPreservedPermissionBoundaries, true);
     assert.equal(fs.existsSync(candidate), false);
+    assert.equal(fs.existsSync(adjacentDirectory), true);
     assert.equal(fs.existsSync(worktree), false);
     assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
   } finally {
@@ -1009,8 +1025,184 @@ test("sandbox rm adds owner-write to read-only tool directories and retries once
     if (fs.existsSync(nestedDirectory)) fs.chmodSync(nestedDirectory, 0o755);
     if (fs.existsSync(path.join(candidate, "pkg"))) fs.chmodSync(path.join(candidate, "pkg"), 0o755);
     if (fs.existsSync(candidate)) fs.chmodSync(candidate, 0o755);
+    if (fs.existsSync(path.join(adjacentDirectory, "retained.zip"))) fs.chmodSync(path.join(adjacentDirectory, "retained.zip"), 0o644);
+    if (fs.existsSync(adjacentDirectory)) fs.chmodSync(adjacentDirectory, 0o755);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("sandbox rm preserves task short id after inaccessible tool cleanup and retries by that id", onPlatforms("linux", "darwin"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = createTempDir("agent-infra-rm-tool-inaccessible-retry-");
+  const branch = "feature/inaccessible-tool-retry";
+  const taskId = "TASK-20260824-000022";
+  const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "feature..inaccessible-tool-retry");
+  const originalRmSync = fs.rmSync;
+  const originalLstatSync = fs.lstatSync;
+  const originalExistsSync = fs.existsSync;
+  const mutableFs = fs as unknown as { lstatSync: typeof fs.lstatSync };
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  let denyCandidateLookup = false;
+  let rmAttempts = 0;
+  let registryPath = "";
+  try {
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch, "archive");
+    registryPath = path.join(taskWorkspaceRoot(config.repoRoot, config.home), "active", ".short-ids.json");
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { "07": taskId } })}\n`, "utf8");
+    fs.mkdirSync(candidate, { recursive: true });
+    fs.writeFileSync(path.join(candidate, "keep.txt"), "keep\n", "utf8");
+
+    fs.rmSync = ((target, options) => {
+      if (path.resolve(String(target)) === candidate && rmAttempts++ === 0) {
+        throw Object.assign(new Error("Permission denied"), { code: "EACCES" });
+      }
+      return originalRmSync(target, options);
+    }) as typeof fs.rmSync;
+    mutableFs.lstatSync = ((target: fs.PathLike, options?: { bigint?: boolean }) => {
+      if (denyCandidateLookup && path.resolve(String(target)) === candidate) {
+        throw Object.assign(new Error("Permission denied"), { code: "EACCES" });
+      }
+      return originalLstatSync(target, options);
+    }) as typeof fs.lstatSync;
+    fs.existsSync = ((target) => path.resolve(String(target)) === candidate
+      ? false
+      : originalExistsSync(target)) as typeof fs.existsSync;
+
+    const firstTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
+    assert.equal(firstTarget.taskState, "archive");
+    denyCandidateLookup = true;
+    await withFixtureDocker(fixture, () => assert.rejects(
+      rm.rmOne(config, [], firstTarget.branch, {
+        assumeYes: true,
+        cleanupTarget: firstTarget,
+        target: { ...evidence.target, toolCandidates: [{ tool: {} as never, candidates: [candidate] }] }
+      }),
+      /SANDBOX_TOOL_CLEANUP_INCOMPLETE:.*EACCES/s
+    ));
+    assert.equal(originalExistsSync(candidate), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, "utf8")).ids, { "07": taskId });
+
+    denyCandidateLookup = false;
+    mutableFs.lstatSync = originalLstatSync;
+    fs.existsSync = originalExistsSync;
+    const retryTarget = resolveSandboxCleanupTarget("07", config.repoRoot, { allowProtected: true });
+    assert.equal(retryTarget.workspace.mode, "task-bound");
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], retryTarget.branch, {
+      assumeYes: true,
+      cleanupTarget: retryTarget,
+      target: { ...evidence.target, toolCandidates: [{ tool: {} as never, candidates: [candidate] }] }
+    }));
+
+    assert.equal(fs.existsSync(candidate), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, "utf8")).ids, {});
+  } finally {
+    fs.rmSync = originalRmSync;
+    mutableFs.lstatSync = originalLstatSync;
+    fs.existsSync = originalExistsSync;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm retries only EACCES, EPERM, and ENOTEMPTY tool removal errors", onPlatforms("linux", "darwin"), async (t) => {
+  for (const code of ["EACCES", "EPERM", "ENOTEMPTY"] as const) {
+    await t.test(`${code} retries once and then removes the candidate`, async () => {
+      const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+      const tmpDir = createTempDir(`agent-infra-rm-${code.toLowerCase()}-retry-`);
+      const branch = `feature/${code.toLowerCase()}-retry`;
+      const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", `feature..${code.toLowerCase()}-retry`);
+      const originalRmSync = fs.rmSync;
+      let attempts = 0;
+      try {
+        const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+        const config = rmOneConfig(fixture, tmpDir);
+        fs.mkdirSync(path.join(candidate, "readonly"), { recursive: true });
+        fs.writeFileSync(path.join(candidate, "readonly", "file.txt"), "file\n", "utf8");
+        fs.chmodSync(path.join(candidate, "readonly"), 0o555);
+        fs.chmodSync(candidate, 0o555);
+        fs.rmSync = ((target, options) => {
+          if (path.resolve(String(target)) === candidate && attempts++ === 0) {
+            throw Object.assign(new Error("injected removal failure"), { code });
+          }
+          return originalRmSync(target, options);
+        }) as typeof fs.rmSync;
+
+        await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+          assumeYes: true,
+          target: {
+            branch, effectiveBranch: branch, engine: "docker-desktop", matchedContainers: [],
+            existingWorktrees: [], toolCandidates: [{ tool: {} as never, candidates: [candidate] }],
+            workspace: { mode: "branch-only" }, controlRoots: [], workspaceViewRoots: []
+          }
+        }));
+
+        assert.equal(attempts, 2);
+        assert.equal(fs.existsSync(candidate), false);
+      } finally {
+        fs.rmSync = originalRmSync;
+        if (fs.existsSync(path.join(candidate, "readonly"))) fs.chmodSync(path.join(candidate, "readonly"), 0o755);
+        if (fs.existsSync(candidate)) fs.chmodSync(candidate, 0o755);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  await t.test("a non-recovery error is reported without changing permissions or retrying", async () => {
+    const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+    const tmpDir = createTempDir("agent-infra-rm-eio-no-retry-");
+    const branch = "feature/eio-no-retry";
+    const candidate = path.join(tmpDir, ".agent-infra", "sandboxes", "go", "demo", "feature..eio-no-retry");
+    const originalRmSync = fs.rmSync;
+    let attempts = 0;
+    try {
+      const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+      const config = rmOneConfig(fixture, tmpDir);
+      fs.mkdirSync(path.join(candidate, "readonly"), { recursive: true });
+      fs.writeFileSync(path.join(candidate, "readonly", "file.txt"), "file\n", "utf8");
+      fs.chmodSync(path.join(candidate, "readonly", "file.txt"), 0o444);
+      fs.chmodSync(path.join(candidate, "readonly"), 0o555);
+      fs.chmodSync(candidate, 0o555);
+      fs.rmSync = ((target, options) => {
+        if (path.resolve(String(target)) === candidate) {
+          attempts += 1;
+          throw Object.assign(new Error("injected I/O failure"), { code: "EIO" });
+        }
+        return originalRmSync(target, options);
+      }) as typeof fs.rmSync;
+
+      await withFixtureDocker(fixture, () => assert.rejects(
+        rm.rmOne(config, [], branch, {
+          assumeYes: true,
+          target: {
+            branch, effectiveBranch: branch, engine: "docker-desktop", matchedContainers: [],
+            existingWorktrees: [], toolCandidates: [{ tool: {} as never, candidates: [candidate] }],
+            workspace: { mode: "branch-only" }, controlRoots: [], workspaceViewRoots: []
+          }
+        }),
+        /EIO: injected I\/O failure/
+      ));
+
+      assert.equal(attempts, 1);
+      assert.equal(fs.existsSync(candidate), true);
+      assert.equal(fs.statSync(candidate).mode & 0o777, 0o555);
+      assert.equal(fs.statSync(path.join(candidate, "readonly")).mode & 0o777, 0o555);
+      assert.equal(fs.statSync(path.join(candidate, "readonly", "file.txt")).mode & 0o777, 0o444);
+    } finally {
+      fs.rmSync = originalRmSync;
+      if (fs.existsSync(path.join(candidate, "readonly"))) fs.chmodSync(path.join(candidate, "readonly"), 0o755);
+      if (fs.existsSync(candidate)) fs.chmodSync(candidate, 0o755);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 test("sandbox rm continues cleanup and reports tool directories that remain after retry", onPlatforms("linux", "darwin"), async () => {

@@ -73,6 +73,15 @@ function isMissingPathError(error: unknown): boolean {
     && (error as { code?: unknown }).code === 'ENOENT');
 }
 
+function isConfirmedMissingPath(pathname: string): boolean {
+  try {
+    fs.lstatSync(pathname);
+    return false;
+  } catch (error) {
+    return isMissingPathError(error);
+  }
+}
+
 function removalErrorCode(error: unknown): string | null {
   return error && typeof error === 'object' && 'code' in error
     && typeof (error as { code?: unknown }).code === 'string'
@@ -1064,7 +1073,7 @@ async function removeUncheckedSandbox(
         toolRemovalFailures.push(`${candidate}: ${removalErrorMessage(initialError)}`);
       }
     }
-    if (!fs.existsSync(candidate)) toolRemovalFailures.pop();
+    if (isConfirmedMissingPath(candidate)) toolRemovalFailures.pop();
   }
   for (const shell of shellConfigDirCandidates(config, effectiveBranch)) fs.rmSync(shell, { recursive: true, force: true });
   if (shouldRemoveShare) fs.rmSync(sharePath, { recursive: true, force: true });
