@@ -24,9 +24,16 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的 `target-alignment`、`change-composition`、`compatibility-policy`、`legacy-path-cleanup`、`redundancy`、`scope-discipline`。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
 
-生成 candidate 时，按逻辑变化组用六项 `rationale` 和 `Evidence[]` 给出可读分析，不新增组级字段。每组说明其目标/验收对应、行为增加与减少、必要性、冗余或重复实现、范围、对应测试及测试是否充分；列出支撑结论的路径、行号和简短证据。六项检查各自仍须写实际结论：`target-alignment` 说明目标对应关系，`change-composition` 概括职责和行为变化，`compatibility-policy` 说明兼容策略，`legacy-path-cleanup` 说明旧路径处理，`redundancy` 说明重复/冗余结果，`scope-discipline` 说明范围判断。不得复用泛化套话；证据不足的维度明确标记未确认，不推断结论。证据详情遵循当前已部署技能的语言，中文技能必须使用中文。canonical renderer 会完整展示每项 `Evidence[]`。
+生成 candidate 前，先根据任务目标和完整 diff 列出功能变化组；不得把文件职责概述或类别总数当作功能组。将每组结果写入现有 `change-composition.rationale` 和 `Evidence[]`，不新增字段：
 
-每组解释覆盖生产代码、测试和文档中适用的变化，并区分源码行数变化、执行/调用次数变化和流程统一。diff 行数仅支持代码文本增减；不能据此推断执行次数减少或流程统一。执行次数、流程行为和测试充分性须有各自直接证据；没有证据时明确说明缺口。CI 全绿不能代替必要性或冗余判断。
+- `rationale` 用简短分组条目记录功能名称及目标/验收对应、行为增加或删除、必要性和该组新增/删除/净增行数。
+- 每条 `Evidence[].detail` 标明对应功能组，并引用具体代码、测试或文档变更；相关测试说明其覆盖风险、已有覆盖以及本次新增 fixture / 测试的成本。没有测试变更时说明现有覆盖依据。
+- 每个变更行只能计入一个功能组；分组的新增、删除行数分别与完整机械 diff 对账。混合用途文件按可定位的 diff hunk 归组；无法可靠归属的数字标为未确认，不估算或重复计数。
+- 完整 PR 与本轮 head-to-head 增量分别列示和对账；上一 head 未确认时不得推算增量数值。
+
+`target-alignment` 只有在每个功能组都能对应任务目标或验收标准时才能判为 `pass`。`change-composition` 只有在组别、行为增减、必要性、行数对账、测试覆盖/成本和可定位证据均有说明时才能判为 `pass`。任一项缺失、相互矛盾或无法核实，须将相应检查标为 `needs-review`，并在 rationale / evidence 中写明缺口，使 core 路由到 `review-code`。不得因六项齐全、字段非空或 CI 通过而判定解释充分。
+
+其他四项检查仍分别给出实际结论；证据详情遵循当前已部署技能的语言，中文技能必须使用中文。canonical renderer 会展示全部 rationale 和 evidence。源码行数只说明文本增删；不能据此推断执行次数或流程统一。
 
 ## 完整 PR 与本轮增量
 
