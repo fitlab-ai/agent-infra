@@ -93,24 +93,6 @@ agent-infra-internal task-create --input "$candidate_file"
 
 The host owns TASK-id/timestamps/version, workflow and branch derivation, template rendering, atomic persistence, short ids, Issue sync, and warnings. The skill must not create task directories, copy templates, allocate short ids, or call platform subcommands directly.
 
-Task metadata (`task.md` YAML front matter):
-```yaml
-id: TASK-{yyyyMMdd-HHmmss}
-type: feature|bugfix|refactor|docs|chore
-branch: <project>-<type>-<slug>
-workflow: feature-development|bug-fix|refactoring
-status: active
-created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
-updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
-agent_infra_version: {agent_infra_version}
-priority:                  # required; inferred by the AI from the title/description; Urgent | High | Medium | Low
-effort:                    # required; inferred by the AI from the title/description; High | Medium | Low
-start_date:                # optional; YYYY-MM-DD
-target_date:               # optional; YYYY-MM-DD
-current_step: requirement-analysis
-assigned_to: {current AI agent}
-```
-
 priority / effort are required: the AI infers them from the task title and description (candidates in `.agents/rules/issue-fields.md`; normalize localized input). Leave start_date / target_date empty at creation: `start_date` is written by the analyze stage and `target_date` by the complete stage; do not invent dates.
 
 ### 3. Handle the Structured Result
