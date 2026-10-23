@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { locateActivityLog, pairEntries } from '../task/activity-log.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { parsePrSummaryContent, renderPrSummaryContent } from '../platform/pr-summary-content.ts';
+import { prepareAndRenderPrSummaryContent } from '../platform/pr-summary.ts';
 import { applyTaskEvent } from '../task/events.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { createManualValidationReceipt, manualValidationFinalSummaryDigest, manualValidationFinalSummaryProjectionMatches, readManualValidationReceipt, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
@@ -50,8 +50,8 @@ function manualSummaryBody(body: string, phase: 'pending' | 'final'): string {
   return JSON.stringify(content);
 }
 
-function renderedManualSummaryBody(body: string, phase: 'pending' | 'final'): string {
-  return renderPrSummaryContent(parsePrSummaryContent(JSON.parse(manualSummaryBody(body, phase))));
+function renderedManualSummaryBody(body: string, phase: 'pending' | 'final', taskContent: string): string {
+  return prepareAndRenderPrSummaryContent(JSON.parse(manualSummaryBody(body, phase)), taskContent).rendered;
 }
 
 function openManualValidationStarted(taskMdPath: string): { present: boolean; transactionId: string | null } {
@@ -105,6 +105,7 @@ async function executeManualValidationTransactionAtResolvedTask(
   const preimage = { commentId: currentState.comment?.id ?? null, body: preimageBody, digest: summaryPreimageDigest(preimageBody) };
   const summaryPath = path.resolve(cwd, values.summaryFile!);
   const finalBodyWithoutReceipt = fs.readFileSync(summaryPath, 'utf8');
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const evidenceDigest = sha256File(summaryPath);
   const archiveGeneration = options.archiveGeneration ?? archiveManualValidationGeneration;
   let transactionResult = readManualValidationTransaction(resolved.taskDir, { taskId: resolved.taskId, prNumber: pullRequest.number, prHeadSha: pullRequest.head.sha, evidenceDigest, artifact: values.artifact! });
@@ -139,7 +140,7 @@ async function executeManualValidationTransactionAtResolvedTask(
     evidenceDigest,
     summaryPreimage: preimage,
     pendingSummaryDigest: summaryPreimageDigest(pendingBody),
-    finalSummaryDigest: manualValidationFinalSummaryDigest(renderedManualSummaryBody(finalBodyWithoutReceipt, 'final')),
+    finalSummaryDigest: manualValidationFinalSummaryDigest(renderedManualSummaryBody(finalBodyWithoutReceipt, 'final', taskContent)),
     artifact: values.artifact!,
     attempt: 1,
     createdAt: new Date().toISOString(),

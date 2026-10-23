@@ -16,7 +16,7 @@ import {
   preparePrSummaryContent
 } from '../../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
-import type { PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
+import type { MechanicalChangeReport, PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
 import { parsePrSummaryContent, renderPrSummaryContent } from '../../../../lib/platform/pr-summary-content.ts';
 
 function summaryPayload(body: string): string {
@@ -56,14 +56,19 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
-function candidate(taskIntentSha256: string): PrecheckCandidate {
+function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): PrecheckCandidate {
   return {
     taskIntentSha256,
     checks: ['target-alignment', 'change-composition', 'compatibility-policy', 'legacy-path-cleanup', 'redundancy', 'scope-discipline'].map((id) => ({
       id: id as PrecheckCandidate['checks'][number]['id'],
       verdict: 'pass' as const,
       evidence: [{ path: 'README.md', startLine: 1, endLine: 1, detail: 'Matches the approved task scope.' }],
-      rationale: 'The complete diff is within the approved scope.'
+      rationale: 'The complete diff is within the approved scope.',
+      ...(id === 'change-composition' ? { groups: [{
+        id: 'canonical-summary', target: 'Preserve the full summary contract', behaviorChange: 'Render typed summary content with the canonical report.',
+        necessity: 'Ensure refreshed summaries retain required sections.', files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        tests: { coverage: 'PR summary unit and integration fixtures.', cost: 'One fixture reused across report generation.' }
+      }] } : {})
     }))
   };
 }
@@ -107,7 +112,7 @@ function summaryFixture(): { root: string; taskId: string; reportPath: string; b
   if (!digest.ok) throw new Error(digest.error.message);
   assert.equal(digest.ok, true);
   const mechanical = runMechanicalChangeReport(root, baseSha, headSha);
-  const candidateValue = candidate(digest.value.sha256);
+  const candidateValue = candidate(digest.value.sha256, mechanical);
   const report = buildPrChangeReport({
     repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
     base: { repository: 'acme/widgets', ref: 'main', sha: baseSha },
@@ -149,7 +154,7 @@ function configureOpaquePullRequest(fixture: ReturnType<typeof summaryFixture>, 
     repository: 'opaque/project', resource: { kind: 'id', value: 'pr-42' },
     base: { repository: 'opaque/project', ref: 'main', sha: fixture.baseSha },
     head: { repository: 'opaque/project', ref: 'feature', sha: fixture.headSha }
-  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256, mechanical));
   if (!report.ok) throw new Error(report.error.message);
   writePrChangeReportAtomic(fixture.reportPath, report.value);
   return taskDir;
@@ -750,7 +755,7 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
     const mechanicalFile = path.join(fixture.root, 'mechanical.json');
     const precheckFile = path.join(fixture.root, 'precheck.json');
     fs.writeFileSync(mechanicalFile, JSON.stringify(mechanical));
-    fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256)));
+    fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256, mechanical)));
 
     const first = await reportWrite(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
@@ -780,7 +785,7 @@ test('change-report reads task semantics after provider context resolution', asy
     const updatedTask = fs.readFileSync(taskPath, 'utf8').replace('Implement the canonical report.', 'Implement the updated canonical report.');
     const updatedDigest = taskIntentDigest(updatedTask);
     if (!updatedDigest.ok) throw new Error(updatedDigest.error.message);
-    fs.writeFileSync(precheckFile, JSON.stringify(candidate(updatedDigest.value.sha256)));
+    fs.writeFileSync(precheckFile, JSON.stringify(candidate(updatedDigest.value.sha256, mechanical)));
     const result = await reportWrite(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
       client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {

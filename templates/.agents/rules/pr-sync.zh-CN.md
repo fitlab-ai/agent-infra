@@ -24,7 +24,7 @@ agent-infra-internal platform-pr summary-context {task-id}
 
 保留人工校验项时，每条写明校验内容、定位和只能人工完成的原因。
 
-人工校验章节按状态渲染：`required` 表示仍保留需要人工完成的项目，使用 `### ⚠️ 需人工校验` 并逐条保留内容、定位和原因；`pending` 表示校验尚未启动或仍未完成，使用 renderer 固定输出的 `### ⏳ 人工验证待收尾`。`passed` 使用 `### ✅ 人工验证已通过`，但只有 `complete-manual-validation` 的 final coordinator 在写入有效 receipt 后才能发布，并保留绑定 transaction、receipt、evidence 和当前 PR head 的凭据标记；不得根据摘要文字或其他状态推断通过。`none`/`not-required` 表示无需人工校验，使用 `### ✅ 无需人工校验` 且不附加通过凭据；`not-observed` 表示尚未读取状态，使用 `### ℹ️ 尚未读取人工校验状态`。
+例如可见状态包括 `required`、`pending`、`passed`、`none`/`not-required` 和 `not-observed`；这些是示例而非穷举。renderer 也接受 `unavailable` 及其他非空状态，并按现有 fallback 渲染。英文标题是文档标签；当前 renderer 输出下列中文标题：`required` 使用 `### ⚠️ 需人工校验` 并保留每项内容、定位和原因；`pending` 使用 `### ⏳ 人工验证待收尾`；`passed` 使用 `### ✅ 人工验证已通过`，但仅允许 `complete-manual-validation` 的 final coordinator 写入有效 receipt 后发布，并保留绑定 transaction、receipt、evidence 和当前 PR head 的凭据标记；不得根据摘要文字或其他状态推断通过。`none`/`not-required` 仅在无需人工校验时使用 `### ✅ 无需人工校验`，不附加通过凭据；`not-observed` 使用 `### ℹ️ 尚未读取人工校验状态`。
 
 core 最终包装出的 canonical 评论结构为：
 

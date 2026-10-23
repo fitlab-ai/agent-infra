@@ -1,3 +1,5 @@
+import { runSummaryContentPipeline } from './summary-content-pipeline.ts';
+
 export type DeliverySummaryContent = Readonly<{
   taskId: string; title: string; summary: string; artifacts: readonly string[];
   verification: Readonly<{ state: string; detail: string }>;
@@ -57,7 +59,7 @@ export function parseDeliverySummaryContent(value: unknown): DeliverySummaryCont
   };
 }
 
-export function prepareDeliverySummaryContent(value: unknown, sources: DeliverySummarySources): DeliverySummaryContent {
+function correctDeliverySummaryContent(value: unknown, sources: DeliverySummarySources): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('delivery summary must be an object');
   const input = { ...(value as Record<string, unknown>) };
   fillText(input, 'taskId', sources.taskId);
@@ -65,7 +67,23 @@ export function prepareDeliverySummaryContent(value: unknown, sources: DeliveryS
   fillText(input, 'title', sources.title);
   if (!isStringArray(input.artifacts)) input.artifacts = [...sources.artifacts];
   if (sources.verificationFallback) fillDeliveryVerification(input, sources.verificationFallback);
-  return parseDeliverySummaryContent(input);
+  return input;
+}
+
+export function prepareAndRenderDeliverySummaryContent(value: unknown, sources: DeliverySummarySources) {
+  return runSummaryContentPipeline(value, {
+    prepare: (input) => input,
+    validate: (input) => {
+      try { return { ok: true as const, value: parseDeliverySummaryContent(input) }; }
+      catch (error) { return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)) }; }
+    },
+    correct: (input) => correctDeliverySummaryContent(input, sources),
+    render: renderDeliverySummaryContent
+  });
+}
+
+export function prepareDeliverySummaryContent(value: unknown, sources: DeliverySummarySources): DeliverySummaryContent {
+  return prepareAndRenderDeliverySummaryContent(value, sources).content;
 }
 
 export function renderDeliverySummaryContent(value: DeliverySummaryContent): string {
@@ -89,9 +107,9 @@ export function parseCancelSummaryContent(value: unknown): CancelSummaryContent 
   };
 }
 
-export function prepareCancelSummaryContent(value: unknown, sources: Readonly<{
+function correctCancelSummaryContent(value: unknown, sources: Readonly<{
   taskId: string; title: string; reason: string; cancelledAt: string; lastCompletedArtifact: string | null;
-}>): CancelSummaryContent {
+}>): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('cancel summary must be an object');
   const input = { ...(value as Record<string, unknown>) };
   fillText(input, 'taskId', sources.taskId);
@@ -103,7 +121,27 @@ export function prepareCancelSummaryContent(value: unknown, sources: Readonly<{
     || (input.lastCompletedArtifact !== null && (typeof input.lastCompletedArtifact !== 'string' || !input.lastCompletedArtifact.trim()))) {
     input.lastCompletedArtifact = sources.lastCompletedArtifact;
   }
-  return parseCancelSummaryContent(input);
+  return input;
+}
+
+export function prepareAndRenderCancelSummaryContent(value: unknown, sources: Readonly<{
+  taskId: string; title: string; reason: string; cancelledAt: string; lastCompletedArtifact: string | null;
+}>) {
+  return runSummaryContentPipeline(value, {
+    prepare: (input) => input,
+    validate: (input) => {
+      try { return { ok: true as const, value: parseCancelSummaryContent(input) }; }
+      catch (error) { return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)) }; }
+    },
+    correct: (input) => correctCancelSummaryContent(input, sources),
+    render: renderCancelSummaryContent
+  });
+}
+
+export function prepareCancelSummaryContent(value: unknown, sources: Readonly<{
+  taskId: string; title: string; reason: string; cancelledAt: string; lastCompletedArtifact: string | null;
+}>): CancelSummaryContent {
+  return prepareAndRenderCancelSummaryContent(value, sources).content;
 }
 
 export function renderCancelSummaryContent(value: CancelSummaryContent): string {

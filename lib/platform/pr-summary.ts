@@ -39,6 +39,7 @@ import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProj
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import { parsePrSummaryContent, renderPrSummaryContent } from './pr-summary-content.ts';
+import { runSummaryContentPipeline } from './summary-content-pipeline.ts';
 import { parseLedgerDocument } from '../task/ledger.ts';
 
 type SummaryComment = { id: number | string; body: string };
@@ -560,8 +561,9 @@ async function syncPullRequestSummary(
   const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
   if (fact.status === 'invalid') return preserveFailure(platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }));
   try {
-    preparedSummaryContent = preparePrSummaryContent(JSON.parse(options.body), taskContent);
-    summaryBody = renderPrSummaryContent(preparedSummaryContent);
+    const prepared = prepareAndRenderPrSummaryContent(JSON.parse(options.body), taskContent);
+    preparedSummaryContent = prepared.content;
+    summaryBody = prepared.rendered;
   }
   catch (error) {
     return preserveFailure(platformResult('failed', {
@@ -810,7 +812,7 @@ async function syncPullRequestSummary(
   }
 }
 
-export function preparePrSummaryContent(value: unknown, taskContent: string) {
+function correctPrSummaryContent(value: unknown, taskContent: string): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return parsePrSummaryContent(value);
   const input = { ...(value as Record<string, unknown>) };
   const ledger = parseLedgerDocument(taskContent);
@@ -826,7 +828,23 @@ export function preparePrSummaryContent(value: unknown, taskContent: string) {
     if (typeof current.detail !== 'string' || !current.detail.trim()) current.detail = `Task decision ledger: ${open} open, ${resolved} resolved.`;
     input.humanDecisions = current;
   }
-  return parsePrSummaryContent(input);
+  return input;
+}
+
+export function prepareAndRenderPrSummaryContent(value: unknown, taskContent: string) {
+  return runSummaryContentPipeline(value, {
+    prepare: (input) => input,
+    validate: (input) => {
+      try { return { ok: true as const, value: parsePrSummaryContent(input) }; }
+      catch (error) { return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)) }; }
+    },
+    correct: (input) => correctPrSummaryContent(input, taskContent),
+    render: renderPrSummaryContent
+  });
+}
+
+export function preparePrSummaryContent(value: unknown, taskContent: string) {
+  return prepareAndRenderPrSummaryContent(value, taskContent).content;
 }
 
 export {

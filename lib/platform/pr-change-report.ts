@@ -7,7 +7,7 @@ import { isResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
 const REPORT_FILE_NAME = 'pr-change-report.json';
-const REPORT_VERSION = 2 as const;
+const REPORT_VERSION = 3 as const;
 const CANONICAL_REPORT_PLACEHOLDER = '<!-- canonical-pr-change-report -->';
 const CANONICAL_REPORT_HEADING = '### PR 代码增减';
 const PRECHECK_IDS = [
@@ -71,11 +71,21 @@ type Evidence = {
   detail: string;
 };
 
+type FunctionalGroup = {
+  id: string;
+  target: string;
+  behaviorChange: string;
+  necessity: string;
+  files: string[];
+  tests: { coverage: string; cost: string };
+};
+
 type Precheck = {
   id: PrecheckId;
   verdict: CheckVerdict;
   evidence: Evidence[];
   rationale: string;
+  groups?: FunctionalGroup[];
 };
 
 type PrecheckCandidate = {
@@ -213,7 +223,73 @@ function parseEvidence(value: unknown, checkId: string, index: number): Validati
   return { ok: true, value: { path: value.path, startLine, endLine, detail: value.detail } };
 }
 
-function parseChecks(value: unknown, prefix = 'precheck.checks'): ValidationResult<Precheck[]> {
+function parseFunctionalGroups(value: unknown, prefix: string): ValidationResult<FunctionalGroup[]> {
+  if (!Array.isArray(value) || value.length === 0) return invalid(`${prefix} must be a non-empty array`);
+  const groups: FunctionalGroup[] = [];
+  const ids = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const raw = value[index];
+    const at = `${prefix}[${index}]`;
+    if (!isRecord(raw)) return invalid(`${at} must be an object`);
+    if (Object.hasOwn(raw, 'additions') || Object.hasOwn(raw, 'deletions') || Object.hasOwn(raw, 'net') || Object.hasOwn(raw, 'counts')) {
+      return invalid(`${at} line counts are derived from diff files and must not be supplied`);
+    }
+    if (!isSafeRenderedText(raw.id) || ids.has(raw.id.trim())) return invalid(`${at}.id must be non-empty and unique`);
+    if (!isSafeRenderedText(raw.target)) return invalid(`${at}.target is required`);
+    if (!isSafeRenderedText(raw.behaviorChange)) return invalid(`${at}.behaviorChange is required`);
+    if (!isSafeRenderedText(raw.necessity)) return invalid(`${at}.necessity is required`);
+    if (!Array.isArray(raw.files) || raw.files.length === 0) return invalid(`${at}.files must be a non-empty array`);
+    const files: string[] = [];
+    for (let fileIndex = 0; fileIndex < raw.files.length; fileIndex += 1) {
+      const file = raw.files[fileIndex];
+      if (!isSafeRenderedText(file)) return invalid(`${at}.files[${fileIndex}] must be a non-empty string`);
+      files.push(file.trim());
+    }
+    if (!isRecord(raw.tests)) return invalid(`${at}.tests must be an object`);
+    if (!isSafeRenderedText(raw.tests.coverage)) return invalid(`${at}.tests.coverage is required`);
+    if (!isSafeRenderedText(raw.tests.cost)) return invalid(`${at}.tests.cost is required`);
+    ids.add(raw.id.trim());
+    groups.push({
+      id: raw.id.trim(), target: raw.target.trim(), behaviorChange: raw.behaviorChange.trim(),
+      necessity: raw.necessity.trim(), files, tests: { coverage: raw.tests.coverage.trim(), cost: raw.tests.cost.trim() }
+    });
+  }
+  return { ok: true, value: groups };
+}
+
+function validateGroupMembership(checks: Precheck[], files: ChangeFile[], totals: ChangeTotals): ValidationResult<Precheck[]> {
+  const composition = checks.find((check) => check.id === 'change-composition');
+  if (!composition?.groups) return invalid('precheck.checks.change-composition.groups is required');
+  const fileByPath = new Map<string, ChangeFile>();
+  for (const file of files) {
+    const key = file.oldPath ?? file.newPath;
+    if (!key || fileByPath.has(key)) return invalid(`diff file path '${key ?? ''}' is missing or duplicated`);
+    fileByPath.set(key, file);
+  }
+  const assigned = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+  for (const group of composition.groups) {
+    for (const member of group.files) {
+      if (!fileByPath.has(member)) return invalid(`change-composition group '${group.id}' references unknown diff file '${member}'`);
+      if (assigned.has(member)) return invalid(`diff file '${member}' belongs to more than one functional group`);
+      assigned.add(member);
+      const file = fileByPath.get(member)!;
+      if (file.additions !== null) {
+        additions += file.additions;
+        deletions += file.deletions!;
+      }
+    }
+  }
+  const missing = [...fileByPath.keys()].find((key) => !assigned.has(key));
+  if (missing) return invalid(`diff file '${missing}' has no functional group`);
+  if (additions !== totals.additions || deletions !== totals.deletions || additions - deletions !== totals.additions - totals.deletions) {
+    return invalid('functional group derived line totals do not match the complete diff');
+  }
+  return { ok: true, value: checks };
+}
+
+function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: ChangeFile[], totals?: ChangeTotals): ValidationResult<Precheck[]> {
   if (!Array.isArray(value) || value.length !== PRECHECK_IDS.length) return invalid(`${prefix} must contain exactly six checks`);
   const checks: Precheck[] = [];
   for (let index = 0; index < value.length; index += 1) {
@@ -230,8 +306,15 @@ function parseChecks(value: unknown, prefix = 'precheck.checks'): ValidationResu
       evidence.push(parsed.value);
     }
     if (!isSafeRenderedText(raw.rationale)) return invalid(`${prefix}.${expectedId}.rationale is required`);
-    checks.push({ id: expectedId, verdict: raw.verdict, evidence, rationale: raw.rationale });
+    let groups: FunctionalGroup[] | undefined;
+    if (expectedId === 'change-composition') {
+      const parsedGroups = parseFunctionalGroups(raw.groups, `${prefix}.${expectedId}.groups`);
+      if (!parsedGroups.ok) return parsedGroups;
+      groups = parsedGroups.value;
+    } else if (Object.hasOwn(raw, 'groups')) return invalid(`${prefix}.${expectedId}.groups is not allowed`);
+    checks.push({ id: expectedId, verdict: raw.verdict, evidence, rationale: raw.rationale, ...(groups ? { groups } : {}) });
   }
+  if (diffFiles && totals) return validateGroupMembership(checks, diffFiles, totals);
   return { ok: true, value: checks };
 }
 
@@ -306,7 +389,7 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
   if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
   if (value.precheck.formalReview !== false || (value.precheck.verdict !== 'clear' && value.precheck.verdict !== 'needs-review') ||
       (value.precheck.route !== 'watch-pr' && value.precheck.route !== 'review-code')) return invalid('change report precheck envelope is invalid');
-  const checks = parseChecks(value.precheck.checks);
+  const checks = parseChecks(value.precheck.checks, 'precheck.checks', files, totals.value);
   if (!checks.ok) return checks;
   const derivedVerdict: PrecheckVerdict = checks.value.every((check) => check.verdict === 'pass') ? 'clear' : 'needs-review';
   const derivedRoute: PrecheckRoute = derivedVerdict === 'clear' ? 'watch-pr' : 'review-code';
@@ -556,10 +639,34 @@ function renderEvidence(evidence: Evidence): string {
   return `  - 证据：<code>${escapeReportText(evidence.path)}</code>${location}：${escapeReportText(evidence.detail)}`;
 }
 
-function renderPrechecks(checks: Precheck[]): string[] {
+function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[]): string[] {
+  const filesByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
+  return groups.flatMap((group) => {
+    const members = group.files.map((member) => filesByPath.get(member)!);
+    const additions = members.reduce((total, file) => total + (file.additions ?? 0), 0);
+    const deletions = members.reduce((total, file) => total + (file.deletions ?? 0), 0);
+    const unknownFiles = members.filter((file) => file.additions === null).length;
+    return [
+      `  - **功能组 ${escapeReportText(group.id)}**：${escapeReportText(group.target)}`,
+      `    - 行为变化：${escapeReportText(group.behaviorChange)}`,
+      `    - 必要性：${escapeReportText(group.necessity)}`,
+      `    - 文件：${group.files.map((member) => {
+        const file = filesByPath.get(member)!;
+        return file.oldPath && file.newPath && file.oldPath !== file.newPath
+          ? `<code>${escapeReportText(file.oldPath)}</code> → <code>${escapeReportText(file.newPath)}</code>`
+          : `<code>${escapeReportText(member)}</code>`;
+      }).join('、')}`,
+      `    - 可计数行数（由正式 diff 逐文件推导）：新增 ${additions}、删除 ${deletions}、净增 ${additions - deletions}${unknownFiles ? `；另有 ${unknownFiles} 个文件行数不可计` : ''}。`,
+      `    - 测试覆盖：${escapeReportText(group.tests.coverage)}；成本：${escapeReportText(group.tests.cost)}`
+    ];
+  });
+}
+
+function renderPrechecks(checks: Precheck[], files: ChangeFile[]): string[] {
   return checks.flatMap((check) => [
     `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeReportText(check.rationale)}`,
-    ...check.evidence.map(renderEvidence)
+    ...check.evidence.map(renderEvidence),
+    ...(check.groups ? renderFunctionalGroups(check.groups, files) : [])
   ]);
 }
 
@@ -593,7 +700,7 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     '',
     '#### 适宜性预检',
     `- 结论：${precheckSummary}；${route}；正式审查：否。`,
-    ...renderPrechecks(report.precheck.checks)
+    ...renderPrechecks(report.precheck.checks, report.diff.files)
   ].join('\n');
 }
 

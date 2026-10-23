@@ -19,7 +19,7 @@ import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-in
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
-import { prepareCancelSummaryContent, prepareDeliverySummaryContent, renderCancelSummaryContent, renderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
+import { prepareAndRenderCancelSummaryContent, prepareAndRenderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment recover --issue <token> --task-id <TASK-id> --output <staging-task.md> [--cwd <path>]
@@ -169,15 +169,17 @@ async function platformComment(args: string[] = []): Promise<void> {
       const supplied = JSON.parse(body) as Record<string, unknown>;
       const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
       const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
-      content = prepareDeliverySummaryContent(supplied, {
+      const prepared = prepareAndRenderDeliverySummaryContent(supplied, {
         taskId: resolved.taskId,
         title: title || resolved.taskId,
         artifacts: enumerateArtifacts(resolved.taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name),
         verificationFallback: { state: 'not-run', detail: 'Final verification has not run at summary staging.' }
       });
+      content = prepared.content;
+      const canonical = canonicalizeSummaryBody(prepared.rendered);
+      if (!canonical.ok) throw new Error(`${canonical.error.code}: ${canonical.error.message}`);
+      body = canonical.value;
     } catch (error) { fail(`unable to stage summary: ${error instanceof Error ? error.message : String(error)}`); return; }
-    const canonical = canonicalizeSummaryBody(renderDeliverySummaryContent(content));
-    if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
     const value = { taskId: resolved.taskId, content, contentSha256: createHash('sha256').update(JSON.stringify(content)).digest('hex') };
     const previous = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
     const next = `${JSON.stringify(value)}\n`;
@@ -223,19 +225,19 @@ async function platformComment(args: string[] = []): Promise<void> {
       const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
       const artifacts = enumerateArtifacts(resolved.taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
       const rendered = kind === 'summary'
-        ? renderDeliverySummaryContent(prepareDeliverySummaryContent(input, {
+        ? prepareAndRenderDeliverySummaryContent(input, {
           taskId: resolved.taskId,
           title: title || resolved.taskId,
           artifacts,
           ...(resolved.state === 'active' ? { verificationFallback: { state: 'not-run', detail: 'Final verification has not run at summary staging.' } } : {})
-        }))
-        : renderCancelSummaryContent(prepareCancelSummaryContent(input, {
+        }).rendered
+        : prepareAndRenderCancelSummaryContent(input, {
           taskId: resolved.taskId,
           title: title || resolved.taskId,
           reason: typeof taskFrontmatter.cancel_reason === 'string' ? taskFrontmatter.cancel_reason : '',
           cancelledAt: typeof taskFrontmatter.cancelled_at === 'string' ? taskFrontmatter.cancelled_at : '',
           lastCompletedArtifact: artifacts.at(-1) ?? null
-        }));
+        }).rendered;
       body = rendered;
     } catch (error) { fail(`invalid ${kind} summary structure: ${error instanceof Error ? error.message : String(error)}`); return; }
   }

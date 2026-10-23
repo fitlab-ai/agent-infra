@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { executeManualValidationTransaction } from '../../../lib/internal/manual-validation.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 import { buildPrChangeReport, runMechanicalChangeReport, taskIntentDigest, writePrChangeReportAtomic } from '../../../lib/platform/pr-change-report.ts';
-import type { PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
+import type { MechanicalChangeReport, PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
@@ -68,14 +68,21 @@ function approvedReviewArtifact(): string {
   return `${content}\n### 审查决定\n通过\n- **总体结论**：通过\n`;
 }
 
-function candidate(taskIntentSha256: string): PrecheckCandidate {
+function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): PrecheckCandidate {
   return {
     taskIntentSha256,
     checks: ['target-alignment', 'change-composition', 'compatibility-policy', 'legacy-path-cleanup', 'redundancy', 'scope-discipline'].map((id) => ({
       id: id as PrecheckCandidate['checks'][number]['id'],
       verdict: 'pass' as const,
       evidence: [{ path: 'README.md', startLine: 1, endLine: 1, detail: 'Fixture change is within the approved scope.' }],
-      rationale: 'The fixture change is within the approved scope.'
+      rationale: 'The fixture change is within the approved scope.',
+      ...(id === 'change-composition' ? { groups: [{
+        id: 'manual-validation-transaction', target: 'Preserve manual-validation transaction safety',
+        behaviorChange: 'Keep receipt and PR head binding through summary refresh.',
+        necessity: 'Protect the final coordinator transaction.',
+        files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        tests: { coverage: 'This integration fixture exercises transaction, receipt and PR head paths.', cost: 'Existing fixture and cases are reused.' }
+      }] } : {})
     }))
   };
 }
@@ -208,7 +215,7 @@ function createFixture(): Fixture {
     repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
     base: { repository: 'acme/widgets', ref: 'main', sha: baseSha },
     head: { repository: 'acme/widgets', ref: 'feature', sha: headSha }
-  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256, mechanical));
   if (!report.ok) throw new Error(report.error.message);
   writePrChangeReportAtomic(reportPath, report.value);
   const artifactPath = path.join(taskDir, 'manual-validation.md');
@@ -277,7 +284,7 @@ function configureOpaqueIdentity(fixture: Fixture, config: Record<string, unknow
     repository: 'acme/widgets', resource: { kind: 'id', value: 'mr:42' },
     base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha },
     head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha }
-  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256, mechanical));
   if (!report.ok) throw new Error(report.error.message);
   writePrChangeReportAtomic(fixture.reportPath, report.value);
 }

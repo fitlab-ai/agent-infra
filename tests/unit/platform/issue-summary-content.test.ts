@@ -36,3 +36,9 @@ test('summary preparation repairs missing and malformed fields from current task
   assert.equal(cancel.reason, 'from task metadata');
   assert.equal(cancel.lastCompletedArtifact, null);
 });
+
+test('delivery structure validates nested verification fields and every artifact entry', () => {
+  const valid = { taskId: 'TASK-20261022-170111', title: 'Delivery', summary: 'Completed.', artifacts: ['code.md'], verification: { state: 'not-run', detail: 'Not run yet.' } };
+  assert.throws(() => parseDeliverySummaryContent({ ...valid, verification: { state: 'not-run' } }), /verification.detail/u);
+  assert.throws(() => parseDeliverySummaryContent({ ...valid, artifacts: ['code.md', ' '] }), /artifacts\[\]/u);
+});

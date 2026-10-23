@@ -48,4 +48,6 @@ test('PR manual-validation renderer distinguishes required, pending, passed, non
 test('PR summary structure rejects missing or invalid fields', () => {
   assert.throws(() => parsePrSummaryContent({ ...content, risks: ' ' }), /risks/);
   assert.throws(() => parsePrSummaryContent({ ...content, humanDecisions: { open: -1, resolved: 0, detail: 'x' } }), /non-negative/);
+  assert.throws(() => parsePrSummaryContent({ ...content, tests: { state: 'pending' } }), /tests.detail/u);
+  assert.throws(() => parsePrSummaryContent({ ...content, humanDecisions: { open: 0, resolved: 0 } }), /humanDecisions.detail/u);
 });
