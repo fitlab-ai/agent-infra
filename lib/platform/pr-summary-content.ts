@@ -40,7 +40,8 @@ export function parsePrSummaryContent(value: unknown): PrSummaryContent {
 
 export function renderPrSummaryContent(value: PrSummaryContent): string {
   const content = parsePrSummaryContent(value);
-  const manualValidationHeading = content.manualValidation.state === 'pending' ? '⏳ 人工验证待收尾'
+  const manualValidationHeading = content.manualValidation.state === 'required' ? '⚠️ 需人工校验'
+    : content.manualValidation.state === 'pending' ? '⏳ 人工验证待收尾'
     : content.manualValidation.state === 'passed' ? '✅ 人工验证已通过'
       : ['none', 'not-required'].includes(content.manualValidation.state) ? '✅ 无需人工校验'
         : content.manualValidation.state === 'unavailable' ? '⚠️ 人工校验状态不可用'
