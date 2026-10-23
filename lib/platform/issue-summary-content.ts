@@ -19,6 +19,31 @@ function text(value: unknown, name: string): string {
   return value.trim();
 }
 
+function isMissingText(value: unknown): boolean {
+  return typeof value !== 'string' || !value.trim();
+}
+
+function fillText(input: Record<string, unknown>, key: string, fallback: string): void {
+  if (isMissingText(input[key])) input[key] = fallback;
+}
+
+function fillDeliveryVerification(
+  input: Record<string, unknown>, fallback: Readonly<{ state: string; detail: string }>
+): void {
+  if (!input.verification || typeof input.verification !== 'object' || Array.isArray(input.verification)) {
+    input.verification = fallback;
+    return;
+  }
+  const verification = { ...(input.verification as Record<string, unknown>) };
+  fillText(verification, 'state', fallback.state);
+  fillText(verification, 'detail', fallback.detail);
+  input.verification = verification;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim());
+}
+
 export function parseDeliverySummaryContent(value: unknown): DeliverySummaryContent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('delivery summary must be an object');
   const input = value as Record<string, unknown>;
@@ -35,20 +60,11 @@ export function parseDeliverySummaryContent(value: unknown): DeliverySummaryCont
 export function prepareDeliverySummaryContent(value: unknown, sources: DeliverySummarySources): DeliverySummaryContent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('delivery summary must be an object');
   const input = { ...(value as Record<string, unknown>) };
-  if (typeof input.taskId !== 'string' || !input.taskId.trim()) input.taskId = sources.taskId;
+  fillText(input, 'taskId', sources.taskId);
   if (input.taskId !== sources.taskId) throw new Error('taskId does not match the active task');
-  if (typeof input.title !== 'string' || !input.title.trim()) input.title = sources.title;
-  if (!Array.isArray(input.artifacts) || input.artifacts.some((item) => typeof item !== 'string' || !item.trim())) input.artifacts = [...sources.artifacts];
-  if (sources.verificationFallback) {
-    if (!input.verification || typeof input.verification !== 'object' || Array.isArray(input.verification)) {
-      input.verification = sources.verificationFallback;
-    } else {
-      const verification = { ...(input.verification as Record<string, unknown>) };
-      if (typeof verification.state !== 'string' || !verification.state.trim()) verification.state = sources.verificationFallback.state;
-      if (typeof verification.detail !== 'string' || !verification.detail.trim()) verification.detail = sources.verificationFallback.detail;
-      input.verification = verification;
-    }
-  }
+  fillText(input, 'title', sources.title);
+  if (!isStringArray(input.artifacts)) input.artifacts = [...sources.artifacts];
+  if (sources.verificationFallback) fillDeliveryVerification(input, sources.verificationFallback);
   return parseDeliverySummaryContent(input);
 }
 
@@ -78,11 +94,11 @@ export function prepareCancelSummaryContent(value: unknown, sources: Readonly<{
 }>): CancelSummaryContent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('cancel summary must be an object');
   const input = { ...(value as Record<string, unknown>) };
-  if (typeof input.taskId !== 'string' || !input.taskId.trim()) input.taskId = sources.taskId;
+  fillText(input, 'taskId', sources.taskId);
   if (input.taskId !== sources.taskId) throw new Error('taskId does not match the task');
-  if (typeof input.title !== 'string' || !input.title.trim()) input.title = sources.title;
-  if (typeof input.reason !== 'string' || !input.reason.trim()) input.reason = sources.reason;
-  if (typeof input.cancelledAt !== 'string' || !input.cancelledAt.trim()) input.cancelledAt = sources.cancelledAt;
+  fillText(input, 'title', sources.title);
+  fillText(input, 'reason', sources.reason);
+  fillText(input, 'cancelledAt', sources.cancelledAt);
   if (input.lastCompletedArtifact === undefined
     || (input.lastCompletedArtifact !== null && (typeof input.lastCompletedArtifact !== 'string' || !input.lastCompletedArtifact.trim()))) {
     input.lastCompletedArtifact = sources.lastCompletedArtifact;

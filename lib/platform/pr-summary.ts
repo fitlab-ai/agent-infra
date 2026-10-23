@@ -703,6 +703,62 @@ async function syncPullRequestSummary(
         operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }],
         result: null, warnings: [], ...info
       };
+      const compensateWrittenSummary = async (remoteId: string) => reconciliation.action === 'create'
+        ? remoteId && loaded.value.provider.comments?.delete
+          ? await loaded.value.provider.comments.delete({
+            context: providerOperationContext(loaded.value),
+            parent: prIdentity,
+            comment: providerResourceToken(loaded.value.provider, 'comment', remoteId),
+            mutation: { idempotencyKey: `pr-summary-delete:${resolved.taskId}:${remoteId}` }
+          })
+          : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Created summary comment has no valid id', retryable: true } }
+        : reconciliation.commentId && previousBody !== null && loaded.value.provider.comments?.write
+          ? await loaded.value.provider.comments.write({
+            context: providerOperationContext(loaded.value),
+            parent: prIdentity,
+            body: previousBody,
+            existingComment: providerResourceToken(loaded.value.provider, 'comment', String(reconciliation.commentId)),
+            mutation: { idempotencyKey: `pr-summary-restore:${resolved.taskId}` }
+          })
+          : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Previous summary body is unavailable for restoration', retryable: true } };
+      const compensateThenFail = async (remoteId: string, code: string, message: string, compensationMessage: string) => {
+        const compensated = await compensateWrittenSummary(remoteId);
+        return {
+          ok: false as const,
+          result: fail('blocked', context, {
+            code: compensated.ok ? code : 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
+            message: compensated.ok ? message : `${compensationMessage}: ${compensated.error.message}`,
+            retryable: true
+          }, prNumber)
+        };
+      };
+      const verifyWrittenSummary = async (remoteId: string) => {
+        const after = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
+        const remoteSummary = loaded.value.provider.comments?.list
+          ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: prIdentity })
+          : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
+        const remoteMatches = remoteSummary.ok
+          ? remoteSummary.value.filter((comment) => comment.body.includes(summaryMarker(resolved.taskId)))
+          : [];
+        const id = /^\d+$/.test(remoteId) ? Number(remoteId) : remoteId;
+        if (!remoteSummary.ok || remoteMatches.length !== 1 || normalizeCommentContent(remoteMatches[0]!.body) !== normalizeCommentContent(desired)) {
+          return compensateThenFail(remoteId, 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED', remoteSummary.ok
+            ? 'Remote summary body did not match the canonical rendered body; the previous summary was restored or the new comment was deleted'
+            : `Remote summary body could not be read: ${remoteSummary.error.message}; the previous summary was restored or the new comment was deleted`,
+          'Summary body readback failed and compensation failed');
+        }
+        if (!after.ok) {
+          return compensateThenFail(remoteId, 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED',
+            `Summary was written but pull-request verification failed: ${after.error?.message || 'unknown verification error'}; the previous summary was restored or the new comment was deleted`,
+            'Summary post-write verification failed and compensation failed');
+        }
+        if (!sameIdentity(initial.value, after.value)) {
+          return compensateThenFail(remoteId, 'PR_SUMMARY_HEAD_RACE',
+            'Pull-request head changed while publishing; the previous summary was restored or the new comment was deleted; rerun report and summary sync',
+            'Pull-request head changed and summary compensation failed');
+        }
+        return { ok: true as const, id };
+      };
       const publish = async (): Promise<PullRequestSummaryResult> => {
       const existingComment = reconciliation.commentId === null
         ? undefined
@@ -717,74 +773,11 @@ async function syncPullRequestSummary(
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
       if (!written.ok) return fail(providerStatus(written.error) === 'blocked' ? 'blocked' : 'failed', context, providerError(written.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'), prNumber);
-      const after = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
-      const id = /^\d+$/.test(written.value.remoteId) ? Number(written.value.remoteId) : written.value.remoteId;
-      const compensateWrittenSummary = async () => reconciliation.action === 'create'
-        ? written.value.remoteId && loaded.value.provider.comments?.delete
-          ? await loaded.value.provider.comments.delete({
-            context: providerOperationContext(loaded.value),
-            parent: prIdentity,
-            comment: providerResourceToken(loaded.value.provider, 'comment', written.value.remoteId),
-            mutation: { idempotencyKey: `pr-summary-delete:${resolved.taskId}:${written.value.remoteId}` }
-          })
-          : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Created summary comment has no valid id', retryable: true } }
-        : reconciliation.commentId && previousBody !== null && loaded.value.provider.comments?.write
-          ? await loaded.value.provider.comments.write({
-            context: providerOperationContext(loaded.value),
-            parent: prIdentity,
-            body: previousBody,
-            existingComment: providerResourceToken(loaded.value.provider, 'comment', String(reconciliation.commentId)),
-            mutation: { idempotencyKey: `pr-summary-restore:${resolved.taskId}` }
-          })
-          : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Previous summary body is unavailable for restoration', retryable: true } };
-      const remoteSummary = loaded.value.provider.comments?.list
-        ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: prIdentity })
-        : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
-      const remoteMatches = remoteSummary.ok
-        ? remoteSummary.value.filter((comment) => comment.body.includes(summaryMarker(resolved.taskId)))
-        : [];
-      if (!remoteSummary.ok || remoteMatches.length !== 1 || normalizeCommentContent(remoteMatches[0]!.body) !== normalizeCommentContent(desired)) {
-        const compensated = await compensateWrittenSummary();
-        if (!compensated.ok) return fail('blocked', context, {
-          code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
-          message: `Summary body readback failed and compensation failed: ${compensated.error.message}`,
-          retryable: true
-        }, prNumber);
-        return fail('blocked', context, {
-          code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED',
-          message: remoteSummary.ok ? 'Remote summary body did not match the canonical rendered body; the previous summary was restored or the new comment was deleted' : `Remote summary body could not be read: ${remoteSummary.error.message}; the previous summary was restored or the new comment was deleted`,
-          retryable: true
-        }, prNumber);
-      }
-      if (!after.ok) {
-        const compensated = await compensateWrittenSummary();
-        if (!compensated.ok) return fail('blocked', context, {
-          code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
-          message: `Summary post-write verification failed and compensation failed: ${compensated.error.message}`,
-          retryable: true
-        }, prNumber);
-        return fail('blocked', context, {
-          code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED',
-          message: `Summary was written but pull-request verification failed: ${after.error?.message || 'unknown verification error'}; the previous summary was restored or the new comment was deleted`,
-          retryable: true
-        }, prNumber);
-      }
-      if (!sameIdentity(initial.value, after.value)) {
-        const compensated = await compensateWrittenSummary();
-        if (!compensated.ok) return fail('blocked', context, {
-          code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
-          message: `Pull-request head changed and summary compensation failed: ${compensated.error.message}`,
-          retryable: true
-        }, prNumber);
-        return fail('blocked', context, {
-          code: 'PR_SUMMARY_HEAD_RACE',
-          message: 'Pull-request head changed while publishing; the previous summary was restored or the new comment was deleted; rerun report and summary sync',
-          retryable: true
-        }, prNumber);
-      }
+      const verified = await verifyWrittenSummary(written.value.remoteId);
+      if (!verified.ok) return verified.result;
       return {
         ...basePlatformResult('applied', context, resolved.taskId, prNumber),
-        comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 },
+        comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(verified.id) ? [verified.id] : [], parts: 1 },
         operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }],
         result: null, warnings: [], ...info
       };
