@@ -287,40 +287,30 @@ function indexDiffFiles(files: ChangeFile[]): ValidationResult<Map<string, Chang
   return { ok: true, value: fileByPath };
 }
 
-function collectGroupLineTotals(
+function collectGroupMembership(
   groups: FunctionalGroup[], fileByPath: Map<string, ChangeFile>
-): ValidationResult<Readonly<{ assigned: Set<string>; additions: number; deletions: number }>> {
+): ValidationResult<Set<string>> {
   const assigned = new Set<string>();
-  let additions = 0;
-  let deletions = 0;
   for (const group of groups) {
     for (const member of group.files) {
       const file = fileByPath.get(member);
       if (!file) return invalid(`change-composition group '${group.id}' references unknown diff file '${member}'`);
       if (assigned.has(member)) return invalid(`diff file '${member}' belongs to more than one functional group`);
       assigned.add(member);
-      if (file.additions !== null) {
-        additions += file.additions;
-        deletions += file.deletions!;
-      }
     }
   }
-  return { ok: true, value: { assigned, additions, deletions } };
+  return { ok: true, value: assigned };
 }
 
-function validateGroupMembership(checks: Precheck[], files: ChangeFile[], totals: ChangeTotals): ValidationResult<Precheck[]> {
+function validateGroupMembership(checks: Precheck[], files: ChangeFile[]): ValidationResult<Precheck[]> {
   const composition = checks.find((check) => check.id === 'change-composition');
   if (!composition?.groups) return invalid('precheck.checks.change-composition.groups is required');
   const indexed = indexDiffFiles(files);
   if (!indexed.ok) return indexed;
-  const derived = collectGroupLineTotals(composition.groups, indexed.value);
-  if (!derived.ok) return derived;
-  const missing = [...indexed.value.keys()].find((key) => !derived.value.assigned.has(key));
+  const assigned = collectGroupMembership(composition.groups, indexed.value);
+  if (!assigned.ok) return assigned;
+  const missing = [...indexed.value.keys()].find((key) => !assigned.value.has(key));
   if (missing) return invalid(`diff file '${missing}' has no functional group`);
-  const { additions, deletions } = derived.value;
-  if (additions !== totals.additions || deletions !== totals.deletions || additions - deletions !== totals.additions - totals.deletions) {
-    return invalid('functional group derived line totals do not match the complete diff');
-  }
   return { ok: true, value: checks };
 }
 
@@ -354,7 +344,7 @@ function parseCheck(value: unknown, index: number, prefix: string): ValidationRe
   return { ok: true, value: { id: expectedId, verdict: value.verdict, evidence: evidence.value, rationale: value.rationale, groups: groups.value } };
 }
 
-function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: ChangeFile[], totals?: ChangeTotals): ValidationResult<Precheck[]> {
+function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: ChangeFile[]): ValidationResult<Precheck[]> {
   if (!Array.isArray(value) || value.length !== PRECHECK_IDS.length) return invalid(`${prefix} must contain exactly six checks`);
   const checks: Precheck[] = [];
   for (let index = 0; index < value.length; index += 1) {
@@ -362,7 +352,7 @@ function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: Cha
     if (!parsed.ok) return parsed;
     checks.push(parsed.value);
   }
-  if (diffFiles && totals) return validateGroupMembership(checks, diffFiles, totals);
+  if (diffFiles) return validateGroupMembership(checks, diffFiles);
   return { ok: true, value: checks };
 }
 
@@ -437,7 +427,7 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
   if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
   if (value.precheck.formalReview !== false || (value.precheck.verdict !== 'clear' && value.precheck.verdict !== 'needs-review') ||
       (value.precheck.route !== 'watch-pr' && value.precheck.route !== 'review-code')) return invalid('change report precheck envelope is invalid');
-  const checks = parseChecks(value.precheck.checks, 'precheck.checks', files, totals.value);
+  const checks = parseChecks(value.precheck.checks, 'precheck.checks', files);
   if (!checks.ok) return checks;
   const derivedVerdict: PrecheckVerdict = checks.value.every((check) => check.verdict === 'pass') ? 'clear' : 'needs-review';
   const derivedRoute: PrecheckRoute = derivedVerdict === 'clear' ? 'watch-pr' : 'review-code';

@@ -834,11 +834,7 @@ function correctPrSummaryContent(value: unknown, taskContent: string): unknown {
 
 export function prepareAndRenderPrSummaryContent(value: unknown, taskContent: string) {
   return runSummaryContentPipeline(value, {
-    prepare: (input) => input,
-    validate: (input) => {
-      try { return { ok: true as const, value: parsePrSummaryContent(input) }; }
-      catch (error) { return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)) }; }
-    },
+    validate: parsePrSummaryContent,
     correct: (input) => correctPrSummaryContent(input, taskContent),
     render: renderPrSummaryContent
   });

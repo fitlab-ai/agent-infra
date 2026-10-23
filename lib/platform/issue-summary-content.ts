@@ -72,11 +72,7 @@ function correctDeliverySummaryContent(value: unknown, sources: DeliverySummaryS
 
 export function prepareAndRenderDeliverySummaryContent(value: unknown, sources: DeliverySummarySources) {
   return runSummaryContentPipeline(value, {
-    prepare: (input) => input,
-    validate: (input) => {
-      try { return { ok: true as const, value: parseDeliverySummaryContent(input) }; }
-      catch (error) { return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)) }; }
-    },
+    validate: parseDeliverySummaryContent,
     correct: (input) => correctDeliverySummaryContent(input, sources),
     render: renderDeliverySummaryContent
   });
@@ -124,11 +120,7 @@ export function prepareAndRenderCancelSummaryContent(value: unknown, sources: Re
   taskId: string; title: string; reason: string; cancelledAt: string; lastCompletedArtifact: string | null;
 }>) {
   return runSummaryContentPipeline(value, {
-    prepare: (input) => input,
-    validate: (input) => {
-      try { return { ok: true as const, value: parseCancelSummaryContent(input) }; }
-      catch (error) { return { ok: false as const, error: error instanceof Error ? error : new Error(String(error)) }; }
-    },
+    validate: parseCancelSummaryContent,
     correct: (input) => correctCancelSummaryContent(input, sources),
     render: renderCancelSummaryContent
   });

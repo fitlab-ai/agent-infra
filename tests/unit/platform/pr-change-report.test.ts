@@ -189,11 +189,16 @@ test('report validation rejects reserved comment controls in rendered text', () 
   if (!result.ok) assert.equal(result.error.code, 'PR_CHANGE_REPORT_INVALID');
 });
 
-test('report validation rejects a derived verdict that does not match checks', () => {
+test('report validation rejects inconsistent totals and verdict facts', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, mechanical(), candidate(digest));
   assert.equal(built.ok, true);
   if (built.ok) {
+    const mismatchedTotals = {
+      ...built.value,
+      diff: { ...built.value.diff, totals: { ...built.value.diff.totals, additions: built.value.diff.totals.additions + 1 } }
+    };
+    assert.equal(validatePrChangeReport(mismatchedTotals).ok, false);
     const invalid = validatePrChangeReport({ ...built.value, precheck: { ...built.value.precheck, verdict: 'needs-review', route: 'review-code' } });
     assert.equal(invalid.ok, false);
   }

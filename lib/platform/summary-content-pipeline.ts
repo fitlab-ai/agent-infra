@@ -1,22 +1,23 @@
-export type SummaryContentValidation<T> =
-  | Readonly<{ ok: true; value: T }>
-  | Readonly<{ ok: false; error: Error }>;
-
 export type SummaryContentOperations<T> = Readonly<{
-  prepare: (value: unknown) => unknown;
-  validate: (value: unknown) => SummaryContentValidation<T>;
-  correct: (value: unknown, validation: SummaryContentValidation<T>) => unknown;
+  validate: (value: unknown) => T;
+  correct: (value: unknown) => unknown;
   render: (value: T) => string;
 }>;
+
+function parse<T>(value: unknown, parser: (value: unknown) => T): T {
+  try {
+    return parser(value);
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
 
 export function runSummaryContentPipeline<T>(
   value: unknown,
   operations: SummaryContentOperations<T>
 ): Readonly<{ content: T; rendered: string }> {
-  const prepared = operations.prepare(value);
-  const initial = operations.validate(prepared);
-  const corrected = operations.correct(prepared, initial);
-  const final = operations.validate(corrected);
-  if (!final.ok) throw final.error;
-  return { content: final.value, rendered: operations.render(final.value) };
+  try { parse(value, operations.validate); } catch { /* Source correction gets a chance to repair invalid structure. */ }
+  const corrected = operations.correct(value);
+  const content = parse(corrected, operations.validate);
+  return { content, rendered: operations.render(content) };
 }
