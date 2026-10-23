@@ -82,10 +82,6 @@ export function prepareAndRenderDeliverySummaryContent(value: unknown, sources: 
   });
 }
 
-export function prepareDeliverySummaryContent(value: unknown, sources: DeliverySummarySources): DeliverySummaryContent {
-  return prepareAndRenderDeliverySummaryContent(value, sources).content;
-}
-
 export function renderDeliverySummaryContent(value: DeliverySummaryContent): string {
   const content = parseDeliverySummaryContent(value);
   return [
@@ -136,12 +132,6 @@ export function prepareAndRenderCancelSummaryContent(value: unknown, sources: Re
     correct: (input) => correctCancelSummaryContent(input, sources),
     render: renderCancelSummaryContent
   });
-}
-
-export function prepareCancelSummaryContent(value: unknown, sources: Readonly<{
-  taskId: string; title: string; reason: string; cancelledAt: string; lastCompletedArtifact: string | null;
-}>): CancelSummaryContent {
-  return prepareAndRenderCancelSummaryContent(value, sources).content;
 }
 
 export function renderCancelSummaryContent(value: CancelSummaryContent): string {

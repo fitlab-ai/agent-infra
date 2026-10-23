@@ -13,7 +13,7 @@ import {
   summaryContext,
   syncPullRequestSummary as syncTypedPullRequestSummary,
   warningResultForPrimary,
-  preparePrSummaryContent
+  prepareAndRenderPrSummaryContent
 } from '../../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import type { MechanicalChangeReport, PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
@@ -382,8 +382,8 @@ test('PR summary fills missing decision counts from the current task ledger', ()
     '| HD-1 | code | - | decision | needs-human-decision | code-r2.md#HD-1 |',
     '| HD-2 | code | - | decision | human-decided | task.md#HD-2 |'
   ].join('\n');
-  const prepared = preparePrSummaryContent(withoutDecisions, taskContent);
-  assert.deepEqual(prepared.humanDecisions, { open: 1, resolved: 1, detail: 'Task decision ledger: 1 open, 1 resolved.' });
+  const prepared = prepareAndRenderPrSummaryContent(withoutDecisions, taskContent);
+  assert.deepEqual(prepared.content.humanDecisions, { open: 1, resolved: 1, detail: 'Task decision ledger: 1 open, 1 resolved.' });
 });
 
 test('invalid typed summary preserves primary-result warning routing unless strict', async () => {

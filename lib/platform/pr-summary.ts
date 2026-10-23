@@ -39,6 +39,7 @@ import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProj
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import { parsePrSummaryContent, renderPrSummaryContent } from './pr-summary-content.ts';
+import type { PrSummaryContent } from './pr-summary-content.ts';
 import { runSummaryContentPipeline } from './summary-content-pipeline.ts';
 import { parseLedgerDocument } from '../task/ledger.ts';
 
@@ -516,7 +517,7 @@ async function syncPullRequestSummary(
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let summaryBody = '';
-  let preparedSummaryContent: ReturnType<typeof preparePrSummaryContent>;
+  let preparedSummaryContent: PrSummaryContent;
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
     const prNumber = output.resource.kind === 'pull-request' && output.resource.number
@@ -841,10 +842,6 @@ export function prepareAndRenderPrSummaryContent(value: unknown, taskContent: st
     correct: (input) => correctPrSummaryContent(input, taskContent),
     render: renderPrSummaryContent
   });
-}
-
-export function preparePrSummaryContent(value: unknown, taskContent: string) {
-  return prepareAndRenderPrSummaryContent(value, taskContent).content;
 }
 
 export {
