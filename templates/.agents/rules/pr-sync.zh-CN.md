@@ -24,7 +24,7 @@ agent-infra-internal platform-pr summary-context {task-id}
 
 保留人工校验项时，每条写明校验内容、定位和只能人工完成的原因。
 
-人工校验章节按状态渲染：`passed` 使用 `### ✅ 人工验证已通过`，但只有 `complete-manual-validation` 的 final coordinator 在写入有效 receipt 后才能发布，并保留绑定 transaction、receipt、evidence 和当前 PR head 的凭据标记；不得根据摘要文字或其他状态推断通过。尚待执行或未完成的项目使用 `### ⚠️ 需人工校验` 并逐条保留内容与原因；确认无需人工校验时使用 `### ✅ 无需人工校验`，不附加通过凭据。
+人工校验章节按状态渲染：`passed` 使用 `### ✅ 人工验证已通过`，但只有 `complete-manual-validation` 的 final coordinator 在写入有效 receipt 后才能发布，并保留绑定 transaction、receipt、evidence 和当前 PR head 的凭据标记；不得根据摘要文字或其他状态推断通过。尚待执行或未完成的项目使用 renderer 固定输出的 `### ⏳ 人工验证待收尾` 并逐条保留内容与原因；确认无需人工校验时使用 `### ✅ 无需人工校验`，不附加通过凭据。
 
 core 最终包装出的 canonical 评论结构为：
 
