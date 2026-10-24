@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import {
   buildPullRequestSummary,
   reportWrite,
+  summaryCommentState,
   summaryContext,
   syncPullRequestSummary as syncTypedPullRequestSummary,
   warningResultForPrimary,
@@ -177,66 +178,8 @@ function queueOpaqueSummary(
     pullRequestSummary: {
       body: persistedBody, changeReportFile: fixture.reportPath,
       ...(manualValidation ? { manualValidation } : {})
-    },
-    managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body: persistedBody, changeReportFile: fixture.reportPath, manualValidation: manualValidation ?? null })).digest('hex') }
+    }
   });
-}
-
-function freezeFinalSummaryRecovery(
-  fixture: ReturnType<typeof summaryFixture>,
-  phase: 'receipt-committed' | 'final-promotion-in-progress' = 'final-promotion-in-progress'
-) {
-  const transactionId = 'mv-frozen-final-noop';
-  const evidenceDigest = 'c'.repeat(64);
-  const typed = JSON.parse(summaryPayload('### ✅ Manual Validation Passed\n\nFinal validation summary.'));
-  typed.manualValidation = { state: 'passed', detail: 'Final validation summary.' };
-  const report = readPrChangeReport(fixture.reportPath);
-  if (!report.ok) throw new Error(report.error.message);
-  const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(typed)), report.value);
-  if (!rendered.ok) throw new Error(rendered.error.message);
-  let body = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
-  const transaction = createManualValidationTransaction({
-    transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
-    summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') }, pendingSummaryDigest: 'b'.repeat(64),
-    finalSummaryDigest: manualValidationFinalSummaryDigest(body), artifact: 'manual-validation.md', attempt: 1,
-    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
-  });
-  const receipt = createManualValidationReceipt({
-    transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
-    artifact: 'manual-validation.md', artifactSha256: 'd'.repeat(64), pendingSummaryDigest: transaction.pendingSummaryDigest,
-    finalSummaryDigest: transaction.finalSummaryDigest, committedAt: '2026-01-01T00:00:00.000Z'
-  });
-  const staged = transitionManualValidationTransaction(transaction, 'summary-staged');
-  if (!staged.ok) throw new Error(staged.error.message);
-  const committed = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
-  if (!committed.ok) throw new Error(committed.error.message);
-  const selected = phase === 'receipt-committed'
-    ? committed
-    : transitionManualValidationTransaction(committed.value, 'final-promotion-in-progress', { eventAppended: true });
-  if (!selected.ok) throw new Error(selected.error.message);
-  const artifactDir = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId);
-  writeManualValidationReceiptAtomic(artifactDir, receipt);
-  writeManualValidationTransactionAtomic(artifactDir, selected.value);
-  body = body.replace('[[manual-validation-receipt]]', `<!-- manual-validation-receipt: transaction=${transactionId}; receipt=${receipt.receiptDigest}; evidence=${evidenceDigest}; head=${fixture.headSha} -->`);
-
-  const marker = `<!-- sync-pr:${fixture.taskId}:summary -->`;
-  const execution = {
-    parentKind: 'pull-request' as const, parent: { kind: 'number' as const, value: 42 }, marker,
-    body, bodyDigest: createHash('sha256').update(body).digest('hex'), action: 'update' as const, phase: 'written' as const,
-    preimage: { kind: 'comment' as const, id: '9', body, bodyDigest: createHash('sha256').update(body).digest('hex') },
-    fence: { headSha: fixture.headSha, manualValidation: { phase: 'final' as const, transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: fixture.headSha, authority: 'coordinator' as const } },
-    position: 'none' as const, idempotencyKey: 'frozen-final-noop:update', remoteId: '9'
-  };
-  const requestBody = JSON.stringify(typed);
-  const operation = recordPlatformOperation({
-    taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
-    target: JSON.stringify({ kind: 'number', value: 42 }), expectedDigest: createHash('sha256').update(requestBody).digest('hex'),
-    dependency: 'deferred', state: 'unknown', pullRequestSummary: {
-      body: requestBody, changeReportFile: fixture.reportPath,
-      manualValidation: { phase: 'final', transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: fixture.headSha, authority: 'coordinator' }
-    }, managedSummary: { requestDigest: createHash('sha256').update(requestBody).digest('hex'), execution }
-  });
-  return { body, operation };
 }
 
 type ResolvedContextClientOptions = {
@@ -285,13 +228,16 @@ function resolvedContextClient(
           merged_at: null, merge_commit_sha: null
         } };
       }
-      if (args.some((value: string) => value.includes('/issues/42/comments'))) {
+      if (args.some((value: string) => value.includes('/issues/42/comments') || value.includes('/issues/comments/'))) {
         if (args.includes('POST') || args.includes('PATCH')) {
           if (options.commentWrites) options.commentWrites.value += 1;
           options.onCommentWrite?.();
           const body = request?.input ? JSON.parse(request.input).body as string : '';
           if (options.writtenBodies && request?.input) options.writtenBodies.push(body);
-          const current = remoteComments.find((comment) => comment.body.includes(`<!-- sync-pr:TASK-20260101-000042:summary -->`));
+          const id = /\/comments\/(\d+)$/u.exec(args[1] ?? '')?.[1];
+          const current = id
+            ? remoteComments.find((comment) => String(comment.id) === id)
+            : remoteComments.find((comment) => comment.body.includes(`<!-- sync-pr:TASK-20260101-000042:summary -->`));
           if (current) current.body = body;
           else remoteComments.push({ id: 9, body });
           return { ok: true, value: { id: 9 } };
@@ -350,8 +296,7 @@ test('queued PR summary recovery replays the desired summary through the configu
       expectedDigest: createHash('sha256').update(desired).digest('hex'),
       dependency: 'deferred',
       state: 'queued',
-      pullRequestSummary: { body, changeReportFile: fixture.reportPath },
-      managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body, changeReportFile: fixture.reportPath, manualValidation: null })).digest('hex') }
+      pullRequestSummary: { body, changeReportFile: fixture.reportPath }
     });
     operationId = operation.id;
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
@@ -359,7 +304,6 @@ test('queued PR summary recovery replays the desired summary through the configu
       client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites, onCommentWrite: () => {
         const current = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operationId);
         assert.equal(current?.state, 'pending');
-        assert.ok(current?.managedSummary?.execution);
       } })
     });
     const persisted = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
@@ -369,85 +313,6 @@ test('queued PR summary recovery replays the desired summary through the configu
     assert.equal(persisted?.state, 'succeeded');
     assert.equal(persisted?.id, operation.id);
     assert.equal(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.length, 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('PR summary persists corrected typed content for unknown-operation recovery', async () => {
-  const fixture = summaryFixture();
-  const callsPath = path.join(fixture.root, 'provider-calls.log');
-  try {
-    const taskPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'task.md');
-    fs.appendFileSync(taskPath, [
-      '', '## Review Disagreement Ledger', '',
-      '| id | stage | round | severity | status | evidence |',
-      '|----|-------|-------|----------|--------|----------|', ''
-    ].join('\n'));
-    configureOpaquePullRequest(fixture, 42, { callsPath });
-    const { humanDecisions: _omitted, ...incomplete } = JSON.parse(summaryPayload('Summary with omitted ledger counts.')) as Record<string, unknown>;
-    const first = await syncTypedPullRequestSummary(fixture.taskId, {
-      cwd: fixture.root, agent: 'codex', body: JSON.stringify(incomplete),
-      changeReportFile: fixture.reportPath, primaryResult: 'no_op', strict: true
-    });
-    assert.equal(first.status, 'applied', JSON.stringify(first));
-
-    const journalPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, '.platform-operations.json');
-    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<Record<string, unknown> & { pullRequestSummary: { body: string }; managedSummary: { execution: { body: string; bodyDigest: string } } }> };
-    const operation = journal.operations.at(-1)!;
-    const frozen = operation.managedSummary.execution;
-    assert.match(frozen.body, /Task decision ledger: 0 open, 0 resolved\./u);
-    assert.equal(frozen.bodyDigest, createHash('sha256').update(frozen.body).digest('hex'));
-    const taskContentBefore = fs.readFileSync(taskPath, 'utf8');
-    fs.writeFileSync(taskPath, `${taskContentBefore}\n| HD-1 | code | 1 | decision | needs-human-decision | code-r1.md#HD-1 |\n`);
-    operation.pullRequestSummary.body = JSON.stringify({ changed: 'source after freeze' });
-    operation.state = 'unknown';
-    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-
-    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
-      agent: 'codex', cwd: fixture.root
-    });
-    const after = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
-    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
-    assert.equal(after?.state, 'succeeded');
-    assert.equal(after?.id, operation.id);
-    assert.equal(after?.managedSummary?.execution?.body, frozen.body);
-    assert.equal(after?.managedSummary?.execution?.bodyDigest, frozen.bodyDigest);
-    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'write').length, 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('terminal managed summary failure is not replayed ahead of a queued operation', async () => {
-  const fixture = summaryFixture();
-  const firstClient = resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha);
-  try {
-    const first = await syncTypedPullRequestSummary(fixture.taskId, {
-      agent: 'codex', cwd: fixture.root, body: summaryPayload('terminal original'),
-      changeReportFile: fixture.reportPath, primaryResult: 'no_op', strict: true, client: firstClient
-    });
-    assert.equal(first.status, 'applied', JSON.stringify(first));
-    const journalPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, '.platform-operations.json');
-    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<Record<string, unknown> & { id: string; state: string; lastCode: string | null }> };
-    const terminal = journal.operations[0]!;
-    terminal.state = 'failed';
-    terminal.lastCode = 'POSTWRITE_CHECK_FAILED';
-    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-    const queued = recordPlatformOperation({
-      taskRef: fixture.taskId, cwd: fixture.root, kind: 'artifact-comment', target: 'later.md',
-      expectedDigest: 'b'.repeat(64), state: 'queued', dependency: 'deferred'
-    });
-    const writes = { value: 0 };
-    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
-      agent: 'codex', cwd: fixture.root, limit: 1,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites: writes })
-    });
-    const records = readPlatformOperationJournal(fixture.taskId, fixture.root).operations;
-    assert.equal(recovered.status, 'blocked');
-    assert.equal(writes.value, 0);
-    assert.equal(records.find((item) => item.id === terminal.id)?.state, 'failed');
-    assert.notEqual(records.find((item) => item.id === queued.id)?.state, 'succeeded');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -471,8 +336,7 @@ test('queued ordinary manual-validation pending summary replays without a coordi
       taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
       target: JSON.stringify({ kind: 'number', value: 42 }),
       expectedDigest: createHash('sha256').update(desired).digest('hex'), dependency: 'deferred', state: 'queued',
-      pullRequestSummary: { body, changeReportFile: fixture.reportPath },
-      managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body, changeReportFile: fixture.reportPath, manualValidation: null })).digest('hex') }
+      pullRequestSummary: { body, changeReportFile: fixture.reportPath }
     });
 
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
@@ -982,114 +846,6 @@ test('summary-sync rejects a direct final manual-validation writer without coord
   }
 });
 
-test('frozen final manual-validation no-op rechecks the receipt and current HEAD guard', async () => {
-  const fixture = summaryFixture();
-  const transactionId = 'mv-frozen-final-noop';
-  const writes = { value: 0 };
-  try {
-    const typed = JSON.parse(summaryPayload('### ✅ Manual Validation Passed\n\nFinal validation summary.'));
-    typed.manualValidation = { state: 'passed', detail: 'Final validation summary.' };
-    const report = readPrChangeReport(fixture.reportPath);
-    assert.equal(report.ok, true);
-    if (!report.ok) return;
-    const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(typed)), report.value);
-    assert.equal(rendered.ok, true);
-    if (!rendered.ok) return;
-    const body = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
-    const marker = '<!-- sync-pr:TASK-20260101-000042:summary -->';
-    const execution = {
-      parentKind: 'pull-request' as const, parent: { kind: 'number' as const, value: 42 }, marker,
-      body, bodyDigest: createHash('sha256').update(body).digest('hex'), action: 'update' as const, phase: 'written' as const,
-      preimage: { kind: 'comment' as const, id: '9', body, bodyDigest: createHash('sha256').update(body).digest('hex') },
-      fence: { headSha: fixture.headSha, manualValidation: { phase: 'final' as const, transactionId, receiptDigest: 'a'.repeat(64), prHeadSha: fixture.headSha, authority: 'coordinator' as const } },
-      position: 'none' as const, idempotencyKey: 'frozen-final-noop:update', remoteId: '9'
-    };
-    const requestBody = JSON.stringify(typed);
-    const operation = recordPlatformOperation({
-      taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
-      target: JSON.stringify({ kind: 'number', value: 42 }), expectedDigest: createHash('sha256').update(requestBody).digest('hex'),
-      dependency: 'deferred', state: 'unknown', pullRequestSummary: {
-        body: requestBody, changeReportFile: fixture.reportPath,
-        manualValidation: { phase: 'final', transactionId, receiptDigest: 'a'.repeat(64), prHeadSha: fixture.headSha, authority: 'coordinator' }
-      }, managedSummary: { requestDigest: createHash('sha256').update(requestBody).digest('hex'), execution }
-    });
-    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
-      agent: 'codex', cwd: fixture.root,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
-        comments: [{ id: 9, body }], commentWrites: writes
-      })
-    });
-    assert.equal(recovered.status, 'blocked', JSON.stringify(recovered));
-    assert.equal(recovered.error?.code, 'MANUAL_VALIDATION_RECEIPT_MISSING');
-    assert.equal(writes.value, 0);
-    assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('frozen final recovery accepts a receipt-backed no-op only after promotion event projection', async () => {
-  const fixture = summaryFixture();
-  const writes = { value: 0 };
-  try {
-    const { body, operation } = freezeFinalSummaryRecovery(fixture);
-    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
-      agent: 'codex', cwd: fixture.root,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
-        comments: [{ id: 9, body }], commentWrites: writes
-      })
-    });
-    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
-    assert.equal(writes.value, 0);
-    const saved = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
-    assert.equal(saved?.state, 'succeeded');
-    assert.equal(saved?.managedSummary?.execution?.phase, 'written');
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('frozen final recovery rejects a committed receipt before the promotion event', async () => {
-  const fixture = summaryFixture();
-  const writes = { value: 0 };
-  try {
-    const { body, operation } = freezeFinalSummaryRecovery(fixture, 'receipt-committed');
-    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
-      agent: 'codex', cwd: fixture.root,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
-        comments: [{ id: 9, body }], commentWrites: writes
-      })
-    });
-    assert.equal(recovered.status, 'blocked');
-    assert.equal(recovered.error?.code, 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID');
-    assert.equal(writes.value, 0);
-    assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('frozen final recovery rejects a receipt-backed no-op after the PR HEAD changes', async () => {
-  const fixture = summaryFixture();
-  const writes = { value: 0 };
-  try {
-    const { body, operation } = freezeFinalSummaryRecovery(fixture);
-    const changedHead = 'd'.repeat(40);
-    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
-      agent: 'codex', cwd: fixture.root,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
-        headSequence: [changedHead], comments: [{ id: 9, body }], commentWrites: writes
-      })
-    });
-    assert.equal(recovered.status, 'blocked');
-    assert.equal(recovered.error?.code, 'PR_SUMMARY_HEAD_RACE');
-    assert.equal(writes.value, 0);
-    assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
 test('summary-sync sanitizes the template around the canonical placeholder and protects fenced markers', async () => {
   const fixture = summaryFixture();
   const writtenBodies: string[] = [];
@@ -1174,6 +930,33 @@ test('summary-sync compensates a published comment when post-write inspection fa
   }
 });
 
+test('PR comment core restores an updated summary when the post-write snapshot check fails', async () => {
+  const fixture = summaryFixture();
+  const commentWrites = { value: 0 };
+  const client = resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+    pullRequestFailureAt: 7, commentWrites
+  });
+  try {
+    const first = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body: 'old summary', changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op', client
+    });
+    assert.equal(first.status, 'applied', JSON.stringify(first));
+    const original = await summaryCommentState(fixture.taskId, { cwd: fixture.root, client });
+    const attempted = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body: 'updated summary', changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op', client
+    });
+    assert.equal(attempted.status, 'blocked');
+    assert.equal(attempted.error?.code, 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED');
+    assert.equal(commentWrites.value, 3);
+    const remote = await summaryCommentState(fixture.taskId, { cwd: fixture.root, client });
+    assert.equal(remote.comment?.body, original.comment?.body);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('summary-sync does not soften an unverifiable compensation into primary-result success', async () => {
   const fixture = summaryFixture();
   const deleteCalls = { value: 0 };
@@ -1191,7 +974,7 @@ test('summary-sync does not soften an unverifiable compensation into primary-res
       })
     });
     assert.equal(result.status, 'blocked');
-    assert.equal(result.error?.code, 'MANAGED_SUMMARY_COMPENSATION_FAILED');
+    assert.equal(result.error?.code, 'PR_SUMMARY_RACE_COMPENSATION_FAILED');
     assert.equal(result.result, null);
     assert.equal(result.warnings.length, 0);
     assert.equal(deleteCalls.value, 1);

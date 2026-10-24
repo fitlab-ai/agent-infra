@@ -45,25 +45,6 @@ type PlatformPullRequestSummaryIntent = Readonly<{
   changeReportFile: string;
   manualValidation?: PlatformPullRequestSummaryManualValidationIntent;
 }>;
-type ManagedSummaryExecution = Readonly<{
-  parentKind: 'issue' | 'pull-request';
-  parent: ResourceIdentity;
-  marker: string;
-  body: string;
-  bodyDigest: string;
-  action: 'create' | 'update' | 'reposition';
-  phase: 'prepared' | 'deleted' | 'written';
-  preimage: Readonly<{ kind: 'absent' } | { kind: 'comment'; id: string; body: string; bodyDigest: string }>;
-  fence: Readonly<{ headSha?: string; manualValidation?: PlatformPullRequestSummaryManualValidationIntent }>;
-  position: 'none' | 'summary-last';
-  idempotencyKey: string;
-  authorizationDigest?: string;
-  remoteId?: string;
-}>;
-type ManagedSummaryIntent = Readonly<{
-  requestDigest: string;
-  execution?: ManagedSummaryExecution;
-}>;
 type PlatformPullRequestReviewIntent = Readonly<{
   prNumber: string;
   resource: ResourceIdentity;
@@ -88,7 +69,6 @@ type PlatformOperation = Readonly<{
   issueCreate?: PlatformIssueCreateIntent;
   pullRequest?: PlatformPullRequestIntent;
   pullRequestSummary?: PlatformPullRequestSummaryIntent;
-  managedSummary?: ManagedSummaryIntent;
   pullRequestReview?: PlatformPullRequestReviewIntent;
   updatedAt: string;
 }>;
@@ -113,7 +93,6 @@ type RecordOperationInput = Readonly<{
   pullRequestReview?: PlatformPullRequestReviewIntent;
   replaceOperationId?: string;
   stableId?: string;
-  managedSummary?: ManagedSummaryIntent;
   cwd?: string;
 }>;
 
@@ -125,43 +104,6 @@ function operationId(input: Pick<RecordOperationInput, 'kind' | 'target' | 'expe
 
 function journalPath(taskDir: string): string {
   return path.join(taskDir, JOURNAL_FILE);
-}
-
-function isValidManagedPreimage(execution: ManagedSummaryExecution): boolean {
-  if (execution.action === 'create') return execution.preimage?.kind === 'absent';
-  return execution.preimage?.kind === 'comment'
-    && typeof execution.preimage.id === 'string' && Boolean(execution.preimage.id.trim())
-    && typeof execution.preimage.body === 'string'
-    && /^[a-f0-9]{64}$/u.test(execution.preimage.bodyDigest);
-}
-
-function isValidManagedExecutionIdentity(execution: ManagedSummaryExecution): boolean {
-  return isResourceIdentity(execution.parent)
-    && ['issue', 'pull-request'].includes(execution.parentKind)
-    && typeof execution.marker === 'string' && Boolean(execution.marker.trim())
-    && typeof execution.body === 'string' && /^[a-f0-9]{64}$/u.test(execution.bodyDigest);
-}
-
-function isValidManagedExecutionPhase(execution: ManagedSummaryExecution): boolean {
-  return ['create', 'update', 'reposition'].includes(execution.action)
-    && ['prepared', 'deleted', 'written'].includes(execution.phase)
-    && ['none', 'summary-last'].includes(execution.position)
-    && typeof execution.idempotencyKey === 'string' && Boolean(execution.idempotencyKey.trim());
-}
-
-function isValidManagedExecutionReferences(execution: ManagedSummaryExecution): boolean {
-  return (execution.authorizationDigest === undefined || /^[a-f0-9]{64}$/u.test(execution.authorizationDigest))
-    && (execution.remoteId === undefined || (typeof execution.remoteId === 'string' && Boolean(execution.remoteId.trim())))
-    && isValidManagedPreimage(execution)
-    && (execution.fence?.headSha === undefined || /^[a-f0-9]{40}$/u.test(execution.fence.headSha));
-}
-
-function isValidManagedExecution(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const execution = value as ManagedSummaryExecution;
-  return isValidManagedExecutionIdentity(execution)
-    && isValidManagedExecutionPhase(execution)
-    && isValidManagedExecutionReferences(execution);
 }
 
 function parseJournal(file: string, taskId: string): PlatformOperationJournal {
@@ -249,12 +191,6 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
             : item.pullRequestReview.artifactFile !== `pr-review-r${item.pullRequestReview.round}.md`)
           || !/^[a-f0-9]{64}$/u.test(item.pullRequestReview.bodyDigest)
         : item.pullRequestReview !== undefined)
-      || (item.managedSummary !== undefined && (
-        !['pull-request-summary', 'summary-comment', 'cancel-comment'].includes(item.kind)
-        || !item.managedSummary || typeof item.managedSummary !== 'object' || Array.isArray(item.managedSummary)
-        || !/^[a-f0-9]{64}$/u.test(item.managedSummary.requestDigest)
-        || (item.managedSummary.execution !== undefined && !isValidManagedExecution(item.managedSummary.execution))
-      ))
       || typeof item.updatedAt !== 'string') {
       throw Object.assign(new Error('Platform operation journal contains an invalid operation'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
     }
@@ -306,7 +242,6 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
     ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
     ...(input.pullRequestSummary ? { pullRequestSummary: input.pullRequestSummary } : {}),
-    ...(input.managedSummary ? { managedSummary: input.managedSummary } : {}),
     ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
     updatedAt: new Date().toISOString()
   };
@@ -327,4 +262,4 @@ function readPlatformOperationJournal(taskRef: string, cwd?: string): PlatformOp
 }
 
 export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, operationId, recordPlatformOperation, readPlatformOperationJournal };
-export type { ManagedSummaryExecution, ManagedSummaryIntent, PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, PlatformPullRequestSummaryManualValidationIntent, RecordOperationInput };
+export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, PlatformPullRequestSummaryManualValidationIntent, RecordOperationInput };

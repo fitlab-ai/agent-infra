@@ -2520,15 +2520,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/issue-comments.ts",
-      "ruleId": "complexity",
-      "stableId": "14ec2e2b55fc4ce7b4d1cc6cdeae06dba12c4083d3eae1d17540d739e200a4be",
-      "displayName": "syncPlatformCommentImpl",
-      "metric": 73,
-      "normalizedMessage": "complexity=73",
-      "count": 1
-    },
-    {
       "file": "lib/platform/issues.ts",
       "ruleId": "complexity",
       "stableId": "2fc062bf1db98843c7eebe6b13b4b13e78eb7df8f56306aee295f2322348022a",

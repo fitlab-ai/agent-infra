@@ -5,15 +5,14 @@ import { createHash } from 'node:crypto';
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import type { ResolveRefResult } from '../task/resolve-ref.ts';
-import { coordinateManagedSummary, coordinatePlatformWrite } from './operation-coordinator.ts';
-import type { ManagedSummaryPolicy, ManagedSummaryRemoteComment } from './managed-summary-core.ts';
-import { executeManagedSummary } from './managed-summary-core.ts';
-import type { PlatformOperation as JournalOperation } from '../task/platform-operation-journal.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { PlatformOperation as JournalOperation, RecordOperationInput } from '../task/platform-operation-journal.ts';
 import { resolvePlatformProviderContext } from './context.ts';
-import type { PlatformClient } from './context.ts';
+import type { LoadedContext, PlatformClient } from './context.ts';
 import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
+import type { ResourceIdentity } from './resource-identity.ts';
 import {
   providerError,
   providerOperationContext,
@@ -62,11 +61,40 @@ type SyncOptions = {
   runtimeVersion?: string;
   summaryAuthorization?: { sha256: string };
   dependency?: 'deferred' | 'required';
-  skipQueue?: boolean;
   queuedOperation?: JournalOperation;
   taskProjection?: { content: string; sha256: string };
 };
 type ResolvedTaskRef = Extract<ResolveRefResult, { ok: true }>;
+
+type CommentPlanStrategy = Readonly<{
+  taskId: string;
+  cwd: string;
+  agent: string;
+  parentKind: 'issue' | 'pull-request';
+  kind: CommentKind;
+  client?: PlatformClient;
+  resolved?: { loaded: LoadedContext; context: PlatformResult };
+  backfill?: boolean;
+  markerPrefix: string;
+  prepare: () => Promise<{ parent: ResourceIdentity; items: RenderedChunk[] }>;
+  validate?: () => Promise<{ code: string; message: string; retryable: boolean } | null>;
+  summaryPosition?: boolean;
+  authorizeReposition?: (comment: RemoteComment, currentUser: string | null) => { code: string; message: string; retryable: boolean } | null;
+  verifyReadback?: boolean;
+  dryRun?: boolean;
+}>;
+
+async function syncCommentPlan(
+  strategy: CommentPlanStrategy,
+  operation: Omit<RecordOperationInput, 'state' | 'lastCode'>,
+  queuedOperation?: JournalOperation
+): Promise<PlatformResult> {
+  const execute = () => executeCommentPlan(strategy, strategy.client);
+  if (queuedOperation) return execute();
+  return coordinatePlatformWrite({ operation, agent: strategy.agent, client: strategy.client, execute,
+    block: (error) => platformResult('blocked', { error }),
+    persistenceFailure: (error) => platformResult('failed', { error }) });
+}
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
   return provider.identity?.comment === 'number' && /^\d+$/.test(id) ? Number(id) : id;
@@ -478,38 +506,330 @@ function relatedComments(comments: RemoteComment[], prefix: string): RemoteComme
   });
 }
 
-function taskManagedComment(comment: RemoteComment, taskId: string): boolean {
-  const marker = normalizeCommentContent(comment.body).split('\n', 1)[0] || '';
-  return marker === MARKERS.task(taskId)
-    || marker === MARKERS.summary(taskId)
-    || marker.startsWith(`<!-- sync-issue:${taskId}:`);
-}
-
-function summaryPosition(comments: RemoteComment[], taskId: string): { ok: boolean; known: boolean; summary: RemoteComment | null } {
-  const managed = comments.filter((comment) => taskManagedComment(comment, taskId));
-  const summary = managed.filter((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === MARKERS.summary(taskId));
-  if (summary.length !== 1) return { ok: false, known: false, summary: null };
-  if (managed.some((comment) => !Number.isSafeInteger(comment.createdSequence) || Number(comment.createdSequence) < 1)) {
-    return { ok: false, known: false, summary: summary[0]! };
-  }
-  const sequence = summary[0]!.createdSequence!;
-  return { ok: managed.every((comment) => sequence >= comment.createdSequence!), known: true, summary: summary[0]! };
-}
-
-async function listedComments(provider: any, loaded: any, parent: ReturnType<typeof taskIssueIdentity>): Promise<any> {
+async function listedComments(provider: any, loaded: any, parent: ResourceIdentity): Promise<any> {
   return provider.comments?.list
     ? provider.comments.list({ context: providerOperationContext(loaded), parent }).then((response: any) => response.ok
-      ? {
-          ok: true as const,
-          value: response.value.map((comment: any) => ({
-            id: providerCommentId(comment.id, provider),
-            body: comment.body,
-            user: comment.author?.name ? { login: comment.author.name } : undefined,
-            createdSequence: comment.createdSequence
-          }))
-        }
-      : response)
+      ? { ok: true as const, value: response.value.map((comment: any) => parentComment(comment, provider)) }
+      : { ...response, error: { ...response.error, retryable: isRetryable(response.error) } })
     : unsupportedProviderOperation(provider, 'comments.list');
+}
+
+type CommentPlanSelection = Readonly<{
+  existing: RemoteComment[];
+  byMarker: Map<string, RemoteComment>;
+  reposition: boolean;
+}>;
+
+function markerSetError(strategy: CommentPlanStrategy, context: PlatformResult, resource: PlatformResult['resource'], existing: RemoteComment[]): PlatformResult | null {
+  if (validateRelatedMarkerSet(existing, strategy.markerPrefix).ok) return null;
+  return platformResult('failed', { ...contextFields(context), resource, error: {
+    code: strategy.parentKind === 'pull-request' ? 'PR_SUMMARY_MARKER_AMBIGUOUS' : 'COMMENT_MARKER_CONFLICT',
+    message: strategy.parentKind === 'pull-request' ? 'Multiple PR comments contain the summary marker' : 'Multiple comments use the same registered marker', retryable: false
+  } });
+}
+
+function taskCommentOwnerError(
+  strategy: CommentPlanStrategy,
+  context: PlatformResult,
+  resource: PlatformResult['resource'],
+  existing: RemoteComment[]
+): PlatformResult | null {
+  if (strategy.kind !== 'task' || existing.length !== 1) return null;
+  const owner = existing[0]!.user?.login;
+  return owner && context.platform.currentUser && owner === context.platform.currentUser ? null : platformResult('blocked', {
+    ...contextFields(context), resource, error: {
+      code: 'COMMENT_OWNER_CONFLICT', message: owner ? `Task comment is owned by '${owner}'` : 'Task comment owner is unavailable', retryable: false
+    }
+  });
+}
+
+async function strategyValidationError(
+  strategy: CommentPlanStrategy,
+  context: PlatformResult,
+  resource: PlatformResult['resource']
+): Promise<PlatformResult | null> {
+  const error = strategy.validate ? await strategy.validate() : null;
+  if (!error) return null;
+  return platformResult(error.retryable ? 'blocked' : 'failed', { ...contextFields(context), resource, error });
+}
+
+function artifactBackfillResult(
+  strategy: CommentPlanStrategy,
+  context: PlatformResult,
+  resource: PlatformResult['resource'],
+  existing: RemoteComment[],
+  desired: RenderedChunk[]
+): PlatformResult | null {
+  if (!strategy.backfill || strategy.kind !== 'artifact' || existing.length === 0) return null;
+  const operations = existing.map((comment): PlatformOperation => ({
+    name: `comment:${normalizeCommentContent(comment.body).split('\n', 1)[0]}`,
+    status: 'no-op',
+    reasonCode: 'BACKFILL_ALREADY_PRESENT'
+  }));
+  return platformResult('no-op', {
+    ...contextFields(context),
+    resource,
+    operations,
+    comment: {
+      kind: strategy.kind,
+      marker: desired[0]?.marker ?? strategy.markerPrefix,
+      ids: existing.map((item) => item.id),
+      parts: existing.length
+    },
+    error: null
+  });
+}
+
+function repositionAuthorizationError(
+  strategy: CommentPlanStrategy,
+  context: PlatformResult,
+  resource: PlatformResult['resource'],
+  comments: RemoteComment[],
+  byMarker: Map<string, RemoteComment>,
+  desired: RenderedChunk[]
+): { error: PlatformResult | null; reposition: boolean } {
+  const marker = desired[0]?.marker;
+  const current = marker ? byMarker.get(marker) : undefined;
+  const reposition = Boolean(strategy.summaryPosition && current && !issueSummaryPositionSatisfied(strategy.taskId, comments, marker!));
+  if (!reposition || !current) return { error: null, reposition: false };
+  const error = strategy.authorizeReposition
+    ? strategy.authorizeReposition(current, context.platform.currentUser ?? null)
+    : { code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'summary reposition requires current authorization and an owned summary comment', retryable: false };
+  return {
+    error: error ? platformResult(error.retryable ? 'blocked' : 'failed', { ...contextFields(context), resource, error }) : null,
+    reposition: true
+  };
+}
+
+async function inspectCommentPlan(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  context: PlatformResult,
+  parent: ResourceIdentity,
+  resource: PlatformResult['resource'],
+  comments: RemoteComment[],
+  desired: RenderedChunk[]
+): Promise<{ ok: true; value: CommentPlanSelection; result?: PlatformResult } | { ok: false; result: PlatformResult }> {
+  const existing = relatedComments(comments, strategy.markerPrefix);
+  const markerError = markerSetError(strategy, context, resource, existing);
+  if (markerError) return { ok: false, result: markerError };
+  const ownerError = taskCommentOwnerError(strategy, context, resource, existing);
+  if (ownerError) return { ok: false, result: ownerError };
+  const validationError = await strategyValidationError(strategy, context, resource);
+  if (validationError) return { ok: false, result: validationError };
+  const backfill = artifactBackfillResult(strategy, context, resource, existing, desired);
+  if (backfill) return { ok: true, value: { existing, byMarker: new Map(), reposition: false }, result: backfill };
+  const byMarker = new Map(existing.map((comment) => [normalizeCommentContent(comment.body).split('\n', 1)[0]!, comment]));
+  const reposition = repositionAuthorizationError(strategy, context, resource, comments, byMarker, desired);
+  if (reposition.error) return { ok: false, result: reposition.error };
+  return { ok: true, value: { existing, byMarker, reposition: reposition.reposition } };
+}
+
+async function repositionSummaryComment(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  context: PlatformResult,
+  parent: ResourceIdentity,
+  resource: PlatformResult['resource'],
+  current: RemoteComment | undefined,
+  operations: PlatformOperation[]
+): Promise<PlatformResult | null> {
+  if (!current) return null;
+  const deleted = loaded.provider.comments?.delete
+    ? await loaded.provider.comments.delete({ context: providerOperationContext(loaded), parent,
+      comment: providerResourceToken(loaded.provider, 'comment', String(current.id)),
+      mutation: { idempotencyKey: `comment-reposition-delete:${strategy.taskId}:${current.id}` } })
+    : unsupportedProviderOperation(loaded.provider, 'comments.delete');
+  if (!deleted.ok) return platformResult(isRetryable(deleted.error) ? 'blocked' : 'failed', {
+    ...contextFields(context), resource, error: deleted.error
+  });
+  operations.push({
+    name: `comment:${current.id}`,
+    status: 'applied',
+    reasonCode: 'SUMMARY_REPOSITIONED'
+  });
+  return null;
+}
+
+async function observeCommentWrite(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  parent: ResourceIdentity,
+  item: RenderedChunk
+): Promise<{ valid: true } | { valid: false; error: PlatformResult['error'] }> {
+  const after = await listedComments(loaded.provider, loaded, parent);
+  const comments = after.ok ? after.value as RemoteComment[] : [];
+  const found = comments.filter((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === item.marker);
+  const positionOk = !strategy.summaryPosition || issueSummaryPositionSatisfied(strategy.taskId, comments, item.marker);
+  const validation = strategy.validate ? await strategy.validate() : null;
+  if (after.ok
+    && found.length === 1
+    && normalizeCommentContent(found[0]!.body) === normalizeCommentContent(item.body)
+    && positionOk
+    && !validation) return { valid: true };
+  const error = validation ?? {
+    code: strategy.kind === 'summary' || strategy.kind === 'cancel' ? 'SUMMARY_BODY_READBACK_FAILED' : 'COMMENT_READBACK_FAILED',
+    message: after.ok ? 'Remote comment did not match the requested body' : after.error.message,
+    retryable: after.ok || isRetryable(after.error)
+  };
+  return { valid: false, error };
+}
+
+async function compensatePullRequestComment(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  parent: ResourceIdentity,
+  current: RemoteComment | undefined,
+  id: number | string,
+  cause: PlatformResult['error']
+): Promise<PlatformResult['error']> {
+  const compensation = current
+    ? await loaded.provider.comments?.write?.({ context: providerOperationContext(loaded), parent, body: current.body,
+      existingComment: providerResourceToken(loaded.provider, 'comment', String(current.id)),
+      mutation: { idempotencyKey: `pr-summary-restore:${strategy.taskId}` } })
+    : await loaded.provider.comments?.delete?.({ context: providerOperationContext(loaded), parent,
+      comment: providerResourceToken(loaded.provider, 'comment', String(id)),
+      mutation: { idempotencyKey: `pr-summary-delete:${strategy.taskId}:${id}` } });
+  if (!compensation?.ok) return {
+    code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
+    message: compensation?.error?.message ?? 'Provider does not support comment compensation',
+    retryable: true
+  };
+  if (cause?.code === 'PR_SUMMARY_HEAD_RACE') return cause;
+  return {
+    code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED',
+    message: cause?.message ?? 'Post-write summary verification failed',
+    retryable: true
+  };
+}
+
+async function verifyCommentWrite(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  parent: ResourceIdentity,
+  item: RenderedChunk,
+  current: RemoteComment | undefined,
+  id: number | string
+): Promise<PlatformResult['error']> {
+  if (!strategy.verifyReadback) return null;
+  const observed = await observeCommentWrite(strategy, loaded, parent, item);
+  if (observed.valid) return null;
+  if (strategy.parentKind === 'pull-request') {
+    return compensatePullRequestComment(strategy, loaded, parent, current, id, observed.error);
+  }
+  return observed.error;
+}
+
+async function writeDesiredComments(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  context: PlatformResult,
+  parent: ResourceIdentity,
+  resource: PlatformResult['resource'],
+  desired: RenderedChunk[],
+  selection: CommentPlanSelection,
+  operations: PlatformOperation[]
+): Promise<{ ok: true; ids: Array<number | string> } | { ok: false; result: PlatformResult }> {
+  const ids: Array<number | string> = [];
+  for (const item of desired) {
+    const current = selection.reposition && item === desired[0] ? undefined : selection.byMarker.get(item.marker);
+    if (current && normalizeCommentContent(current.body) === normalizeCommentContent(item.body)) {
+      ids.push(current.id);
+      operations.push({ name: `comment:${item.marker}`, status: 'no-op', reasonCode: null });
+      continue;
+    }
+    const written = loaded.provider.comments?.write
+      ? await loaded.provider.comments.write({ context: providerOperationContext(loaded), parent, body: item.body,
+        ...(current ? { existingComment: providerResourceToken(loaded.provider, 'comment', String(current.id)) } : {}),
+        mutation: { idempotencyKey: `comment:${strategy.taskId}:${item.marker}` } })
+      : unsupportedProviderOperation(loaded.provider, 'comments.write');
+    if (!written.ok) return { ok: false, result: platformResult(isRetryable(written.error) ? 'blocked' : 'failed', {
+      ...contextFields(context), resource, operations, error: written.error
+    }) };
+    const id = providerCommentId(written.value.remoteId, loaded.provider);
+    ids.push(id);
+    operations.push({ name: `comment:${item.marker}`, status: 'applied', reasonCode: null });
+    const error = await verifyCommentWrite(strategy, loaded, parent, item, current, id);
+    if (error) return { ok: false, result: platformResult(error.retryable ? 'blocked' : 'failed', {
+      ...contextFields(context), resource, operations, error
+    }) };
+  }
+  return { ok: true, ids };
+}
+
+async function deleteStaleComments(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  context: PlatformResult,
+  parent: ResourceIdentity,
+  resource: PlatformResult['resource'],
+  existing: RemoteComment[],
+  desired: RenderedChunk[],
+  operations: PlatformOperation[]
+): Promise<PlatformResult | null> {
+  const markers = new Set(desired.map((item) => item.marker));
+  for (const stale of existing.filter((comment) => !markers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!))) {
+    const deleted = loaded.provider.comments?.delete
+      ? await loaded.provider.comments.delete({ context: providerOperationContext(loaded), parent,
+        comment: providerResourceToken(loaded.provider, 'comment', String(stale.id)),
+        mutation: { idempotencyKey: `comment-delete:${strategy.taskId}:${stale.id}` } })
+      : unsupportedProviderOperation(loaded.provider, 'comments.delete');
+    if (!deleted.ok) return platformResult(isRetryable(deleted.error) ? 'blocked' : 'failed', {
+      ...contextFields(context), resource, operations, error: deleted.error
+    });
+    operations.push({ name: `comment:${stale.id}`, status: 'applied', reasonCode: 'STALE_CHUNK_DELETED' });
+  }
+  return null;
+}
+
+type PreparedCommentExecution = Readonly<{
+  loaded: LoadedContext;
+  context: PlatformResult;
+  parent: ResourceIdentity;
+  desired: RenderedChunk[];
+  resource: PlatformResult['resource'];
+  selection: CommentPlanSelection;
+  result?: PlatformResult;
+}>;
+
+async function prepareCommentExecution(
+  strategy: CommentPlanStrategy,
+  client?: PlatformClient
+): Promise<{ ok: true; value: PreparedCommentExecution } | { ok: false; result: PlatformResult }> {
+  const resolved = strategy.resolved
+    ? { ok: true as const, value: strategy.resolved.loaded }
+    : await resolvePlatformProviderContext({ cwd: strategy.cwd, client });
+  const loaded = resolved;
+  const context = strategy.resolved?.context ?? (loaded.ok ? loaded.value.context : loaded.context);
+  if (!loaded.ok || !hasResolvedPlatformContext(context)) return { ok: false, result: context };
+  let parent: ResourceIdentity;
+  let desired: RenderedChunk[];
+  try { ({ parent, items: desired } = await strategy.prepare()); }
+  catch (error) {
+    const value = error as { code?: string; message?: string };
+    return { ok: false, result: platformResult('failed', { ...contextFields(context), error: {
+      code: value.code || 'COMMENT_PAYLOAD_INVALID', message: value.message || String(error), retryable: false
+    } }) };
+  }
+  const resource = { kind: strategy.parentKind, number: resourceIdentityNumber(parent), identity: parent } as const;
+  const listed = await listedComments(loaded.value.provider, loaded.value, parent);
+  if (!listed.ok) return { ok: false, result: platformResult(isRetryable(listed.error) ? 'blocked' : 'failed', {
+    ...contextFields(context), resource, error: listed.error
+  }) };
+  const selection = await inspectCommentPlan(strategy, loaded.value, context, parent, resource, listed.value, desired);
+  if (!selection.ok) return selection;
+  return {
+    ok: true,
+    value: {
+      loaded: loaded.value,
+      context,
+      parent,
+      desired,
+      resource,
+      selection: selection.value,
+      result: selection.result
+    }
+  };
 }
 
 function validateRelatedMarkerSet(comments: RemoteComment[], prefix: string): { ok: boolean; code: string | null } {
@@ -531,186 +851,15 @@ function validateRelatedMarkerSet(comments: RemoteComment[], prefix: string): { 
   return complete ? { ok: true, code: null } : { ok: false, code: 'COMMENT_MARKER_CONFLICT' };
 }
 
-function writeComment(
-  client: PlatformClient,
-  repo: string,
-  issue: number,
-  cwd: string,
-  body: string,
-  id?: number
-) {
-  const endpoint = id ? `repos/${repo}/issues/comments/${id}` : `repos/${repo}/issues/${issue}/comments`;
-  return client.json<{ id?: number }>(
-    ['api', endpoint, '-X', id ? 'PATCH' : 'POST', '--input', '-'],
-    { cwd, method: id ? 'PATCH' : 'POST', input: JSON.stringify({ body }) }
-  );
+function parentComment(comment: any, provider: any): RemoteComment {
+  return {
+    id: providerCommentId(comment.id, provider), body: comment.body,
+    user: comment.author?.name ? { login: comment.author.name } : undefined,
+    createdSequence: comment.createdSequence
+  };
 }
 
-async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
-  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) {
-    return platformResult('failed', {
-      error: { code: resolved.code, message: resolved.message, retryable: false }
-    });
-  }
-  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
-  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent)); }
-  catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
-  if (!issueIdentityFromTask) {
-    return platformResult('no-op', {
-      error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
-    });
-  }
-  if (options.kind === 'summary' || options.kind === 'cancel') return platformResult('blocked', {
-    resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
-    error: { code: 'MANAGED_SUMMARY_CORE_REQUIRED', message: 'Issue summary publication must use the managed summary operation core', retryable: false }
-  });
-  let desired: RenderedChunk[];
-  try {
-    const projectedContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
-    if (options.kind === 'task' && options.taskProjection
-      && createHash('sha256').update(projectedContent).digest('hex') !== options.taskProjection.sha256) {
-      throw Object.assign(new Error('finalization task projection digest does not match content'), { code: 'FINALIZATION_PROJECTION_INVALID' });
-    }
-    desired = expectedComments(resolved.taskId, projectedContent, resolved.taskDir, resolved.repoRoot, options);
-  } catch (error) {
-    return platformResult('failed', {
-      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask) },
-      error: { code: 'COMMENT_PAYLOAD_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
-    });
-  }
-  if (options.kind === 'task' && Buffer.byteLength(desired[0]!.body, 'utf8') > COMMENT_BYTE_LIMIT) {
-    return platformResult('failed', {
-      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
-      operations: [{ name: `comment:${MARKERS.task(resolved.taskId)}`, status: 'skipped', reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE' }],
-      error: { code: 'COMMENT_PAYLOAD_TOO_LARGE', message: 'Projected task comment exceeds the platform byte limit', retryable: false }
-    });
-  }
-  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
-  const context = loaded.ok ? loaded.value.context : loaded.context;
-  if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
-  const issue = resourceIdentityNumber(issueIdentityFromTask);
-  const listed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
-  if (!listed.ok) {
-    return platformResult(isRetryable(listed.error) ? 'blocked' : 'failed', {
-      ...contextFields(context), resource: { kind: 'issue', number: issue }, error: listed.error
-    });
-  }
-
-  const existing = relatedComments(listed.value, markerPrefix(resolved.taskId, options));
-  if (!validateRelatedMarkerSet(existing, markerPrefix(resolved.taskId, options)).ok) {
-    return platformResult('failed', {
-      ...contextFields(context),
-      resource: { kind: 'issue', number: issue },
-      error: { code: 'COMMENT_MARKER_CONFLICT', message: 'Multiple comments use the same registered marker', retryable: false }
-    });
-  }
-
-  if (options.kind === 'task' && existing.length === 1) {
-    const owner = existing[0]!.user?.login;
-    if (!owner || !context.platform.currentUser || owner !== context.platform.currentUser) {
-      return platformResult('blocked', {
-        ...contextFields(context),
-        resource: { kind: 'issue', number: issue, identity: issueIdentityFromTask },
-        error: {
-          code: 'COMMENT_OWNER_CONFLICT',
-          message: owner ? `Task comment is owned by '${owner}'` : 'Task comment owner is unavailable',
-          retryable: false
-        }
-      });
-    }
-  }
-
-  // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
-  if (options.kind === 'artifact' && options.backfill && existing.length > 0) {
-    const operations = existing.map((comment): PlatformOperation => ({
-      name: `comment:${normalizeCommentContent(comment.body).split('\n', 1)[0]}`,
-      status: 'no-op',
-      reasonCode: 'BACKFILL_ALREADY_PRESENT'
-    }));
-    return platformResult('no-op', {
-      ...contextFields(context),
-      changed: false,
-      resource: { kind: 'issue', number: issue },
-      operations,
-      comment: {
-        kind: options.kind,
-        marker: desired[0]!.marker,
-        ids: existing.map((comment) => comment.id),
-        parts: existing.length
-      },
-      error: null
-    });
-  }
-
-  const operations: PlatformOperation[] = [];
-  const ids: Array<number | string> = [];
-  for (const item of desired) {
-    const current = existing.find((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === item.marker);
-    if (current && normalizeCommentContent(current.body) === normalizeCommentContent(item.body)) {
-      ids.push(current.id);
-      operations.push({ name: `comment:${item.marker}`, status: 'no-op', reasonCode: null });
-      continue;
-    }
-    const written = loaded.value.provider.comments?.write
-        ? await loaded.value.provider.comments.write({
-          context: providerOperationContext(loaded.value),
-          parent: issueIdentityFromTask,
-          body: item.body,
-          ...(current ? { existingComment: { kind: 'id' as const, value: String(current.id) } } : {}),
-          mutation: { idempotencyKey: `comment:${resolved.taskId}:${item.marker}` }
-        })
-        : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
-    if (!written.ok) {
-      if (!current && isRetryable(written.error)) {
-        // A provider owns reconciliation because only it knows how to address the resource.
-      }
-      return platformResult(isRetryable(written.error) ? 'blocked' : 'failed', {
-        ...contextFields(context),
-        resource: { kind: 'issue', number: issue },
-        operations,
-        error: written.error
-      });
-    }
-    ids.push(providerCommentId((written.value as { remoteId: string }).remoteId, loaded.value.provider));
-    operations.push({ name: `comment:${item.marker}`, status: 'applied', reasonCode: null });
-  }
-
-  const desiredMarkers = new Set(desired.map((item) => item.marker));
-  const stale = existing.filter((comment) => !desiredMarkers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!));
-  for (const comment of stale) {
-    const deleted = loaded.value.provider.comments?.delete
-        ? await loaded.value.provider.comments.delete({
-          context: providerOperationContext(loaded.value),
-          parent: issueIdentityFromTask,
-          comment: { kind: 'id', value: String(comment.id) },
-          mutation: { idempotencyKey: `comment-delete:${resolved.taskId}:${comment.id}` }
-        })
-        : unsupportedProviderOperation(loaded.value.provider, 'comments.delete');
-    if (!deleted.ok) {
-      return platformResult(isRetryable(deleted.error) ? 'blocked' : 'failed', {
-        ...contextFields(context),
-        resource: { kind: 'issue', number: issue },
-        operations,
-        error: deleted.error
-      });
-    }
-    operations.push({ name: `comment:${comment.id}`, status: 'applied', reasonCode: 'STALE_CHUNK_DELETED' });
-  }
-  const changed = operations.some((operation) => operation.status === 'applied');
-  const result = platformResult(changed ? 'applied' : 'no-op', {
-    ...contextFields(context),
-    changed,
-    resource: { kind: 'issue', number: issue },
-    operations,
-    comment: { kind: options.kind, marker: desired[0]?.marker ?? markerPrefix(resolved.taskId, options), ids, parts: desired.length },
-    error: null
-  });
-  return result;
-}
-
-function issueSummaryPositionSatisfied(taskId: string, comments: readonly ManagedSummaryRemoteComment[], marker: string): boolean {
+function issueSummaryPositionSatisfied(taskId: string, comments: readonly RemoteComment[], marker: string): boolean {
   const managed = comments.filter((comment) => comment.body.split('\n', 1)[0]?.startsWith(`<!-- sync-issue:${taskId}:`));
   const summary = managed.filter((comment) => comment.body.split('\n', 1)[0] === marker);
   return summary.length === 1 && managed.every((comment) => Number.isSafeInteger(comment.createdSequence)
@@ -718,128 +867,85 @@ function issueSummaryPositionSatisfied(taskId: string, comments: readonly Manage
     && summary[0]!.createdSequence! >= comment.createdSequence!);
 }
 
-function managedIssueSummaryPolicy(resolved: ResolvedTaskRef, options: SyncOptions, kind: 'summary-comment' | 'cancel-comment', requestDigest: string): ManagedSummaryPolicy {
-  return {
-    kind,
-    taskRef: resolved.taskId,
-    target: options.kind,
-    requestDigest: options.queuedOperation?.managedSummary?.requestDigest ?? requestDigest,
-    dependency: options.dependency ?? 'deferred',
-    cwd: resolved.repoRoot,
-    client: options.client,
-    agent: options.agent,
-    prepare: async () => {
-      const latest = fs.readFileSync(resolved.taskMdPath, 'utf8');
-      const identity = taskIssueIdentity(parseTaskFrontmatter(latest));
-      if (!identity) throw Object.assign(new Error('Task has no valid platform issue identity'), { code: 'ISSUE_NOT_LINKED' });
-      const desired = expectedComments(resolved.taskId, latest, resolved.taskDir, resolved.repoRoot, options);
-      const item = desired[0];
-      if (!item) throw Object.assign(new Error('Managed summary renderer produced no comment'), { code: 'COMMENT_PAYLOAD_INVALID' });
-      return {
-        parent: identity, marker: item.marker, body: item.body,
-        position: options.kind === 'summary' ? 'summary-last' : 'none', fence: {},
-        ...(options.summaryAuthorization ? { authorizationDigest: options.summaryAuthorization.sha256 } : {})
-      };
-    },
-    validate: async (execution) => {
-      const latest = fs.readFileSync(resolved.taskMdPath, 'utf8');
-      let identity;
-      try { identity = taskIssueIdentity(parseTaskFrontmatter(latest)); }
-      catch (error) { return { ...taskIssueIdentityError(error), retryable: false }; }
-      if (!identity || JSON.stringify(identity) !== JSON.stringify(execution.parent)) return {
-        code: 'MANAGED_SUMMARY_TARGET_CHANGED', message: 'Task issue identity changed after summary execution was prepared', retryable: true
-      };
-      if (execution.authorizationDigest && execution.authorizationDigest !== createHash('sha256').update(options.body ?? '').digest('hex')) return {
-        code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'Summary reposition authorization no longer matches the frozen request', retryable: false
-      };
-      return null;
-    },
-    positionSatisfied: (comments, marker) => issueSummaryPositionSatisfied(resolved.taskId, comments, marker),
-    authorizeReposition: (comment, currentUser) => {
-      if (!options.summaryAuthorization || options.summaryAuthorization.sha256 !== createHash('sha256').update(options.body ?? '').digest('hex')
-        || !comment.author || !currentUser || comment.author !== currentUser) return {
-        code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'summary reposition requires current finalization authorization and an owned durable summary', retryable: false
-      };
-      return null;
-    }
-  };
-}
-
-async function syncManagedIssueComment(resolved: ResolvedTaskRef, options: SyncOptions): Promise<PlatformResult> {
-  const kind = options.kind === 'summary' ? 'summary-comment' : 'cancel-comment';
-  const requestDigest = createHash('sha256').update(JSON.stringify({ kind, body: options.body ?? '', authorization: options.summaryAuthorization?.sha256 ?? null })).digest('hex');
-  const persisted = options.queuedOperation?.managedSummary;
-  if (persisted && !persisted.execution && persisted.requestDigest !== requestDigest) return platformResult('blocked', { error: {
-    code: 'MANAGED_SUMMARY_REQUEST_CHANGED', message: 'Queued Issue summary source no longer matches its persisted request digest', retryable: false
-  } });
-  const policy = managedIssueSummaryPolicy(resolved, options, kind, requestDigest);
-  const operation = { taskRef: resolved.taskId, cwd: resolved.repoRoot, kind, target: options.kind, expectedDigest: requestDigest, dependency: options.dependency ?? 'deferred' } as const;
-  if (options.queuedOperation) return (await executeManagedSummary(policy, options.queuedOperation)).result;
-  if (options.skipQueue) return platformResult('blocked', { error: {
-    code: 'MANAGED_SUMMARY_OPERATION_REQUIRED', message: 'Managed summary recovery requires the existing queued operation identity', retryable: false
-  } });
-  return (await coordinateManagedSummary({ operation, policy, agent: options.agent, client: options.client })).result;
-}
-
-async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
-  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) return syncPlatformCommentImpl(taskRef, options);
-  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return syncPlatformCommentImpl(taskRef, options);
-
-  if (options.kind === 'summary' || options.kind === 'cancel') return syncManagedIssueComment(resolved, options);
-
-  let operation: { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string };
-  try {
-    const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
-    const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
-    const content = desired.map((chunk) => chunk.content).join('\0');
-    const kind = options.kind === 'task' ? 'task-comment' : 'artifact-comment';
-    const target = options.kind === 'artifact' ? options.artifact! : options.kind;
-    operation = { kind, target, expectedDigest: createHash('sha256').update(content).digest('hex') };
-  } catch {
-    return syncPlatformCommentImpl(taskRef, options);
+async function executeCommentPlan(
+  strategy: CommentPlanStrategy,
+  client?: PlatformClient
+): Promise<PlatformResult> {
+  const prepared = await prepareCommentExecution(strategy, client);
+  if (!prepared.ok) return prepared.result;
+  const { loaded, context, parent, desired, resource, selection, result } = prepared.value;
+  if (result) return result;
+  if (strategy.dryRun) return platformResult('planned', {
+    ...contextFields(context), resource,
+    operations: desired.map((item) => ({ name: `comment:${item.marker}`, status: 'planned', reasonCode: null })), error: null
+  });
+  const operations: PlatformOperation[] = [];
+  const currentSummary = desired[0] ? selection.byMarker.get(desired[0].marker) : undefined;
+  if (selection.reposition) {
+    const repositioned = await repositionSummaryComment(strategy, loaded, context, parent, resource, currentSummary, operations);
+    if (repositioned) return repositioned;
   }
-
-  const execute = () => syncPlatformCommentImpl(taskRef, options);
-  if (options.skipQueue) return execute();
-  return coordinatePlatformWrite({
-    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, dependency: options.dependency ?? 'deferred' },
-    agent: options.agent,
-    execute,
-    block: (error) => platformResult('blocked', { error }),
-    persistenceFailure: (error) => platformResult('failed', { error })
+  const written = await writeDesiredComments(strategy, loaded, context, parent, resource, desired, selection, operations);
+  if (!written.ok) return written.result;
+  const deleted = await deleteStaleComments(strategy, loaded, context, parent, resource, selection.existing, desired, operations);
+  if (deleted) return deleted;
+  const changed = operations.some((operation) => operation.status === 'applied');
+  return platformResult(changed ? 'applied' : 'no-op', {
+    ...contextFields(context), changed, resource, operations,
+    comment: {
+      kind: strategy.kind,
+      marker: desired[0]?.marker ?? strategy.markerPrefix,
+      ids: written.ids,
+      parts: desired.length
+    },
+    error: null
   });
 }
 
-async function recoverManagedPlatformComment(taskId: string, operation: JournalOperation, options: { agent: string; cwd: string; client?: PlatformClient }) {
-  const kind = operation.kind === 'summary-comment' ? 'summary-comment' : 'cancel-comment';
-  const execution = operation.managedSummary?.execution;
-  if (!execution) return platformResult('blocked', { error: {
-    code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING', message: 'Managed Issue comment has no frozen execution evidence', retryable: true
-  } });
-  const policy: ManagedSummaryPolicy = {
-    kind, taskRef: taskId, target: operation.target,
-    requestDigest: operation.managedSummary?.requestDigest ?? '', dependency: operation.dependency,
-    cwd: options.cwd, client: options.client, agent: options.agent,
-    prepare: async () => { throw Object.assign(new Error('Recovery must use frozen managed summary evidence'), { code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING' }); },
-    validate: async (frozen) => {
-      const resolved = resolveTaskRef(taskId, { repoRoot: options.cwd });
-      if (!resolved.ok) return { code: resolved.code, message: resolved.message, retryable: false };
-      const identity = taskIssueIdentity(parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')));
-      return identity && JSON.stringify(identity) === JSON.stringify(frozen.parent) ? null : {
-        code: 'MANAGED_SUMMARY_TARGET_CHANGED', message: 'Bound Issue identity differs from the frozen managed comment target', retryable: true
-      };
-    },
-    positionSatisfied: (comments: readonly ManagedSummaryRemoteComment[], marker: string) => {
-      const managed = comments.filter((comment) => comment.body.split('\n', 1)[0]?.startsWith(`<!-- sync-issue:${taskId}:`));
-      const summary = managed.filter((comment) => comment.body.split('\n', 1)[0] === marker);
-      return summary.length === 1 && managed.every((comment) => Number.isSafeInteger(comment.createdSequence)
-        && comment.createdSequence !== null && summary[0]!.createdSequence !== null
-        && summary[0]!.createdSequence! >= comment.createdSequence!);
-    }
+function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return Promise.resolve(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
+  const readStrategy = (): CommentPlanStrategy => {
+    const prefix = markerPrefix(resolved.taskId, options);
+    return {
+      taskId: resolved.taskId, cwd: resolved.repoRoot, agent: options.agent, client: options.client,
+      parentKind: 'issue', kind: options.kind, markerPrefix: prefix,
+      backfill: options.backfill,
+      prepare: async () => {
+        const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+        const parent = taskIssueIdentity(parseTaskFrontmatter(taskContent));
+        if (!parent) throw Object.assign(new Error('Task has no valid platform issue identity'), { code: 'ISSUE_NOT_LINKED' });
+        const source = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+        if (options.kind === 'task' && options.taskProjection && createHash('sha256').update(source).digest('hex') !== options.taskProjection.sha256) {
+          throw Object.assign(new Error('finalization task projection digest does not match content'), { code: 'FINALIZATION_PROJECTION_INVALID' });
+        }
+        const items = expectedComments(resolved.taskId, source, resolved.taskDir, resolved.repoRoot, options);
+        if (options.kind === 'task' && Buffer.byteLength(items[0]!.body, 'utf8') > COMMENT_BYTE_LIMIT) throw Object.assign(new Error('Projected task comment exceeds the platform byte limit'), { code: 'COMMENT_PAYLOAD_TOO_LARGE' });
+        return { parent, items };
+      },
+      summaryPosition: options.kind === 'summary',
+      verifyReadback: options.kind === 'summary' || options.kind === 'cancel',
+      authorizeReposition: (comment, currentUser) => options.summaryAuthorization
+        && options.summaryAuthorization.sha256 === createHash('sha256').update(options.body ?? '').digest('hex')
+        && comment.user?.login && currentUser && comment.user.login === currentUser
+        ? null : { code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'summary reposition requires current finalization authorization and an owned durable summary', retryable: false }
+    };
   };
-  return (await executeManagedSummary(policy, operation)).result;
+  let strategy: CommentPlanStrategy;
+  let operation: Omit<RecordOperationInput, 'state' | 'lastCode'>;
+  try {
+    strategy = readStrategy();
+    const source = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : fs.readFileSync(resolved.taskMdPath, 'utf8');
+    const expected = expectedComments(resolved.taskId, source, resolved.taskDir, resolved.repoRoot, options);
+    const digest = createHash('sha256').update(expected.map((item) => item.content).join('\0')).digest('hex');
+    const kind: JournalOperation['kind'] = options.kind === 'task' ? 'task-comment' : options.kind === 'artifact' ? 'artifact-comment' : options.kind === 'summary' ? 'summary-comment' : 'cancel-comment';
+    const target = options.kind === 'artifact' ? options.artifact! : options.kind;
+    operation = { taskRef: resolved.taskId, cwd: resolved.repoRoot, kind, target, expectedDigest: digest, dependency: options.dependency ?? 'deferred' };
+  } catch (error) {
+    const value = error as { code?: string; message?: string };
+    return Promise.resolve(platformResult('failed', { error: { code: value.code || 'COMMENT_PAYLOAD_INVALID', message: value.message || String(error), retryable: false } }));
+  }
+  return syncCommentPlan(strategy, operation, options.queuedOperation);
 }
 
 function inspectPlatformCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string; id: string } | null {
@@ -921,10 +1027,9 @@ export {
   normalizeCommentContent,
   renderTaskComment,
   renderTaskCommentResult,
-  recoverManagedPlatformComment,
+  syncCommentPlan,
   isTaskCommentTooLarge,
   syncPlatformComment,
-  validateRelatedMarkerSet,
-  writeComment
+  validateRelatedMarkerSet
 };
-export type { CommentKind, RemoteComment, RenderedChunk, SyncOptions };
+export type { CommentKind, CommentPlanStrategy, RemoteComment, RenderedChunk, SyncOptions };

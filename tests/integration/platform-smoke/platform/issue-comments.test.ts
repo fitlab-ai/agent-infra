@@ -568,56 +568,6 @@ test('authorized summary reposition blocks when the final remote body readback i
   }
 });
 
-test('authorized summary reposition resumes the same frozen operation after deletion interruption', async () => {
-  const root = syncFixture();
-  const statePath = path.join(root, 'provider-comments.json');
-  const providerSource = path.resolve('tests/fixtures/platform-providers/summary-reposition-provider.mjs');
-  const fixtureProject = JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).project as string;
-  fs.writeFileSync(statePath, JSON.stringify({ comments: [], nextId: 1, nextSequence: 1, writeCount: 0 }));
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-    project: fixtureProject,
-    platform: { type: 'trae', providers: { trae: { source: providerSource, config: { statePath, failWriteAt: 2 } } } }
-  }));
-  const taskId = 'TASK-20260101-000001';
-  const body = 'Delivery summary for interrupted reposition.';
-  const options = {
-    kind: 'summary' as const, agent: 'codex', cwd: root, body,
-    summaryAuthorization: { sha256: createHash('sha256').update(body).digest('hex') }
-  };
-  try {
-    const first = await syncPlatformComment(taskId, options);
-    assert.equal(first.status, 'applied', JSON.stringify(first));
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
-      comments: Array<{ id: string; author: { name: string }; body: string; createdAt: string; updatedAt: string; createdSequence: number }>;
-      nextSequence: number; writeCount: number;
-    };
-    state.comments.push({
-      id: 'later-task-comment', author: { name: 'codex' },
-      body: `<!-- sync-issue:${taskId}:task -->\nTask snapshot`,
-      createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z', createdSequence: state.nextSequence++
-    });
-    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
-
-    const interrupted = await syncPlatformComment(taskId, options);
-    assert.equal(interrupted.status, 'blocked', JSON.stringify(interrupted));
-    const before = readPlatformOperationJournal(taskId, root).operations.filter((operation) => operation.kind === 'summary-comment').at(-1)!;
-    assert.ok(['pending', 'unknown'].includes(before.state), JSON.stringify(before));
-    assert.equal(before.managedSummary?.execution?.phase, 'deleted');
-    assert.equal(before.managedSummary?.execution?.authorizationDigest, options.summaryAuthorization.sha256);
-    const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root });
-    const after = readPlatformOperationJournal(taskId, root).operations.find((operation) => operation.id === before.id);
-    const finalState = JSON.parse(fs.readFileSync(statePath, 'utf8')) as typeof state;
-    assert.equal(recovered.status, 'applied');
-    assert.equal(after?.id, before.id);
-    assert.equal(after?.state, 'succeeded');
-    assert.equal(after?.managedSummary?.execution?.authorizationDigest, options.summaryAuthorization.sha256);
-    assert.equal(finalState.writeCount, 3);
-    assert.equal(finalState.comments.filter((comment) => comment.body.startsWith(`<!-- sync-issue:${taskId}:summary -->`)).length, 1);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('artifact sync isolates sibling stems and becomes a no-op on replay', async () => {
   const root = syncFixture();
   const siblingBody = `${MARKERS.artifact('TASK-20260101-000001', 'analysis-r2')}\nexisting sibling`;

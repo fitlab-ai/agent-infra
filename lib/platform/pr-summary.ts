@@ -11,16 +11,14 @@ import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import { inspectPlatformPullRequest } from './pull-requests.ts';
 import type { LoadedContext, PlatformClient } from './context.ts';
-import { normalizeCommentContent } from './issue-comments.ts';
+import { normalizeCommentContent, syncCommentPlan } from './issue-comments.ts';
+import type { CommentPlanStrategy, RenderedChunk } from './issue-comments.ts';
 import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument, splitDocumentPlaceholder } from './comment-safety.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
-import { coordinateManagedSummary } from './operation-coordinator.ts';
-import type { ManagedSummaryPolicy, ManagedSummaryPrepared } from './managed-summary-core.ts';
-import { executeManagedSummary, previewManagedSummary } from './managed-summary-core.ts';
-import type { PlatformOperation as JournalOperation } from '../task/platform-operation-journal.ts';
+import type { PlatformOperation as JournalOperation, RecordOperationInput } from '../task/platform-operation-journal.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
-import { providerError, providerOperationContext, providerStatus, providerResourceToken, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
+import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
 import { resourceIdentityEquals } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
@@ -81,7 +79,6 @@ type PullRequestSummarySyncOptions = {
   primaryResult: PullRequestPrimaryResult;
   runtimeVersion?: string;
   manualValidation?: ManualValidationSummaryOptions;
-  skipQueue?: boolean;
   queuedOperation?: JournalOperation;
 };
 type ResolvedTaskRef = Extract<ResolveRefResult, { ok: true }>;
@@ -179,8 +176,7 @@ function basePlatformResult(
 function isHardSummaryFailure(error: PlatformResult['error']): boolean {
   return error?.code === 'PR_SUMMARY_HEAD_RACE'
     || error?.code === 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED'
-    || error?.code === 'PR_SUMMARY_RACE_COMPENSATION_FAILED'
-    || Boolean(error?.code.startsWith('MANAGED_SUMMARY_'));
+    || error?.code === 'PR_SUMMARY_RACE_COMPENSATION_FAILED';
 }
 
 function inspectionError(error: { code: string; message: string; retryable: boolean }): PlatformResult['status'] {
@@ -260,11 +256,19 @@ function renderedSummaryBody(taskId: string, rendered: string, report: PrChangeR
 }
 
 type PreparedBoundSummary = Readonly<{
-  summary: ManagedSummaryPrepared;
+  parent: ResourceIdentity;
+  item: RenderedChunk;
+  snapshot: PlatformChangeRequestSnapshot;
+  rendered: string;
+  manual: ManualValidationSummaryOptions | undefined;
   prNumber: number;
   precheckVerdict: 'clear' | 'needs-review';
   nextAction: 'watch-pr' | 'review-code';
 }>;
+
+type BoundSummaryState = {
+  prepared: PreparedBoundSummary | null;
+};
 
 function prepareBoundSummaryContent(body: string, taskContent: string) {
   try { return prepareAndRenderPrSummaryContent(JSON.parse(body), taskContent); }
@@ -280,20 +284,21 @@ async function prepareBoundPullRequestSummary(
   loaded: LoadedContext,
   expectedIdentity: ResourceIdentity
 ): Promise<PreparedBoundSummary> {
-  const snapshot = readBoundTaskSnapshot(resolved.taskMdPath);
-  if (snapshot.factError) throw preparationError(snapshot.factError.code, snapshot.factError.message);
-  if (!snapshot.boundFact || !resourceIdentityEquals(snapshot.boundFact.identity.resource, expectedIdentity)) throw preparationError('PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bound pull request identity changed while the summary was queued');
-  const preparedContent = prepareBoundSummaryContent(options.body, snapshot.taskContent);
+  const taskSnapshot = readBoundTaskSnapshot(resolved.taskMdPath);
+  if (taskSnapshot.factError) throw preparationError(taskSnapshot.factError.code, taskSnapshot.factError.message);
+  if (!taskSnapshot.boundFact || !resourceIdentityEquals(taskSnapshot.boundFact.identity.resource, expectedIdentity)) throw preparationError('PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bound pull request identity changed while the summary was queued');
+  const preparedContent = prepareBoundSummaryContent(options.body, taskSnapshot.taskContent);
   const current = await inspectBoundPullRequest(context, resolved.repoRoot, expectedIdentity, loaded);
   if (!current.ok) throw preparationError(current.error?.code || 'PR_SNAPSHOT_UNAVAILABLE', current.error?.message || 'Pull-request snapshot is unavailable');
   const evidenceDigest = await manualValidationEvidence(resolved, options.manualValidation, preparedContent.rendered, current.value);
-  const report = validatedSummaryReport(resolved, options, current.value, snapshot.taskContent);
+  const report = validatedSummaryReport(resolved, options, current.value, taskSnapshot.taskContent);
   const body = renderedSummaryBody(resolved.taskId, preparedContent.rendered, report, options.manualValidation, evidenceDigest, current.value.head.sha);
   return {
-    summary: {
-      parent: expectedIdentity, marker: summaryMarker(resolved.taskId), body, position: 'none',
-      fence: { headSha: current.value.head.sha, ...(options.manualValidation?.transactionId ? { manualValidation: { ...options.manualValidation, transactionId: options.manualValidation.transactionId } } : {}) }
-    },
+    parent: expectedIdentity,
+    item: { marker: summaryMarker(resolved.taskId), body, content: options.body, part: 1, total: 1 },
+    snapshot: current.value,
+    rendered: body,
+    manual: options.manualValidation,
     prNumber: current.value.number,
     precheckVerdict: report.precheck.verdict,
     nextAction: report.precheck.route
@@ -305,74 +310,20 @@ async function validateBoundPullRequestSummary(
   options: PullRequestSummarySyncOptions,
   context: PlatformResult,
   loaded: LoadedContext,
-  execution: Parameters<ManagedSummaryPolicy['validate']>[0]
+  prepared: PreparedBoundSummary
 ) {
-  const latest = await inspectBoundPullRequest(context, resolved.repoRoot, execution.parent, loaded);
+  const latest = await inspectBoundPullRequest(context, resolved.repoRoot, prepared.parent, loaded);
   if (!latest.ok) return latest.error;
-  if (latest.value.head.sha !== execution.fence.headSha) return { code: 'PR_SUMMARY_HEAD_RACE', message: 'Pull request head changed during managed summary publication', retryable: true };
+  if (!sameIdentity(prepared.snapshot, latest.value)) return { code: 'PR_SUMMARY_HEAD_RACE', message: 'Pull-request identity or base/head snapshot changed during summary publication', retryable: true };
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const bound = readPrDeliveryFact(frontmatter, options.runtimeVersion);
-  if (bound.status !== 'valid' || bound.fact.state !== 'bound' || !resourceIdentityEquals(bound.fact.identity.resource, execution.parent)) return { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request identity differs from frozen summary target', retryable: true };
-  try { await manualValidationEvidence(resolved, execution.fence.manualValidation, execution.body, latest.value); }
+  if (bound.status !== 'valid' || bound.fact.state !== 'bound' || !resourceIdentityEquals(bound.fact.identity.resource, prepared.parent)) return { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request identity changed during summary publication', retryable: true };
+  try { await manualValidationEvidence(resolved, prepared.manual, prepared.rendered, latest.value); }
   catch (error) {
     const value = error as { code?: string; message?: string };
     return { code: value.code || 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: value.message || String(error), retryable: false };
   }
   return null;
-}
-
-type BoundSummaryState = {
-  knownPrNumber: number | null;
-  preparedInfo: { precheckVerdict: 'clear' | 'needs-review'; nextAction: 'watch-pr' | 'review-code' } | null;
-};
-
-async function runBoundSummaryOperation(
-  options: PullRequestSummarySyncOptions,
-  expectedIdentity: ResourceIdentity,
-  operation: Parameters<typeof coordinateManagedSummary>[0]['operation'],
-  policy: ManagedSummaryPolicy,
-  state: BoundSummaryState,
-  preserveFailure: (output: PlatformResult, knownPrNumber?: number | null) => PullRequestSummaryResult
-): Promise<PullRequestSummaryResult> {
-  if (options.skipQueue && !options.queuedOperation) return preserveFailure(platformResult('blocked', { error: {
-    code: 'MANAGED_SUMMARY_OPERATION_REQUIRED', message: 'Managed summary recovery requires the existing queued operation identity', retryable: false
-  } }), state.knownPrNumber);
-  const output = options.queuedOperation
-    ? await executeManagedSummary(policy, options.queuedOperation)
-    : options.dryRun
-      ? await previewManagedSummary(policy, `dry-run:${policy.requestDigest}`)
-      : await coordinateManagedSummary({ operation, policy, agent: options.agent, client: options.client });
-  if (output.result.error || output.result.status === 'failed' || output.result.status === 'blocked') return preserveFailure({
-    ...output.result, resource: { kind: 'pull-request', number: state.knownPrNumber, identity: expectedIdentity }
-  }, state.knownPrNumber);
-  const info = state.preparedInfo ?? { precheckVerdict: 'needs-review' as const, nextAction: 'review-code' as const };
-  return {
-    ...output.result, resource: { kind: 'pull-request', number: state.knownPrNumber ?? resourceIdentityNumber(expectedIdentity), identity: expectedIdentity },
-    comment: output.result.comment ? { ...output.result.comment, kind: 'summary' } : null,
-    result: null, warnings: [], ...info
-  };
-}
-
-function boundPullRequestSummaryPolicy(
-  resolved: ResolvedTaskRef,
-  options: PullRequestSummarySyncOptions,
-  context: PlatformResult,
-  loaded: LoadedContext,
-  expectedIdentity: ResourceIdentity,
-  requestDigest: string,
-  state: BoundSummaryState
-): ManagedSummaryPolicy {
-  return {
-    kind: 'pull-request-summary', taskRef: resolved.taskId, target: JSON.stringify(expectedIdentity), requestDigest,
-    dependency: 'deferred', cwd: resolved.repoRoot, client: options.client, loaded, agent: options.agent,
-    prepare: async () => {
-      const prepared = await prepareBoundPullRequestSummary(resolved, options, context, loaded, expectedIdentity);
-      state.knownPrNumber = prepared.prNumber;
-      state.preparedInfo = { precheckVerdict: prepared.precheckVerdict, nextAction: prepared.nextAction };
-      return prepared.summary;
-    },
-    validate: (execution) => validateBoundPullRequestSummary(resolved, options, context, loaded, execution)
-  };
 }
 
 async function syncBoundPullRequestSummary(
@@ -383,24 +334,40 @@ async function syncBoundPullRequestSummary(
   expectedIdentity: ResourceIdentity,
   preserveFailure: (output: PlatformResult, knownPrNumber?: number | null) => PullRequestSummaryResult
 ): Promise<PullRequestSummaryResult> {
-  const state: BoundSummaryState = { knownPrNumber: resourceIdentityNumber(expectedIdentity), preparedInfo: null };
-  const frozen = options.queuedOperation?.managedSummary?.execution;
-  const requestDigest = createHash('sha256').update(JSON.stringify({ body: options.body, changeReportFile: options.changeReportFile, manualValidation: options.manualValidation ?? null })).digest('hex');
-  const persistedDigest = options.queuedOperation?.managedSummary?.requestDigest;
-  if (options.queuedOperation?.managedSummary && !frozen && persistedDigest !== requestDigest) return preserveFailure(platformResult('blocked', { error: {
-    code: 'MANAGED_SUMMARY_REQUEST_CHANGED', message: 'Queued pull-request summary source no longer matches its persisted request digest', retryable: false
-  } }), state.knownPrNumber);
-  const policy = boundPullRequestSummaryPolicy(resolved, options, context, loaded, expectedIdentity, persistedDigest ?? requestDigest, state);
+  const state: BoundSummaryState = { prepared: null };
   const expectedDigest = createHash('sha256').update(options.body).digest('hex');
-  const operation = {
-    taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: 'pull-request-summary' as const,
-    target: JSON.stringify(expectedIdentity), expectedDigest, dependency: 'deferred' as const,
+  const operation: Omit<RecordOperationInput, 'state' | 'lastCode'> = {
+    taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: 'pull-request-summary',
+    target: JSON.stringify(expectedIdentity), expectedDigest, dependency: 'deferred',
     pullRequestSummary: {
       body: options.body, changeReportFile: options.changeReportFile ?? taskReportPath(resolved.taskDir),
       ...(options.manualValidation?.transactionId ? { manualValidation: { ...options.manualValidation, transactionId: options.manualValidation.transactionId } } : {})
     }
   };
-  return runBoundSummaryOperation(options, expectedIdentity, operation, policy, state, preserveFailure);
+  const strategy: CommentPlanStrategy = {
+    taskId: resolved.taskId, cwd: resolved.repoRoot, agent: options.agent, client: options.client, resolved: { loaded, context },
+    parentKind: 'pull-request', kind: 'summary', markerPrefix: summaryMarker(resolved.taskId).replace(/ -->$/u, ''),
+    dryRun: options.dryRun, verifyReadback: true,
+    prepare: async () => {
+      const prepared = await prepareBoundPullRequestSummary(resolved, options, context, loaded, expectedIdentity);
+      state.prepared = prepared;
+      return { parent: prepared.parent, items: [prepared.item] };
+    },
+    validate: async () => state.prepared ? validateBoundPullRequestSummary(resolved, options, context, loaded, state.prepared) : null
+  };
+  const output = await syncCommentPlan(strategy, operation, options.queuedOperation);
+  if (output.error || output.status === 'failed' || output.status === 'blocked') return preserveFailure({
+    ...output, resource: { kind: 'pull-request', number: state.prepared?.prNumber ?? resourceIdentityNumber(expectedIdentity), identity: expectedIdentity }
+  }, state.prepared?.prNumber ?? resourceIdentityNumber(expectedIdentity));
+  const info = state.prepared
+    ? { precheckVerdict: state.prepared.precheckVerdict, nextAction: state.prepared.nextAction }
+    : { precheckVerdict: 'needs-review' as const, nextAction: 'review-code' as const };
+  return {
+    ...output,
+    resource: { kind: 'pull-request', number: state.prepared?.prNumber ?? resourceIdentityNumber(expectedIdentity), identity: expectedIdentity },
+    comment: output.comment ? { ...output.comment, kind: 'summary' } : null,
+    result: null, warnings: [], ...info
+  };
 }
 
 type PreparedSummarySync = Readonly<{
@@ -459,7 +426,6 @@ function boundSummaryPhaseError(options: PullRequestSummarySyncOptions, raw: unk
 }
 
 function validateBoundPrSummaryInput(options: PullRequestSummarySyncOptions, knownPrNumber: number | null): PlatformResult | null {
-  if (options.queuedOperation?.managedSummary?.execution) return null;
   try {
     return boundSummaryPhaseError(options, JSON.parse(options.body), knownPrNumber);
   }
@@ -868,21 +834,18 @@ async function syncPullRequestSummary(
   if (fact.status === 'valid' && fact.fact.state === 'bound') {
     return syncBoundPullRequestSummary(resolved, options, context, loaded, fact.fact.identity.resource, preserveFailure);
   }
-  return preserveFailure(platformResult(options.dryRun || options.skipQueue ? 'blocked' : 'failed', { error: {
-    code: options.skipQueue ? 'MANAGED_SUMMARY_OPERATION_REQUIRED' : 'PR_NOT_LINKED',
-    message: options.skipQueue ? 'Managed summary recovery requires the existing queued operation identity' : 'Task has no verified bound pull request',
-    retryable: false
+  return preserveFailure(platformResult(options.dryRun ? 'blocked' : 'failed', { error: {
+    code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false
   } }));
 }
 
-async function recoverManagedPullRequestSummary(taskId: string, operation: JournalOperation, options: { agent: string; cwd: string; client?: PlatformClient }): Promise<PlatformResult> {
-  if (!operation.managedSummary) return platformResult('blocked', { error: { code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING', message: 'Pull-request summary has no managed execution intent', retryable: true } });
+async function replayPullRequestSummary(taskId: string, operation: JournalOperation, options: { agent: string; cwd: string; client?: PlatformClient }): Promise<PlatformResult> {
   const intent = operation.pullRequestSummary;
   if (!intent) return platformResult('blocked', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary content is missing', retryable: false } });
   const replayed = await syncPullRequestSummary(taskId, {
     agent: options.agent, cwd: options.cwd, client: options.client, body: intent.body,
     changeReportFile: intent.changeReportFile, ...(intent.manualValidation ? { manualValidation: intent.manualValidation } : {}),
-    primaryResult: 'no_op', strict: true, skipQueue: true, queuedOperation: operation
+    primaryResult: 'no_op', strict: true, queuedOperation: operation
   });
   return (replayed.status === 'applied' || replayed.status === 'no-op') && !replayed.error && replayed.warnings.length === 0
     ? replayed
@@ -925,7 +888,7 @@ export {
   summaryContext,
   summaryMarker,
   syncPullRequestSummary,
-  recoverManagedPullRequestSummary,
+  replayPullRequestSummary,
   warningResultForPrimary
 };
 export type { ManualValidationSummaryOptions, PullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryCommentStateResult, SummaryContextResult };
