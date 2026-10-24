@@ -27,10 +27,17 @@ function managedSummaryFixture() {
     context: { platform: { type: 'github', repository: 'acme/widgets', currentUser: 'codex' }, capabilities: { comment: true }, operations: [] },
     provider: { type: 'github', identity: { comment: 'id' }, comments: {
       list: async () => ({ ok: true as const, value: remote.map((comment) => ({ ...comment, author: { name: 'codex' }, createdSequence: 1 })) }),
-      write: async (request: { body: string }) => {
+      write: async (request: { body: string; existingComment?: { value: string } }) => {
         writes += 1;
-        remote.push({ id: `comment-${writes}`, body: request.body });
-        return { ok: true as const, value: { remoteId: `comment-${writes}`, changed: true } };
+        if (request.existingComment) {
+          const current = remote.find((comment) => comment.id === request.existingComment!.value);
+          if (!current) return { ok: false as const, error: { code: 'COMMENT_NOT_FOUND', message: 'comment not found', retryable: false } };
+          current.body = request.body;
+          return { ok: true as const, value: { remoteId: current.id, changed: true } };
+        }
+        const id = `comment-${writes}`;
+        remote.push({ id, body: request.body });
+        return { ok: true as const, value: { remoteId: id, changed: true } };
       }
     } }
   } as never;
@@ -298,6 +305,53 @@ test('update recovery rejects a replacement object with the same body', async ()
     assert.equal(output.result.status, 'blocked');
     assert.equal(fixture.writes, 0);
     assert.equal(fixture.remote[0]?.id, 'replacement-comment');
+  } finally {
+    fs.rmSync(fixture.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('update compensation restores only its original comment preimage', async () => {
+  const fixture = managedSummaryFixture();
+  const marker = `<!-- sync-issue:${fixture.taskId}:summary -->`;
+  const oldBody = `${marker}\noriginal`;
+  fixture.remote.push({ id: 'comment-original', body: oldBody });
+  let validations = 0;
+  (fixture.policy as unknown as { validate: ManagedSummaryPolicy['validate'] }).validate = async () => ++validations === 2
+    ? { code: 'SUMMARY_READBACK_REJECTED', message: 'post-write guard rejected the result', retryable: false }
+    : null;
+  try {
+    const output = await coordinateManagedSummary({ operation: fixture.operation, policy: fixture.policy, agent: 'codex' });
+    assert.equal(output.result.status, 'failed');
+    assert.equal(fixture.remote.length, 1);
+    assert.equal(fixture.remote[0]?.id, 'comment-original');
+    assert.equal(fixture.remote[0]?.body, oldBody);
+    assert.equal(fixture.writes, 2);
+    const operation = readPlatformOperationJournal(fixture.taskId, fixture.repoRoot).operations[0];
+    assert.equal(operation?.state, 'failed');
+    assert.equal(operation?.managedSummary?.execution?.preimage.kind, 'comment');
+  } finally {
+    fs.rmSync(fixture.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('update recovery leaves a third-party body on the original comment untouched', async () => {
+  const fixture = managedSummaryFixture();
+  const marker = `<!-- sync-issue:${fixture.taskId}:summary -->`;
+  fixture.remote.push({ id: 'comment-original', body: `${marker}\nthird-party edit` });
+  const execution = {
+    parentKind: 'issue' as const, parent: { kind: 'number' as const, value: 7 }, marker,
+    body: `${marker}\ndesired`, bodyDigest: createHash('sha256').update(`${marker}\ndesired`).digest('hex'),
+    action: 'update' as const, phase: 'written' as const,
+    preimage: { kind: 'comment' as const, id: 'comment-original', body: `${marker}\noriginal`, bodyDigest: createHash('sha256').update(`${marker}\noriginal`).digest('hex') },
+    fence: {}, position: 'none' as const, idempotencyKey: 'original-operation:update', remoteId: 'comment-original'
+  };
+  try {
+    const operation = recordPlatformOperation({ ...fixture.operation, state: 'unknown', stableId: 'a'.repeat(64), managedSummary: { requestDigest: fixture.policy.requestDigest, execution } });
+    const output = await executeManagedSummary(fixture.policy, operation);
+    assert.equal(output.result.status, 'blocked');
+    assert.equal(output.result.error?.code, 'MANAGED_SUMMARY_OUTCOME_UNKNOWN');
+    assert.equal(fixture.writes, 0);
+    assert.equal(fixture.remote[0]?.body, `${marker}\nthird-party edit`);
   } finally {
     fs.rmSync(fixture.repoRoot, { recursive: true, force: true });
   }

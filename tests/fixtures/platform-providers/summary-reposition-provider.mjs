@@ -43,6 +43,10 @@ export default async function createPlatformProvider(input) {
       async write(request) {
         const state = readState(config.statePath);
         state.writeCount += 1;
+        if (config.failWriteAt === state.writeCount) {
+          writeState(config.statePath, state);
+          return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'write interrupted after reposition deletion' } };
+        }
         const next = {
           id: `comment-${state.nextId++}`, author: { name: 'codex' },
           body: config.corruptSecondWrite && state.writeCount === 2 ? `${request.body}\ncorrupted` : request.body,

@@ -44,7 +44,6 @@ import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProj
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import { parsePrSummaryContent, renderPrSummaryContent } from './pr-summary-content.ts';
-import type { PrSummaryContent } from './pr-summary-content.ts';
 import { runSummaryContentPipeline } from './summary-content-pipeline.ts';
 import { parseLedgerDocument } from '../task/ledger.ts';
 
@@ -267,6 +266,13 @@ type PreparedBoundSummary = Readonly<{
   nextAction: 'watch-pr' | 'review-code';
 }>;
 
+function prepareBoundSummaryContent(body: string, taskContent: string) {
+  try { return prepareAndRenderPrSummaryContent(JSON.parse(body), taskContent); }
+  catch (error) {
+    throw preparationError('PR_SUMMARY_CONTENT_INVALID', error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function prepareBoundPullRequestSummary(
   resolved: ResolvedTaskRef,
   options: PullRequestSummarySyncOptions,
@@ -277,7 +283,7 @@ async function prepareBoundPullRequestSummary(
   const snapshot = readBoundTaskSnapshot(resolved.taskMdPath);
   if (snapshot.factError) throw preparationError(snapshot.factError.code, snapshot.factError.message);
   if (!snapshot.boundFact || !resourceIdentityEquals(snapshot.boundFact.identity.resource, expectedIdentity)) throw preparationError('PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bound pull request identity changed while the summary was queued');
-  const preparedContent = prepareAndRenderPrSummaryContent(JSON.parse(options.body), snapshot.taskContent);
+  const preparedContent = prepareBoundSummaryContent(options.body, snapshot.taskContent);
   const current = await inspectBoundPullRequest(context, resolved.repoRoot, expectedIdentity, loaded);
   if (!current.ok) throw preparationError(current.error?.code || 'PR_SNAPSHOT_UNAVAILABLE', current.error?.message || 'Pull-request snapshot is unavailable');
   const evidenceDigest = await manualValidationEvidence(resolved, options.manualValidation, preparedContent.rendered, current.value);
@@ -420,18 +426,42 @@ function validateUnboundPrSummaryInput(options: PullRequestSummarySyncOptions, t
   }
 }
 
-function validateBoundPrSummaryInput(options: PullRequestSummarySyncOptions, taskContent: string, knownPrNumber: number | null): PlatformResult | null {
+function boundSummaryPhase(raw: unknown): { passed: boolean; known: boolean } | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const input = raw as Record<string, unknown>;
+  const manual = input.manualValidation && typeof input.manualValidation === 'object' && !Array.isArray(input.manualValidation)
+    ? input.manualValidation as Record<string, unknown> : {};
+  const state = typeof manual.state === 'string' ? manual.state : null;
+  const overview = typeof input.overview === 'string' ? input.overview : '';
+  return {
+    passed: state === 'passed' || /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(overview),
+    known: state !== null || overview.length > 0
+  };
+}
+
+function manualSummaryPhaseFailure(options: PullRequestSummarySyncOptions, phase: { passed: boolean; known: boolean }): { code: string; message: string } | null {
+  const manual = options.manualValidation;
+  if (phase.passed && (manual?.phase !== 'final' || manual.authority !== 'coordinator')) return {
+    code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator'
+  };
+  if (!manual || !phase.known) return null;
+  if ((manual.phase === 'pending' && phase.passed) || (manual.phase === 'final' && !phase.passed)) return {
+    code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase'
+  };
+  return null;
+}
+
+function boundSummaryPhaseError(options: PullRequestSummarySyncOptions, raw: unknown, knownPrNumber: number | null): PlatformResult | null {
+  const phase = boundSummaryPhase(raw);
+  if (!phase) return null;
+  const error = manualSummaryPhaseFailure(options, phase);
+  return error ? platformResult('failed', { resource: { kind: 'pull-request', number: knownPrNumber }, error: { ...error, retryable: false } }) : null;
+}
+
+function validateBoundPrSummaryInput(options: PullRequestSummarySyncOptions, knownPrNumber: number | null): PlatformResult | null {
   if (options.queuedOperation?.managedSummary?.execution) return null;
   try {
-    const content = parsePrSummaryContent(correctPrSummaryContent(JSON.parse(options.body), taskContent));
-    if (content.manualValidation.state === 'passed'
-      && (options.manualValidation?.phase !== 'final' || options.manualValidation.authority !== 'coordinator')) {
-      return platformResult('failed', {
-        resource: { kind: 'pull-request', number: knownPrNumber },
-        error: { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }
-      });
-    }
-    return null;
+    return boundSummaryPhaseError(options, JSON.parse(options.body), knownPrNumber);
   }
   catch (error) {
     return platformResult('failed', {
@@ -450,7 +480,7 @@ async function prepareSummarySync(taskRef: string, options: PullRequestSummarySy
   if (fact.status === 'invalid') return { ok: false, knownPrNumber, error: platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }) };
   const isBound = fact.status === 'valid' && fact.fact.state === 'bound';
   const contentError = isBound
-    ? validateBoundPrSummaryInput(options, taskContent, knownPrNumber)
+    ? validateBoundPrSummaryInput(options, knownPrNumber)
     : validateUnboundPrSummaryInput(options, taskContent, knownPrNumber);
   if (contentError) return { ok: false, knownPrNumber, error: contentError };
   if (!options.changeReportFile && (options.dryRun || fact.status !== 'valid' || fact.fact.state !== 'bound')) return {

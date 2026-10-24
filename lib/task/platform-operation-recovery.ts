@@ -274,6 +274,14 @@ async function replayPullRequest(taskId: string, operation: ReturnType<typeof re
   return recoverCreatedPullRequest(taskId, { agent, cwd, base: intent.baseRef || '', head: intent.headRef || '', skipQueue: true });
 }
 
+function isRecoveryEligible(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], excludeId?: string): boolean {
+  if (operation.id === excludeId) return false;
+  if (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown') return true;
+  return operation.state === 'failed'
+    && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED'
+    && !operation.managedSummary;
+}
+
 async function recoverPlatformOperationsOnce(
   taskRef: string,
   selection: 'required' | 'deferred' | 'all',
@@ -287,9 +295,7 @@ async function recoverPlatformOperationsOnce(
     const value = error as { code?: string; message?: string };
     return attemptResult('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const candidates = journal.operations.filter((operation) => operation.id !== options.excludeId
-    && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')));
+  const candidates = journal.operations.filter((operation) => isRecoveryEligible(operation, options.excludeId));
   if (!candidates.length) return attemptResult('no-op', [], []);
   const head = candidates[0]!;
   if (selection !== 'all' && head.dependency !== selection) {
@@ -433,9 +439,7 @@ async function recoverPlatformOperations(
     const value = error as { code?: string; message?: string };
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const eligible = (operation: typeof initial.operations[number]) => operation.id !== options.excludeId
-    && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED' && !operation.managedSummary));
+  const eligible = (operation: typeof initial.operations[number]) => isRecoveryEligible(operation, options.excludeId);
   const first = initial.operations.filter(eligible);
   if (!first.length) return result('no-op', [], []);
   const operationLimit = options.limit === undefined ? first.length : Math.max(1, options.limit);

@@ -380,13 +380,6 @@ function ambiguousMarker(policy: ManagedSummaryPolicy): PlatformError {
   };
 }
 
-async function returnNoop(policy: ManagedSummaryPolicy, operation: Pick<PlatformOperation, 'id'>, loaded: LoadedContext, prepared: ManagedSummaryPrepared, current: ManagedSummaryRemoteComment): Promise<ManagedSummaryOutput> {
-  const execution = freezeExecution(policy, operation, prepared, 'update', current, 'noop');
-  const validation = await policy.validate(execution, 'readback');
-  if (validation) return errorResult(loaded, prepared.parent, validation, 'no-op', policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue');
-  return operationResult(loaded, execution, 'no-op', 'no-op', null, false);
-}
-
 function plannedAction(policy: ManagedSummaryPolicy, loaded: LoadedContext, prepared: ManagedSummaryPrepared, comments: readonly ManagedSummaryRemoteComment[], current: ManagedSummaryRemoteComment | null): { action: ManagedSummaryExecution['action'] } | { result: ManagedSummaryOutput } {
   if (!current) return { action: 'create' };
   if (prepared.position !== 'summary-last' || (policy.positionSatisfied?.(comments, prepared.marker) ?? true)) return { action: 'update' };
@@ -406,22 +399,52 @@ function freezeExecution(policy: ManagedSummaryPolicy, operation: Pick<PlatformO
   };
 }
 
-async function executeFreshSummary(policy: ManagedSummaryPolicy, operation: PlatformOperation, loaded: LoadedContext): Promise<ManagedSummaryOutput> {
+type ReadOnlySummaryPlan = Readonly<{
+  prepared: ManagedSummaryPrepared;
+  comments: ManagedSummaryRemoteComment[];
+  execution: ManagedSummaryExecution;
+  noOp: boolean;
+}> | Readonly<{ result: ManagedSummaryOutput }>;
+
+async function planSummary(
+  policy: ManagedSummaryPolicy,
+  operationId: string,
+  loaded: LoadedContext
+): Promise<ReadOnlySummaryPlan> {
   const input = await preparedIntent(policy, loaded);
-  if ('result' in input) return input.result;
+  if ('result' in input) return input;
   const { prepared } = input;
   const listed = await remoteComments(loaded, prepared.parent);
-  if (!listed.ok) return errorResult(loaded, prepared.parent, listed.error);
+  if (!listed.ok) return { result: errorResult(loaded, prepared.parent, listed.error) };
   const matches = listed.comments.filter((comment) => markerBody(comment.body) === prepared.marker);
-  if (matches.length > 1) return errorResult(loaded, prepared.parent, ambiguousMarker(policy));
+  if (matches.length > 1) return { result: errorResult(loaded, prepared.parent, ambiguousMarker(policy)) };
   const current = matches[0] ?? null;
   const positionOk = prepared.position === 'none' || (policy.positionSatisfied?.(listed.comments, prepared.marker) ?? true);
-  if (current && normalizeBody(current.body) === normalizeBody(prepared.body) && positionOk) return returnNoop(policy, operation, loaded, prepared, current);
-  const plan = plannedAction(policy, loaded, prepared, listed.comments, current);
+  if (current && normalizeBody(current.body) === normalizeBody(prepared.body) && positionOk) {
+    return {
+      prepared, comments: listed.comments,
+      execution: freezeExecution(policy, { id: operationId }, prepared, 'update', current, 'noop'), noOp: true
+    };
+  }
+  const action = plannedAction(policy, loaded, prepared, listed.comments, current);
+  if ('result' in action) return action;
+  return {
+    prepared, comments: listed.comments,
+    execution: freezeExecution(policy, { id: operationId }, prepared, action.action, current), noOp: false
+  };
+}
+
+async function executeFreshSummary(policy: ManagedSummaryPolicy, operation: PlatformOperation, loaded: LoadedContext): Promise<ManagedSummaryOutput> {
+  const plan = await planSummary(policy, operation.id, loaded);
   if ('result' in plan) return plan.result;
-  const execution = freezeExecution(policy, operation, prepared, plan.action, current);
-  recordExecution(policy, operation, execution, 'pending');
-  return performWrite(policy, operation, loaded, execution, listed.comments, false);
+  if (plan.noOp) {
+    const validation = await policy.validate(plan.execution, 'readback');
+    return validation
+      ? errorResult(loaded, plan.prepared.parent, validation, 'no-op', policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue')
+      : operationResult(loaded, plan.execution, 'no-op', 'no-op', null, false);
+  }
+  recordExecution(policy, operation, plan.execution, 'pending');
+  return performWrite(policy, operation, loaded, plan.execution, plan.comments, false);
 }
 
 async function previewManagedSummary(policy: ManagedSummaryPolicy, operationId: string): Promise<ManagedSummaryOutput> {
@@ -429,24 +452,14 @@ async function previewManagedSummary(policy: ManagedSummaryPolicy, operationId: 
     ? { ok: true as const, value: policy.loaded }
     : await resolvePlatformProviderContext({ cwd: policy.cwd, client: policy.client });
   if (!loaded.ok) return { action: 'no-op', result: loaded.context };
-  const input = await preparedIntent(policy, loaded.value);
-  if ('result' in input) return input.result;
-  const { prepared } = input;
-  const listed = await remoteComments(loaded.value, prepared.parent);
-  if (!listed.ok) return errorResult(loaded.value, prepared.parent, listed.error);
-  const matches = listed.comments.filter((comment) => markerBody(comment.body) === prepared.marker);
-  if (matches.length > 1) return errorResult(loaded.value, prepared.parent, ambiguousMarker(policy));
-  const current = matches[0] ?? null;
-  const positionOk = prepared.position === 'none' || (policy.positionSatisfied?.(listed.comments, prepared.marker) ?? true);
-  if (current && normalizeBody(current.body) === normalizeBody(prepared.body) && positionOk) {
-    return returnNoop(policy, { id: operationId }, loaded.value, prepared, current);
-  }
-  const plan = plannedAction(policy, loaded.value, prepared, listed.comments, current);
+  const plan = await planSummary(policy, operationId, loaded.value);
   if ('result' in plan) return plan.result;
-  const execution = freezeExecution(policy, { id: operationId }, prepared, plan.action, current);
-  const validation = await policy.validate(execution, 'before-write');
-  if (validation) return errorResult(loaded.value, execution.parent, validation, execution.action);
-  return operationResult(loaded.value, execution, execution.action, 'planned', null, false);
+  const phase = plan.noOp ? 'readback' : 'before-write';
+  const validation = await policy.validate(plan.execution, phase);
+  if (validation) return errorResult(loaded.value, plan.execution.parent, validation, plan.execution.action);
+  return plan.noOp
+    ? operationResult(loaded.value, plan.execution, 'no-op', 'no-op', null, false)
+    : operationResult(loaded.value, plan.execution, plan.execution.action, 'planned', null, false);
 }
 
 async function executeManagedSummary(policy: ManagedSummaryPolicy, operation: PlatformOperation): Promise<ManagedSummaryOutput> {
