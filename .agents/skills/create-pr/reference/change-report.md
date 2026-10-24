@@ -24,14 +24,14 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的 `target-alignment`、`change-composition`、`compatibility-policy`、`legacy-path-cleanup`、`redundancy`、`scope-discipline`。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
 
-生成 candidate 前，先根据任务目标和完整 diff 列出功能变化组；不得把文件职责概述或类别总数当作功能组。将每组结果写入现有 `change-composition.rationale` 和 `Evidence[]`，不新增字段：
+生成 candidate 前，先根据任务目标和完整 diff 列出功能变化组；不得把文件职责概述或类别总数当作功能组。每个功能组作为现有 `change-composition` 检查中的 typed `groups[]` 对象，包含 `id`、`target`、`behaviorChange`、`necessity`、`files[]` 和 `tests:{coverage,cost}`。`rationale`/`Evidence[]` 仅补充判断和定位，不能替代组对象。
 
-- `rationale` 用简短分组条目记录功能名称及目标/验收对应、行为增加或删除、必要性和该组新增/删除/净增行数。
-- 每条 `Evidence[].detail` 标明对应功能组，并引用具体代码、测试或文档变更；相关测试说明其覆盖风险、已有覆盖以及本次新增 fixture / 测试的成本。没有测试变更时说明现有覆盖依据。
-- 每个变更行只能计入一个功能组；分组的新增、删除行数分别与完整机械 diff 对账。混合用途文件按可定位的 diff hunk 归组；无法可靠归属的数字标为未确认，不估算或重复计数。
+- `files[]` 只能引用完整正式 diff 中的 canonical 文件路径（机械报告的 `oldPath ?? newPath`）；rename 仍作为一条机械记录保留 old/new 两端。正式 diff 中每个文件必须恰好归入一个组，不得遗漏、重复或引用 diff 外文件。
+- 不要在 candidate 中填写组级行数。core 从绑定的正式 diff 逐文件 additions/deletions 聚合各组的新增、删除和净增，并将各组加总与正式 diff totals 对账。`null` 行数保持不可计数，文件仍需归组且不能改写为零。
+- 每条 `Evidence[].detail` 可引用具体代码、测试或文档变更；`tests.coverage` 与 `tests.cost` 分别说明覆盖风险/已有覆盖依据，以及本次新增 fixture / 测试的成本。没有测试变更时说明现有覆盖依据。
 - 完整 PR 与本轮 head-to-head 增量分别列示和对账；上一 head 未确认时不得推算增量数值。
 
-`target-alignment` 只有在每个功能组都能对应任务目标或验收标准时才能判为 `pass`。`change-composition` 只有在组别、行为增减、必要性、行数对账、测试覆盖/成本和可定位证据均有说明时才能判为 `pass`。任一项缺失、相互矛盾或无法核实，须将相应检查标为 `needs-review`，并在 rationale / evidence 中写明缺口，使 core 路由到 `review-code`。不得因六项齐全、字段非空或 CI 通过而判定解释充分。
+`target-alignment` 只有在每个功能组都能对应任务目标或验收标准时才能判为 `pass`。`change-composition` 的 typed 结构、文件集合和机械计数通过结构校验后，仍须按现有语义判断组别、行为增减、必要性、测试覆盖/成本和证据是否充分；结构或解释缺项、矛盾、无法核实时保持 `needs-review` 并说明缺口，使 core 路由到 `review-code`。不得因结构完整或 CI 通过而自动判定内容充分。
 
 其他四项检查仍分别给出实际结论；证据详情遵循当前已部署技能的语言，中文技能必须使用中文。canonical renderer 会展示全部 rationale 和 evidence。源码行数只说明文本增删；不能据此推断执行次数或流程统一。
 

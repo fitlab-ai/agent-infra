@@ -7,7 +7,7 @@ import { isResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
 const REPORT_FILE_NAME = 'pr-change-report.json';
-const REPORT_VERSION = 2 as const;
+const REPORT_VERSION = 3 as const;
 const CANONICAL_REPORT_PLACEHOLDER = '<!-- canonical-pr-change-report -->';
 const CANONICAL_REPORT_HEADING = '### PR 代码增减';
 const PRECHECK_IDS = [
@@ -71,11 +71,21 @@ type Evidence = {
   detail: string;
 };
 
+type FunctionalGroup = {
+  id: string;
+  target: string;
+  behaviorChange: string;
+  necessity: string;
+  files: string[];
+  tests: { coverage: string; cost: string };
+};
+
 type Precheck = {
   id: PrecheckId;
   verdict: CheckVerdict;
   evidence: Evidence[];
   rationale: string;
+  groups?: FunctionalGroup[];
 };
 
 type PrecheckCandidate = {
@@ -213,25 +223,136 @@ function parseEvidence(value: unknown, checkId: string, index: number): Validati
   return { ok: true, value: { path: value.path, startLine, endLine, detail: value.detail } };
 }
 
-function parseChecks(value: unknown, prefix = 'precheck.checks'): ValidationResult<Precheck[]> {
+function parseFunctionalGroupFiles(value: unknown, prefix: string): ValidationResult<string[]> {
+  if (!Array.isArray(value) || value.length === 0) return invalid(`${prefix} must be a non-empty array`);
+  const files: string[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const file = value[index];
+    if (!isSafeRenderedText(file)) return invalid(`${prefix}[${index}] must be a non-empty string`);
+    files.push(file.trim());
+  }
+  return { ok: true, value: files };
+}
+
+function parseFunctionalGroupTests(value: unknown, prefix: string): ValidationResult<FunctionalGroup['tests']> {
+  if (!isRecord(value)) return invalid(`${prefix} must be an object`);
+  if (!isSafeRenderedText(value.coverage)) return invalid(`${prefix}.coverage is required`);
+  if (!isSafeRenderedText(value.cost)) return invalid(`${prefix}.cost is required`);
+  return { ok: true, value: { coverage: value.coverage.trim(), cost: value.cost.trim() } };
+}
+
+function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>): ValidationResult<FunctionalGroup> {
+  if (!isRecord(value)) return invalid(`${prefix} must be an object`);
+  if (Object.hasOwn(value, 'additions') || Object.hasOwn(value, 'deletions') || Object.hasOwn(value, 'net') || Object.hasOwn(value, 'counts')) {
+    return invalid(`${prefix} line counts are derived from diff files and must not be supplied`);
+  }
+  if (!isSafeRenderedText(value.id) || ids.has(value.id.trim())) return invalid(`${prefix}.id must be non-empty and unique`);
+  if (!isSafeRenderedText(value.target)) return invalid(`${prefix}.target is required`);
+  if (!isSafeRenderedText(value.behaviorChange)) return invalid(`${prefix}.behaviorChange is required`);
+  if (!isSafeRenderedText(value.necessity)) return invalid(`${prefix}.necessity is required`);
+  const files = parseFunctionalGroupFiles(value.files, `${prefix}.files`);
+  if (!files.ok) return files;
+  const tests = parseFunctionalGroupTests(value.tests, `${prefix}.tests`);
+  if (!tests.ok) return tests;
+  const id = value.id.trim();
+  ids.add(id);
+  return {
+    ok: true,
+    value: {
+      id, target: value.target.trim(), behaviorChange: value.behaviorChange.trim(),
+      necessity: value.necessity.trim(), files: files.value, tests: tests.value
+    }
+  };
+}
+
+function parseFunctionalGroups(value: unknown, prefix: string): ValidationResult<FunctionalGroup[]> {
+  if (!Array.isArray(value) || value.length === 0) return invalid(`${prefix} must be a non-empty array`);
+  const groups: FunctionalGroup[] = [];
+  const ids = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const group = parseFunctionalGroup(value[index], `${prefix}[${index}]`, ids);
+    if (!group.ok) return group;
+    groups.push(group.value);
+  }
+  return { ok: true, value: groups };
+}
+
+function indexDiffFiles(files: ChangeFile[]): ValidationResult<Map<string, ChangeFile>> {
+  const fileByPath = new Map<string, ChangeFile>();
+  for (const file of files) {
+    const key = file.oldPath ?? file.newPath;
+    if (!key || fileByPath.has(key)) return invalid(`diff file path '${key ?? ''}' is missing or duplicated`);
+    fileByPath.set(key, file);
+  }
+  return { ok: true, value: fileByPath };
+}
+
+function collectGroupMembership(
+  groups: FunctionalGroup[], fileByPath: Map<string, ChangeFile>
+): ValidationResult<Set<string>> {
+  const assigned = new Set<string>();
+  for (const group of groups) {
+    for (const member of group.files) {
+      const file = fileByPath.get(member);
+      if (!file) return invalid(`change-composition group '${group.id}' references unknown diff file '${member}'`);
+      if (assigned.has(member)) return invalid(`diff file '${member}' belongs to more than one functional group`);
+      assigned.add(member);
+    }
+  }
+  return { ok: true, value: assigned };
+}
+
+function validateGroupMembership(checks: Precheck[], files: ChangeFile[]): ValidationResult<Precheck[]> {
+  const composition = checks.find((check) => check.id === 'change-composition');
+  if (!composition?.groups) return invalid('precheck.checks.change-composition.groups is required');
+  const indexed = indexDiffFiles(files);
+  if (!indexed.ok) return indexed;
+  const assigned = collectGroupMembership(composition.groups, indexed.value);
+  if (!assigned.ok) return assigned;
+  const missing = [...indexed.value.keys()].find((key) => !assigned.value.has(key));
+  if (missing) return invalid(`diff file '${missing}' has no functional group`);
+  return { ok: true, value: checks };
+}
+
+function parseEvidenceList(value: unknown, checkId: PrecheckId, prefix: string): ValidationResult<Evidence[]> {
+  if (!Array.isArray(value) || value.length === 0) return invalid(`${prefix}.${checkId}.evidence must not be empty`);
+  const evidence: Evidence[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const parsed = parseEvidence(value[index], checkId, index);
+    if (!parsed.ok) return parsed;
+    evidence.push(parsed.value);
+  }
+  return { ok: true, value: evidence };
+}
+
+function parseCheck(value: unknown, index: number, prefix: string): ValidationResult<Precheck> {
+  const expectedId = PRECHECK_IDS[index]!;
+  const entryPrefix = `${prefix}[${index}]`;
+  const at = `${prefix}.${expectedId}`;
+  if (!isRecord(value)) return invalid(`${entryPrefix} must be an object`);
+  if (value.id !== expectedId) return invalid(`${entryPrefix}.id must be '${expectedId}'`);
+  if (value.verdict !== 'pass' && value.verdict !== 'needs-review') return invalid(`${at}.verdict is invalid`);
+  const evidence = parseEvidenceList(value.evidence, expectedId, prefix);
+  if (!evidence.ok) return evidence;
+  if (!isSafeRenderedText(value.rationale)) return invalid(`${at}.rationale is required`);
+  if (expectedId !== 'change-composition') {
+    if (Object.hasOwn(value, 'groups')) return invalid(`${at}.groups is not allowed`);
+    return { ok: true, value: { id: expectedId, verdict: value.verdict, evidence: evidence.value, rationale: value.rationale } };
+  }
+  const groups = parseFunctionalGroups(value.groups, `${at}.groups`);
+  if (!groups.ok) return groups;
+  return { ok: true, value: { id: expectedId, verdict: value.verdict, evidence: evidence.value, rationale: value.rationale, groups: groups.value } };
+}
+
+function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: ChangeFile[]): ValidationResult<Precheck[]> {
   if (!Array.isArray(value) || value.length !== PRECHECK_IDS.length) return invalid(`${prefix} must contain exactly six checks`);
   const checks: Precheck[] = [];
   for (let index = 0; index < value.length; index += 1) {
-    const raw = value[index];
-    if (!isRecord(raw)) return invalid(`${prefix}[${index}] must be an object`);
-    const expectedId = PRECHECK_IDS[index]!;
-    if (raw.id !== expectedId) return invalid(`${prefix}[${index}].id must be '${expectedId}'`);
-    if (raw.verdict !== 'pass' && raw.verdict !== 'needs-review') return invalid(`${prefix}.${expectedId}.verdict is invalid`);
-    if (!Array.isArray(raw.evidence) || raw.evidence.length === 0) return invalid(`${prefix}.${expectedId}.evidence must not be empty`);
-    const evidence: Evidence[] = [];
-    for (let evidenceIndex = 0; evidenceIndex < raw.evidence.length; evidenceIndex += 1) {
-      const parsed = parseEvidence(raw.evidence[evidenceIndex], expectedId, evidenceIndex);
-      if (!parsed.ok) return parsed;
-      evidence.push(parsed.value);
-    }
-    if (!isSafeRenderedText(raw.rationale)) return invalid(`${prefix}.${expectedId}.rationale is required`);
-    checks.push({ id: expectedId, verdict: raw.verdict, evidence, rationale: raw.rationale });
+    const parsed = parseCheck(value[index], index, prefix);
+    if (!parsed.ok) return parsed;
+    checks.push(parsed.value);
   }
+  if (diffFiles) return validateGroupMembership(checks, diffFiles);
   return { ok: true, value: checks };
 }
 
@@ -306,7 +427,7 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
   if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
   if (value.precheck.formalReview !== false || (value.precheck.verdict !== 'clear' && value.precheck.verdict !== 'needs-review') ||
       (value.precheck.route !== 'watch-pr' && value.precheck.route !== 'review-code')) return invalid('change report precheck envelope is invalid');
-  const checks = parseChecks(value.precheck.checks);
+  const checks = parseChecks(value.precheck.checks, 'precheck.checks', files);
   if (!checks.ok) return checks;
   const derivedVerdict: PrecheckVerdict = checks.value.every((check) => check.verdict === 'pass') ? 'clear' : 'needs-review';
   const derivedRoute: PrecheckRoute = derivedVerdict === 'clear' ? 'watch-pr' : 'review-code';
@@ -556,10 +677,34 @@ function renderEvidence(evidence: Evidence): string {
   return `  - 证据：<code>${escapeReportText(evidence.path)}</code>${location}：${escapeReportText(evidence.detail)}`;
 }
 
-function renderPrechecks(checks: Precheck[]): string[] {
+function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[]): string[] {
+  const filesByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
+  return groups.flatMap((group) => {
+    const members = group.files.map((member) => filesByPath.get(member)!);
+    const additions = members.reduce((total, file) => total + (file.additions ?? 0), 0);
+    const deletions = members.reduce((total, file) => total + (file.deletions ?? 0), 0);
+    const unknownFiles = members.filter((file) => file.additions === null).length;
+    return [
+      `  - **功能组 ${escapeReportText(group.id)}**：${escapeReportText(group.target)}`,
+      `    - 行为变化：${escapeReportText(group.behaviorChange)}`,
+      `    - 必要性：${escapeReportText(group.necessity)}`,
+      `    - 文件：${group.files.map((member) => {
+        const file = filesByPath.get(member)!;
+        return file.oldPath && file.newPath && file.oldPath !== file.newPath
+          ? `<code>${escapeReportText(file.oldPath)}</code> → <code>${escapeReportText(file.newPath)}</code>`
+          : `<code>${escapeReportText(member)}</code>`;
+      }).join('、')}`,
+      `    - 可计数行数（由正式 diff 逐文件推导）：新增 ${additions}、删除 ${deletions}、净增 ${additions - deletions}${unknownFiles ? `；另有 ${unknownFiles} 个文件行数不可计` : ''}。`,
+      `    - 测试覆盖：${escapeReportText(group.tests.coverage)}；成本：${escapeReportText(group.tests.cost)}`
+    ];
+  });
+}
+
+function renderPrechecks(checks: Precheck[], files: ChangeFile[]): string[] {
   return checks.flatMap((check) => [
     `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeReportText(check.rationale)}`,
-    ...check.evidence.map(renderEvidence)
+    ...check.evidence.map(renderEvidence),
+    ...(check.groups ? renderFunctionalGroups(check.groups, files) : [])
   ]);
 }
 
@@ -593,7 +738,7 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     '',
     '#### 适宜性预检',
     `- 结论：${precheckSummary}；${route}；正式审查：否。`,
-    ...renderPrechecks(report.precheck.checks)
+    ...renderPrechecks(report.precheck.checks, report.diff.files)
   ].join('\n');
 }
 

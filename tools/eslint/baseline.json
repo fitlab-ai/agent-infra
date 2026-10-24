@@ -2151,15 +2151,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/platform-operation-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "0808f430156769029a2b6ad59fa7e4e4c1b090643a8a1252b6fde4d81e3bbaa7",
-      "displayName": "replayPullRequestSummary",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pr-summary.ts",
       "ruleId": "complexity",
       "stableId": "8cf638f301a90033027f383fef6bcc662d3c1c7869e4afde3b30b96f1f79fbc3",
@@ -2529,15 +2520,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/issue-comments.ts",
-      "ruleId": "complexity",
-      "stableId": "14ec2e2b55fc4ce7b4d1cc6cdeae06dba12c4083d3eae1d17540d739e200a4be",
-      "displayName": "syncPlatformCommentImpl",
-      "metric": 73,
-      "normalizedMessage": "complexity=73",
-      "count": 1
-    },
-    {
       "file": "lib/platform/issues.ts",
       "ruleId": "complexity",
       "stableId": "2fc062bf1db98843c7eebe6b13b4b13e78eb7df8f56306aee295f2322348022a",
@@ -2580,15 +2562,6 @@
       "displayName": "syncPlatformPullRequestInLabels",
       "metric": 77,
       "normalizedMessage": "complexity=77",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pr-summary.ts",
-      "ruleId": "complexity",
-      "stableId": "a34eb99a2da7b96aabc6770dfd11134d37ac88a4157ba07b024a99c2d7354188",
-      "displayName": "syncPullRequestSummary.execute",
-      "metric": 51,
-      "normalizedMessage": "complexity=51",
       "count": 1
     },
     {

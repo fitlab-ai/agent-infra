@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { executeManualValidationTransaction } from '../../../lib/internal/manual-validation.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 import { buildPrChangeReport, runMechanicalChangeReport, taskIntentDigest, writePrChangeReportAtomic } from '../../../lib/platform/pr-change-report.ts';
-import type { PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
+import type { MechanicalChangeReport, PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
@@ -23,6 +23,10 @@ import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.t
 import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000042';
+
+function manualSummaryContent() {
+  return { overview: '实现摘要。', tests: { state: 'not-started', detail: 'CI 尚未启动。' }, review: { state: 'not-observed', detail: '未读取远端 Review。' }, manualValidation: { state: 'required', detail: '在生产环境完成权限校验。' }, humanDecisions: { open: 0, resolved: 0, detail: '无待处理裁决。' }, risks: '无额外风险记录。' };
+}
 
 type Fixture = {
   root: string;
@@ -64,14 +68,21 @@ function approvedReviewArtifact(): string {
   return `${content}\n### 审查决定\n通过\n- **总体结论**：通过\n`;
 }
 
-function candidate(taskIntentSha256: string): PrecheckCandidate {
+function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): PrecheckCandidate {
   return {
     taskIntentSha256,
     checks: ['target-alignment', 'change-composition', 'compatibility-policy', 'legacy-path-cleanup', 'redundancy', 'scope-discipline'].map((id) => ({
       id: id as PrecheckCandidate['checks'][number]['id'],
       verdict: 'pass' as const,
       evidence: [{ path: 'README.md', startLine: 1, endLine: 1, detail: 'Fixture change is within the approved scope.' }],
-      rationale: 'The fixture change is within the approved scope.'
+      rationale: 'The fixture change is within the approved scope.',
+      ...(id === 'change-composition' ? { groups: [{
+        id: 'manual-validation-transaction', target: 'Preserve manual-validation transaction safety',
+        behaviorChange: 'Keep receipt and PR head binding through summary refresh.',
+        necessity: 'Protect the final coordinator transaction.',
+        files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        tests: { coverage: 'This integration fixture exercises transaction, receipt and PR head paths.', cost: 'Existing fixture and cases are reused.' }
+      }] } : {})
     }))
   };
 }
@@ -195,7 +206,7 @@ function createFixture(): Fixture {
   fs.writeFileSync(taskPath, upsertSection(fs.readFileSync(taskPath, 'utf8'), taskWithReceipt).content);
 
   const summaryPath = path.join(root, 'summary.md');
-  fs.writeFileSync(summaryPath, '## Summary\n\n<!-- canonical-pr-change-report -->\n');
+  fs.writeFileSync(summaryPath, JSON.stringify(manualSummaryContent()));
   const reportPath = path.join(taskDir, 'pr-change-report.json');
   const digest = taskIntentDigest(fs.readFileSync(taskPath, 'utf8'));
   if (!digest.ok) throw new Error(digest.error.message);
@@ -204,7 +215,7 @@ function createFixture(): Fixture {
     repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
     base: { repository: 'acme/widgets', ref: 'main', sha: baseSha },
     head: { repository: 'acme/widgets', ref: 'feature', sha: headSha }
-  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256, mechanical));
   if (!report.ok) throw new Error(report.error.message);
   writePrChangeReportAtomic(reportPath, report.value);
   const artifactPath = path.join(taskDir, 'manual-validation.md');
@@ -273,7 +284,7 @@ function configureOpaqueIdentity(fixture: Fixture, config: Record<string, unknow
     repository: 'acme/widgets', resource: { kind: 'id', value: 'mr:42' },
     base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha },
     head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha }
-  }, digest.value.sha256, mechanical, candidate(digest.value.sha256));
+  }, digest.value.sha256, mechanical, candidate(digest.value.sha256, mechanical));
   if (!report.ok) throw new Error(report.error.message);
   writePrChangeReportAtomic(fixture.reportPath, report.value);
 }
@@ -489,23 +500,10 @@ test('opaque PR identity recovers a failed final summary promotion on coordinato
   assert.equal(retry.receipt?.prHeadSha, fixture.headSha);
 });
 
-test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {
+test('coordinator replaces the Chinese manual-validation section and preserves canonical report order', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  fs.writeFileSync(fixture.summaryPath, [
-    '## 审查摘要',
-    '',
-    '### ⚠️ 需人工校验',
-    '',
-    '- 在生产环境完成权限校验。',
-    '',
-    '### 关键技术决策',
-    '',
-    '- 保持最小权限。',
-    '',
-    '<!-- canonical-pr-change-report -->',
-    ''
-  ].join('\n'));
+  fs.writeFileSync(fixture.summaryPath, JSON.stringify(manualSummaryContent()));
   const state: FakeGitHubState = { comments: [], writes: 0 };
 
   const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
@@ -514,33 +512,14 @@ test('coordinator replaces the Chinese manual-validation status section in place
 
   assert.equal(result.status, 'applied', JSON.stringify(result));
   const body = state.comments[0]?.body ?? '';
-  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n<!-- manual-validation-receipt: [^\n]+ -->\n- 在生产环境完成权限校验。\n\n### 关键技术决策/m);
+  assert.match(body, /### ✅ 人工验证已通过\n\n状态：passed\n\n在生产环境完成权限校验。\n\n<!-- manual-validation-receipt: [^\n]+ -->/m);
   assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
-});
-
-test('coordinator preserves a canonical report placeholder after the manual-validation section', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  fs.writeFileSync(fixture.summaryPath, [
-    '## 审查摘要',
-    '',
-    '### ⚠️ 需人工校验',
-    '',
-    '- 在生产环境完成权限校验。',
-    '',
-    '<!-- canonical-pr-change-report -->',
-    ''
-  ].join('\n'));
-  const state: FakeGitHubState = { comments: [], writes: 0 };
-
-  const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
-    client: fakeClient(fixture.baseSha, fixture.headSha, state)
-  });
-
-  assert.equal(result.status, 'applied', JSON.stringify(result));
-  const body = state.comments[0]?.body ?? '';
-  assert.match(body, /^### ✅ 人工验证已通过$/mu);
-  assert.match(body, /^### PR 代码增减$/mu);
-  assert.ok(body.indexOf('### ✅ 人工验证已通过') < body.indexOf('- 在生产环境完成权限校验。'));
-  assert.ok(body.indexOf('- 在生产环境完成权限校验。') < body.indexOf('### PR 代码增减'));
+  const statusIndex = body.indexOf('### ✅ 人工验证已通过');
+  const stateIndex = body.indexOf('状态：passed');
+  const detailIndex = body.indexOf('在生产环境完成权限校验。');
+  const receiptIndex = body.indexOf('<!-- manual-validation-receipt:');
+  const decisionsIndex = body.indexOf('### 人工决策');
+  const reportIndex = body.indexOf('### PR 代码增减');
+  assert.ok(statusIndex >= 0 && stateIndex >= 0 && detailIndex >= 0 && receiptIndex >= 0 && decisionsIndex >= 0 && reportIndex >= 0);
+  assert.ok(statusIndex < stateIndex && stateIndex < detailIndex && detailIndex < receiptIndex && receiptIndex < decisionsIndex && decisionsIndex < reportIndex);
 });

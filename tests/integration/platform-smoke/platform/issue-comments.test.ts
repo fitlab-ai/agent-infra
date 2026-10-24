@@ -15,11 +15,15 @@ import {
   renderTaskCommentResult,
   normalizeCommentContent,
   syncPlatformComment,
+  inspectPlatformCommentOperation,
   validateRelatedMarkerSet
 } from '../../../../lib/platform/issue-comments.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { sanitizeMarkdownDocument } from '../../../../lib/platform/comment-safety.ts';
 import { createTempDir } from '../../../helpers.ts';
+import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
+import { parseDeliverySummaryContent, renderDeliverySummaryContent } from '../../../../lib/platform/issue-summary-content.ts';
 
 test('task comments preserve frontmatter and body in reversible details format', () => {
   const task = '---\nid: TASK-20260101-000001\ntype: feature\n---\n\n# Task\n\nBody | `code`\n';
@@ -248,6 +252,122 @@ function syncFixture() {
   );
   return root;
 }
+
+test('summary ordering with an unknown provider sequence preserves the existing comment', async () => {
+  const root = syncFixture();
+  const statePath = path.join(root, 'provider-comments.json');
+  const providerSource = path.resolve('tests/fixtures/platform-providers/summary-reposition-provider.mjs');
+  const fixtureProject = JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).project as string;
+  fs.writeFileSync(statePath, JSON.stringify({ comments: [], nextId: 1, nextSequence: 1, writeCount: 0 }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    project: fixtureProject,
+    platform: { type: 'trae', providers: { trae: { source: providerSource, config: { statePath } } } }
+  }));
+  const body = 'Delivery summary.';
+  const options = {
+    kind: 'summary' as const, agent: 'codex', cwd: root, body,
+    summaryAuthorization: { sha256: createHash('sha256').update(body).digest('hex') }
+  };
+  try {
+    assert.equal((await syncPlatformComment('TASK-20260101-000001', options)).status, 'applied');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { comments: Array<{ id: string; createdSequence: number | null }>; writeCount: number };
+    const originalId = state.comments[0]!.id;
+    state.comments[0]!.createdSequence = null;
+    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+    const result = await syncPlatformComment('TASK-20260101-000001', options);
+    const after = JSON.parse(fs.readFileSync(statePath, 'utf8')) as typeof state;
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'SUMMARY_POSITION_UNVERIFIED');
+    assert.equal(after.comments.length, 1);
+    assert.equal(after.comments[0]!.id, originalId);
+    assert.equal(after.writeCount, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cancellation no-op still verifies the final remote body', async () => {
+  const root = syncFixture();
+  const taskId = 'TASK-20260101-000001';
+  const remote: Array<{ id: number; body: string; user: { login: string } }> = [];
+  let reads = 0;
+  let writes = 0;
+  let alterSecondRead = false;
+  const client = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json: (args: string[], options?: { input?: string }) => {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) ?? '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (args.includes('POST')) {
+        writes += 1;
+        remote.push({ id: 1, body: JSON.parse(options!.input!).body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 1 } };
+      }
+      if (endpoint.endsWith('/comments?per_page=100')) {
+        reads += 1;
+        return { ok: true, value: [remote.map((comment) => ({
+          ...comment, body: alterSecondRead && reads >= 2 ? `${comment.body}\nthird-party` : comment.body
+        }))] };
+      }
+      throw new Error(args.join(' '));
+    },
+    text: () => ({ ok: true, value: '' })
+  } as unknown as GitHubClient;
+  try {
+    assert.equal((await syncPlatformComment(taskId, { kind: 'cancel', agent: 'codex', cwd: root, body: 'Cancellation summary.', client })).status, 'applied');
+    reads = 0;
+    alterSecondRead = true;
+
+    const result = await syncPlatformComment(taskId, { kind: 'cancel', agent: 'codex', cwd: root, body: 'Cancellation summary.', client });
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'SUMMARY_BODY_READBACK_FAILED');
+    assert.equal(reads, 2);
+    assert.equal(writes, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('recovery replaces a summary operation when its authoritative staging digest changes', async () => {
+  const root = syncFixture();
+  const statePath = path.join(root, 'provider-comments.json');
+  const providerSource = path.resolve('tests/fixtures/platform-providers/summary-reposition-provider.mjs');
+  const fixtureProject = JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).project as string;
+  fs.writeFileSync(statePath, JSON.stringify({ comments: [], nextId: 1, nextSequence: 1, writeCount: 0 }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    project: fixtureProject,
+    platform: { type: 'trae', providers: { trae: { source: providerSource, config: { statePath } } } }
+  }));
+  const taskId = 'TASK-20260101-000001';
+  try {
+    const old = recordPlatformOperation({ taskRef: taskId, cwd: root, kind: 'summary-comment', target: 'summary',
+      expectedDigest: 'a'.repeat(64), dependency: 'deferred', state: 'queued' });
+    const content = parseDeliverySummaryContent({ taskId, title: 'Task', summary: 'Current source', artifacts: [],
+      verification: { state: 'pending', detail: 'Not yet' } });
+    fs.writeFileSync(path.join(taskWorkspaceRoot(root), 'active', taskId, '.delivery-summary.json'), JSON.stringify({
+      taskId, content, contentSha256: createHash('sha256').update(JSON.stringify(content)).digest('hex')
+    }));
+    const expected = inspectPlatformCommentOperation(taskId, {
+      kind: 'summary', agent: 'codex', cwd: root, body: renderDeliverySummaryContent(content)
+    })!;
+
+    const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root });
+    const operations = readPlatformOperationJournal(taskId, root).operations;
+
+    assert.equal(recovered.status, 'applied');
+    assert.notEqual(expected.id, old.id);
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0]!.id, expected.id);
+    assert.equal(operations[0]!.expectedDigest, expected.expectedDigest);
+    assert.equal(operations[0]!.state, 'succeeded');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('comment sync preserves source @ content', async () => {
   const root = syncFixture();
@@ -521,6 +641,49 @@ test('comment sync refuses duplicate registered markers without writing', async 
   const result = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_MARKER_CONFLICT');
+});
+
+test('authorized summary reposition blocks when the final remote body readback is corrupted', async () => {
+  const root = syncFixture();
+  const statePath = path.join(root, 'provider-comments.json');
+  const providerSource = path.resolve('tests/fixtures/platform-providers/summary-reposition-provider.mjs');
+  const fixtureProject = JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).project as string;
+  fs.writeFileSync(statePath, JSON.stringify({ comments: [], nextId: 1, nextSequence: 1, writeCount: 0 }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    project: fixtureProject,
+    platform: { type: 'trae', providers: { trae: { source: providerSource, config: { statePath, corruptSecondWrite: true } } } }
+  }));
+  const body = 'Delivery summary for finalization.';
+  const options = {
+    kind: 'summary' as const, agent: 'codex', cwd: root, body,
+    summaryAuthorization: { sha256: createHash('sha256').update(body).digest('hex') }
+  };
+  try {
+    const first = await syncPlatformComment('TASK-20260101-000001', options);
+    assert.equal(first.status, 'applied', JSON.stringify(first));
+
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
+      comments: Array<{ id: string; author: { name: string }; body: string; createdAt: string; updatedAt: string; createdSequence: number }>;
+      nextId: number; nextSequence: number; writeCount: number;
+    };
+    state.comments.push({
+      id: 'later-task-comment', author: { name: 'codex' },
+      body: `<!-- sync-issue:TASK-20260101-000001:task -->\nTask snapshot`,
+      createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z',
+      createdSequence: state.nextSequence++
+    });
+    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+    const repositioned = await syncPlatformComment('TASK-20260101-000001', options);
+    assert.equal(repositioned.status, 'blocked');
+    assert.equal(repositioned.error?.code, 'SUMMARY_BODY_READBACK_FAILED');
+    const finalState = JSON.parse(fs.readFileSync(statePath, 'utf8')) as typeof state;
+    const summaries = finalState.comments.filter((comment) => comment.body.startsWith(`<!-- sync-issue:TASK-20260101-000001:summary -->`));
+    assert.equal(summaries.length, 1);
+    assert.match(summaries[0]!.body, /corrupted$/u);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('artifact sync isolates sibling stems and becomes a no-op on replay', async () => {

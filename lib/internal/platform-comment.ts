@@ -17,6 +17,9 @@ import { recoverTaskFromComments } from '../platform/task-recovery.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { enumerateArtifacts } from '../task/artifacts.ts';
+import { parseTaskFrontmatter } from '../task/frontmatter.ts';
+import { prepareAndRenderCancelSummaryContent, prepareAndRenderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment recover --issue <token> --task-id <TASK-id> --output <staging-task.md> [--cwd <path>]
@@ -158,13 +161,26 @@ async function platformComment(args: string[] = []): Promise<void> {
     let body: string;
     try { body = readBodyFile(parsed.values.bodyFile, cwd); }
     catch (error) { fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`); return; }
-    const canonical = canonicalizeSummaryBody(body);
-    if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
-    body = canonical.value;
     const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
     if (!resolved.ok || resolved.state !== 'active') { fail('stage-summary requires an active task'); return; }
     const target = path.join(resolved.taskDir, '.delivery-summary.json');
-    const value = { taskId: resolved.taskId, body, sha256: createHash('sha256').update(body).digest('hex') };
+    let content;
+    try {
+      const supplied = JSON.parse(body) as Record<string, unknown>;
+      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
+      const prepared = prepareAndRenderDeliverySummaryContent(supplied, {
+        taskId: resolved.taskId,
+        title: title || resolved.taskId,
+        artifacts: enumerateArtifacts(resolved.taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name),
+        verificationFallback: { state: 'not-run', detail: 'Final verification has not run at summary staging.' }
+      });
+      content = prepared.content;
+      const canonical = canonicalizeSummaryBody(prepared.rendered);
+      if (!canonical.ok) throw new Error(`${canonical.error.code}: ${canonical.error.message}`);
+      body = canonical.value;
+    } catch (error) { fail(`unable to stage summary: ${error instanceof Error ? error.message : String(error)}`); return; }
+    const value = { taskId: resolved.taskId, content, contentSha256: createHash('sha256').update(JSON.stringify(content)).digest('hex') };
     const previous = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
     const next = `${JSON.stringify(value)}\n`;
     if (previous === next) {
@@ -198,6 +214,32 @@ async function platformComment(args: string[] = []): Promise<void> {
   } catch (error) {
     fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     return;
+  }
+  if (kind === 'summary' || kind === 'cancel') {
+    try {
+      const input = JSON.parse(body!) as Record<string, unknown>;
+      const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
+      if (!resolved.ok) throw new Error(resolved.message);
+      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const taskFrontmatter = parseTaskFrontmatter(taskContent);
+      const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
+      const artifacts = enumerateArtifacts(resolved.taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
+      const rendered = kind === 'summary'
+        ? prepareAndRenderDeliverySummaryContent(input, {
+          taskId: resolved.taskId,
+          title: title || resolved.taskId,
+          artifacts,
+          ...(resolved.state === 'active' ? { verificationFallback: { state: 'not-run', detail: 'Final verification has not run at summary staging.' } } : {})
+        }).rendered
+        : prepareAndRenderCancelSummaryContent(input, {
+          taskId: resolved.taskId,
+          title: title || resolved.taskId,
+          reason: typeof taskFrontmatter.cancel_reason === 'string' ? taskFrontmatter.cancel_reason : '',
+          cancelledAt: typeof taskFrontmatter.cancelled_at === 'string' ? taskFrontmatter.cancelled_at : '',
+          lastCompletedArtifact: artifacts.at(-1) ?? null
+        }).rendered;
+      body = rendered;
+    } catch (error) { fail(`invalid ${kind} summary structure: ${error instanceof Error ? error.message : String(error)}`); return; }
   }
   finish(await syncPlatformComment(taskRef!, {
     kind: kind as CommentKind,

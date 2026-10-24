@@ -12,6 +12,7 @@ import {
   renderCanonicalChangeReport,
   replaceCanonicalReportPlaceholder,
   taskIntentDigest,
+  validatePrecheckCandidate,
   validatePrChangeReport,
   writePrChangeReportAtomic
 } from '../../../lib/platform/pr-change-report.ts';
@@ -20,19 +21,24 @@ import { createTempDir } from '../../helpers.ts';
 
 const sha = (letter: string) => letter.repeat(40);
 
-function candidate(taskIntentSha256: string): PrecheckCandidate {
+function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
   return {
     taskIntentSha256,
     checks: PRECHECK_IDS.map((id) => ({
       id,
       verdict: 'pass' as const,
       evidence: [{ path: 'lib/example.ts', startLine: 1, endLine: 1, detail: 'Matches the approved task scope.' }],
-      rationale: 'The complete diff is within the approved scope.'
+      rationale: 'The complete diff is within the approved scope.',
+      ...(id === 'change-composition' ? { groups: [{
+        id: 'summary-content', target: 'Structure managed comment content', behaviorChange: 'Validate and render typed content.',
+        necessity: 'Keep required content complete.', files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        tests: { coverage: 'Existing unit and integration contracts cover the change.', cost: 'No new fixture beyond this candidate.' }
+      }] } : {})
     }))
   };
 }
 
-function detailedCandidate(taskIntentSha256: string): PrecheckCandidate {
+function detailedCandidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
   return {
     taskIntentSha256,
     checks: PRECHECK_IDS.map((id, index) => ({
@@ -42,7 +48,12 @@ function detailedCandidate(taskIntentSha256: string): PrecheckCandidate {
         path: `checks/${id}.ts`, startLine: index + 10, endLine: index + 11,
         detail: `Evidence-${id}-<detail>`
       }],
-      rationale: `Rationale-${id}-responsibility-${index}`
+      rationale: `Rationale-${id}-responsibility-${index}`,
+      ...(id === 'change-composition' ? { groups: [{
+        id: 'summary-content', target: 'Structured content', behaviorChange: 'Add structure validation.', necessity: 'Prevent missing sections.',
+        files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        tests: { coverage: 'Tests exercise required paths.', cost: 'One shared fixture.' }
+      }] } : {})
     }))
   };
 }
@@ -178,11 +189,16 @@ test('report validation rejects reserved comment controls in rendered text', () 
   if (!result.ok) assert.equal(result.error.code, 'PR_CHANGE_REPORT_INVALID');
 });
 
-test('report validation rejects a derived verdict that does not match checks', () => {
+test('report validation rejects inconsistent totals and verdict facts', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, mechanical(), candidate(digest));
   assert.equal(built.ok, true);
   if (built.ok) {
+    const mismatchedTotals = {
+      ...built.value,
+      diff: { ...built.value.diff, totals: { ...built.value.diff.totals, additions: built.value.diff.totals.additions + 1 } }
+    };
+    assert.equal(validatePrChangeReport(mismatchedTotals).ok, false);
     const invalid = validatePrChangeReport({ ...built.value, precheck: { ...built.value.precheck, verdict: 'needs-review', route: 'review-code' } });
     assert.equal(invalid.ok, false);
   }
@@ -206,7 +222,7 @@ test('summary body requires one placeholder and core renders the canonical repor
 test('canonical report renders high-level change categories and all six precheck details', () => {
   const digest = 'd'.repeat(64);
   const value = categorizedMechanical();
-  const precheck = detailedCandidate(digest);
+  const precheck = detailedCandidate(digest, value);
   precheck.checks[0]!.evidence.push({
     path: 'tests/report-rendering.test.ts', startLine: 22, endLine: 25,
     detail: 'A second source confirms the rendered behavior.'
@@ -280,7 +296,8 @@ test('canonical report renders nullable evidence line endpoints without null tex
 
 test('canonical report lists bounded text representatives with stable tie ordering and classifications', () => {
   const digest = 'd'.repeat(64);
-  const built = buildPrChangeReport(identity(), digest, representativeMechanical(), candidate(digest));
+  const diff = representativeMechanical();
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
   assert.equal(built.ok, true);
   if (!built.ok) return;
 
@@ -295,7 +312,7 @@ test('canonical report renders a text rename as a path change without content la
   const value = representativeMechanical();
   value.files = [{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }];
   value.totals = { files: 1, textFiles: 1, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 };
-  const built = buildPrChangeReport(identity(), digest, value, candidate(digest));
+  const built = buildPrChangeReport(identity(), digest, value, candidate(digest, value));
   assert.equal(built.ok, true);
   if (!built.ok) return;
 
@@ -309,13 +326,61 @@ test('canonical report omits binary-only changes from representative summaries',
   const value = representativeMechanical();
   value.files = [{ status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 }];
   value.totals = { files: 1, textFiles: 0, binaryFiles: 1, additions: 0, deletions: 0, oldBytes: 600, newBytes: 300, netBytes: -300 };
-  const built = buildPrChangeReport(identity(), digest, value, candidate(digest));
+  const built = buildPrChangeReport(identity(), digest, value, candidate(digest, value));
   assert.equal(built.ok, true);
   if (!built.ok) return;
 
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /- 行数变化最大（仅文本文件，按新增行\+删除行，最多展示 3 个）：\n  - 无可比较的文本文件。/);
   assert.match(rendered, /- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：\n  - 无可比较的文本文件。/);
+});
+
+test('typed functional groups derive line totals from unique complete diff file membership', () => {
+  const digest = 'd'.repeat(64);
+  const diff = representativeMechanical();
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /功能组 summary-content/u);
+  assert.match(rendered, /由正式 diff 逐文件推导）：新增 21、删除 20、净增 1；另有 1 个文件行数不可计/u);
+  assert.match(rendered, /<code>\.agents\/old\.md<\/code> → <code>\.agents\/new\.md<\/code>/u);
+
+  const malformed = candidate(digest, diff);
+  const composition = malformed.checks.find((check) => check.id === 'change-composition')!;
+  composition.groups![0]!.files[0] = composition.groups![0]!.files[1]!;
+  const rejected = buildPrChangeReport(identity(), digest, diff, malformed);
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.error.message, /more than one functional group|no functional group/u);
+
+  const omitted = candidate(digest, diff);
+  omitted.checks.find((check) => check.id === 'change-composition')!.groups![0]!.files.pop();
+  const omittedFile = buildPrChangeReport(identity(), digest, diff, omitted);
+  assert.equal(omittedFile.ok, false);
+  if (!omittedFile.ok) assert.match(omittedFile.error.message, /has no functional group/u);
+
+  const unknown = candidate(digest, diff);
+  unknown.checks.find((check) => check.id === 'change-composition')!.groups![0]!.files[0] = 'src/not-in-diff.ts';
+  const unknownFile = buildPrChangeReport(identity(), digest, diff, unknown);
+  assert.equal(unknownFile.ok, false);
+  if (!unknownFile.ok) assert.match(unknownFile.error.message, /references unknown diff file/u);
+});
+
+test('typed group structure requires nested test coverage and rejects hand-entered counts', () => {
+  const digest = 'd'.repeat(64);
+  const incomplete = JSON.parse(JSON.stringify(candidate(digest))) as Record<string, unknown>;
+  const incompleteChecks = incomplete.checks as Array<Record<string, unknown>>;
+  const composition = incompleteChecks.find((check) => check.id === 'change-composition')!;
+  const groups = composition.groups as Array<Record<string, unknown>>;
+  groups[0]!.tests = { coverage: 'Covered.' };
+  assert.equal(validatePrecheckCandidate(incomplete).ok, false);
+
+  const withManualCounts = JSON.parse(JSON.stringify(candidate(digest))) as Record<string, unknown>;
+  const checks = withManualCounts.checks as Array<Record<string, unknown>>;
+  const compositionWithCounts = checks.find((check) => check.id === 'change-composition')!;
+  const typedGroups = compositionWithCounts.groups as Array<Record<string, unknown>>;
+  typedGroups[0]!.additions = 2;
+  assert.equal(validatePrecheckCandidate(withManualCounts).ok, false);
 });
 
 test('canonical report summarizes a precheck review route in Chinese', () => {

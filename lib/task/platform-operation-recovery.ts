@@ -3,13 +3,15 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
-import { inspectPlatformCommentOperation, normalizeCommentContent, syncPlatformComment } from '../platform/issue-comments.ts';
+import { inspectPlatformCommentOperation, syncPlatformComment } from '../platform/issue-comments.ts';
+import { parseDeliverySummaryContent, renderDeliverySummaryContent, parseCancelSummaryContent, renderCancelSummaryContent } from '../platform/issue-summary-content.ts';
+import { enumerateArtifacts } from './artifacts.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
 import { resolvePlatformProviderContext } from '../platform/context.ts';
 import { providerOperationContext, providerError, unsupportedProviderOperation } from '../platform/provider-bridge.ts';
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
-import { bindPlatformPullRequest, inspectPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
-import { syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { bindPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
+import { replayPullRequestSummary } from '../platform/pr-summary.ts';
 import { publishPrReview, readReviewBodyFile } from '../platform/pr-review.ts';
 import type { PlatformClient } from '../platform/context.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
@@ -53,33 +55,57 @@ function result(status: RecoveryResult['status'], recovered: string[], pending: 
 function summaryPayload(taskDir: string, taskId: string): { body: string; sha256: string } | null {
   const file = path.join(taskDir, '.delivery-summary.json');
   if (!fs.existsSync(file)) return null;
-  const data = JSON.parse(fs.readFileSync(file, 'utf8')) as { taskId?: unknown; body?: unknown; sha256?: unknown };
-  const canonical = typeof data.body === 'string' ? canonicalizeSummaryBody(data.body) : null;
-  if (data.taskId !== taskId || typeof data.body !== 'string' || typeof data.sha256 !== 'string'
-    || !canonical?.ok || canonical.value !== data.body
-    || createHash('sha256').update(data.body).digest('hex') !== data.sha256) {
+  const data = JSON.parse(fs.readFileSync(file, 'utf8')) as { taskId?: unknown; content?: unknown; contentSha256?: unknown };
+  let content;
+  try { content = parseDeliverySummaryContent(data.content); }
+  catch { content = null; }
+  if (data.taskId !== taskId || !content || content.taskId !== taskId || typeof data.contentSha256 !== 'string'
+    || createHash('sha256').update(JSON.stringify(content)).digest('hex') !== data.contentSha256) {
     throw Object.assign(new Error('delivery summary staging record is invalid'), { code: 'SUMMARY_STAGING_INVALID' });
   }
-  return { body: data.body, sha256: data.sha256 };
+  const canonical = canonicalizeSummaryBody(renderDeliverySummaryContent(content));
+  if (!canonical?.ok) throw Object.assign(new Error('delivery summary staging body is not canonical'), { code: 'SUMMARY_STAGING_INVALID' });
+  return { body: canonical.value, sha256: createHash('sha256').update(canonical.value).digest('hex') };
+}
+
+function cancellationPayload(taskDir: string, taskId: string): string | null {
+  const taskPath = path.join(taskDir, 'task.md');
+  if (!fs.existsSync(taskPath)) return null;
+  const taskContent = fs.readFileSync(taskPath, 'utf8');
+  const frontmatter = parseTaskFrontmatter(taskContent);
+  const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim() || taskId;
+  const artifacts = enumerateArtifacts(taskDir).filter((artifact) => artifact.name !== 'task.md').map((artifact) => artifact.name);
+  const content = parseCancelSummaryContent({
+    taskId,
+    title,
+    outcome: 'cancelled',
+    reason: frontmatter.cancel_reason,
+    cancelledAt: frontmatter.cancelled_at,
+    lastCompletedArtifact: artifacts.at(-1) ?? null
+  });
+  return renderCancelSummaryContent(content);
 }
 
 async function replayComment(taskId: string, taskDir: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   if (operation.kind === 'task-comment') {
-    return syncPlatformComment(taskId, { kind: 'task', agent, cwd, client, dependency: operation.dependency, skipQueue: true });
+    return syncPlatformComment(taskId, { kind: 'task', agent, cwd, client, dependency: operation.dependency, queuedOperation: operation });
   }
   if (operation.kind === 'artifact-comment') {
-    return syncPlatformComment(taskId, { kind: 'artifact', artifact: operation.target, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
+    return syncPlatformComment(taskId, { kind: 'artifact', artifact: operation.target, agent, cwd, client, dependency: operation.dependency, queuedOperation: operation });
   }
   if (operation.kind === 'summary-comment') {
-    const summary = summaryPayload(taskDir, taskId);
-    if (!summary) return platformResult('failed', { error: { code: 'SUMMARY_STAGING_MISSING', message: 'delivery summary staging record is unavailable', retryable: false } });
-    return syncPlatformComment(taskId, {
-      kind: 'summary', body: summary.body, agent, cwd,
-      summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency, client, skipQueue: true
-    });
+    let summary;
+    try { summary = summaryPayload(taskDir, taskId); }
+    catch (error) { return platformResult('failed', { error: { code: 'SUMMARY_STAGING_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }); }
+    if (!summary) return platformResult('blocked', { error: { code: 'SUMMARY_STAGING_MISSING', message: 'delivery summary staging record is unavailable', retryable: true } });
+    return syncPlatformComment(taskId, { kind: 'summary', body: summary.body, agent, cwd, client, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency, queuedOperation: operation });
   }
   if (operation.kind === 'cancel-comment') {
-    return syncPlatformComment(taskId, { kind: 'cancel', agent, cwd, client, dependency: operation.dependency, skipQueue: true });
+    let body: string | null;
+    try { body = cancellationPayload(taskDir, taskId); }
+    catch (error) { return platformResult('failed', { error: { code: 'CANCEL_SUMMARY_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }); }
+    if (!body) return platformResult('blocked', { error: { code: 'CANCEL_SUMMARY_INVALID', message: 'Cancellation facts are unavailable for recovery', retryable: true } });
+    return syncPlatformComment(taskId, { kind: 'cancel', body, agent, cwd, client, dependency: operation.dependency, queuedOperation: operation });
   }
   return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_UNSUPPORTED', message: `operation kind '${operation.kind}' has no registered recovery handler`, retryable: false } });
 }
@@ -183,55 +209,6 @@ async function verifyIssueCreate(taskId: string, operation: ReturnType<typeof re
   return platformResult('no-op');
 }
 
-async function replayPullRequestSummary(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
-  let identity;
-  try { identity = parseResourceIdentity(JSON.parse(operation.target), 'queued pull-request summary identity'); }
-  catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary identity is invalid', retryable: false } }); }
-  const summary = operation.pullRequestSummary;
-  if (!summary) return platformResult('blocked', { error: {
-    code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
-  } });
-  const manualValidationHeading = /^###\s+(?:⏳\s+(?:Manual Validation Pending|人工验证待收尾)|✅\s+(?:Manual Validation Passed|人工验证已通过))\s*$/mu.test(summary.body);
-  if (manualValidationHeading && !summary.manualValidation) return platformResult('blocked', { error: {
-    code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'Queued manual-validation summary has no persisted transaction context', retryable: false
-  } });
-  const resolved = await resolvePlatformProviderContext({ cwd, client });
-  if (!resolved.ok) return resolved.context;
-  const listed = resolved.value.provider.comments?.list
-    ? await resolved.value.provider.comments.list({ context: providerOperationContext(resolved.value), parent: identity })
-    : unsupportedProviderOperation(resolved.value.provider, 'comments.list');
-  if (!listed.ok) return platformResult(providerErrorRetryable(listed.error.code) ? 'blocked' : 'failed', { error: providerError(listed.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') });
-  const marker = `<!-- sync-pr:${taskId}:summary -->`;
-  const summaries = listed.value.filter((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === marker);
-  if (summaries.length > 1) return platformResult('blocked', { error: {
-    code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple pull-request comments contain the queued summary marker', retryable: false
-  } });
-  if (!summary.manualValidation && summaries.length === 1 && createHash('sha256').update(normalizeCommentContent(summaries[0]!.body)).digest('hex') === operation.expectedDigest) {
-    return platformResult('no-op');
-  }
-  const bound = await inspectPlatformPullRequest(taskId, { cwd, client });
-  if (!bound.pullRequest || !resourceIdentityEquals(bound.pullRequest.identity, identity)) return platformResult('blocked', { error: bound.error ?? {
-    code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request differs from the queued summary target', retryable: false
-  } });
-  const replayed = await syncPullRequestSummary(taskId, {
-    agent,
-    cwd,
-    client,
-    body: summary.body,
-    changeReportFile: summary.changeReportFile,
-    ...(summary.manualValidation ? { manualValidation: summary.manualValidation } : {}),
-    primaryResult: 'no_op',
-    strict: true,
-    skipQueue: true
-  });
-  if ((replayed.status === 'applied' || replayed.status === 'no-op') && !replayed.error && replayed.warnings.length === 0) {
-    return platformResult(replayed.status, { changed: replayed.changed });
-  }
-  return platformResult('blocked', { error: replayed.error ?? {
-    code: 'PR_SUMMARY_RECOVERY_UNCONFIRMED', message: 'Pull-request summary replay did not confirm the requested remote state', retryable: true
-  } });
-}
-
 async function replayPullRequestReview(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   const intent = operation.pullRequestReview;
   if (!intent) return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request review recovery parameters are missing', retryable: false } });
@@ -280,6 +257,14 @@ async function replayPullRequest(taskId: string, operation: ReturnType<typeof re
   return recoverCreatedPullRequest(taskId, { agent, cwd, base: intent.baseRef || '', head: intent.headRef || '', skipQueue: true });
 }
 
+function isRecoveryEligible(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], excludeId?: string): boolean {
+  if (operation.id === excludeId) return false;
+  if (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown') return true;
+  return operation.state === 'failed'
+    && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED'
+;
+}
+
 async function recoverPlatformOperationsOnce(
   taskRef: string,
   selection: 'required' | 'deferred' | 'all',
@@ -293,9 +278,7 @@ async function recoverPlatformOperationsOnce(
     const value = error as { code?: string; message?: string };
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const candidates = journal.operations.filter((operation) => operation.id !== options.excludeId
-    && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')));
+  const candidates = journal.operations.filter((operation) => isRecoveryEligible(operation, options.excludeId));
   if (!candidates.length) return result('no-op', [], []);
   const head = candidates[0]!;
   if (selection !== 'all' && head.dependency !== selection) {
@@ -357,11 +340,18 @@ async function recoverPlatformOperationsOnce(
       const commentOptions = operation.kind === 'task-comment'
         ? { kind: 'task' as const, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
           : operation.kind === 'artifact-comment'
-          ? { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
-          : operation.kind === 'summary-comment' ? (() => {
-            const summary = summaryPayload(resolved.taskDir, resolved.taskId);
-            return summary ? { kind: 'summary' as const, body: summary.body, agent: options.agent, cwd: resolved.repoRoot, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency } : null;
-          })() : { kind: 'cancel' as const, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency };
+            ? { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
+            : operation.kind === 'summary-comment' ? (() => {
+              try {
+                const summary = summaryPayload(resolved.taskDir, resolved.taskId);
+                return summary ? { kind: 'summary' as const, body: summary.body, agent: options.agent, cwd: resolved.repoRoot, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency } : null;
+              } catch { return null; }
+            })() : (() => {
+              try {
+                const body = cancellationPayload(resolved.taskDir, resolved.taskId);
+                return body ? { kind: 'cancel' as const, body, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency } : null;
+              } catch { return null; }
+            })();
       const current = commentOptions ? inspectPlatformCommentOperation(resolved.taskId, commentOptions) : null;
       if (!current) {
         pending.push(operation.id);
@@ -383,20 +373,21 @@ async function recoverPlatformOperationsOnce(
       remote = operation.kind === 'issue-create'
         ? await verifyIssueCreate(resolved.taskId, operation, resolved.repoRoot)
         : operation.kind === 'pull-request-summary'
-        ? await replayPullRequestSummary(resolved.taskId, operation, options.agent, resolved.repoRoot, options.client)
+        ? await replayPullRequestSummary(resolved.taskId, targetOperation, { agent: options.agent, cwd: resolved.repoRoot, client: options.client })
         : operation.kind === 'pull-request-review'
         ? await replayPullRequestReview(operation, options.agent, resolved.repoRoot, options.client)
         : operation.kind === 'issue-metadata'
         ? await replayIssueMetadata(resolved.taskId, targetOperation, options.agent, resolved.repoRoot)
         : operation.kind === 'pull-request'
           ? await replayPullRequest(resolved.taskId, targetOperation, options.agent, resolved.repoRoot)
-          : await replayComment(resolved.taskId, resolved.taskDir, operation, options.agent, resolved.repoRoot);
+          : await replayComment(resolved.taskId, resolved.taskDir, targetOperation, options.agent, resolved.repoRoot, options.client);
     }
     catch (error) {
       const value = error as { code?: string; message?: string };
       remote = platformResult('blocked', { error: { code: value.code || 'PLATFORM_OPERATION_RECOVERY_FAILED', message: value.message || String(error), retryable: true } });
     }
     const succeeded = (remote.status === 'applied' || remote.status === 'no-op') && !remote.error;
+    const latestOperation = readPlatformOperationJournal(resolved.taskId, resolved.repoRoot).operations.find((item) => item.id === operation.id);
     try {
       recordPlatformOperation({
         taskRef: resolved.taskId,
@@ -411,7 +402,7 @@ async function recoverPlatformOperationsOnce(
         ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : 'unknown',
-        lastCode: remote.error?.code ?? null
+        lastCode: remote.error?.code ?? latestOperation?.lastCode ?? null
       });
     } catch (error) {
       const value = error as { code?: string; message?: string };
@@ -441,9 +432,7 @@ async function recoverPlatformOperations(
     const value = error as { code?: string; message?: string };
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const eligible = (operation: typeof initial.operations[number]) => operation.id !== options.excludeId
-    && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED'));
+  const eligible = (operation: typeof initial.operations[number]) => isRecoveryEligible(operation, options.excludeId);
   const first = initial.operations.filter(eligible);
   if (!first.length) return result('no-op', [], []);
   const operationLimit = options.limit === undefined ? first.length : Math.max(1, options.limit);

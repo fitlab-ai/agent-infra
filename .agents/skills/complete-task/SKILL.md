@@ -140,9 +140,9 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 如果存在有效的 `platform_issue_identity`，严格按以下顺序执行：
 
 1. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
-2. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`。该命令把正文和 SHA-256 写入 task 目录的 durable staging record；本步骤不得直接发布 summary 评论。
+2. 把完成摘要字段写成 JSON 临时文件，并调用 `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`。字段为 `taskId`、`title`、`summary`、`artifacts`、`verification:{state,detail}`；`taskId` 必须是当前完整任务 ID，`title` 来自 task.md，`artifacts` 来自当前 artifact registry（无产物用 `[]`）。验证尚未执行时写 `state:"not-run"` 和非空说明，不等待之后的终态事件或最终验证。命令把规范 payload 与摘要写入 durable staging record；本步骤不得直接发布 summary 评论。
 
-摘要正文只记录当前任务证据能够支持的交付结果、关联 PR 与实际合入事实、验证命令及其范围/结果/未覆盖部分，以及已知待办；需要说明验证范围时可注明对应提交。没有证据支持的事实不推断，未完成事项写入待办。这是 Issue 收尾摘要，不是 PR 留言。
+`summary` 字段只记录当前任务证据能够支持的交付结果、关联 PR 与实际合入事实、验证命令及其范围/结果/未覆盖部分，以及已知待办；需要说明验证范围时可注明对应提交。没有证据支持的事实不推断，未完成事项写入待办。这是 Issue 收尾摘要，不是 PR 留言。
 
 摘要默认使用当前技能的语言：中文技能生成中文摘要，英文技能生成英文摘要。中英文摘要保持相同字段结构。
 

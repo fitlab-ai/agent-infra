@@ -33,6 +33,7 @@ import {
 } from './operation-outcome.ts';
 import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import { validateSandboxControlIdentity } from '../sandbox/control/identity-sentinel.ts';
+import { parseDeliverySummaryContent, renderDeliverySummaryContent } from '../platform/issue-summary-content.ts';
 
 const RECEIPT_VERSION = 4 as const;
 const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification', 'summary'] as const;
@@ -730,16 +731,20 @@ function readDeliverySummary(taskDir: string, taskId: string): { body: string; s
   } catch {
     throw Object.assign(new Error('delivery summary staging record is unavailable'), { code: 'SUMMARY_STAGING_INVALID' });
   }
-  if (value.taskId !== taskId || typeof value.body !== 'string' || typeof value.sha256 !== 'string') {
+  if (value.taskId !== taskId || !value.content || typeof value.contentSha256 !== 'string') {
     throw Object.assign(new Error('delivery summary staging record is invalid'), { code: 'SUMMARY_STAGING_INVALID' });
   }
-  const canonical = canonicalizeSummaryBody(value.body);
-  if (!canonical.ok || canonical.value !== value.body) {
-    throw Object.assign(new Error('delivery summary staging body is not canonical'), { code: 'SUMMARY_STAGING_INVALID' });
+  let content;
+  try { content = parseDeliverySummaryContent(value.content); }
+  catch { throw Object.assign(new Error('delivery summary staging payload is invalid'), { code: 'SUMMARY_STAGING_INVALID' }); }
+  if (content.taskId !== taskId || createHash('sha256').update(JSON.stringify(content)).digest('hex') !== value.contentSha256) {
+    throw Object.assign(new Error('delivery summary staging digest does not match payload'), { code: 'SUMMARY_STAGING_INVALID' });
   }
+  const body = renderDeliverySummaryContent(content);
+  const canonical = canonicalizeSummaryBody(body);
+  if (!canonical.ok) throw Object.assign(new Error('delivery summary staging body is not canonical'), { code: 'SUMMARY_STAGING_INVALID' });
   const digest = createHash('sha256').update(canonical.value).digest('hex');
-  if (digest !== value.sha256) throw Object.assign(new Error('delivery summary staging digest does not match body'), { code: 'SUMMARY_STAGING_INVALID' });
-  return { body: canonical.value, sha256: value.sha256 };
+  return { body: canonical.value, sha256: digest };
 }
 
 async function syncPendingSummary(input: {

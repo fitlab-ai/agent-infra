@@ -141,7 +141,7 @@ Check whether task.md has a valid `platform_issue_identity`. If it does not, ski
 When a valid `platform_issue_identity` exists, execute in this exact order:
 
 1. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
-2. Write the business summary to a temporary file and run `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`. This stores the body and SHA-256 in the task's durable staging record; it must not publish the summary comment directly.
+2. Write the completion summary as JSON fields `taskId`, `title`, `summary`, `artifacts`, and `verification:{state,detail}`, then run `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`. Use the current artifact registry (`[]` when empty). If final verification has not run, use `state:"not-run"` with a non-empty explanation. The command persists the normalized payload; do not publish the summary comment in this step.
 
 The summary body records only delivery results, the associated PR and actual merge facts, verification commands with their scope/results/uncovered areas, and known todo items supported by current task evidence. Include the related commit when it helps explain verification scope. Do not infer unsupported facts; list unfinished work as a todo. This is an Issue closeout summary, not a PR comment.
 

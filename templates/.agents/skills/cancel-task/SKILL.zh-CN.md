@@ -82,7 +82,7 @@ ls <task-workspace>/completed/{task-id}/task.md
 - 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
-取消评论至少包含：
+取消评论 JSON 字段为 `taskId`、`title`、`outcome:"cancelled"`、`reason`、`cancelledAt`、`lastCompletedArtifact`，值来自任务身份、task.md、已记录取消原因与时间和当前 artifact registry；无已完成产物时用 `null`。取消评论至少包含：
 - 取消原因
 - 选定的 `status:` label
 
