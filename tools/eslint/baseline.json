@@ -2151,15 +2151,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/platform-operation-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "0808f430156769029a2b6ad59fa7e4e4c1b090643a8a1252b6fde4d81e3bbaa7",
-      "displayName": "replayPullRequestSummary",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pr-summary.ts",
       "ruleId": "complexity",
       "stableId": "8cf638f301a90033027f383fef6bcc662d3c1c7869e4afde3b30b96f1f79fbc3",

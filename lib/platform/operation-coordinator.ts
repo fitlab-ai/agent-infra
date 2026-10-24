@@ -1,8 +1,12 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { recoverPlatformOperations } from '../task/platform-operation-recovery.ts';
-import { recordPlatformOperation } from '../task/platform-operation-journal.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../task/platform-operation-journal.ts';
 import type { RecordOperationInput } from '../task/platform-operation-journal.ts';
 import type { PlatformError, PlatformStatus } from './types.ts';
+import { platformResult } from './types.ts';
 import type { PlatformClient } from './context.ts';
+import { executeManagedSummary } from './managed-summary-core.ts';
+import type { ManagedSummaryOutput, ManagedSummaryPolicy } from './managed-summary-core.ts';
 
 type OperationResult = Readonly<{
   status: PlatformStatus;
@@ -93,4 +97,78 @@ async function coordinatePlatformWrite<T extends OperationResult>(input: Coordin
   return output;
 }
 
-export { coordinatePlatformWrite };
+type ManagedSummaryCoordinateInput = Readonly<{
+  operation: Omit<RecordOperationInput, 'state' | 'lastCode' | 'stableId' | 'managedSummary'>;
+  policy: ManagedSummaryPolicy;
+  agent: string;
+  client?: PlatformClient;
+  drain?: CoordinateInput<OperationResult>['drain'];
+}>;
+
+async function coordinateManagedSummary(input: ManagedSummaryCoordinateInput): Promise<ManagedSummaryOutput> {
+  const stableId = createHash('sha256').update(randomUUID()).digest('hex');
+  const requestDigest = input.policy.requestDigest;
+  const queued = queueManagedSummary(input, stableId, requestDigest);
+  if (!queued.ok) return queued.output;
+  const drained = await drainManagedSummary(input, stableId);
+  if (drained.status !== 'applied' && drained.status !== 'no-op') return queueBlockedResult(drained.error);
+  const output = await executeQueuedManagedSummary(input, queued.operation);
+  return persistManagedSummaryOutcome(input, stableId, requestDigest, output);
+}
+
+function queueManagedSummary(input: ManagedSummaryCoordinateInput, stableId: string, requestDigest: string) {
+  try {
+    return { ok: true as const, operation: recordPlatformOperation({
+      ...input.operation, stableId, managedSummary: { requestDigest }, state: 'queued'
+    }) };
+  } catch (error) {
+    const value = error as { code?: string; message?: string };
+    return { ok: false as const, output: { action: 'no-op' as const, result: platformResult('failed', { error: {
+      code: value.code || 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED',
+      message: value.message || 'Unable to queue managed summary', retryable: true
+    } }) } };
+  }
+}
+
+async function drainManagedSummary(input: ManagedSummaryCoordinateInput, stableId: string) {
+  if (input.drain) return input.drain(input.operation.taskRef, stableId, input.agent, input.operation.cwd);
+  return recoverPlatformOperations(input.operation.taskRef, input.operation.dependency, {
+    agent: input.agent, client: input.client, cwd: input.operation.cwd, excludeId: stableId
+  });
+}
+
+function queueBlockedResult(error: { code: string; message: string; retryable?: boolean } | null): ManagedSummaryOutput {
+  return { action: 'no-op', result: platformResult('blocked', { error: error ? { ...error, retryable: true } : {
+    code: 'PLATFORM_OPERATION_QUEUE_BLOCKED', message: 'A previous platform operation is unresolved; managed summary remains queued', retryable: true
+  } }) };
+}
+
+async function executeQueuedManagedSummary(input: ManagedSummaryCoordinateInput, operation: Awaited<ReturnType<typeof recordPlatformOperation>>): Promise<ManagedSummaryOutput> {
+  try { return await executeManagedSummary(input.policy, operation); }
+  catch (error) {
+    const value = error as { code?: string; message?: string };
+    return { action: 'no-op', result: platformResult('blocked', { error: {
+      code: value.code || 'MANAGED_SUMMARY_FAILED', message: value.message || String(error), retryable: true
+    } }) };
+  }
+}
+
+function persistManagedSummaryOutcome(input: ManagedSummaryCoordinateInput, stableId: string, requestDigest: string, output: ManagedSummaryOutput): ManagedSummaryOutput {
+  const succeeded = (output.result.status === 'applied' || output.result.status === 'no-op') && !output.result.error;
+  const terminal = readPlatformOperationJournal(input.operation.taskRef, input.operation.cwd).operations.find((item) => item.id === stableId);
+  try {
+    recordPlatformOperation({
+      ...input.operation, stableId, managedSummary: terminal?.managedSummary ?? { requestDigest },
+      state: succeeded ? 'succeeded' : output.result.status === 'failed' && output.result.error?.retryable === false ? 'failed' : 'unknown',
+      lastCode: output.result.error?.code ?? null
+    });
+  } catch (error) {
+    const value = error as { code?: string; message?: string };
+    return { action: output.action, result: { ...output.result, status: 'blocked', changed: false, error: {
+      code: value.code || 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || 'Unable to persist managed summary outcome', retryable: true
+    } } };
+  }
+  return output;
+}
+
+export { coordinateManagedSummary, coordinatePlatformWrite, executeManagedSummary };

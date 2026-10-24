@@ -170,14 +170,16 @@ function queueOpaqueSummary(
   const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(JSON.parse(summaryPayload(body)))), report.value);
   if (!rendered.ok) throw new Error(rendered.error.message);
   const desired = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
+  const persistedBody = summaryPayload(body);
   return recordPlatformOperation({
     taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
     target: JSON.stringify({ kind: 'id', value: 'pr-42' }),
     expectedDigest: createHash('sha256').update(desired).digest('hex'), dependency: 'deferred', state: 'queued',
     pullRequestSummary: {
-      body: summaryPayload(body), changeReportFile: fixture.reportPath,
+      body: persistedBody, changeReportFile: fixture.reportPath,
       ...(manualValidation ? { manualValidation } : {})
-    }
+    },
+    managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body: persistedBody, changeReportFile: fixture.reportPath, manualValidation: manualValidation ?? null })).digest('hex') }
   });
 }
 
@@ -189,6 +191,7 @@ type ResolvedContextClientOptions = {
   comments?: Array<{ id: number; body: string }>;
   writtenBodies?: string[];
   pullRequestFailureAt?: number;
+  deleteFailure?: boolean;
 };
 
 function resolvedContextClient(
@@ -246,7 +249,13 @@ function resolvedContextClient(
       throw new Error(`unexpected GitHub call: ${args.join(' ')}`);
     },
     text: (args: string[]) => {
-      if (args.includes('-X') && args.includes('DELETE')) options.deleteCalls && (options.deleteCalls.value += 1);
+      if (args.includes('-X') && args.includes('DELETE')) {
+        if (options.deleteCalls) options.deleteCalls.value += 1;
+        if (options.deleteFailure) return { ok: false, error: { code: 'COMMENT_DELETE_FAILED', message: 'comment delete failed' } };
+        const commentId = /\/comments\/(\d+)$/u.exec(args[1] ?? '')?.[1];
+        const index = remoteComments.findIndex((comment) => String(comment.id) === commentId);
+        if (index >= 0) remoteComments.splice(index, 1);
+      }
       return { ok: true, value: '' };
     }
   } as unknown as GitHubClient;
@@ -282,7 +291,8 @@ test('queued PR summary recovery replays the desired summary through the configu
       expectedDigest: createHash('sha256').update(desired).digest('hex'),
       dependency: 'deferred',
       state: 'queued',
-      pullRequestSummary: { body, changeReportFile: fixture.reportPath }
+      pullRequestSummary: { body, changeReportFile: fixture.reportPath },
+      managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body, changeReportFile: fixture.reportPath, manualValidation: null })).digest('hex') }
     });
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
       agent: 'codex', cwd: fixture.root,
@@ -317,10 +327,10 @@ test('PR summary persists corrected typed content for unknown-operation recovery
     assert.equal(first.status, 'applied', JSON.stringify(first));
 
     const journalPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, '.platform-operations.json');
-    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<Record<string, unknown> & { pullRequestSummary: { body: string } }> };
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<Record<string, unknown> & { pullRequestSummary: { body: string }; managedSummary: { execution: { body: string } } }> };
     const operation = journal.operations.at(-1)!;
-    const persisted = JSON.parse(operation.pullRequestSummary.body) as { humanDecisions: { open: number; resolved: number; detail: string } };
-    assert.deepEqual(persisted.humanDecisions, { open: 0, resolved: 0, detail: 'Task decision ledger: 0 open, 0 resolved.' });
+    assert.match(operation.managedSummary.execution.body, /Task decision ledger: 0 open, 0 resolved\./u);
+    operation.pullRequestSummary.body = JSON.stringify({ changed: 'source after freeze' });
     operation.state = 'unknown';
     fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
 
@@ -351,7 +361,8 @@ test('queued ordinary manual-validation pending summary replays without a coordi
       taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
       target: JSON.stringify({ kind: 'number', value: 42 }),
       expectedDigest: createHash('sha256').update(desired).digest('hex'), dependency: 'deferred', state: 'queued',
-      pullRequestSummary: { body, changeReportFile: fixture.reportPath }
+      pullRequestSummary: { body, changeReportFile: fixture.reportPath },
+      managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body, changeReportFile: fixture.reportPath, manualValidation: null })).digest('hex') }
     });
 
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
@@ -943,6 +954,32 @@ test('summary-sync compensates a published comment when post-write inspection fa
     assert.equal(result.result, null);
     assert.equal(result.warnings.length, 0);
     assert.equal(commentWrites.value, 1);
+    assert.equal(deleteCalls.value, 1);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync does not soften an unverifiable compensation into primary-result success', async () => {
+  const fixture = summaryFixture();
+  const deleteCalls = { value: 0 };
+  try {
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: `## Summary\n\n${'<!-- canonical-pr-change-report -->'}`,
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'pr_created',
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        pullRequestFailureAt: 3,
+        deleteCalls,
+        deleteFailure: true
+      })
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'MANAGED_SUMMARY_COMPENSATION_FAILED');
+    assert.equal(result.result, null);
+    assert.equal(result.warnings.length, 0);
     assert.equal(deleteCalls.value, 1);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });

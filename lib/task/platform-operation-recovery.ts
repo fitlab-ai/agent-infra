@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
-import { inspectPlatformCommentOperation, normalizeCommentContent, syncPlatformComment } from '../platform/issue-comments.ts';
+import { inspectPlatformCommentOperation, normalizeCommentContent, recoverManagedPlatformComment, syncPlatformComment } from '../platform/issue-comments.ts';
 import { parseDeliverySummaryContent, renderDeliverySummaryContent, parseCancelSummaryContent, renderCancelSummaryContent } from '../platform/issue-summary-content.ts';
 import { enumerateArtifacts } from './artifacts.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
@@ -11,7 +11,7 @@ import { resolvePlatformProviderContext } from '../platform/context.ts';
 import { providerOperationContext, providerError, unsupportedProviderOperation } from '../platform/provider-bridge.ts';
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
 import { bindPlatformPullRequest, inspectPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
-import { syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { recoverManagedPullRequestSummary, syncPullRequestSummary } from '../platform/pr-summary.ts';
 import { parsePrSummaryContent } from '../platform/pr-summary-content.ts';
 import { publishPrReview, readReviewBodyFile } from '../platform/pr-review.ts';
 import type { PlatformClient } from '../platform/context.ts';
@@ -95,26 +95,22 @@ async function replayComment(taskId: string, taskDir: string, operation: ReturnT
     return syncPlatformComment(taskId, { kind: 'artifact', artifact: operation.target, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   }
   if (operation.kind === 'summary-comment') {
+    if (!operation.managedSummary) return platformResult('blocked', { error: { code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING', message: 'Queued Issue summary has no managed execution intent', retryable: true } });
+    if (operation.managedSummary.execution) return recoverManagedPlatformComment(taskId, operation, { agent, cwd, client });
     let summary;
     try { summary = summaryPayload(taskDir, taskId); }
-    catch (error) {
-      const value = error as { code?: string; message?: string };
-      return platformResult('failed', { error: { code: value.code || 'SUMMARY_STAGING_INVALID', message: value.message || String(error), retryable: false } });
-    }
-    if (!summary) return platformResult('failed', { error: { code: 'SUMMARY_STAGING_MISSING', message: 'delivery summary staging record is unavailable', retryable: false } });
-    return syncPlatformComment(taskId, {
-      kind: 'summary', body: summary.body, agent, cwd,
-      summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency, client, skipQueue: true
-    });
+    catch (error) { return platformResult('failed', { error: { code: 'SUMMARY_STAGING_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }); }
+    if (!summary) return platformResult('blocked', { error: { code: 'SUMMARY_STAGING_MISSING', message: 'delivery summary staging record is unavailable', retryable: true } });
+    return syncPlatformComment(taskId, { kind: 'summary', body: summary.body, agent, cwd, client, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency, skipQueue: true, queuedOperation: operation });
   }
   if (operation.kind === 'cancel-comment') {
+    if (!operation.managedSummary) return platformResult('blocked', { error: { code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING', message: 'Queued cancellation comment has no managed execution intent', retryable: true } });
+    if (operation.managedSummary.execution) return recoverManagedPlatformComment(taskId, operation, { agent, cwd, client });
     let body: string | null;
     try { body = cancellationPayload(taskDir, taskId); }
-    catch (error) {
-      return platformResult('failed', { error: { code: 'CANCEL_SUMMARY_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } });
-    }
-    if (!body) return platformResult('failed', { error: { code: 'CANCEL_SUMMARY_INVALID', message: 'Cancellation facts are unavailable for recovery', retryable: false } });
-    return syncPlatformComment(taskId, { kind: 'cancel', body, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
+    catch (error) { return platformResult('failed', { error: { code: 'CANCEL_SUMMARY_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }); }
+    if (!body) return platformResult('blocked', { error: { code: 'CANCEL_SUMMARY_INVALID', message: 'Cancellation facts are unavailable for recovery', retryable: true } });
+    return syncPlatformComment(taskId, { kind: 'cancel', body, agent, cwd, client, dependency: operation.dependency, skipQueue: true, queuedOperation: operation });
   }
   return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_UNSUPPORTED', message: `operation kind '${operation.kind}' has no registered recovery handler`, retryable: false } });
 }
@@ -219,56 +215,10 @@ async function verifyIssueCreate(taskId: string, operation: ReturnType<typeof re
 }
 
 async function replayPullRequestSummary(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
-  let identity;
-  try { identity = parseResourceIdentity(JSON.parse(operation.target), 'queued pull-request summary identity'); }
-  catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary identity is invalid', retryable: false } }); }
-  const summary = operation.pullRequestSummary;
-  if (!summary) return platformResult('blocked', { error: {
-    code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
+  if (!operation.managedSummary) return platformResult('blocked', { error: {
+    code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING', message: 'Queued pull-request summary has no managed execution intent', retryable: true
   } });
-  let finalManualValidation = false;
-  try {
-    const content = parsePrSummaryContent(JSON.parse(summary.body));
-    finalManualValidation = content.manualValidation.state === 'passed';
-  } catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary content is invalid', retryable: false } }); }
-  if (finalManualValidation && !summary.manualValidation) return platformResult('blocked', { error: {
-    code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'Queued manual-validation summary has no persisted transaction context', retryable: false
-  } });
-  const resolved = await resolvePlatformProviderContext({ cwd, client });
-  if (!resolved.ok) return resolved.context;
-  const listed = resolved.value.provider.comments?.list
-    ? await resolved.value.provider.comments.list({ context: providerOperationContext(resolved.value), parent: identity })
-    : unsupportedProviderOperation(resolved.value.provider, 'comments.list');
-  if (!listed.ok) return platformResult(providerErrorRetryable(listed.error.code) ? 'blocked' : 'failed', { error: providerError(listed.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') });
-  const marker = `<!-- sync-pr:${taskId}:summary -->`;
-  const summaries = listed.value.filter((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === marker);
-  if (summaries.length > 1) return platformResult('blocked', { error: {
-    code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple pull-request comments contain the queued summary marker', retryable: false
-  } });
-  if (!summary.manualValidation && summaries.length === 1 && createHash('sha256').update(normalizeCommentContent(summaries[0]!.body)).digest('hex') === operation.expectedDigest) {
-    return platformResult('no-op');
-  }
-  const bound = await inspectPlatformPullRequest(taskId, { cwd, client });
-  if (!bound.pullRequest || !resourceIdentityEquals(bound.pullRequest.identity, identity)) return platformResult('blocked', { error: bound.error ?? {
-    code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request differs from the queued summary target', retryable: false
-  } });
-  const replayed = await syncPullRequestSummary(taskId, {
-    agent,
-    cwd,
-    client,
-    body: summary.body,
-    changeReportFile: summary.changeReportFile,
-    ...(summary.manualValidation ? { manualValidation: summary.manualValidation } : {}),
-    primaryResult: 'no_op',
-    strict: true,
-    skipQueue: true
-  });
-  if ((replayed.status === 'applied' || replayed.status === 'no-op') && !replayed.error && replayed.warnings.length === 0) {
-    return platformResult(replayed.status, { changed: replayed.changed });
-  }
-  return platformResult('blocked', { error: replayed.error ?? {
-    code: 'PR_SUMMARY_RECOVERY_UNCONFIRMED', message: 'Pull-request summary replay did not confirm the requested remote state', retryable: true
-  } });
+  return recoverManagedPullRequestSummary(taskId, operation, { agent, cwd, client });
 }
 
 async function replayPullRequestReview(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
@@ -359,6 +309,7 @@ async function recoverPlatformOperationsOnce(
           ...(operation.issueCreate ? { issueCreate: operation.issueCreate } : {}),
           ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
           ...(operation.pullRequestSummary ? { pullRequestSummary: operation.pullRequestSummary } : {}),
+          ...(operation.managedSummary ? { managedSummary: operation.managedSummary } : {}),
           ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {})
         });
       } catch (error) {
@@ -391,23 +342,10 @@ async function recoverPlatformOperationsOnce(
         }
       }
     }
-    if (operation.kind === 'task-comment' || operation.kind === 'artifact-comment'
-      || operation.kind === 'summary-comment' || operation.kind === 'cancel-comment') {
+    if (operation.kind === 'task-comment' || operation.kind === 'artifact-comment') {
       const commentOptions = operation.kind === 'task-comment'
         ? { kind: 'task' as const, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
-          : operation.kind === 'artifact-comment'
-          ? { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
-          : operation.kind === 'summary-comment' ? (() => {
-            try {
-              const summary = summaryPayload(resolved.taskDir, resolved.taskId);
-              return summary ? { kind: 'summary' as const, body: summary.body, agent: options.agent, cwd: resolved.repoRoot, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency } : null;
-            } catch { return null; }
-          })() : (() => {
-            try {
-              const body = cancellationPayload(resolved.taskDir, resolved.taskId);
-              return body ? { kind: 'cancel' as const, body, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency } : null;
-            } catch { return null; }
-          })();
+          : { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency };
       const current = commentOptions ? inspectPlatformCommentOperation(resolved.taskId, commentOptions) : null;
       if (!current) {
         pending.push(operation.id);
@@ -443,6 +381,7 @@ async function recoverPlatformOperationsOnce(
       remote = platformResult('blocked', { error: { code: value.code || 'PLATFORM_OPERATION_RECOVERY_FAILED', message: value.message || String(error), retryable: true } });
     }
     const succeeded = (remote.status === 'applied' || remote.status === 'no-op') && !remote.error;
+    const latestManagedSummary = readPlatformOperationJournal(resolved.taskId, resolved.repoRoot).operations.find((item) => item.id === operation.id)?.managedSummary;
     try {
       recordPlatformOperation({
         taskRef: resolved.taskId,
@@ -454,6 +393,7 @@ async function recoverPlatformOperationsOnce(
         ...(operation.issueCreate ? { issueCreate: operation.issueCreate } : {}),
         ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
         ...(operation.pullRequestSummary ? { pullRequestSummary: operation.pullRequestSummary } : {}),
+        ...(latestManagedSummary ?? operation.managedSummary ? { managedSummary: latestManagedSummary ?? operation.managedSummary } : {}),
         ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : 'unknown',
@@ -489,7 +429,7 @@ async function recoverPlatformOperations(
   }
   const eligible = (operation: typeof initial.operations[number]) => operation.id !== options.excludeId
     && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED'));
+      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED' && !operation.managedSummary));
   const first = initial.operations.filter(eligible);
   if (!first.length) return result('no-op', [], []);
   const operationLimit = options.limit === undefined ? first.length : Math.max(1, options.limit);

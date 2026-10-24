@@ -4,7 +4,11 @@ import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { ResolveRefResult } from '../task/resolve-ref.ts';
+import { coordinateManagedSummary, coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { ManagedSummaryPolicy, ManagedSummaryRemoteComment } from './managed-summary-core.ts';
+import { executeManagedSummary } from './managed-summary-core.ts';
+import type { PlatformOperation as JournalOperation } from '../task/platform-operation-journal.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { providerErrorRetryable } from './provider-validation.ts';
@@ -59,8 +63,10 @@ type SyncOptions = {
   summaryAuthorization?: { sha256: string };
   dependency?: 'deferred' | 'required';
   skipQueue?: boolean;
+  queuedOperation?: JournalOperation;
   taskProjection?: { content: string; sha256: string };
 };
+type ResolvedTaskRef = Extract<ResolveRefResult, { ok: true }>;
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
   return provider.identity?.comment === 'number' && /^\d+$/.test(id) ? Number(id) : id;
@@ -556,6 +562,10 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
     });
   }
+  if (options.kind === 'summary' || options.kind === 'cancel') return platformResult('blocked', {
+    resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
+    error: { code: 'MANAGED_SUMMARY_CORE_REQUIRED', message: 'Issue summary publication must use the managed summary operation core', retryable: false }
+  });
   let desired: RenderedChunk[];
   try {
     const projectedContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
@@ -688,99 +698,6 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
     }
     operations.push({ name: `comment:${comment.id}`, status: 'applied', reasonCode: 'STALE_CHUNK_DELETED' });
   }
-  if (options.kind === 'summary') {
-    const refreshed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
-    if (!refreshed.ok) {
-      return platformResult(isRetryable(refreshed.error) ? 'blocked' : 'failed', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: refreshed.error
-      });
-    }
-    const position = summaryPosition(refreshed.value, resolved.taskId);
-    const expectedBody = desired[0]?.body;
-    const matchingSummary = refreshed.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === MARKERS.summary(resolved.taskId));
-    if (matchingSummary.length !== 1 || !expectedBody || normalizeCommentContent(matchingSummary[0]!.body) !== normalizeCommentContent(expectedBody)) {
-      return platformResult('blocked', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
-        error: { code: 'SUMMARY_BODY_READBACK_FAILED', message: 'Remote summary body did not match the rendered delivery summary', retryable: true }
-      });
-    }
-    if (!position.ok && !position.known) {
-      return platformResult('blocked', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
-        error: { code: 'SUMMARY_POSITION_UNVERIFIED', message: 'Summary comment ordering cannot be proven from the provider snapshot', retryable: true }
-      });
-    }
-    if (!position.ok && position.summary) {
-      const owner = position.summary.user?.login;
-      if (!options.summaryAuthorization || options.summaryAuthorization.sha256 !== createHash('sha256').update(options.body ?? '').digest('hex')
-        || !owner || owner !== context.platform.currentUser) {
-        return platformResult('failed', {
-          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
-          error: { code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'summary reposition requires current finalization authorization and an owned durable summary', retryable: false }
-        });
-      }
-      const deleted = loaded.value.provider.comments?.delete
-        ? await loaded.value.provider.comments.delete({
-          context: providerOperationContext(loaded.value), parent: issueIdentityFromTask,
-          comment: { kind: 'id', value: String(position.summary.id) },
-          mutation: { idempotencyKey: `summary-reposition-delete:${resolved.taskId}:${position.summary.id}` }
-        })
-        : unsupportedProviderOperation(loaded.value.provider, 'comments.delete');
-      if (!deleted.ok) {
-        return platformResult(isRetryable(deleted.error) ? 'blocked' : 'failed', {
-          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: deleted.error
-        });
-      }
-      const written = loaded.value.provider.comments?.write
-        ? await loaded.value.provider.comments.write({
-          context: providerOperationContext(loaded.value), parent: issueIdentityFromTask, body: desired[0]!.body,
-          mutation: { idempotencyKey: `summary-reposition-write:${resolved.taskId}` }
-        })
-        : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
-      if (!written.ok) {
-        return platformResult(isRetryable(written.error) ? 'blocked' : 'failed', {
-          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: written.error
-        });
-      }
-      ids.splice(0, ids.length, providerCommentId((written.value as { remoteId: string }).remoteId, loaded.value.provider));
-      operations.push({ name: `comment:${desired[0]!.marker}`, status: 'applied', reasonCode: 'SUMMARY_REPOSITIONED' });
-      const reconciled = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
-      const finalSummaries = reconciled.ok
-        ? reconciled.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === MARKERS.summary(resolved.taskId))
-        : [];
-      if (!reconciled.ok || finalSummaries.length !== 1 || !desired[0]
-        || normalizeCommentContent(finalSummaries[0]!.body) !== normalizeCommentContent(desired[0].body)) {
-        const error = reconciled.ok
-          ? { code: 'SUMMARY_BODY_READBACK_FAILED', message: 'Remote summary body did not match the final rendered delivery summary', retryable: true }
-          : reconciled.error;
-        return platformResult(isRetryable(error) ? 'blocked' : 'failed', {
-          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error
-        });
-      }
-      if (!summaryPosition(reconciled.value, resolved.taskId).ok) {
-        const error = reconciled.ok
-          ? { code: 'SUMMARY_POSITION_UNVERIFIED', message: 'Summary comment is not provably last among task-managed comments', retryable: true }
-          : reconciled.error;
-        return platformResult(isRetryable(error) ? 'blocked' : 'failed', {
-          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error
-        });
-      }
-    }
-  }
-  if (options.kind === 'cancel') {
-    const refreshed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
-    if (!refreshed.ok) return platformResult(isRetryable(refreshed.error) ? 'blocked' : 'failed', {
-      ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: refreshed.error
-    });
-    const marker = MARKERS.cancel(resolved.taskId);
-    const matches = refreshed.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === marker);
-    if (matches.length !== 1 || !desired[0] || normalizeCommentContent(matches[0]!.body) !== normalizeCommentContent(desired[0].body)) {
-      return platformResult('blocked', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
-        error: { code: 'SUMMARY_BODY_READBACK_FAILED', message: 'Remote cancellation body did not match the rendered cancellation summary', retryable: true }
-      });
-    }
-  }
   const changed = operations.some((operation) => operation.status === 'applied');
   const result = platformResult(changed ? 'applied' : 'no-op', {
     ...contextFields(context),
@@ -793,19 +710,91 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
   return result;
 }
 
+function issueSummaryPositionSatisfied(taskId: string, comments: readonly ManagedSummaryRemoteComment[], marker: string): boolean {
+  const managed = comments.filter((comment) => comment.body.split('\n', 1)[0]?.startsWith(`<!-- sync-issue:${taskId}:`));
+  const summary = managed.filter((comment) => comment.body.split('\n', 1)[0] === marker);
+  return summary.length === 1 && managed.every((comment) => Number.isSafeInteger(comment.createdSequence)
+    && comment.createdSequence !== null && summary[0]!.createdSequence !== null
+    && summary[0]!.createdSequence! >= comment.createdSequence!);
+}
+
+function managedIssueSummaryPolicy(resolved: ResolvedTaskRef, options: SyncOptions, kind: 'summary-comment' | 'cancel-comment', requestDigest: string): ManagedSummaryPolicy {
+  return {
+    kind,
+    taskRef: resolved.taskId,
+    target: options.kind,
+    requestDigest: options.queuedOperation?.managedSummary?.requestDigest ?? requestDigest,
+    dependency: options.dependency ?? 'deferred',
+    cwd: resolved.repoRoot,
+    client: options.client,
+    agent: options.agent,
+    prepare: async () => {
+      const latest = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const identity = taskIssueIdentity(parseTaskFrontmatter(latest));
+      if (!identity) throw Object.assign(new Error('Task has no valid platform issue identity'), { code: 'ISSUE_NOT_LINKED' });
+      const desired = expectedComments(resolved.taskId, latest, resolved.taskDir, resolved.repoRoot, options);
+      const item = desired[0];
+      if (!item) throw Object.assign(new Error('Managed summary renderer produced no comment'), { code: 'COMMENT_PAYLOAD_INVALID' });
+      return {
+        parent: identity, marker: item.marker, body: item.body,
+        position: options.kind === 'summary' ? 'summary-last' : 'none', fence: {},
+        ...(options.summaryAuthorization ? { authorizationDigest: options.summaryAuthorization.sha256 } : {})
+      };
+    },
+    validate: async (execution) => {
+      const latest = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      let identity;
+      try { identity = taskIssueIdentity(parseTaskFrontmatter(latest)); }
+      catch (error) { return { ...taskIssueIdentityError(error), retryable: false }; }
+      if (!identity || JSON.stringify(identity) !== JSON.stringify(execution.parent)) return {
+        code: 'MANAGED_SUMMARY_TARGET_CHANGED', message: 'Task issue identity changed after summary execution was prepared', retryable: true
+      };
+      if (execution.authorizationDigest && execution.authorizationDigest !== createHash('sha256').update(options.body ?? '').digest('hex')) return {
+        code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'Summary reposition authorization no longer matches the frozen request', retryable: false
+      };
+      return null;
+    },
+    positionSatisfied: (comments, marker) => issueSummaryPositionSatisfied(resolved.taskId, comments, marker),
+    authorizeReposition: (comment, currentUser) => {
+      if (!options.summaryAuthorization || options.summaryAuthorization.sha256 !== createHash('sha256').update(options.body ?? '').digest('hex')
+        || !comment.author || !currentUser || comment.author !== currentUser) return {
+        code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'summary reposition requires current finalization authorization and an owned durable summary', retryable: false
+      };
+      return null;
+    }
+  };
+}
+
+async function syncManagedIssueComment(resolved: ResolvedTaskRef, options: SyncOptions): Promise<PlatformResult> {
+  const kind = options.kind === 'summary' ? 'summary-comment' : 'cancel-comment';
+  const requestDigest = createHash('sha256').update(JSON.stringify({ kind, body: options.body ?? '', authorization: options.summaryAuthorization?.sha256 ?? null })).digest('hex');
+  const persisted = options.queuedOperation?.managedSummary;
+  if (persisted && !persisted.execution && persisted.requestDigest !== requestDigest) return platformResult('blocked', { error: {
+    code: 'MANAGED_SUMMARY_REQUEST_CHANGED', message: 'Queued Issue summary source no longer matches its persisted request digest', retryable: false
+  } });
+  const policy = managedIssueSummaryPolicy(resolved, options, kind, requestDigest);
+  const operation = { taskRef: resolved.taskId, cwd: resolved.repoRoot, kind, target: options.kind, expectedDigest: requestDigest, dependency: options.dependency ?? 'deferred' } as const;
+  if (options.queuedOperation) return (await executeManagedSummary(policy, options.queuedOperation)).result;
+  if (options.skipQueue) return platformResult('blocked', { error: {
+    code: 'MANAGED_SUMMARY_OPERATION_REQUIRED', message: 'Managed summary recovery requires the existing queued operation identity', retryable: false
+  } });
+  return (await coordinateManagedSummary({ operation, policy, agent: options.agent, client: options.client })).result;
+}
+
 async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return syncPlatformCommentImpl(taskRef, options);
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return syncPlatformCommentImpl(taskRef, options);
 
+  if (options.kind === 'summary' || options.kind === 'cancel') return syncManagedIssueComment(resolved, options);
+
   let operation: { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string };
   try {
     const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
     const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
     const content = desired.map((chunk) => chunk.content).join('\0');
-    const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment'
-      : options.kind === 'cancel' ? 'cancel-comment' : 'artifact-comment';
+    const kind = options.kind === 'task' ? 'task-comment' : 'artifact-comment';
     const target = options.kind === 'artifact' ? options.artifact! : options.kind;
     operation = { kind, target, expectedDigest: createHash('sha256').update(content).digest('hex') };
   } catch {
@@ -821,6 +810,36 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     block: (error) => platformResult('blocked', { error }),
     persistenceFailure: (error) => platformResult('failed', { error })
   });
+}
+
+async function recoverManagedPlatformComment(taskId: string, operation: JournalOperation, options: { agent: string; cwd: string; client?: PlatformClient }) {
+  const kind = operation.kind === 'summary-comment' ? 'summary-comment' : 'cancel-comment';
+  const execution = operation.managedSummary?.execution;
+  if (!execution) return platformResult('blocked', { error: {
+    code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING', message: 'Managed Issue comment has no frozen execution evidence', retryable: true
+  } });
+  const policy: ManagedSummaryPolicy = {
+    kind, taskRef: taskId, target: operation.target,
+    requestDigest: operation.managedSummary?.requestDigest ?? '', dependency: operation.dependency,
+    cwd: options.cwd, client: options.client, agent: options.agent,
+    prepare: async () => { throw Object.assign(new Error('Recovery must use frozen managed summary evidence'), { code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING' }); },
+    validate: async (frozen) => {
+      const resolved = resolveTaskRef(taskId, { repoRoot: options.cwd });
+      if (!resolved.ok) return { code: resolved.code, message: resolved.message, retryable: false };
+      const identity = taskIssueIdentity(parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')));
+      return identity && JSON.stringify(identity) === JSON.stringify(frozen.parent) ? null : {
+        code: 'MANAGED_SUMMARY_TARGET_CHANGED', message: 'Bound Issue identity differs from the frozen managed comment target', retryable: true
+      };
+    },
+    positionSatisfied: (comments: readonly ManagedSummaryRemoteComment[], marker: string) => {
+      const managed = comments.filter((comment) => comment.body.split('\n', 1)[0]?.startsWith(`<!-- sync-issue:${taskId}:`));
+      const summary = managed.filter((comment) => comment.body.split('\n', 1)[0] === marker);
+      return summary.length === 1 && managed.every((comment) => Number.isSafeInteger(comment.createdSequence)
+        && comment.createdSequence !== null && summary[0]!.createdSequence !== null
+        && summary[0]!.createdSequence! >= comment.createdSequence!);
+    }
+  };
+  return (await executeManagedSummary(policy, operation)).result;
 }
 
 function inspectPlatformCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string; id: string } | null {
@@ -902,6 +921,7 @@ export {
   normalizeCommentContent,
   renderTaskComment,
   renderTaskCommentResult,
+  recoverManagedPlatformComment,
   isTaskCommentTooLarge,
   syncPlatformComment,
   validateRelatedMarkerSet,
