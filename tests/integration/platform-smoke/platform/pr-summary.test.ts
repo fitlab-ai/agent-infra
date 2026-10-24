@@ -9,7 +9,6 @@ import { execFileSync } from 'node:child_process';
 import {
   buildPullRequestSummary,
   reportWrite,
-  reconcileSummaryComment,
   summaryContext,
   syncPullRequestSummary as syncTypedPullRequestSummary,
   warningResultForPrimary,
@@ -188,6 +187,7 @@ type ResolvedContextClientOptions = {
   headSequence?: string[];
   deleteCalls?: { value: number };
   commentWrites?: { value: number };
+  onCommentWrite?: () => void;
   comments?: Array<{ id: number; body: string }>;
   writtenBodies?: string[];
   pullRequestFailureAt?: number;
@@ -231,6 +231,7 @@ function resolvedContextClient(
       if (args.some((value: string) => value.includes('/issues/42/comments'))) {
         if (args.includes('POST') || args.includes('PATCH')) {
           if (options.commentWrites) options.commentWrites.value += 1;
+          options.onCommentWrite?.();
           const body = request?.input ? JSON.parse(request.input).body as string : '';
           if (options.writtenBodies && request?.input) options.writtenBodies.push(body);
           const current = remoteComments.find((comment) => comment.body.includes(`<!-- sync-pr:TASK-20260101-000042:summary -->`));
@@ -274,6 +275,7 @@ test('PR summary envelope owns marker and current HEAD', () => {
 test('queued PR summary recovery replays the desired summary through the configured client', async () => {
   const fixture = summaryFixture();
   const commentWrites = { value: 0 };
+  let operationId: string | null = null;
   try {
     const body = summaryPayload('## Summary');
     const report = readPrChangeReport(fixture.reportPath);
@@ -294,15 +296,22 @@ test('queued PR summary recovery replays the desired summary through the configu
       pullRequestSummary: { body, changeReportFile: fixture.reportPath },
       managedSummary: { requestDigest: createHash('sha256').update(JSON.stringify({ body, changeReportFile: fixture.reportPath, manualValidation: null })).digest('hex') }
     });
+    operationId = operation.id;
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
       agent: 'codex', cwd: fixture.root,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites })
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites, onCommentWrite: () => {
+        const current = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operationId);
+        assert.equal(current?.state, 'pending');
+        assert.ok(current?.managedSummary?.execution);
+      } })
     });
     const persisted = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
 
     assert.equal(recovered.status, 'applied');
     assert.equal(commentWrites.value, 1);
     assert.equal(persisted?.state, 'succeeded');
+    assert.equal(persisted?.id, operation.id);
+    assert.equal(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.length, 1);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -715,6 +724,8 @@ test('queued manual-validation summary recovery rechecks the persisted transacti
     platformConfig.platform.providers.trae.config.initialSummaryBody = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
     fs.writeFileSync(configPath, JSON.stringify(platformConfig));
     const operation = queueOpaqueSummary(fixture, body, { phase: 'pending', transactionId });
+    assert.equal(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'queued');
+    assert.equal(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.filter((item) => ['queued', 'pending', 'unknown'].includes(item.state))[0]?.id, operation.id);
 
     const recovered = await recoverPlatformOperations(fixture.taskId, 'all', { agent: 'codex', cwd: fixture.root });
 
@@ -743,14 +754,6 @@ test('queued ordinary manual-validation pending summary without transaction cont
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
-});
-
-test('PR summary reconciliation creates, updates, converges and rejects duplicate markers', () => {
-  const desired = buildPullRequestSummary('TASK-1', 'Summary', 'abc');
-  assert.deepEqual(reconcileSummaryComment([], 'TASK-1', desired), { action: 'create', commentId: null });
-  assert.deepEqual(reconcileSummaryComment([{ id: 2, body: desired }], 'TASK-1', desired), { action: 'no-op', commentId: 2 });
-  assert.deepEqual(reconcileSummaryComment([{ id: 2, body: 'old\n<!-- sync-pr:TASK-1:summary -->' }], 'TASK-1', desired), { action: 'update', commentId: 2 });
-  assert.equal(reconcileSummaryComment([{ id: 2, body: desired }, { id: 3, body: desired }], 'TASK-1', desired).action, 'conflict');
 });
 
 test('change-report writes a task-bound sidecar and converges on replay', async () => {

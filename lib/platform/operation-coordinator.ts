@@ -153,13 +153,18 @@ async function executeQueuedManagedSummary(input: ManagedSummaryCoordinateInput,
   }
 }
 
+function managedSummaryOutcomeState(output: ManagedSummaryOutput, persistedState?: string): 'succeeded' | 'failed' | 'unknown' {
+  if ((output.result.status === 'applied' || output.result.status === 'no-op') && !output.result.error) return 'succeeded';
+  if (persistedState === 'failed' || (output.result.status === 'failed' && output.result.error?.retryable === false)) return 'failed';
+  return 'unknown';
+}
+
 function persistManagedSummaryOutcome(input: ManagedSummaryCoordinateInput, stableId: string, requestDigest: string, output: ManagedSummaryOutput): ManagedSummaryOutput {
-  const succeeded = (output.result.status === 'applied' || output.result.status === 'no-op') && !output.result.error;
   const terminal = readPlatformOperationJournal(input.operation.taskRef, input.operation.cwd).operations.find((item) => item.id === stableId);
   try {
     recordPlatformOperation({
       ...input.operation, stableId, managedSummary: terminal?.managedSummary ?? { requestDigest },
-      state: succeeded ? 'succeeded' : output.result.status === 'failed' && output.result.error?.retryable === false ? 'failed' : 'unknown',
+      state: managedSummaryOutcomeState(output, terminal?.state),
       lastCode: output.result.error?.code ?? null
     });
   } catch (error) {

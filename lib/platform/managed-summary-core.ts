@@ -116,7 +116,7 @@ function operationResult(
   loaded: LoadedContext,
   execution: ManagedSummaryExecution,
   action: ManagedSummaryOutput['action'],
-  status: 'applied' | 'no-op' | 'blocked' | 'failed',
+  status: 'applied' | 'no-op' | 'planned' | 'blocked' | 'failed',
   error: PlatformError | null = null,
   changed = status === 'applied'
 ): ManagedSummaryOutput {
@@ -126,7 +126,7 @@ function operationResult(
       changed,
       platform: loaded.context.platform,
       capabilities: loaded.context.capabilities,
-      operations: [{ name: `summary:${action}`, status: status === 'applied' ? 'applied' : status === 'no-op' ? 'no-op' : 'failed', reasonCode: error?.code ?? null }],
+      operations: [{ name: `summary:${action}`, status: status === 'blocked' ? 'failed' : status, reasonCode: error?.code ?? null }],
       resource: {
         kind: execution.parentKind,
         number: resourceIdentityNumber(execution.parent),
@@ -155,13 +155,16 @@ async function listForExecution(policy: ManagedSummaryPolicy, loaded: LoadedCont
 }
 
 function matchesFrozenPreimage(current: ManagedSummaryRemoteComment | null, execution: ManagedSummaryExecution): boolean {
-  if (execution.action === 'reposition' && (execution.phase === 'deleted' || execution.phase === 'prepared')) return current === null;
+  if (execution.action === 'reposition' && execution.phase === 'deleted') return current === null;
+  if (execution.action === 'reposition' && execution.phase === 'prepared' && current === null) return true;
   if (execution.preimage.kind === 'absent') return current === null;
   return current?.id === execution.preimage.id && normalizeBody(current.body) === normalizeBody(execution.preimage.body);
 }
 
 function hasFrozenPostimage(current: ManagedSummaryRemoteComment | null, positionOk: boolean, execution: ManagedSummaryExecution): boolean {
-  return Boolean(current && normalizeBody(current.body) === normalizeBody(execution.body) && positionOk);
+  return Boolean(current
+    && (execution.action !== 'update' || (execution.preimage.kind === 'comment' && current.id === execution.preimage.id))
+    && normalizeBody(current.body) === normalizeBody(execution.body) && positionOk);
 }
 
 function unknownOutcome(policy: ManagedSummaryPolicy, operation: PlatformOperation, loaded: LoadedContext, execution: ManagedSummaryExecution): ManagedSummaryOutput {
@@ -377,25 +380,11 @@ function ambiguousMarker(policy: ManagedSummaryPolicy): PlatformError {
   };
 }
 
-function noOpExecution(policy: ManagedSummaryPolicy, operation: PlatformOperation, prepared: ManagedSummaryPrepared, current: ManagedSummaryRemoteComment): ManagedSummaryExecution {
-  return {
-    parentKind: policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue', parent: prepared.parent,
-    marker: prepared.marker, body: prepared.body, bodyDigest: digest(prepared.body), action: 'update', phase: 'prepared',
-    preimage: { kind: 'comment', id: current.id, body: current.body, bodyDigest: digest(current.body) },
-    fence: prepared.fence, position: prepared.position, idempotencyKey: `${operation.id}:noop`,
-    ...(prepared.authorizationDigest ? { authorizationDigest: prepared.authorizationDigest } : {})
-  };
-}
-
-async function returnNoop(policy: ManagedSummaryPolicy, operation: PlatformOperation, loaded: LoadedContext, prepared: ManagedSummaryPrepared, current: ManagedSummaryRemoteComment): Promise<ManagedSummaryOutput> {
-  const validation = await policy.validate(noOpExecution(policy, operation, prepared, current), 'readback');
+async function returnNoop(policy: ManagedSummaryPolicy, operation: Pick<PlatformOperation, 'id'>, loaded: LoadedContext, prepared: ManagedSummaryPrepared, current: ManagedSummaryRemoteComment): Promise<ManagedSummaryOutput> {
+  const execution = freezeExecution(policy, operation, prepared, 'update', current, 'noop');
+  const validation = await policy.validate(execution, 'readback');
   if (validation) return errorResult(loaded, prepared.parent, validation, 'no-op', policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue');
-  return { action: 'no-op', result: platformResult('no-op', {
-    platform: loaded.context.platform, capabilities: loaded.context.capabilities,
-    resource: { kind: policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue', number: resourceIdentityNumber(prepared.parent), identity: prepared.parent },
-    comment: { kind: prepared.marker.includes(':cancel -->') ? 'cancel' : 'summary', marker: prepared.marker, ids: [/^\d+$/u.test(current.id) ? Number(current.id) : current.id], parts: 1 },
-    error: null
-  }) };
+  return operationResult(loaded, execution, 'no-op', 'no-op', null, false);
 }
 
 function plannedAction(policy: ManagedSummaryPolicy, loaded: LoadedContext, prepared: ManagedSummaryPrepared, comments: readonly ManagedSummaryRemoteComment[], current: ManagedSummaryRemoteComment | null): { action: ManagedSummaryExecution['action'] } | { result: ManagedSummaryOutput } {
@@ -405,14 +394,14 @@ function plannedAction(policy: ManagedSummaryPolicy, loaded: LoadedContext, prep
   return authorization ? { result: errorResult(loaded, prepared.parent, authorization) } : { action: 'reposition' };
 }
 
-function freezeExecution(policy: ManagedSummaryPolicy, operation: PlatformOperation, prepared: ManagedSummaryPrepared, action: ManagedSummaryExecution['action'], current: ManagedSummaryRemoteComment | null): ManagedSummaryExecution {
+function freezeExecution(policy: ManagedSummaryPolicy, operation: Pick<PlatformOperation, 'id'>, prepared: ManagedSummaryPrepared, action: ManagedSummaryExecution['action'], current: ManagedSummaryRemoteComment | null, keySuffix: string = action): ManagedSummaryExecution {
   return {
     parentKind: policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue', parent: prepared.parent,
     marker: prepared.marker, body: prepared.body, bodyDigest: digest(prepared.body), action, phase: 'prepared',
     preimage: current
       ? { kind: 'comment', id: current.id, body: current.body, bodyDigest: digest(current.body) }
       : { kind: 'absent' },
-    fence: prepared.fence, position: prepared.position, idempotencyKey: `${operation.id}:${action}`,
+    fence: prepared.fence, position: prepared.position, idempotencyKey: `${operation.id}:${keySuffix}`,
     ...(prepared.authorizationDigest ? { authorizationDigest: prepared.authorizationDigest } : {})
   };
 }
@@ -435,6 +424,31 @@ async function executeFreshSummary(policy: ManagedSummaryPolicy, operation: Plat
   return performWrite(policy, operation, loaded, execution, listed.comments, false);
 }
 
+async function previewManagedSummary(policy: ManagedSummaryPolicy, operationId: string): Promise<ManagedSummaryOutput> {
+  const loaded = policy.loaded
+    ? { ok: true as const, value: policy.loaded }
+    : await resolvePlatformProviderContext({ cwd: policy.cwd, client: policy.client });
+  if (!loaded.ok) return { action: 'no-op', result: loaded.context };
+  const input = await preparedIntent(policy, loaded.value);
+  if ('result' in input) return input.result;
+  const { prepared } = input;
+  const listed = await remoteComments(loaded.value, prepared.parent);
+  if (!listed.ok) return errorResult(loaded.value, prepared.parent, listed.error);
+  const matches = listed.comments.filter((comment) => markerBody(comment.body) === prepared.marker);
+  if (matches.length > 1) return errorResult(loaded.value, prepared.parent, ambiguousMarker(policy));
+  const current = matches[0] ?? null;
+  const positionOk = prepared.position === 'none' || (policy.positionSatisfied?.(listed.comments, prepared.marker) ?? true);
+  if (current && normalizeBody(current.body) === normalizeBody(prepared.body) && positionOk) {
+    return returnNoop(policy, { id: operationId }, loaded.value, prepared, current);
+  }
+  const plan = plannedAction(policy, loaded.value, prepared, listed.comments, current);
+  if ('result' in plan) return plan.result;
+  const execution = freezeExecution(policy, { id: operationId }, prepared, plan.action, current);
+  const validation = await policy.validate(execution, 'before-write');
+  if (validation) return errorResult(loaded.value, execution.parent, validation, execution.action);
+  return operationResult(loaded.value, execution, execution.action, 'planned', null, false);
+}
+
 async function executeManagedSummary(policy: ManagedSummaryPolicy, operation: PlatformOperation): Promise<ManagedSummaryOutput> {
   const loaded = policy.loaded
     ? { ok: true as const, value: policy.loaded }
@@ -446,10 +460,14 @@ async function executeManagedSummary(policy: ManagedSummaryPolicy, operation: Pl
     message: 'Pending managed summary has no frozen preimage/postimage evidence; no remote mutation was attempted',
     retryable: true
   });
-  return intent.execution
-    ? observeOrRetry(policy, operation, loaded.value, intent.execution)
-    : executeFreshSummary(policy, operation, loaded.value);
+  if (intent.execution) return observeOrRetry(policy, operation, loaded.value, intent.execution);
+  if (operation.state !== 'queued') return errorResult(loaded.value, null, {
+    code: 'MANAGED_SUMMARY_EXECUTION_EVIDENCE_MISSING',
+    message: 'A pending or unknown summary without frozen execution evidence cannot be prepared or written',
+    retryable: true
+  });
+  return executeFreshSummary(policy, operation, loaded.value);
 }
 
-export { executeManagedSummary, digest as managedSummaryDigest };
+export { executeManagedSummary, previewManagedSummary, digest as managedSummaryDigest };
 export type { ManagedSummaryKind, ManagedSummaryOutput, ManagedSummaryPolicy, ManagedSummaryPrepared, ManagedSummaryRemoteComment };
