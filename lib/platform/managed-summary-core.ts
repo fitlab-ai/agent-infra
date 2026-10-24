@@ -400,7 +400,6 @@ function freezeExecution(policy: ManagedSummaryPolicy, operation: Pick<PlatformO
 }
 
 type ReadOnlySummaryPlan = Readonly<{
-  prepared: ManagedSummaryPrepared;
   comments: ManagedSummaryRemoteComment[];
   execution: ManagedSummaryExecution;
   noOp: boolean;
@@ -422,14 +421,14 @@ async function planSummary(
   const positionOk = prepared.position === 'none' || (policy.positionSatisfied?.(listed.comments, prepared.marker) ?? true);
   if (current && normalizeBody(current.body) === normalizeBody(prepared.body) && positionOk) {
     return {
-      prepared, comments: listed.comments,
+      comments: listed.comments,
       execution: freezeExecution(policy, { id: operationId }, prepared, 'update', current, 'noop'), noOp: true
     };
   }
   const action = plannedAction(policy, loaded, prepared, listed.comments, current);
   if ('result' in action) return action;
   return {
-    prepared, comments: listed.comments,
+    comments: listed.comments,
     execution: freezeExecution(policy, { id: operationId }, prepared, action.action, current), noOp: false
   };
 }
@@ -440,7 +439,7 @@ async function executeFreshSummary(policy: ManagedSummaryPolicy, operation: Plat
   if (plan.noOp) {
     const validation = await policy.validate(plan.execution, 'readback');
     return validation
-      ? errorResult(loaded, plan.prepared.parent, validation, 'no-op', policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue')
+      ? errorResult(loaded, plan.execution.parent, validation, 'no-op', policy.kind === 'pull-request-summary' ? 'pull-request' : 'issue')
       : operationResult(loaded, plan.execution, 'no-op', 'no-op', null, false);
   }
   recordExecution(policy, operation, plan.execution, 'pending');

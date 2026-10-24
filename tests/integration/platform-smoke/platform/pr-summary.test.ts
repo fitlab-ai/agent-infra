@@ -182,6 +182,63 @@ function queueOpaqueSummary(
   });
 }
 
+function freezeFinalSummaryRecovery(
+  fixture: ReturnType<typeof summaryFixture>,
+  phase: 'receipt-committed' | 'final-promotion-in-progress' = 'final-promotion-in-progress'
+) {
+  const transactionId = 'mv-frozen-final-noop';
+  const evidenceDigest = 'c'.repeat(64);
+  const typed = JSON.parse(summaryPayload('### ✅ Manual Validation Passed\n\nFinal validation summary.'));
+  typed.manualValidation = { state: 'passed', detail: 'Final validation summary.' };
+  const report = readPrChangeReport(fixture.reportPath);
+  if (!report.ok) throw new Error(report.error.message);
+  const rendered = replaceCanonicalReportPlaceholder(renderPrSummaryContent(parsePrSummaryContent(typed)), report.value);
+  if (!rendered.ok) throw new Error(rendered.error.message);
+  let body = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
+  const transaction = createManualValidationTransaction({
+    transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
+    summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') }, pendingSummaryDigest: 'b'.repeat(64),
+    finalSummaryDigest: manualValidationFinalSummaryDigest(body), artifact: 'manual-validation.md', attempt: 1,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+  });
+  const receipt = createManualValidationReceipt({
+    transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
+    artifact: 'manual-validation.md', artifactSha256: 'd'.repeat(64), pendingSummaryDigest: transaction.pendingSummaryDigest,
+    finalSummaryDigest: transaction.finalSummaryDigest, committedAt: '2026-01-01T00:00:00.000Z'
+  });
+  const staged = transitionManualValidationTransaction(transaction, 'summary-staged');
+  if (!staged.ok) throw new Error(staged.error.message);
+  const committed = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
+  if (!committed.ok) throw new Error(committed.error.message);
+  const selected = phase === 'receipt-committed'
+    ? committed
+    : transitionManualValidationTransaction(committed.value, 'final-promotion-in-progress', { eventAppended: true });
+  if (!selected.ok) throw new Error(selected.error.message);
+  const artifactDir = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId);
+  writeManualValidationReceiptAtomic(artifactDir, receipt);
+  writeManualValidationTransactionAtomic(artifactDir, selected.value);
+  body = body.replace('[[manual-validation-receipt]]', `<!-- manual-validation-receipt: transaction=${transactionId}; receipt=${receipt.receiptDigest}; evidence=${evidenceDigest}; head=${fixture.headSha} -->`);
+
+  const marker = `<!-- sync-pr:${fixture.taskId}:summary -->`;
+  const execution = {
+    parentKind: 'pull-request' as const, parent: { kind: 'number' as const, value: 42 }, marker,
+    body, bodyDigest: createHash('sha256').update(body).digest('hex'), action: 'update' as const, phase: 'written' as const,
+    preimage: { kind: 'comment' as const, id: '9', body, bodyDigest: createHash('sha256').update(body).digest('hex') },
+    fence: { headSha: fixture.headSha, manualValidation: { phase: 'final' as const, transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: fixture.headSha, authority: 'coordinator' as const } },
+    position: 'none' as const, idempotencyKey: 'frozen-final-noop:update', remoteId: '9'
+  };
+  const requestBody = JSON.stringify(typed);
+  const operation = recordPlatformOperation({
+    taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
+    target: JSON.stringify({ kind: 'number', value: 42 }), expectedDigest: createHash('sha256').update(requestBody).digest('hex'),
+    dependency: 'deferred', state: 'unknown', pullRequestSummary: {
+      body: requestBody, changeReportFile: fixture.reportPath,
+      manualValidation: { phase: 'final', transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: fixture.headSha, authority: 'coordinator' }
+    }, managedSummary: { requestDigest: createHash('sha256').update(requestBody).digest('hex'), execution }
+  });
+  return { body, operation };
+}
+
 type ResolvedContextClientOptions = {
   onContextResolved?: () => void;
   headSequence?: string[];
@@ -964,6 +1021,68 @@ test('frozen final manual-validation no-op rechecks the receipt and current HEAD
     });
     assert.equal(recovered.status, 'blocked', JSON.stringify(recovered));
     assert.equal(recovered.error?.code, 'MANUAL_VALIDATION_RECEIPT_MISSING');
+    assert.equal(writes.value, 0);
+    assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('frozen final recovery accepts a receipt-backed no-op only after promotion event projection', async () => {
+  const fixture = summaryFixture();
+  const writes = { value: 0 };
+  try {
+    const { body, operation } = freezeFinalSummaryRecovery(fixture);
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
+      agent: 'codex', cwd: fixture.root,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        comments: [{ id: 9, body }], commentWrites: writes
+      })
+    });
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(writes.value, 0);
+    const saved = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
+    assert.equal(saved?.state, 'succeeded');
+    assert.equal(saved?.managedSummary?.execution?.phase, 'written');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('frozen final recovery rejects a committed receipt before the promotion event', async () => {
+  const fixture = summaryFixture();
+  const writes = { value: 0 };
+  try {
+    const { body, operation } = freezeFinalSummaryRecovery(fixture, 'receipt-committed');
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
+      agent: 'codex', cwd: fixture.root,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        comments: [{ id: 9, body }], commentWrites: writes
+      })
+    });
+    assert.equal(recovered.status, 'blocked');
+    assert.equal(recovered.error?.code, 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID');
+    assert.equal(writes.value, 0);
+    assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('frozen final recovery rejects a receipt-backed no-op after the PR HEAD changes', async () => {
+  const fixture = summaryFixture();
+  const writes = { value: 0 };
+  try {
+    const { body, operation } = freezeFinalSummaryRecovery(fixture);
+    const changedHead = 'd'.repeat(40);
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
+      agent: 'codex', cwd: fixture.root,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        headSequence: [changedHead], comments: [{ id: 9, body }], commentWrites: writes
+      })
+    });
+    assert.equal(recovered.status, 'blocked');
+    assert.equal(recovered.error?.code, 'PR_SUMMARY_HEAD_RACE');
     assert.equal(writes.value, 0);
     assert.notEqual(readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
   } finally {

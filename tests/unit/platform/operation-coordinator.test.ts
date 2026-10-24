@@ -334,6 +334,39 @@ test('update compensation restores only its original comment preimage', async ()
   }
 });
 
+test('update compensation refuses to overwrite a third-party edit after a successful write', async () => {
+  const fixture = managedSummaryFixture();
+  const marker = `<!-- sync-issue:${fixture.taskId}:summary -->`;
+  const oldBody = `${marker}\noriginal`;
+  const thirdPartyBody = `${marker}\nthird-party edit after successful update`;
+  fixture.remote.push({ id: 'comment-original', body: oldBody });
+  const provider = fixture.policy.loaded!.provider.comments!;
+  const write = provider.write!;
+  provider.write = async (request) => {
+    const response = await write(request);
+    if (response.ok && request.existingComment) {
+      fixture.remote.find((comment) => comment.id === request.existingComment!.value)!.body = thirdPartyBody;
+    }
+    return response;
+  };
+  let validations = 0;
+  (fixture.policy as unknown as { validate: ManagedSummaryPolicy['validate'] }).validate = async () => ++validations === 2
+    ? { code: 'SUMMARY_READBACK_REJECTED', message: 'post-write guard rejected the result', retryable: false }
+    : null;
+  try {
+    const output = await coordinateManagedSummary({ operation: fixture.operation, policy: fixture.policy, agent: 'codex' });
+    assert.equal(output.result.status, 'blocked');
+    assert.equal(output.result.error?.code, 'MANAGED_SUMMARY_COMPENSATION_UNSAFE');
+    assert.equal(fixture.writes, 1);
+    assert.deepEqual(fixture.remote, [{ id: 'comment-original', body: thirdPartyBody }]);
+    const operation = readPlatformOperationJournal(fixture.taskId, fixture.repoRoot).operations[0];
+    assert.equal(operation?.state, 'unknown');
+    assert.equal(operation?.managedSummary?.execution?.phase, 'written');
+  } finally {
+    fs.rmSync(fixture.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('update recovery leaves a third-party body on the original comment untouched', async () => {
   const fixture = managedSummaryFixture();
   const marker = `<!-- sync-issue:${fixture.taskId}:summary -->`;
