@@ -92,7 +92,6 @@ type RecordOperationInput = Readonly<{
   pullRequestSummary?: PlatformPullRequestSummaryIntent;
   pullRequestReview?: PlatformPullRequestReviewIntent;
   replaceOperationId?: string;
-  stableId?: string;
   cwd?: string;
 }>;
 
@@ -221,7 +220,7 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
   }
   const { taskId, file } = resolveJournal(input.taskRef, input.cwd);
   const journal = parseJournal(file, taskId);
-  const id = input.stableId ?? operationId(input);
+  const id = operationId(input);
   const targetIndex = journal.operations.findIndex((item) => item.id === id);
   const replacementIndex = input.replaceOperationId
     ? journal.operations.findIndex((item) => item.id === input.replaceOperationId)

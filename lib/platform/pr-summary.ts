@@ -19,7 +19,7 @@ import type { PlatformResult } from './types.ts';
 import type { PlatformOperation as JournalOperation, RecordOperationInput } from '../task/platform-operation-journal.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
-import { resourceIdentityEquals } from './resource-identity.ts';
+import { parseResourceIdentity, resourceIdentityEquals } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import type { ChangeRequestSnapshot } from './provider-contract.ts';
@@ -842,6 +842,14 @@ async function syncPullRequestSummary(
 async function replayPullRequestSummary(taskId: string, operation: JournalOperation, options: { agent: string; cwd: string; client?: PlatformClient }): Promise<PlatformResult> {
   const intent = operation.pullRequestSummary;
   if (!intent) return platformResult('blocked', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary content is missing', retryable: false } });
+  let target: ResourceIdentity;
+  try { target = parseResourceIdentity(JSON.parse(operation.target), 'queued pull-request summary identity'); }
+  catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary identity is invalid', retryable: false } }); }
+  const bound = await inspectPlatformPullRequest(taskId, { cwd: options.cwd, client: options.client });
+  if (!bound.pullRequest || !resourceIdentityEquals(bound.pullRequest.identity, target)) return platformResult('blocked', {
+    resource: bound.pullRequest ? { kind: 'pull-request', number: bound.pullRequest.number, identity: bound.pullRequest.identity } : undefined,
+    error: bound.error ?? { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request differs from the queued summary target', retryable: false }
+  });
   const replayed = await syncPullRequestSummary(taskId, {
     agent: options.agent, cwd: options.cwd, client: options.client, body: intent.body,
     changeReportFile: intent.changeReportFile, ...(intent.manualValidation ? { manualValidation: intent.manualValidation } : {}),

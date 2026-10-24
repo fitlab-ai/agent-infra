@@ -318,6 +318,57 @@ test('queued PR summary recovery replays the desired summary through the configu
   }
 });
 
+test('queued PR summary recovery rejects a target that differs from the current bound pull request', async () => {
+  const fixture = summaryFixture();
+  const commentWrites = { value: 0 };
+  const baseClient = resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites });
+  try {
+    const operation = recordPlatformOperation({
+      taskRef: fixture.taskId, cwd: fixture.root, kind: 'pull-request-summary',
+      target: JSON.stringify({ kind: 'number', value: 43 }), expectedDigest: 'a'.repeat(64),
+      dependency: 'deferred', state: 'queued',
+      pullRequestSummary: { body: summaryPayload('Queued for PR 43'), changeReportFile: fixture.reportPath }
+    });
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
+      agent: 'codex', cwd: fixture.root,
+      client: {
+        ...baseClient,
+        json: (args: string[], request?: { input?: string }) => args.some((arg) => arg.includes('/issues/43/comments'))
+          ? { ok: true, value: [[]] }
+          : baseClient.json(args, request)
+      }
+    });
+    const persisted = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
+
+    assert.notEqual(recovered.status, 'applied');
+    assert.equal(commentWrites.value, 0);
+    assert.notEqual(persisted?.state, 'succeeded');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('PR summary dry-run does not enqueue an operation that recovery can publish', async () => {
+  const fixture = summaryFixture();
+  const commentWrites = { value: 0 };
+  const client = resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites });
+  try {
+    const preview = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body: 'Preview only', changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op', strict: true, dryRun: true, client
+    });
+    const afterPreview = readPlatformOperationJournal(fixture.taskId, fixture.root).operations;
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', { cwd: fixture.root, agent: 'codex', client });
+
+    assert.equal(preview.status, 'planned');
+    assert.equal(afterPreview.length, 0);
+    assert.equal(recovered.status, 'no-op');
+    assert.equal(commentWrites.value, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('queued ordinary manual-validation pending summary replays without a coordinator transaction', async () => {
   const fixture = summaryFixture();
   const commentWrites = { value: 0 };

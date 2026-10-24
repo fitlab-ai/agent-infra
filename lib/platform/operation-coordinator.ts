@@ -1,8 +1,7 @@
 import { recoverPlatformOperations } from '../task/platform-operation-recovery.ts';
-import { readPlatformOperationJournal, recordPlatformOperation } from '../task/platform-operation-journal.ts';
+import { recordPlatformOperation } from '../task/platform-operation-journal.ts';
 import type { RecordOperationInput } from '../task/platform-operation-journal.ts';
 import type { PlatformError, PlatformStatus } from './types.ts';
-import { platformResult } from './types.ts';
 import type { PlatformClient } from './context.ts';
 
 type OperationResult = Readonly<{

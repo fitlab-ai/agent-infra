@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import type { ResolveRefResult } from '../task/resolve-ref.ts';
 import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import type { PlatformOperation as JournalOperation, RecordOperationInput } from '../task/platform-operation-journal.ts';
 import { resolvePlatformProviderContext } from './context.ts';
@@ -64,8 +63,6 @@ type SyncOptions = {
   queuedOperation?: JournalOperation;
   taskProjection?: { content: string; sha256: string };
 };
-type ResolvedTaskRef = Extract<ResolveRefResult, { ok: true }>;
-
 type CommentPlanStrategy = Readonly<{
   taskId: string;
   cwd: string;
@@ -90,6 +87,7 @@ async function syncCommentPlan(
   queuedOperation?: JournalOperation
 ): Promise<PlatformResult> {
   const execute = () => executeCommentPlan(strategy, strategy.client);
+  if (strategy.dryRun) return execute();
   if (queuedOperation) return execute();
   return coordinatePlatformWrite({ operation, agent: strategy.agent, client: strategy.client, execute,
     block: (error) => platformResult('blocked', { error }),
@@ -590,7 +588,16 @@ function repositionAuthorizationError(
 ): { error: PlatformResult | null; reposition: boolean } {
   const marker = desired[0]?.marker;
   const current = marker ? byMarker.get(marker) : undefined;
-  const reposition = Boolean(strategy.summaryPosition && current && !issueSummaryPositionSatisfied(strategy.taskId, comments, marker!));
+  const position = strategy.summaryPosition && current
+    ? issueSummaryPosition(strategy.taskId, comments, marker!)
+    : true;
+  if (position === null) return {
+    error: platformResult('blocked', { ...contextFields(context), resource, error: {
+      code: 'SUMMARY_POSITION_UNVERIFIED', message: 'Summary comment ordering cannot be proven from the provider snapshot', retryable: true
+    } }),
+    reposition: false
+  };
+  const reposition = Boolean(strategy.summaryPosition && current && !position);
   if (!reposition || !current) return { error: null, reposition: false };
   const error = strategy.authorizeReposition
     ? strategy.authorizeReposition(current, context.platform.currentUser ?? null)
@@ -603,9 +610,7 @@ function repositionAuthorizationError(
 
 async function inspectCommentPlan(
   strategy: CommentPlanStrategy,
-  loaded: LoadedContext,
   context: PlatformResult,
-  parent: ResourceIdentity,
   resource: PlatformResult['resource'],
   comments: RemoteComment[],
   desired: RenderedChunk[]
@@ -660,7 +665,7 @@ async function observeCommentWrite(
   const after = await listedComments(loaded.provider, loaded, parent);
   const comments = after.ok ? after.value as RemoteComment[] : [];
   const found = comments.filter((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === item.marker);
-  const positionOk = !strategy.summaryPosition || issueSummaryPositionSatisfied(strategy.taskId, comments, item.marker);
+  const positionOk = !strategy.summaryPosition || issueSummaryPosition(strategy.taskId, comments, item.marker) === true;
   const validation = strategy.validate ? await strategy.validate() : null;
   if (after.ok
     && found.length === 1
@@ -673,6 +678,39 @@ async function observeCommentWrite(
     retryable: after.ok || isRetryable(after.error)
   };
   return { valid: false, error };
+}
+
+async function verifyIssueSummaryReadback(
+  strategy: CommentPlanStrategy,
+  loaded: LoadedContext,
+  context: PlatformResult,
+  parent: ResourceIdentity,
+  resource: PlatformResult['resource'],
+  desired: RenderedChunk[],
+  operations: PlatformOperation[]
+): Promise<PlatformResult | null> {
+  if (strategy.parentKind !== 'issue' || (strategy.kind !== 'summary' && strategy.kind !== 'cancel')) return null;
+  const after = await listedComments(loaded.provider, loaded, parent);
+  if (!after.ok) return platformResult(isRetryable(after.error) ? 'blocked' : 'failed', {
+    ...contextFields(context), resource, operations, error: after.error
+  });
+  const item = desired[0];
+  const matching = item
+    ? after.value.filter((comment: RemoteComment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === item.marker)
+    : [];
+  if (!item || matching.length !== 1 || normalizeCommentContent(matching[0]!.body) !== normalizeCommentContent(item.body)) {
+    return platformResult('blocked', { ...contextFields(context), resource, operations, error: {
+      code: 'SUMMARY_BODY_READBACK_FAILED',
+      message: strategy.kind === 'cancel' ? 'Remote cancellation body did not match the rendered cancellation summary' : 'Remote summary body did not match the rendered delivery summary',
+      retryable: true
+    } });
+  }
+  if (strategy.summaryPosition && issueSummaryPosition(strategy.taskId, after.value, item.marker) !== true) {
+    return platformResult('blocked', { ...contextFields(context), resource, operations, error: {
+      code: 'SUMMARY_POSITION_UNVERIFIED', message: 'Summary comment is not provably last among task-managed comments', retryable: true
+    } });
+  }
+  return null;
 }
 
 async function compensatePullRequestComment(
@@ -711,7 +749,7 @@ async function verifyCommentWrite(
   current: RemoteComment | undefined,
   id: number | string
 ): Promise<PlatformResult['error']> {
-  if (!strategy.verifyReadback) return null;
+  if (!strategy.verifyReadback || strategy.parentKind === 'issue') return null;
   const observed = await observeCommentWrite(strategy, loaded, parent, item);
   if (observed.valid) return null;
   if (strategy.parentKind === 'pull-request') {
@@ -816,7 +854,7 @@ async function prepareCommentExecution(
   if (!listed.ok) return { ok: false, result: platformResult(isRetryable(listed.error) ? 'blocked' : 'failed', {
     ...contextFields(context), resource, error: listed.error
   }) };
-  const selection = await inspectCommentPlan(strategy, loaded.value, context, parent, resource, listed.value, desired);
+  const selection = await inspectCommentPlan(strategy, context, resource, listed.value, desired);
   if (!selection.ok) return selection;
   return {
     ok: true,
@@ -859,12 +897,11 @@ function parentComment(comment: any, provider: any): RemoteComment {
   };
 }
 
-function issueSummaryPositionSatisfied(taskId: string, comments: readonly RemoteComment[], marker: string): boolean {
+function issueSummaryPosition(taskId: string, comments: readonly RemoteComment[], marker: string): boolean | null {
   const managed = comments.filter((comment) => comment.body.split('\n', 1)[0]?.startsWith(`<!-- sync-issue:${taskId}:`));
   const summary = managed.filter((comment) => comment.body.split('\n', 1)[0] === marker);
-  return summary.length === 1 && managed.every((comment) => Number.isSafeInteger(comment.createdSequence)
-    && comment.createdSequence !== null && summary[0]!.createdSequence !== null
-    && summary[0]!.createdSequence! >= comment.createdSequence!);
+  if (summary.length !== 1 || managed.some((comment) => !Number.isSafeInteger(comment.createdSequence) || comment.createdSequence === null)) return null;
+  return managed.every((comment) => summary[0]!.createdSequence! >= comment.createdSequence!);
 }
 
 async function executeCommentPlan(
@@ -889,6 +926,8 @@ async function executeCommentPlan(
   if (!written.ok) return written.result;
   const deleted = await deleteStaleComments(strategy, loaded, context, parent, resource, selection.existing, desired, operations);
   if (deleted) return deleted;
+  const readback = await verifyIssueSummaryReadback(strategy, loaded, context, parent, resource, desired, operations);
+  if (readback) return readback;
   const changed = operations.some((operation) => operation.status === 'applied');
   return platformResult(changed ? 'applied' : 'no-op', {
     ...contextFields(context), changed, resource, operations,

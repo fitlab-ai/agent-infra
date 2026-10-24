@@ -3,16 +3,15 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
-import { inspectPlatformCommentOperation, normalizeCommentContent, syncPlatformComment } from '../platform/issue-comments.ts';
+import { inspectPlatformCommentOperation, syncPlatformComment } from '../platform/issue-comments.ts';
 import { parseDeliverySummaryContent, renderDeliverySummaryContent, parseCancelSummaryContent, renderCancelSummaryContent } from '../platform/issue-summary-content.ts';
 import { enumerateArtifacts } from './artifacts.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
 import { resolvePlatformProviderContext } from '../platform/context.ts';
 import { providerOperationContext, providerError, unsupportedProviderOperation } from '../platform/provider-bridge.ts';
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
-import { bindPlatformPullRequest, inspectPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
+import { bindPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
 import { replayPullRequestSummary } from '../platform/pr-summary.ts';
-import { parsePrSummaryContent } from '../platform/pr-summary-content.ts';
 import { publishPrReview, readReviewBodyFile } from '../platform/pr-review.ts';
 import type { PlatformClient } from '../platform/context.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
@@ -336,10 +335,23 @@ async function recoverPlatformOperationsOnce(
         }
       }
     }
-    if (operation.kind === 'task-comment' || operation.kind === 'artifact-comment') {
+    if (operation.kind === 'task-comment' || operation.kind === 'artifact-comment'
+      || operation.kind === 'summary-comment' || operation.kind === 'cancel-comment') {
       const commentOptions = operation.kind === 'task-comment'
         ? { kind: 'task' as const, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
-          : { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency };
+          : operation.kind === 'artifact-comment'
+            ? { kind: 'artifact' as const, artifact: operation.target, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency }
+            : operation.kind === 'summary-comment' ? (() => {
+              try {
+                const summary = summaryPayload(resolved.taskDir, resolved.taskId);
+                return summary ? { kind: 'summary' as const, body: summary.body, agent: options.agent, cwd: resolved.repoRoot, summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency } : null;
+              } catch { return null; }
+            })() : (() => {
+              try {
+                const body = cancellationPayload(resolved.taskDir, resolved.taskId);
+                return body ? { kind: 'cancel' as const, body, agent: options.agent, cwd: resolved.repoRoot, dependency: operation.dependency } : null;
+              } catch { return null; }
+            })();
       const current = commentOptions ? inspectPlatformCommentOperation(resolved.taskId, commentOptions) : null;
       if (!current) {
         pending.push(operation.id);
