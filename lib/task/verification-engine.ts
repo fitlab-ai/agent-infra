@@ -192,12 +192,9 @@ function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFil
   if (expectedStep && metadata.current_step !== expectedStep) {
     let validLifecycleArtifact = false;
     if (currentTask) {
-      const { section, invalidEntries } = inspectActivityLog(task.content);
-      if (section && invalidEntries.length === 0) {
-        validLifecycleArtifact = checkArtifactLifecycleActivityLog(
-          taskDir, artifactFile, skillName, task
-        )?.status === "pass";
-      }
+      validLifecycleArtifact = checkArtifactLifecycleActivityLog(
+        taskDir, artifactFile, skillName, task
+      )?.status === "pass";
     }
     if (!validLifecycleArtifact) {
       return failResult(

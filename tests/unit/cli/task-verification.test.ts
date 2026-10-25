@@ -12,7 +12,7 @@ import {
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
-import { createTaskWorkspaceFixture } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, recordArtifactCompletions } from '../../helpers.ts';
 
 const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
@@ -333,6 +333,38 @@ test('artifact verification ignores Activity Log deletion, damage, and reorderin
     fs.writeFileSync(analysisPath, '# Changed Analysis\n');
     const invalid = await verify();
     assert.equal(invalid.status, 'fail');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('task-meta artifact completion exception remains valid after Activity Log removal', async () => {
+  const f = fixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const task = [
+    '---', `id: ${f.taskId}`, 'type: refactor', 'workflow: refactoring', 'status: active', 'current_step: technical-design-review', 'assigned_to: codex',
+    'created_at: 2026-01-01 00:00:00+00:00', 'updated_at: 2026-01-01 00:00:00+00:00',
+    'agent_infra_version: v0.9.11-alpha.0', '---', '', '# Task', ''
+  ].join('\n');
+  const verifyConfig = path.join(f.root, '.agents', 'skills', 'plan-task', 'config', 'verify.json');
+  fs.mkdirSync(path.dirname(verifyConfig), { recursive: true });
+  fs.copyFileSync(path.join(process.cwd(), '.agents', 'skills', 'plan-task', 'config', 'verify.json'), verifyConfig);
+  fs.writeFileSync(taskPath, task);
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'plan.md'), '# Plan\n');
+  recordArtifactCompletions(f.taskDir, [
+    { name: 'analysis.md', lifecycleInputs: [] },
+    { name: 'plan.md', lifecycleInputs: ['analysis.md'] }
+  ]);
+  const withLog = fs.readFileSync(taskPath, 'utf8');
+  const withoutLog = withLog.replace(/\n## Activity Log\n[\s\S]*?(?=\n## |$)/u, '');
+  fs.writeFileSync(taskPath, withoutLog);
+  try {
+    const result = await verifyInProcess({
+      mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir, artifactFile: 'plan.md',
+      checks: ['task-meta', 'activity-log'], repositoryRoot: f.root
+    });
+    assert.equal(result.status, 'pass', result.message);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

@@ -454,7 +454,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       reviewedInputs, executionInputs, artifactHashes,
       reworkIntents: rework.intents,
       unresolvedLedger,
-      executionBusy: executionBusy || hasOpenLifecycleExecution(content),
+      executionBusy: executionBusy || hasOpenLifecycleExecution(content, taskDir),
       recommendedAction: null,
       qualificationStale: qualificationStaleArtifacts.length > 0,
       qualificationStaleArtifacts

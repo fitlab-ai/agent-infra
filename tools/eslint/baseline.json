@@ -144,15 +144,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/completion-facts.ts",
-      "ruleId": "complexity",
-      "stableId": "e59c37a00f2e1380b9d5e0a6d01447cf13eeccc3075dc9be08dc322899edea04",
-      "displayName": "artifactCompletionOrder",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/native-file-lock.ts",
       "ruleId": "complexity",
       "stableId": "9422a81d6ab7114b964b5b411b10140efb67a173b2b6077c04857a7d43ed93b2",

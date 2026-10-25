@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 
-import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { appendActivityEntry, locateActivityLog, openLifecycleExecutionRows, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
   buildArtifactLinkSection,
   inspectArtifactDirectory,
@@ -635,7 +635,12 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   const section = locateActivityLog(content);
   if (!section) return failed(request, { code: 'EVENT_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  const rows = startedBackedRows(pairEntries(section.entries));
+  let rows: ReturnType<typeof pairEntries>;
+  try {
+    rows = startedBackedRows(openLifecycleExecutionRows(content, resolved.taskDir, pairEntries(section.entries)));
+  } catch (error) {
+    return failed(request, { code: 'EVENT_TRANSITION_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+  }
   let normalized = request;
   let artifactContext: ArtifactContextResult | null = null;
   let supersededOpenStart: { action: string } | null = null;

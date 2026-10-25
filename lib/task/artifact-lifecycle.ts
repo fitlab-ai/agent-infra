@@ -10,7 +10,7 @@ import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, receiptsForOutput, sha256File } from './artifact-receipts.ts';
-import { hasArtifactCompletionRecord, hasValidArtifactCompletion, parseCompletionFacts } from './completion-facts.ts';
+import { hasArtifactCompletionRecord, hasValidArtifactCompletion } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
@@ -444,17 +444,10 @@ function attachArtifactSelection(
     ...context, status: 'failed', selection: null, error: { code, message }
   });
   if (!context.next) return fail('ARTIFACT_SELECTION_INDETERMINATE', 'artifact inventory did not provide a writable identity');
-  let taskContent: string;
-  try {
-    taskContent = fs.readFileSync(path.join(context.taskDir, 'task.md'), 'utf8');
-  } catch (error) {
-    return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
-  }
-  let openRounds: number[];
-  try { openRounds = openArtifactRounds(context.taskDir, taskContent, family); }
-  catch (error) {
-    return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
-  }
+  const state = readArtifactSelectionState(context.taskDir, family);
+  if (!state.ok) return fail('ARTIFACT_SELECTION_INDETERMINATE', state.message);
+  const taskContent = state.content;
+  const openRounds = state.openRounds;
   if (openRounds.length > 1) return fail('ARTIFACT_TOPOLOGY_CONFLICT', `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`);
   const openRound = openRounds[0] ?? null;
   const selectedIdentity = openRound === null ? context.next : {
@@ -476,6 +469,17 @@ function attachArtifactSelection(
     };
   } catch (error) {
     return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function readArtifactSelectionState(taskDir: string, family: ArtifactFamily):
+  | { ok: true; content: string; openRounds: number[] }
+  | { ok: false; message: string } {
+  try {
+    const content = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    return { ok: true, content, openRounds: openArtifactRounds(taskDir, content, family) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -741,9 +745,7 @@ export function validateArtifactPublication(taskDir: string, family: ArtifactFam
         return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completed artifact '${name}' is immutable` };
       }
       const event = completionEvent(family);
-      const frontmatter = parseTypedTaskFrontmatter(task);
-      const completionFactExists = event !== null && parseCompletionFacts(frontmatter.completion_facts)
-        .some((fact) => fact.event === event && fact.output === name);
+      const completionFactExists = event !== null && hasArtifactCompletionRecord(task, name, event);
       if (event && completionFactExists) {
         return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completion evidence for '${name}' does not match its current content` };
       }

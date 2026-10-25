@@ -67,10 +67,15 @@ export function hasValidArtifactCompletion(taskContent: string, taskDir: string,
 /** Distinguishes an invalidated completion fact from a round that has never completed. */
 export function hasArtifactCompletionRecord(taskContent: string, artifact: string, event: string): boolean {
   try {
-    const facts = parseCompletionFacts(parseTypedTaskFrontmatter(taskContent).completion_facts);
-    return facts.some((fact) => fact.event === event && fact.output === artifact);
+    const raw = parseTypedTaskFrontmatter(taskContent).completion_facts;
+    if (typeof raw !== 'string' || raw.trim() === '') return false;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return true;
+    return parsed.some((fact) => fact && typeof fact === 'object' && !Array.isArray(fact)
+      && (fact as { event?: unknown }).event === event
+      && (fact as { output?: unknown }).output === artifact);
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -87,52 +92,69 @@ function validateArtifactCompletion(
   if (context.visiting.has(key)) return false;
   context.visiting.add(key);
 
-  let valid = false;
+  let valid: boolean;
   try {
-    const identity = parseArtifactName(artifact);
-    if (!identity || completionEvent(identity.family) !== event) return finish(false);
-    const frontmatter = parseTypedTaskFrontmatter(taskContent);
-    const fact = parseCompletionFacts(frontmatter.completion_facts)
-      .find((candidate) => candidate.event === event && candidate.output === artifact);
-    if (!fact || !Array.isArray(fact.lifecycleInputs) || fact.requestId.length === 0) return finish(false);
-
-    const outputPath = path.join(taskDir, artifact);
-    const outputStat = fs.lstatSync(outputPath);
-    if (!outputStat.isFile() || outputStat.isSymbolicLink()) return finish(false);
-    const outputContent = fs.readFileSync(outputPath, 'utf8');
-    if (sha256File(outputPath) !== fact.outputSha256
-      || canonicalSemanticDigest(outputContent) !== fact.semanticDigest) return finish(false);
-
-    const expectedReceiptEvent = receiptEvent(event);
-    if (!expectedReceiptEvent) return finish(false);
-    const receiptRows = parseArtifactReceipts(taskContent).rows
-      .filter((receipt) => receipt.output === artifact && receipt.event === expectedReceiptEvent);
-    const inputs = fact.lifecycleInputs;
-    if (inputs.some((input) => !input || typeof input.name !== 'string'
-      || !/^[a-f0-9]{64}$/u.test(input.sha256) || !parseArtifactName(input.name))) return finish(false);
-    const inputKeys = inputs.map((input) => `${input.name}\0${input.sha256}`);
-    if (new Set(inputKeys).size !== inputKeys.length || receiptRows.length !== inputs.length) return finish(false);
-    if (receiptRows.some((receipt) => !inputKeys.includes(`${receipt.input}\0${receipt.inputSha256}`))) return finish(false);
-
-    for (const input of inputs) {
-      const inputIdentity = parseArtifactName(input.name);
-      const inputEvent = inputIdentity && completionEvent(inputIdentity.family);
-      if (!inputIdentity || !inputEvent) return finish(false);
-      const inputPath = path.join(taskDir, input.name);
-      const inputStat = fs.lstatSync(inputPath);
-      if (!inputStat.isFile() || inputStat.isSymbolicLink() || sha256File(inputPath) !== input.sha256) return finish(false);
-      if (!validateArtifactCompletion(taskContent, taskDir, input.name, inputEvent, context)) return finish(false);
-    }
-
-    valid = true;
+    const fact = findCompletionFact(taskContent, artifact, event);
+    const inputs = fact?.lifecycleInputs;
+    valid = Boolean(fact && inputs && validateOutput(taskDir, artifact, fact)
+      && validateInputReceipts(taskContent, artifact, event, inputs)
+      && validateInputCompletions(taskContent, taskDir, inputs, context));
   } catch {
     valid = false;
   }
-  return finish(valid);
+  context.visiting.delete(key);
+  context.results.set(key, valid);
+  return valid;
+}
 
-  function finish(result: boolean): boolean {
-    context.visiting.delete(key);
-    context.results.set(key, result);
-    return result;
+function findCompletionFact(taskContent: string, artifact: string, event: string): CompletionFact | null {
+  const identity = parseArtifactName(artifact);
+  if (!identity || completionEvent(identity.family) !== event) return null;
+  const fact = parseCompletionFacts(parseTypedTaskFrontmatter(taskContent).completion_facts)
+    .find((candidate) => candidate.event === event && candidate.output === artifact);
+  return fact && Array.isArray(fact.lifecycleInputs) && fact.requestId.length > 0 ? fact : null;
+}
+
+function validateOutput(taskDir: string, artifact: string, fact: CompletionFact): boolean {
+  const outputPath = path.join(taskDir, artifact);
+  const stat = fs.lstatSync(outputPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) return false;
+  const content = fs.readFileSync(outputPath, 'utf8');
+  return sha256File(outputPath) === fact.outputSha256
+    && canonicalSemanticDigest(content) === fact.semanticDigest;
+}
+
+function validateInputReceipts(
+  taskContent: string,
+  artifact: string,
+  event: string,
+  inputs: readonly Readonly<{ name: string; sha256: string }>[]
+): boolean {
+  const expectedEvent = receiptEvent(event);
+  if (!expectedEvent || inputs.some((input) => !input || typeof input.name !== 'string'
+    || !/^[a-f0-9]{64}$/u.test(input.sha256) || !parseArtifactName(input.name))) return false;
+  const keys = inputs.map((input) => `${input.name}\0${input.sha256}`);
+  if (new Set(keys).size !== keys.length) return false;
+  const receipts = parseArtifactReceipts(taskContent).rows
+    .filter((receipt) => receipt.output === artifact && receipt.event === expectedEvent);
+  return receipts.length === inputs.length
+    && receipts.every((receipt) => keys.includes(`${receipt.input}\0${receipt.inputSha256}`));
+}
+
+function validateInputCompletions(
+  taskContent: string,
+  taskDir: string,
+  inputs: readonly Readonly<{ name: string; sha256: string }>[],
+  context: ValidationContext
+): boolean {
+  for (const input of inputs) {
+    const identity = parseArtifactName(input.name);
+    const inputEvent = identity && completionEvent(identity.family);
+    if (!inputEvent) return false;
+    const inputPath = path.join(taskDir, input.name);
+    const stat = fs.lstatSync(inputPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || sha256File(inputPath) !== input.sha256
+      || !validateArtifactCompletion(taskContent, taskDir, input.name, inputEvent, context)) return false;
   }
+  return true;
 }

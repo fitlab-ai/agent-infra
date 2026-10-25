@@ -277,6 +277,28 @@ function addReceipt(file: string, receipt: ArtifactReceipt) {
   fs.writeFileSync(file, upsertSection(content, mutation).content);
 }
 
+function fixtureSource(taskDir: string, family: string, round?: number): string | undefined {
+  const candidates = fs.readdirSync(taskDir).map((candidate) => parseQualificationArtifactName(candidate))
+    .filter((candidate) => candidate?.family === family && (round === undefined || candidate.round === round));
+  if (candidates.length) return candidates.at(-1)?.name;
+  return fs.readdirSync(taskDir).map((candidate) => parseQualificationArtifactName(candidate))
+    .filter((candidate) => candidate?.family === family).at(-1)?.name;
+}
+
+function fixtureInputs(taskDir: string, family: string, round: number): string[] {
+  switch (family) {
+    case 'analysis': return [];
+    case 'review-analysis': return [fixtureSource(taskDir, 'analysis', round)].filter((name): name is string => Boolean(name));
+    case 'plan': return [fixtureSource(taskDir, 'analysis'), fixtureSource(taskDir, 'review-analysis')]
+      .filter((name): name is string => Boolean(name));
+    case 'review-plan': return [fixtureSource(taskDir, 'plan', round)].filter((name): name is string => Boolean(name));
+    case 'code': return [fixtureSource(taskDir, 'plan') ?? fixtureSource(taskDir, 'analysis')]
+      .filter((name): name is string => Boolean(name));
+    case 'review-code': return [fixtureSource(taskDir, 'code')].filter((name): name is string => Boolean(name));
+    default: return [];
+  }
+}
+
 function recordFixtureCompletion(taskDir: string, name: string) {
   const identity = parseQualificationArtifactName(name);
   if (!identity || identity.family === 'manual-validation' || identity.family === 'validation-run' || identity.family === 'pr-review') return;
@@ -287,21 +309,7 @@ function recordFixtureCompletion(taskDir: string, name: string) {
   const current = task.match(/^completion_facts: '(.+)'$/m)?.[1];
   const facts = current ? JSON.parse(current) as Array<{ output?: string }> : [];
   const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
-  const source = (family: string, round?: number) => {
-    const identities = fs.readdirSync(taskDir).map((candidate) => parseQualificationArtifactName(candidate))
-      .filter((candidate) => candidate?.family === family
-        && (round === undefined || candidate.round === round));
-    const selected = identities.at(-1) ?? fs.readdirSync(taskDir).map((candidate) => parseQualificationArtifactName(candidate))
-      .filter((candidate) => candidate?.family === family).at(-1);
-    return selected?.name;
-  };
-  const inputs = identity.family === 'analysis' ? []
-    : identity.family === 'review-analysis' ? [source('analysis', identity.round)].filter((input): input is string => Boolean(input))
-    : identity.family === 'plan' ? [source('analysis'), source('review-analysis')].filter((input): input is string => Boolean(input))
-    : identity.family === 'review-plan' ? [source('plan', identity.round)].filter((input): input is string => Boolean(input))
-    : identity.family === 'code' ? [source('plan') ?? source('analysis')].filter((input): input is string => Boolean(input))
-    : identity.family === 'review-code' ? [source('code')].filter((input): input is string => Boolean(input))
-    : [];
+  const inputs = fixtureInputs(taskDir, identity.family, identity.round);
   const fact = {
     event, output: name, outputSha256: sha256File(artifactPath), semanticDigest: canonicalSemanticDigest(artifactContent),
     requestId: `fixture-${name}`, result: 'completed',
@@ -852,6 +860,22 @@ test('started replay keeps the open identity after its artifact lands', () => {
   assert.equal(result.round, 1);
   assert.equal(result.artifact, 'plan.md');
   assert.equal((fs.readFileSync(f.file, 'utf8').match(/Plan Task \(Round 1\) \[started\]/g) ?? []).length, 1);
+});
+
+test('valid completion facts close a started row for event mutual exclusion and capability busy state', () => {
+  const f = fixture('requirement-analysis');
+  recordFixtureCompletion(f.dir, 'analysis.md');
+  const task = fs.readFileSync(f.file, 'utf8');
+  fs.writeFileSync(f.file, task.split('\n').filter((line) => !line.includes('**Analyze Task (Round 1)** by codex')).join('\n'));
+
+  const content = fs.readFileSync(f.file, 'utf8');
+  const facts = buildLifecycleFacts(f.dir, content, 'active');
+  assert.equal(facts.ok, true);
+  if (facts.ok) assert.equal(facts.facts.executionBusy, false);
+
+  const started = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex', '--dry-run']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).status, 'planned');
 });
 
 test('plan event reopens technical design after commit preparation', () => {
