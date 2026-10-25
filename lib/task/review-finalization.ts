@@ -9,7 +9,6 @@ import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { validateQualificationAudit } from './qualification-audit.ts';
@@ -36,7 +35,6 @@ type ReviewFinalizationRequest = {
   taskRef: string;
   stage: string;
   artifact: string;
-  orchestrated?: boolean;
   dryRun?: boolean;
 };
 type ReviewFinalizationResult = {
@@ -144,13 +142,6 @@ function preflightReviewSummary(
     content = fs.readFileSync(validated.artifact.path, 'utf8');
   } catch (error) { return preflightFailed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
 
-  const execution = validateLifecycleExecution(request.taskRef, {
-    mode: request.orchestrated ? 'orchestrated' : 'standalone',
-    identity: { stage: spec.family, round: parsed.round, artifact: request.artifact, role: 'reviewer' },
-    dryRun: request.dryRun
-  }, { repoRoot: options.repoRoot });
-  if (!execution.ok) return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`, resolved.taskId);
-
   const artifactSha256 = sha256Content(content);
   const semanticDigest = canonicalSemanticDigest(content);
   const detail = inspectDecisionDetailDuplicates(content);
@@ -212,14 +203,6 @@ function prepareReviewSummaryCandidate(
   const artifactSha256 = sha256Content(artifactContent);
   const semanticDigest = canonicalSemanticDigest(artifactContent);
   const digests = { artifactSha256, semanticDigest };
-  const execution = validateLifecycleExecution(request.taskRef, {
-    mode: request.orchestrated ? 'orchestrated' : 'standalone',
-    identity: { stage: spec.family, round: parsed.round, artifact: request.artifact, role: 'reviewer' },
-    dryRun: request.dryRun
-  }, { repoRoot: options.repoRoot });
-  if (!execution.ok) {
-    return reject('REVIEW_PROVENANCE_INVALID', `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`);
-  }
   try {
     const ledger = parseLedgerDocument(taskContent);
     if (!ledger.present) return reject('REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);

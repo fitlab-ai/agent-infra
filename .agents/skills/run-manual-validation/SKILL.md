@@ -8,7 +8,7 @@ description: >
 
 # 运行人工校验
 
-生命周期事件必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request` 或 `validation-rerun`；started 与 completed 使用同一组值。
+生命周期事件必须携带显式触发信息：普通技能调用使用 `model`；仅用户明确要求时使用 `human`。`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request` 或 `validation-rerun`；started 与 completed 使用同一组值。
 
 ## 任务上下文解析
 

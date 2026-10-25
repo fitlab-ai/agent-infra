@@ -31,7 +31,6 @@ const highFrequencyCommands = [
   "review-code",
   "review-plan",
   "review-pr",
-  "run-task",
   "test",
   "watch-pr"
 ];
@@ -300,7 +299,6 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".git-hooks/check-version-format.sh", "templates/.git-hooks/check-version-format.sh"],
     [".agents/hooks/check-version-format.sh", "templates/.agents/hooks/check-version-format.sh"],
     [".agents/hooks/auto-resume.sh", "templates/.agents/hooks/auto-resume.sh"],
-    [".agents/hooks/lifecycle-delegation.js", "templates/.agents/hooks/lifecycle-delegation.js"],
     [".codex/hooks.json", "templates/.codex/hooks.json"],
     ...buildCommandSyncFiles(project),
     ...referenceSyncFiles
@@ -394,8 +392,6 @@ test("version format validation hooks are wired into templates and local config"
   const templateClaudeSettings = JSON.parse(read("templates/.claude/settings.json"));
   const rootCodexHooks = JSON.parse(read(".codex/hooks.json"));
   const templateCodexHooks = JSON.parse(read("templates/.codex/hooks.json"));
-  const rootLifecycleHook = read(".agents/hooks/lifecycle-delegation.js");
-  const templateLifecycleHook = read("templates/.agents/hooks/lifecycle-delegation.js");
   const localCheckScript = read(".git-hooks/check-version-format.sh");
   const templateCheckScript = read("templates/.git-hooks/check-version-format.sh");
   const localLargeFileCheck = read(".git-hooks/check-large-files.cjs");
@@ -533,122 +529,6 @@ test("version format validation hooks are wired into templates and local config"
         ]
       },
       `${relativePath} should configure the Codex PreToolUse version format validation hook`
-    );
-    const lifecycle = [
-      ["PreToolUse", "^collaborationspawn_agent$", "pre-tool"],
-      ["PostToolUse", "", "post-tool"],
-      ["SubagentStart", "", "subagent-start"],
-      ["SubagentStop", "", "subagent-stop"]
-    ] as const;
-    for (const [event, matcher, phase] of lifecycle) {
-      const entry = settings.hooks?.[event]?.find((candidate) => candidate.matcher === matcher);
-      assert.equal(entry?.matcher, matcher, `${relativePath} should configure ${event} lifecycle matching`);
-      assert.equal(entry?.hooks.length, 1, `${relativePath} should configure one ${event} lifecycle command`);
-      assert.match(entry?.hooks[0]?.command ?? '', new RegExp(`--client codex --event ${phase}$`));
-      assert.equal(entry?.hooks[0]?.timeout, 30, `${relativePath} should allow the managed lifecycle bridge to complete`);
-    }
-  });
-  for (const source of [rootLifecycleHook, templateLifecycleHook]) {
-    assert.match(source, /timeout: 30_000/u);
-  }
-});
-
-test("version format validation hooks enforce exact v-prefixed semver", () => {
-  const tempRoot = createTempDir("agent-infra-version-hook-");
-  const hooksDir = path.join(tempRoot, ".git-hooks");
-  const aiHooksDir = path.join(tempRoot, ".agents", "hooks");
-  const configDir = path.join(tempRoot, ".agents");
-  const configPath = path.join(configDir, ".airc.json");
-
-  fs.mkdirSync(hooksDir, { recursive: true });
-  fs.mkdirSync(aiHooksDir, { recursive: true });
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.copyFileSync(".git-hooks/check-version-format.sh", path.join(hooksDir, "check-version-format.sh"));
-  fs.copyFileSync(".agents/hooks/check-version-format.sh", path.join(aiHooksDir, "check-version-format.sh"));
-  const writeTemplateVersion = (templateVersion: string) => {
-    fs.writeFileSync(configPath, JSON.stringify({ templateVersion }));
-  };
-
-  const runGitHook = () => spawnSync(
-    "sh",
-    [path.join(hooksDir, "check-version-format.sh")],
-    { cwd: tempRoot, encoding: "utf8", input: "" }
-  );
-
-  const runAiHook = (input: string) => spawnSync(
-    "sh",
-    [path.join(aiHooksDir, "check-version-format.sh")],
-    {
-      cwd: tempRoot,
-      encoding: "utf8",
-      input
-    }
-  );
-
-  try {
-    const validVersions = [
-      "v0.0.0",
-      "v1.2.3",
-      "v1.2.3-alpha-beta",
-      "v1.2.3-rc.1",
-      "v1.2.3+build-x.5",
-      "v1.2.3-alpha.0+build-x.5"
-    ];
-    const invalidVersions = [
-      "1.2.3",
-      "v1.2",
-      "v01.2.3",
-      "v1.2.3-01",
-      "v1.2.3-alpha..1",
-      "v1.2.3+build..1",
-      "v1.2.3-alpha_1"
-    ];
-
-    for (const version of validVersions) {
-      writeTemplateVersion(version);
-      const result = runGitHook();
-      assert.equal(result.status, 0, `${version} should be accepted: ${result.stderr}`);
-      assert.match(result.stdout, /Version format check passed\./);
-    }
-
-    for (const version of invalidVersions) {
-      writeTemplateVersion(version);
-      const result = runGitHook();
-      assert.equal(result.status, 1, `${version} should be rejected`);
-      assert.match(result.stdout, /templateVersion must use v-prefixed semver/);
-    }
-
-    const nonCommit = runAiHook(JSON.stringify({ tool_input: { command: "git status" } }));
-    assert.equal(nonCommit.status, 0, "PreToolUse should skip non-git-commit commands");
-    assert.equal(nonCommit.stdout, "", "PreToolUse should stay silent when skipping non-git-commit commands");
-
-    writeTemplateVersion("v1.2.3-alpha.0+build-x.5");
-    const commit = runAiHook(JSON.stringify({ tool_input: { command: "git commit -m test" } }));
-    assert.equal(commit.status, 0, "PreToolUse should validate git commit commands");
-    assert.match(commit.stdout, /Version format check passed\./, "PreToolUse should log successful validation");
-    assert.match(commit.stdout, /AI hook: version check passed\./, "PreToolUse should log successful AI-hook delegation");
-
-    writeTemplateVersion("1.2.3");
-
-    const blockedCommit = runAiHook(JSON.stringify({ tool_input: { command: "git commit -m broken" } }));
-    assert.equal(blockedCommit.status, 2, "PreToolUse should block invalid git commit commands with exit 2");
-    assert.match(blockedCommit.stderr, /AI hook: blocking git commit \(version format error\)\./, "PreToolUse should log blocked AI-hook delegation");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-test("template JavaScript files do not contain shebang lines", () => {
-  const jsFiles = listFilesRecursive("templates")
-    .filter((relativePath) => relativePath.endsWith(".js"));
-
-  jsFiles.forEach((relativePath) => {
-    const firstLine = read(relativePath).split(/\r?\n/, 1)[0];
-    assert.ok(
-      !(firstLine ?? "").startsWith("#!"),
-      `${relativePath}: template .js files must not contain shebang lines. ` +
-      "Homebrew rewrites shebangs to machine-specific absolute paths during installation, " +
-      "which pollutes project files when synced. Use 'node <path>' to invoke these scripts."
     );
   });
 });

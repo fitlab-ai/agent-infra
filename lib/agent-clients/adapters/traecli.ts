@@ -11,7 +11,6 @@ const traecliAdapter = defineAgentClientAdapter({
     commands: { level: 'integrated' },
     hooks: { level: 'compatible' },
     subagents: { level: 'experimental' },
-    orchestration: { level: 'experimental' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
@@ -19,10 +18,6 @@ const traecliAdapter = defineAgentClientAdapter({
     kind: 'interactive-only',
     command: '/model',
     guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
-  },
-  delegationEvidence: {
-    actualModel: 'unavailable',
-    actualReasoningEffort: 'unavailable'
   },
   project: {
     ownedPathPrefixes: ['.traecli/'],

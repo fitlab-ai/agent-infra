@@ -5,8 +5,7 @@ export const AGENT_TOKEN_VALUES = ['claude', 'codex', 'antigravity', 'opencode',
 export type AgentToken = (typeof AGENT_TOKEN_VALUES)[number];
 export const KNOWN_AI_AGENTS: ReadonlySet<string> = new Set(AGENT_TOKEN_VALUES);
 
-// Long name -> short name mapping: `claude-code` reuses the existing
-// orchestration precedent, and `antigravity-cli` is the active client.
+// Long name -> short name mapping for the activity-log agent field.
 export const AGENT_LONG_NAMES: Readonly<Record<string, string>> = {
   'claude-code': 'claude',
   'antigravity-cli': 'antigravity'

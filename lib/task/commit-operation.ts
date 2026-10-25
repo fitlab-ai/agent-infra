@@ -20,7 +20,7 @@ import {
   writeCheckpointIntent
 } from './commit-intent.ts';
 
-type CommitExecutionMode = 'direct' | 'orchestrated';
+type CommitExecutionMode = 'direct';
 
 type CommitOperationInput = Readonly<{
   cwd: string;
@@ -68,7 +68,7 @@ const HEAD_REF = /^refs\/heads\/(.+)$/;
 type CommitDelivery = Readonly<{ mode: 'local' } | { mode: 'push'; remote: string; refs: readonly string[] }>;
 
 function isCommitExecutionMode(value: unknown): value is CommitExecutionMode {
-  return value === 'direct' || value === 'orchestrated';
+  return value === 'direct';
 }
 
 function gitText(repoRoot: string, args: readonly string[]): string {
@@ -284,15 +284,6 @@ function checkpointTimestamp(): string {
 function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
-  if (mode === 'orchestrated') return failure(
-    input,
-    mode,
-    task?.taskId ?? null,
-    'ORCHESTRATED_COMMIT_REMOVED',
-    'Orchestrated commit is no longer a lifecycle stage; use local checkpoint delivery from code-task',
-    'blocked',
-    inspected.snapshot
-  );
   const branch = inspected.snapshot.branch;
   const commonError = validateCommon(input, branch);
   if (commonError) return failure(input, mode, task?.taskId ?? null, commonError.code, commonError.message, 'blocked', inspected.snapshot);
@@ -503,7 +494,7 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
     warnings: [],
     snapshot: null,
     operations: [],
-    error: { code: 'COMMIT_MODE_INVALID', message: 'commit mode must be direct or orchestrated' }
+    error: { code: 'COMMIT_MODE_INVALID', message: 'commit mode must be direct' }
   };
   const mode: CommitExecutionMode = input.mode ?? 'direct';
   let normalizedInput: CommitOperationInput;
@@ -515,7 +506,6 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
   const resolved = resolveBoundTask(normalizedInput);
   if (resolved.kind === 'error') return resolved.result;
   const task = resolved.kind === 'bound' ? resolved.task : null;
-  if (mode === 'orchestrated' && !task) return failure(normalizedInput, mode, null, 'ORCHESTRATION_TASK_REQUIRED', 'orchestrated commit requires a task context', 'blocked');
   try {
     return executeCommitOperationCore(normalizedInput, task, mode);
   } catch (error) {

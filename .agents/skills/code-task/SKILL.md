@@ -9,7 +9,7 @@ description: >
 # 编码任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。生命周期事件还必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 初次实现使用 `user-request`，修复或裁决使用 `review-finding`；started 与 completed 使用同一组值。
+生命周期事件必须携带显式触发信息：普通技能调用使用 `model`；仅用户明确要求时使用 `human`。`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 初次实现使用 `user-request`，修复或裁决使用 `review-finding`；started 与 completed 使用同一组值。
 
 根据所选生命周期路径的实现输入编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现、基于 `review-code` 反馈的修复，以及人工裁决驱动实现三种模式。
 

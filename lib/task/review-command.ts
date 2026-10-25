@@ -4,14 +4,14 @@ export function parseReviewCommand(args: readonly string[]): ReviewFinalizationR
   if (!args[0] || !['preflight', 'finalize-summary'].includes(args[1] ?? '')) throw new Error('task ref and a supported review operation are required');
   const values: Record<string, string | boolean> = {};
   const flags = {
-    '--stage': 'stage', '--artifact': 'artifact', '--orchestrated': 'orchestrated', '--dry-run': 'dryRun'
+    '--stage': 'stage', '--artifact': 'artifact', '--dry-run': 'dryRun'
   } as const;
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
     if (!Object.hasOwn(flags, flag)) throw new Error(`unknown option '${flag}'`);
     const key = flags[flag as keyof typeof flags];
     if (Object.hasOwn(values, key)) throw new Error(`duplicate option '${flag}'`);
-    const value = flag === '--orchestrated' || flag === '--dry-run' ? true : args[++index];
+    const value = flag === '--dry-run' ? true : args[++index];
     if (!value || typeof value === 'string' && value.startsWith('--')) throw new Error(`option '${flag}' requires a value`);
     values[key] = value;
   }

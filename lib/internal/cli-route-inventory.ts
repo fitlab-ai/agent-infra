@@ -36,8 +36,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-create': ['input'],
   'task-qualification': ['proposal', 'confirm', 'supersede', 'revoke'],
   'sandbox-control': ['serve', 'execute', 'recover', 'client'],
-  'agent-client': ['next-steps', 'model-selection', 'launch-carrier'],
-  'codex-lifecycle': ['preflight', 'hook-event', 'resolve-start', 'resolve-stop', 'consume'],
+  'agent-client': ['next-steps', 'model-selection'],
   'git-workflow': ['inspect', 'preview-tree', 'snapshot', 'compare-trees', 'commit', 'push-rebased'],
   'task-delivery': ['deliver'],
   'release-workflow': ['inspect', 'prepare', 'publish', 'post-prepare', 'post-publish'],
@@ -57,7 +56,6 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-warning': ['list', 'add', 'set-status'],
   'task-activity': ['pr-review-inspect', 'pr-review-start', 'pr-review-complete', 'pr-review-terminate'],
   'task-artifact': ['inspect', 'init', 'preflight', 'finalize-local'],
-  'task-orchestration': ['status', 'progress'],
   'task-review': ['preflight', 'finalize-summary'],
   'task-event': ['event'],
   'task-lifecycle': ['intent'],
@@ -95,7 +93,6 @@ export function internalRouteSelector(command: string, args: readonly string[]):
   if (command === 'task-snapshot') return 'snapshot';
   if (command === 'task-validate') return optionValue(args, '--scope') ?? 'snapshot';
   if (command === 'task-short-id') return first(args) === 'list' && args.includes('--verify') ? 'list-verify' : first(args);
-  if (command === 'task-orchestration') return args[1] === 'status' ? 'status' : args[1] ? 'progress' : '';
   if (command === 'task-review') return args[1] ?? '';
   if (command === 'task-artifact') return args[1] ?? '';
   if (command === 'platform-pr-review' && first(args) === 'publish') {

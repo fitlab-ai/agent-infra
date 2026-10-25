@@ -37,16 +37,6 @@ test('sandbox executor context requires the complete manifest binding', () => {
   );
 });
 
-test('authority parser preserves auto hook matching as an operation input', () => {
-  const operation = parseTaskControlOperation('task-orchestration', [
-    'auto', 'hook-start', '--client', 'claude-code', '--native-agent', 'claude', '--child-id', 'child', '--parent-id', 'parent'
-  ]);
-  assert.equal(operation.family, 'task-orchestration');
-  if (operation.family !== 'task-orchestration') throw new Error('unexpected operation family');
-  assert.equal(operation.taskRef, 'auto');
-  assert.equal(operation.input.auto, true);
-});
-
 test('authority parser owns lifecycle and finalization command shapes', () => {
   const lifecycle = parseTaskControlOperation('task-lifecycle', [
     'TASK-20260809-010203', 'cancel', '--agent', 'codex', '--reason', 'obsolete'
@@ -75,35 +65,5 @@ test('authority parser owns lifecycle and finalization command shapes', () => {
       'TASK-20260809-010203', 'cancel', '--agent', 'codex', '--unknown', 'value'
     ]),
     /TASK_CONTROL_OPERATION_INVALID: unknown option '--unknown'/
-  );
-});
-
-test('authority parser accepts only automatic recovery', () => {
-  const automatic = parseTaskControlOperation('task-lifecycle', [
-    'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--auto'
-  ]);
-  assert.equal(automatic.family, 'task-lifecycle');
-  if (automatic.family !== 'task-lifecycle') throw new Error('unexpected lifecycle operation family');
-  assert.deepEqual(automatic.request, {
-    taskRef: 'TASK-20260809-010203', intent: 'recover-started', agent: 'codex', auto: true
-  });
-  assert.throws(
-    () => parseTaskControlOperation('task-lifecycle', [
-      'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--auto',
-      '--stage', 'code', '--round', '1', '--artifact', 'code.md', '--reason', 'mixed mode'
-    ]),
-    /unknown option '--stage'/u
-  );
-  assert.throws(
-    () => parseTaskControlOperation('task-lifecycle', [
-      'TASK-20260809-010203', 'recover-started', '--agent', 'codex'
-    ]),
-    /--auto is required/u
-  );
-  assert.throws(
-    () => parseTaskControlOperation('task-lifecycle', [
-      'TASK-20260809-010203', 'cancel', '--agent', 'codex', '--reason', 'obsolete', '--auto'
-    ]),
-    /only supported for recover-started/u
   );
 });

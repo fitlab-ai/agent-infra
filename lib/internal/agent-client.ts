@@ -7,25 +7,17 @@ import {
 } from '../agent-clients/config.ts';
 import { normalizeCustomToolInvocations } from '../agent-clients/custom-tool-invocations.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
-import { getAgentClientAdapter, getAgentClientModelSelection } from '../agent-clients/registry.ts';
+import { getAgentClientModelSelection } from '../agent-clients/registry.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection|launch-carrier> [options]\n';
+const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection> [options]\n';
 
 type ParsedArgs = Readonly<{
   skillName: string;
   taskRef?: string;
   version?: string;
   format: 'text' | 'json';
-}>;
-
-type LaunchCarrierArgs = Readonly<{
-  client: string;
-  adapterContext: string;
-  stage: string;
-  round: number;
-  role: string;
 }>;
 
 function failure(code: string, message: string): void {
@@ -90,63 +82,6 @@ function parseArgs(args: string[]): ParsedArgs | null {
     ...(version ? { version } : {}),
     format
   };
-}
-
-function parseLaunchCarrierArgs(args: string[]): LaunchCarrierArgs | null {
-  const allowed = new Set(['--client', '--adapter-context', '--stage', '--round', '--role', '--format']);
-  const values: Record<string, string> = {};
-  const seen = new Set<string>();
-  for (let index = 1; index < args.length; index += 1) {
-    const flag = args[index]!;
-    if (!allowed.has(flag) || seen.has(flag)) {
-      failure('AGENT_CLIENT_PAYLOAD_INVALID', `invalid or duplicate option '${flag}'`);
-      return null;
-    }
-    const value = args[++index];
-    if (!value || value.startsWith('--')) {
-      failure('AGENT_CLIENT_PAYLOAD_INVALID', `option '${flag}' requires a value`);
-      return null;
-    }
-    seen.add(flag);
-    values[flag] = value;
-  }
-  const round = Number(values['--round']);
-  if (!isAgentClientId(values['--client']) || !values['--adapter-context'] || !values['--stage'] || !values['--role']
-    || !Number.isSafeInteger(round) || round < 1 || (values['--format'] ?? 'json') !== 'json') {
-    failure('AGENT_CLIENT_PAYLOAD_INVALID', 'launch-carrier requires client, adapter context, stage, positive round, role, and json format');
-    return null;
-  }
-  return {
-    client: values['--client']!,
-    adapterContext: values['--adapter-context']!,
-    stage: values['--stage']!,
-    round,
-    role: values['--role']!
-  };
-}
-
-function launchCarrier(args: string[]): void {
-  const parsed = parseLaunchCarrierArgs(args);
-  if (!parsed) return;
-  const createCarrier = getAgentClientAdapter(parsed.client).orchestrationAdapter?.createLaunchCarrier;
-  if (!createCarrier) {
-    process.stdout.write(`${JSON.stringify({
-      status: 'failed', changed: false, client: parsed.client, carrier: null,
-      error: { code: 'AGENT_CLIENT_LAUNCH_CARRIER_UNSUPPORTED', message: `Agent Client '${parsed.client}' does not support lifecycle launch carriers` }
-    })}\n`);
-    process.exitCode = 1;
-    return;
-  }
-  try {
-    const carrier = createCarrier(parsed.adapterContext, { stage: parsed.stage, round: parsed.round, role: parsed.role });
-    process.stdout.write(`${JSON.stringify({ status: 'ready', changed: false, client: parsed.client, carrier, error: null })}\n`);
-  } catch (error) {
-    process.stdout.write(`${JSON.stringify({
-      status: 'failed', changed: false, client: parsed.client, carrier: null,
-      error: { code: error instanceof Error && error.name ? error.name : 'AGENT_CLIENT_LAUNCH_CARRIER_INVALID', message: error instanceof Error ? error.message : String(error) }
-    })}\n`);
-    process.exitCode = 1;
-  }
 }
 
 function modelSelection(args: string[]): void {
@@ -245,9 +180,6 @@ function writeNextStepOutput(
 
 function agentClient(args: string[] = []): void {
   if (!ensureInternalHandlerRoute('agent-client', args)) return;
-  if (internalHandlerRoute('agent-client', 'launch-carrier', args[0] ?? '')) {
-    return launchCarrier(args);
-  }
   if (internalHandlerRoute('agent-client', 'model-selection', args[0] ?? '')) {
     return modelSelection(args);
   }

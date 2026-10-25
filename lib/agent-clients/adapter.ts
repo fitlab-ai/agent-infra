@@ -8,10 +8,6 @@ import type {
   AgentClientCapabilityMap,
   AgentClientId
 } from './types.ts';
-import type {
-  OrchestrationOptions,
-  OrchestrationResult
-} from '../task/orchestration.ts';
 import {
   SANDBOX_HOOK_PHASES
 } from '../sandbox/tool-types.ts';
@@ -41,56 +37,6 @@ type AgentClientModelSelectionContext =
       command: string;
       guidance: string;
     }>;
-
-type AgentClientDelegationEvidence = Readonly<{
-  actualModel: 'host-event' | 'app-server' | 'unavailable';
-  actualReasoningEffort: 'host-event' | 'app-server' | 'spawn-ack' | 'unavailable';
-  spawnModeRequired?: boolean;
-  actualModelRequired?: boolean;
-  actualReasoningEffortRequired?: boolean;
-  fallbackReasonRequired?: boolean;
-}>;
-
-type AgentClientLifecycleRecoveryRequest = Readonly<{
-  taskRef: string;
-  intent: 'recover-started';
-  agent: string;
-  auto: true;
-}>;
-
-type AgentClientLifecycleRecoveryResult = Readonly<{
-  status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
-  changed: boolean;
-  targetState: 'active';
-  requestRef: string;
-  intent: 'recover-started';
-  taskId: string | null;
-  receiptId: string | null;
-  childId: string | null;
-  error: Readonly<{ code: string; message: string }> | null;
-}>;
-
-type AgentClientOrchestrationAdapter = Readonly<{
-  validateActivationEvidence?: (evidence: unknown, parentId: string) => boolean;
-  validateReceiptEvidence?: (receipt: unknown) => boolean;
-  createLaunchCarrier?: (
-    adapterContext: string,
-    identity: Readonly<{ stage: string; round: number; role: string }>
-  ) => Readonly<Record<string, string>>;
-  prepareDelegation?: (
-    taskRef: string,
-    input: Readonly<{
-      client: AgentClientId;
-      requestedModel?: string;
-      requestedReasoningEffort?: string;
-    }>,
-    options?: Readonly<{ repoRoot?: string; orchestrationOptions?: OrchestrationOptions }>
-  ) => Promise<OrchestrationResult>;
-  recoverStarted?: (
-    request: AgentClientLifecycleRecoveryRequest,
-    options: Readonly<{ repoRoot: string }>
-  ) => AgentClientLifecycleRecoveryResult | Promise<AgentClientLifecycleRecoveryResult>;
-}>;
 
 type AgentClientSeedCommand = Readonly<{
   templates: Readonly<{
@@ -123,8 +69,6 @@ type AgentClientAdapter = Readonly<{
   invocation: string;
   capabilities: AgentClientCapabilities;
   modelSelection: AgentClientModelSelectionContext;
-  delegationEvidence: AgentClientDelegationEvidence;
-  orchestrationAdapter?: AgentClientOrchestrationAdapter;
   project: AgentClientProjectDescriptor;
   sandbox: AgentClientSandboxDescriptor;
 }>;
@@ -397,18 +341,6 @@ function defineAgentClientAdapter(
     });
   } else {
     throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
-  }
-
-  const evidence = candidate.delegationEvidence;
-  if (
-    !evidence
-    || !['host-event', 'app-server', 'unavailable'].includes(evidence.actualModel)
-    || !['host-event', 'app-server', 'spawn-ack', 'unavailable'].includes(evidence.actualReasoningEffort)
-    || ['spawnModeRequired', 'actualModelRequired', 'actualReasoningEffortRequired', 'fallbackReasonRequired']
-      .some((key) => evidence[key as keyof AgentClientDelegationEvidence] !== undefined
-        && typeof evidence[key as keyof AgentClientDelegationEvidence] !== 'boolean')
-  ) {
-    throw new Error(`Agent Client '${candidate.id}' has invalid delegation evidence`);
   }
 
   if (
@@ -701,10 +633,6 @@ function defineAgentClientAdapter(
     invocation: candidate.invocation,
     capabilities: Object.freeze(capabilities),
     modelSelection: frozenModelSelection,
-    delegationEvidence: Object.freeze({ ...evidence }),
-    ...(candidate.orchestrationAdapter === undefined
-      ? {}
-      : { orchestrationAdapter: Object.freeze({ ...candidate.orchestrationAdapter }) }),
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
       ...projectAssets,
@@ -726,10 +654,6 @@ export type {
   AgentClientAdapter,
   AgentClientCapabilities,
   AgentClientCustomCommandDescriptor,
-  AgentClientDelegationEvidence,
-  AgentClientLifecycleRecoveryRequest,
-  AgentClientLifecycleRecoveryResult,
-  AgentClientOrchestrationAdapter,
   AgentClientManifestEntry,
   AgentClientModelSelectionContext,
   AgentClientProjectDescriptor,

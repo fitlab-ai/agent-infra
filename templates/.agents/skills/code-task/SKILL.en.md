@@ -9,7 +9,7 @@ description: >
 # Code Task
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` for initial work and `review-finding` for fixes or decisions. Reuse the same values for started and completed.
+Lifecycle events require explicit trigger data: ordinary skill invocation uses `model`; use `human` only when the user explicitly requests it. `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` use `user-request` for initial work and `review-finding` for fixes or decisions. Reuse the same values for started and completed.
 
 Implement from the input selected by the lifecycle path and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
 

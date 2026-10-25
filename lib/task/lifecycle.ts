@@ -21,7 +21,7 @@ import { resourceIdentityEquals } from '../platform/resource-identity.ts';
 import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 
 const lifecycleIntentCatalog = [
-  'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
+  'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
 ] as const;
 const lifecycleFailureCatalog = [
   'LIFECYCLE_DIRECTORY_TRANSFER_FAILED',
@@ -60,8 +60,7 @@ type TaskLifecycleRequest =
   | { taskRef: string; intent: 'complete'; agent: string; dryRun?: boolean }
   | { taskRef: string; intent: 'close-codescan'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'close-dependabot'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
-  | { taskRef: string; intent: 'restore'; agent: string; stagingDir: string; issueNumber: number; dryRun?: boolean }
-  | { taskRef: string; intent: 'recover-started'; agent: string; auto: true; dryRun?: boolean };
+  | { taskRef: string; intent: 'restore'; agent: string; stagingDir: string; issueNumber: number; dryRun?: boolean };
 
 type HotState = 'active' | 'blocked' | 'completed';
 type SourceState = HotState | 'staging';
@@ -368,32 +367,17 @@ function taskBoundControlMoveSafety(
   return null;
 }
 
-function orchestrationMoveSafety(sourcePath: string): LifecycleError | null {
-  const orchestrationPath = path.join(sourcePath, '.runtime', 'orchestration.json');
-  if (!pathExists(orchestrationPath)) return null;
-  try {
-    const run = JSON.parse(fs.readFileSync(orchestrationPath, 'utf8')) as { status?: unknown; pendingDelegation?: unknown };
-    if (run.status === 'running' || run.pendingDelegation !== null && run.pendingDelegation !== undefined) {
-      return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task orchestration has an active or pending delegation; settle it before moving the task directory' };
-    }
-  } catch {
-    return { code: 'LIFECYCLE_RUNTIME_MOVE_UNSAFE', message: 'task orchestration state is unreadable; refusing to move the task directory' };
-  }
-  return null;
-}
-
 function runtimeMoveSafety(
   request: TaskLifecycleRequest,
   movingTaskDirectory: boolean,
   options: TaskLifecycleOptions,
   taskId: string,
   repoRoot: string,
-  sourcePath: string,
   validateControlManifestIdentity: boolean
 ): LifecycleError | null {
   if (!movingTaskDirectory) return null;
   const controlSafety = taskBoundControlMoveSafety(request, options.controlRoot, options, taskId, repoRoot, validateControlManifestIdentity);
-  return controlSafety ?? orchestrationMoveSafety(sourcePath);
+  return controlSafety;
 }
 
 function targetContainsTask(targetPath: string, taskId: string, request: TaskLifecycleRequest): boolean {
@@ -422,7 +406,6 @@ function actionAndNote(request: TaskLifecycleRequest, restoredFiles = 0): { acti
   if (request.intent === 'complete') return { action: 'Complete Task', note: 'Task moved to completed/' };
   if (request.intent === 'close-codescan') return { action: 'Close Codescan', note: `Code Scanning alert #${request.alertNumber} dismissed: ${request.reason}` };
   if (request.intent === 'close-dependabot') return { action: 'Close Dependabot', note: `Dependabot alert #${request.alertNumber} dismissed: ${request.reason}` };
-  if (request.intent === 'recover-started') return { action: 'Recover Started', note: 'automatic recovery' };
   return { action: 'Restore Task', note: `Restored ${restoredFiles} files from Issue #${request.issueNumber}` };
 }
 
@@ -630,9 +613,6 @@ export function inspectTaskLifecycleProgress(
 }
 
 function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
-  if (requestInput.intent === 'recover-started') {
-    return failed(requestInput, { code: 'LIFECYCLE_RECOVERY_REQUIRES_AUTHORITY', message: 'recover-started must be dispatched through task control authority' });
-  }
   const normalized = normalizedRequest(requestInput);
   if ('code' in normalized) return failed(requestInput, normalized);
   const request = normalized;
@@ -696,7 +676,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     && !(request.intent === 'complete' && targetContainsTask(targetPath, taskId, request))) {
     return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
-  const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath, true);
+  const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, true);
   if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   const content = io.readFileSync(currentTaskFile);
   let frontmatter;
@@ -823,7 +803,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   }
   if (fs.existsSync(targetPath) && !fs.existsSync(path.join(sourcePath, 'task.md'))) completed.add('directory-moved');
   if (!completed.has('directory-moved')) {
-    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, sourcePath, false);
+    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, false);
     if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     if (request.intent === 'complete') {

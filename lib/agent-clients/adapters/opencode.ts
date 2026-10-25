@@ -17,7 +17,6 @@ const opencodeAdapter = defineAgentClientAdapter({
     commands: { level: 'integrated' },
     hooks: { level: 'compatible' },
     subagents: { level: 'unsupported' },
-    orchestration: { level: 'unsupported' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
@@ -25,10 +24,6 @@ const opencodeAdapter = defineAgentClientAdapter({
     kind: 'interactive-only',
     command: '/models',
     guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
-  },
-  delegationEvidence: {
-    actualModel: 'unavailable',
-    actualReasoningEffort: 'unavailable'
   },
   project: {
     ownedPathPrefixes: ['.opencode/'],

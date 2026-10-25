@@ -3,7 +3,7 @@ import { finalizeReviewSummary, preflightReviewSummary } from '../task/review-fi
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run]\n';
+const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--dry-run]\n';
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -25,13 +25,13 @@ async function taskReview(args: string[] = []): Promise<void> {
   let request;
   try { request = parseReviewCommand(args); }
   catch (error) { failUsage(error instanceof Error ? error.message : String(error)); return; }
-  const { stage, artifact, dryRun, orchestrated } = request;
+  const { stage, artifact, dryRun } = request;
   const operation = args[1]!;
   const resolved = resolveTaskRef(args[0]!);
   if (!resolved.ok) { failUsage(resolved.message); return; }
   const result = operation === 'preflight'
-    ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun })
-    : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun });
+    ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, dryRun })
+    : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, dryRun });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

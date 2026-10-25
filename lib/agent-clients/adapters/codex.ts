@@ -4,44 +4,6 @@ import {
   codexBeforeContainerCreateHook,
   codexRecoveryChecks
 } from './codex-sandbox.ts';
-import { parseCodexLifecycleBinding } from './codex-lifecycle/binding.ts';
-import { isCodexDelegationReceiptEvidence, isCodexLifecycleActivationEvidence } from './codex-lifecycle/evidence.ts';
-
-function codexCarrierError(code: string): Error {
-  const error = new Error(code);
-  error.name = code;
-  return error;
-}
-
-function codexStageToken(stage: string): string {
-  const tokens: Readonly<Record<string, string>> = {
-    analysis: 'a',
-    plan: 'p',
-    code: 'c',
-    'review-analysis': 'ra',
-    'review-plan': 'rp',
-    'review-code': 'rc',
-    commit: 'm'
-  };
-  const token = tokens[stage];
-  if (!token) throw codexCarrierError('CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID');
-  return token;
-}
-
-function codexLaunchCarrier(
-  adapterContext: string,
-  identity: Readonly<{ stage: string; round: number; role: string }>
-): Readonly<Record<string, string>> {
-  if (!Number.isSafeInteger(identity.round) || identity.round < 1
-    || !['executor', 'reviewer'].includes(identity.role)) {
-    throw codexCarrierError('CODEX_LIFECYCLE_SPAWN_IDENTITY_INVALID');
-  }
-  const label = `${codexStageToken(identity.stage)}_${identity.role === 'reviewer' ? 'r' : 'e'}_r${identity.round}`;
-  const taskName = `${label}${adapterContext}`;
-  const parsed = parseCodexLifecycleBinding(taskName);
-  if (!parsed) throw codexCarrierError('CODEX_LIFECYCLE_LAUNCH_CONTEXT_INVALID');
-  return Object.freeze({ task_name: parsed.taskName });
-}
 
 const codexAdapter = defineAgentClientAdapter({
   id: 'codex',
@@ -53,7 +15,6 @@ const codexAdapter = defineAgentClientAdapter({
     commands: { level: 'integrated' },
     hooks: { level: 'integrated' },
     subagents: { level: 'experimental' },
-    orchestration: { level: 'experimental' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
@@ -61,23 +22,6 @@ const codexAdapter = defineAgentClientAdapter({
     kind: 'interactive-only',
     command: '/model',
     guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
-  },
-  delegationEvidence: {
-    actualModel: 'app-server',
-    actualReasoningEffort: 'app-server'
-  },
-  orchestrationAdapter: {
-    validateActivationEvidence: isCodexLifecycleActivationEvidence,
-    validateReceiptEvidence: isCodexDelegationReceiptEvidence,
-    createLaunchCarrier: codexLaunchCarrier,
-    prepareDelegation: async (...args) => {
-      const { prepareCodexOrchestrationDelegation } = await import('./codex-orchestration.ts');
-      return prepareCodexOrchestrationDelegation(...args);
-    },
-    recoverStarted: async (...args) => {
-      const { recoverStartedLifecycleFromAdapter } = await import('./codex-lifecycle/recovery.ts');
-      return recoverStartedLifecycleFromAdapter(...args);
-    }
   },
   project: {
     ownedPathPrefixes: ['.codex/'],

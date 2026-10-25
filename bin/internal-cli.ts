@@ -17,7 +17,7 @@ if (major < 22 || (major === 22 && minor < 9)) {
 
 const command = process.argv[2] || '';
 const internalRouteRegistered = Object.hasOwn(INTERNAL_HANDLER_ROUTE_SELECTORS, command);
-const taskControlCommand = command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization';
+const taskControlCommand = command === 'task-lifecycle' || command === 'task-finalization';
 const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-review'
   || command === 'task-event'
@@ -59,7 +59,7 @@ function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANS
 let controlRouted = false;
 if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand || taskPlatformRecoveryCommand)) {
   const transport = resolveSandboxControlTransport(process.env, {
-    localWorkflow: command === 'task-orchestration' || command === 'task-finalization' || taskWorkflowCommand || manualValidationWorkflowCommand || taskPlatformRecoveryCommand
+    localWorkflow: command === 'task-finalization' || taskWorkflowCommand || manualValidationWorkflowCommand || taskPlatformRecoveryCommand
   });
   switch (transport.kind) {
     case 'fail-closed': {
@@ -84,11 +84,6 @@ if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkfl
 }
 
 if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (command) {
-  case 'task-orchestration': {
-    const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
-    await taskOrchestration(process.argv.slice(3));
-    break;
-  }
   case 'task-lifecycle': {
     const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
     await taskLifecycle(process.argv.slice(3));
@@ -119,11 +114,6 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
   case 'agent-client': {
     const { agentClient } = await import('../lib/internal/agent-client.ts');
     agentClient(process.argv.slice(3));
-    break;
-  }
-  case 'codex-lifecycle': {
-    const { codexLifecycle } = await import('../lib/agent-clients/adapters/codex-lifecycle/cli.ts');
-    await codexLifecycle(process.argv.slice(3));
     break;
   }
   case 'git-workflow': {
@@ -224,11 +214,6 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
   case 'task-artifact': {
     const { taskArtifact } = await import('../lib/internal/task-artifact.ts');
     taskArtifact(process.argv.slice(3));
-    break;
-  }
-  case 'task-orchestration': {
-    const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
-    await taskOrchestration(process.argv.slice(3));
     break;
   }
   case 'task-review': {

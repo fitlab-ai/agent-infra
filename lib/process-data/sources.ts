@@ -194,22 +194,6 @@ function listFiles(directory: string): string[] {
   return output;
 }
 
-function structuredReceipt(repoRoot: string, filePath: string): CapturedObject {
-  const raw = readStableFile(repoRoot, filePath, 'structured-telemetry');
-  if (!raw.content) return raw;
-  try {
-    const parsed = JSON.parse(raw.content) as Record<string, unknown>;
-    const fields = ['client', 'model', 'reasoning', 'stage', 'toolCategory', 'time', 'status', 'retry', 'error', 'fallback'];
-    const selected = Object.fromEntries(
-      fields.filter((field) => parsed[field] !== undefined).map((field) => [field, jsonClone(parsed[field])])
-    );
-    selected.sourceSha256 = raw.sha256;
-    return captureText('structured-telemetry', raw.sourceIdentity, canonicalJsonBytes(selected).toString('utf8'));
-  } catch {
-    return { ...raw, content: undefined, disposition: { state: 'unavailable', reason: 'invalid receipt JSON' } };
-  }
-}
-
 function unavailableLog(repoRoot: string, filePath: string, includeExcerpts: boolean): CapturedObject {
   const raw = readStableFile(repoRoot, filePath, 'local-file');
   if (raw.disposition?.state === 'excluded-sensitive') return raw;
@@ -242,8 +226,6 @@ function collectLocalObjects(repoRoot: string, options: { includeExcerpts?: bool
       const identity = relativeIdentity(repoRoot, filePath);
       if (/\/entropy-check\/.*\.md$/i.test(identity)) {
         objects.push(readStableFile(repoRoot, filePath, 'operational-report'));
-      } else if (/\/(?:delegation|orchestration)(?:\/|[-_]).*\.json$/i.test(identity)) {
-        objects.push(structuredReceipt(repoRoot, filePath));
       } else {
         objects.push(unavailableLog(repoRoot, filePath, options.includeExcerpts === true));
       }

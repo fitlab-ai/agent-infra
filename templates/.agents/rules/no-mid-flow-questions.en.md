@@ -49,14 +49,6 @@ SKILLs currently covered by this exemption:
 - `create-release-note`: may confirm publish after presenting exact staged notes and their digest
 - `post-release`: may confirm a normal push after preparing the local post commit and presenting the complete `postConfirmation` and digest
 
-### Exemption 5: Complete model policy missing at lifecycle start
-
-Only when `run-task` receives `ORCHESTRATION_MODEL_POLICY_REQUIRED` before any run, baseline, receipt, or child is created may it show model-selection context with its completeness label and ask once for complete executor/reviewer model + reasoning effort. Partial explicit policy, a missing client, active delegation, and other pause causes do not qualify. No answer means no run is created.
-
-SKILLs currently covered by this exemption:
-
-- `run-task`: may collect only the atomic model policy explicitly required by core
-
 ### Exemption 6: Necessary facts or security accountability that cannot be inferred
 
 Only when the executor has checked the current task, configuration, code, Git, and platform records and still cannot safely infer a user-specific fact or security-accountability information required to proceed may it ask the user for that missing information. Keep the question limited to the missing fact itself. Do not ask for ordinary implementation preferences that existing evidence can resolve, and do not turn an exhausted recovery budget into general permission to ask.
@@ -104,8 +96,6 @@ A mandatory human review checkpoint means:
 - Do not pause mid-process to ask for input: do not insert interruptions such as "Do you prefer option A or B?" between execution steps
 
 If a key decision needs human judgment during execution, follow the rule above and register the detail identity through the structured `decision-next-id` / `decision-upsert` commands for the user to address at the review checkpoint; ordinary open questions still go to `## Open Questions` / `未决问题`.
-
-The `run-task` orchestrator may continue after a child skill artifact only when core mechanical state permits it; this does not bypass human decisions. When core reports a human decision, manual validation, or another stable pause condition, the orchestrator must stop without asking mid-flow or approving it itself.
 
 ## Error diagnosis and recovery order
 

@@ -36,7 +36,7 @@ function fixture(state: 'active' | 'blocked' = 'active') {
 
 test('lifecycle catalog exposes the approved closed intent set', () => {
   assert.deepEqual(lifecycleIntentCatalog, [
-    'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
+    'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
   ]);
 });
 
@@ -80,30 +80,9 @@ test('task move refuses a task-bound sandbox control consumer without changing t
   assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID)), false);
 });
 
-test('task move refuses active or unreadable orchestration state and preserves all bytes', () => {
-  for (const content of ['{"status":"running","pendingDelegation":{"id":"receipt"}}\n', '{invalid\n']) {
-    const f = fixture();
-    const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
-    fs.mkdirSync(path.dirname(runPath), { recursive: true });
-    fs.writeFileSync(runPath, content);
-    const taskFile = path.join(f.taskDir, 'task.md');
-    const taskBefore = fs.readFileSync(taskFile);
-    const runBefore = fs.readFileSync(runPath);
-
-    const result = applyTaskLifecycle(
-      { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Settle run' },
-      { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
-    );
-    assert.equal(result.error?.code, 'LIFECYCLE_RUNTIME_MOVE_UNSAFE');
-    assert.deepEqual(fs.readFileSync(taskFile), taskBefore);
-    assert.deepEqual(fs.readFileSync(runPath), runBefore);
-    assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
-  }
-});
-
 test('safe task move carries task-owned runtime bytes to the new state intact', () => {
   const f = fixture();
-  const runtimeFile = path.join(f.taskDir, '.runtime', 'orchestration.json');
+  const runtimeFile = path.join(f.taskDir, '.runtime', 'state.json');
   fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
   fs.writeFileSync(runtimeFile, '{"status":"completed","pendingDelegation":null}\n');
   const before = fs.readFileSync(runtimeFile);
@@ -112,7 +91,7 @@ test('safe task move carries task-owned runtime bytes to the new state intact', 
     { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
   );
   assert.equal(result.status, 'applied');
-  assert.deepEqual(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID, '.runtime', 'orchestration.json')), before);
+  assert.deepEqual(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'blocked', TASK_ID, '.runtime', 'state.json')), before);
   assert.equal(fs.existsSync(f.taskDir), false);
 });
 

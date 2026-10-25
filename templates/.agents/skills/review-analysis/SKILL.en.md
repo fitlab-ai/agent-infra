@@ -9,7 +9,7 @@ description: >
 # Requirement Analysis Review
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `review-finding`. Reuse the same values for started and completed.
+Lifecycle events require explicit trigger data: ordinary skill invocation uses `model`; use `human` only when the user explicitly requests it. `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` use `user-request` or `review-finding`. Reuse the same values for started and completed.
 
 Review the latest analysis artifact and produce `review-analysis.md` or `review-analysis-r{N}.md`.
 

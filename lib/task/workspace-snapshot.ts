@@ -40,7 +40,7 @@ type OrchestrationWorkspaceFingerprint = Readonly<{
 }>;
 
 function captureWorktreeTree(repoRoot: string, forcedPath: string | null): string {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-orchestration-index-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-snapshot-index-'));
   const indexFile = path.join(tempDir, 'index');
   try {
     try { git(repoRoot, indexFile, ['read-tree', 'HEAD']); }
@@ -68,7 +68,6 @@ function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFil
       return;
     }
     if (!stat.isFile() && !stat.isSymbolicLink()) return;
-    if (/^task-workspace\/(?:active|blocked|completed)\/TASK-[0-9]{8}-[0-9]{6}\/\.runtime\/orchestration\.json$/u.test(relative)) return;
     const content = stat.isSymbolicLink()
       ? Buffer.from(fs.readlinkSync(absolute))
       : fs.readFileSync(absolute);
@@ -100,7 +99,7 @@ function decodeWorkspaceFingerprint(value: string): OrchestrationWorkspaceFinger
     }
     return parsed;
   } catch (error) {
-    throw new Error(`ORCHESTRATION_SNAPSHOT_FAILED: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`WORKSPACE_SNAPSHOT_FAILED: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -124,7 +123,7 @@ function diffWorkspaceSnapshots(repoRoot: string, before: string, after: string)
   const beforeV2 = decodeWorkspaceFingerprint(before);
   const afterV2 = decodeWorkspaceFingerprint(after);
   if ((beforeV2 === null) !== (afterV2 === null)) {
-    throw new Error('ORCHESTRATION_SNAPSHOT_FAILED: workspace fingerprint versions cannot be mixed');
+    throw new Error('WORKSPACE_SNAPSHOT_FAILED: workspace fingerprint versions cannot be mixed');
   }
   if (!beforeV2 || !afterV2) {
     const output = git(repoRoot, null, ['diff', '--name-only', '-z', before, after]);

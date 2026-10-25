@@ -18,7 +18,7 @@ function git(root: string, args: string[]): void {
 }
 
 test('task-scoped snapshots isolate ignored active tasks while retaining Git-visible changes', () => {
-  const root = createTempDir('orchestration-snapshot-');
+  const root = createTempDir('workspace-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -48,7 +48,7 @@ test('task-scoped snapshots isolate ignored active tasks while retaining Git-vis
 });
 
 test('repository-wide context snapshots retain active task coverage', () => {
-  const root = createTempDir('orchestration-snapshot-');
+  const root = createTempDir('workspace-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -72,7 +72,7 @@ test('repository-wide context snapshots retain active task coverage', () => {
 });
 
 test('task-scoped and repository-wide contexts retain their explicit scope', () => {
-  const root = createTempDir('orchestration-snapshot-');
+  const root = createTempDir('workspace-snapshot-');
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -95,7 +95,7 @@ test('task-scoped and repository-wide contexts retain their explicit scope', () 
 });
 
 test('repository snapshots ignore lifecycle artifacts while detecting Git-visible changes', () => {
-  const root = createTempDir('orchestration-repository-snapshot-');
+  const root = createTempDir('repository-snapshot-');
   taskWorkspaceRoot(root);
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
@@ -126,8 +126,8 @@ test('repository snapshots ignore lifecycle artifacts while detecting Git-visibl
   assert.notEqual(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
 });
 
-test('versioned orchestration snapshots combine a linked worktree with task state from another root', () => {
-  const root = createTempDir('orchestration-split-snapshot-');
+test('versioned versioned snapshots combine a linked worktree with task state from another root', () => {
+  const root = createTempDir('split-snapshot-');
   const stateRoot = path.join(root, 'state');
   const gitRoot = path.join(root, 'worktree');
   fs.mkdirSync(stateRoot);

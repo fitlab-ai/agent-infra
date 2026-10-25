@@ -31,15 +31,6 @@ const AGENT_CLIENTS_SCHEMA = {
           installInSandbox: {
             type: 'boolean'
           },
-          orchestration: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['executor', 'reviewer'],
-            properties: {
-              executor: { $ref: '#/definitions/orchestrationRolePolicy' },
-              reviewer: { $ref: '#/definitions/orchestrationRolePolicy' }
-            }
-          }
         }
       }))
     },
@@ -66,15 +57,6 @@ const AGENT_CLIENTS_SCHEMA = {
     }
   },
   definitions: {
-    orchestrationRolePolicy: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['model', 'reasoningEffort'],
-      properties: {
-        model: { type: 'string', minLength: 1 },
-        reasoningEffort: { type: 'string', minLength: 1 }
-      }
-    },
     agentClientCapabilityId: {
       type: 'string',
       enum: [...AGENT_CLIENT_CAPABILITY_IDS]

@@ -10,7 +10,7 @@
 ## 提交执行边界
 
 - 不直接执行 `git add` 或 `git commit`；所有自动提交都必须通过 `agent-infra-internal git-workflow commit` 共享 core，并遵守对应技能提供的 paths、HEAD/tree 和交付模式约束。
-- 提交由当前工作流定义。`code-task` 完成实现必须在测试和实现报告 preflight 通过后，通过共享 core 创建一个本地 checkpoint；该要求适用于直接调用和 `run-task` 编排，不需要额外的提交授权或用户确认。
+- 提交由当前工作流定义。`code-task` 完成实现必须在测试和实现报告 preflight 通过后，通过共享 core 创建一个本地 checkpoint；该要求由当前 code-task 调用共享 core 完成。
 - `code-task` 的本地 checkpoint 不推送远端。其他技能只有在其流程明确要求时才可调用共享 core；独立 `commit` 技能仍须由用户显式调用，并遵循其 push delivery 流程。
 - 工作流没有要求提交时，不要自行创建提交；需要用户执行独立提交时，再提示对应 TUI 命令。
 

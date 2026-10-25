@@ -21,13 +21,12 @@ const TASK_CONTEXT_SKILL_USAGES: Record<string, string> = {
   'complete-manual-validation': '[--task <ref> | -t <ref>] [pr-ref] <verification-summary>',
   'watch-pr': '[--task <ref> | -t <ref>] | [--pr <number>] | [<pr-url>]',
   'run-manual-validation': '[--task <ref> | -t <ref> | --branch <ref>] [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>',
-  'run-task': '[--task <ref> | -t <ref>] [--executor-model <model> --executor-reasoning-effort <effort> --reviewer-model <model> --reviewer-reasoning-effort <effort>]'
 };
 
 const TASK_CONTEXT_SKILLS = Object.keys(TASK_CONTEXT_SKILL_USAGES);
 
-test('public task scope registry covers the documented sixteen skills only', () => {
-  assert.equal(TASK_CONTEXT_SKILLS.length, 16);
+test('public task scope registry covers the documented fifteen skills only', () => {
+  assert.equal(TASK_CONTEXT_SKILLS.length, 15);
   for (const name of TASK_CONTEXT_SKILLS) assert.equal(isTaskScopeSkill(name), true);
   assert.equal(isTaskScopeSkill('post-release'), false);
   assert.equal(isTaskScopeSkill('test'), false);
@@ -100,7 +99,7 @@ for (const name of TASK_CONTEXT_SKILLS) {
     test(`${variant} SKILL.md (${name}) delegates task identity to task-context`, () => {
       const content = read(p);
       assert.ok(content.includes('agent-infra-internal task-context resolve'));
-      if (name !== 'run-task' && name !== 'run-manual-validation') {
+      if (name !== 'run-manual-validation') {
         assert.ok(content.includes('taskId'));
       }
     });

@@ -34,14 +34,10 @@ test('every registered mutation requires a matching domain contract', () => {
     );
     const result = {
       requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
-      intentDigest: binding.intentDigest, status: operation.intent === 'recover-started' ? 'applied' : 'completed',
-      changed: true,
-      ...(operation.intent === 'recover-started' ? { targetState: 'active' } : {})
+      intentDigest: binding.intentDigest, status: 'completed', changed: true
     };
-    const domain = operation.intent === 'recover-started'
-      ? { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' }
-      : { consistent: true };
-    const expectedOutcome = operation.intent === 'recover-started' ? 'unknown' : 'success';
+    const domain = { consistent: true };
+    const expectedOutcome = 'success';
     assert.equal(classifySandboxControlRecovery({
       operation,
       binding,
@@ -54,19 +50,6 @@ test('every registered mutation requires a matching domain contract', () => {
       operation, binding, startedCommitted: true, terminalResult: result
     }).outcome, 'unknown', `${operation.family}:${operation.intent} missing domain`);
   }
-});
-
-test('recover-started response loss stays unknown and is retried through the idempotent command', () => {
-  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'recover-started')!;
-  const binding = operationRecoveryBinding('f'.repeat(32), 'generation-7', 'TASK-20260904-002407', operation.family, operation.intent);
-  const result = {
-    requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
-    intentDigest: binding.intentDigest, status: 'applied', changed: true, targetState: 'active'
-  };
-  assert.equal(classifySandboxControlRecovery({
-    operation, binding, startedCommitted: true, terminalResult: result,
-    domain: { consistent: true }, criticalPhases
-  }).outcome, 'unknown');
 });
 
 test('recovery matrix distinguishes explicit failure and journal partial state', () => {

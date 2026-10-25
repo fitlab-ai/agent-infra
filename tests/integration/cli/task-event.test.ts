@@ -11,7 +11,6 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
-import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 import { parseArtifactReceipts, upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import {
@@ -174,51 +173,6 @@ function fixture(step = 'requirement-analysis-review') {
     fs.writeFileSync(path.join(dir, 'task.md'), withFacts.replace('## Activity Log\n\n', `## Activity Log\n\n${logs.join('\n')}\n`));
   }
   return { root, id, dir, file: path.join(dir, 'task.md') };
-}
-
-function orchestrationReceipt(taskId: string, overrides: Record<string, unknown> = {}) {
-  const status = typeof overrides.status === 'string' ? overrides.status : 'activated';
-  const adapterEvidence = ['activated', 'stage-completed', 'sealed', 'consumed', 'aborted'].includes(status)
-    ? { codex: {
-        activationEvidence: { kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4, capabilitySessionId: 'parent-1' },
-        records: ['sealed', 'consumed', 'aborted'].includes(status)
-          ? { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } }
-          : {}
-      } }
-    : {};
-  return {
-    id: 'receipt-1', taskId, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
-    artifact: 'plan.md', client: 'codex', requestedModel: 'executor-model',
-    requestedReasoningEffort: 'xhigh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh',
-    modelFallbackReason: null, reasoningEffortFallbackReason: null,
-    parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: null,
-    status, workspaceSnapshotScope: 'task', adapterEvidence,
-    beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
-    createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
-    spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
-    spawnDispatchedAt: '2026-01-01T00:00:00.000Z',
-    activationDeadlineAt: '2026-01-01T00:00:15.000Z', startEvidenceMonotonicMs: 2,
-    activatedMonotonicMs: 2, activatedAt: '2026-01-01T00:00:01.000Z',
-    sealedAt: null, consumedAt: null,
-    ...overrides
-  };
-}
-
-function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    taskId, runId: 'run-1', status: 'running', nextStage: 'plan', stepCount: 0, maxSteps: 24,
-    modelPolicy: {
-      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
-    },
-    modelPolicySource: {
-      kind: 'explicit', client: 'codex', resolvedAt: '2026-01-01T00:00:00.000Z'
-    },
-    recoveryHistory: [], baseline: '', pendingDelegation: null, receipts: [], pause: null,
-    completionEvidence: null,
-    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides
-  };
 }
 
 function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxControlSafeEnv()) {
@@ -947,160 +901,6 @@ test('standalone plan start does not require a fresh analysis review', () => {
   assert.equal(JSON.parse(started.stdout).status, 'applied');
 });
 
-test('completed event validates orchestration provenance before writing task state', () => {
-  const f = fixture();
-  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: f.root });
-  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: f.root });
-  spawnSync('git', ['add', '.'], { cwd: f.root });
-  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: f.root });
-
-  const orchestrate = (args: string[]) => spawnSync(
-    process.execPath, [INTERNAL_CLI_PATH, 'task-orchestration', f.id, ...args],
-    { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() }
-  );
-  assert.equal(orchestrate([
-    'begin-or-resume', '--client', 'claude-code',
-    '--executor-model', 'executor-model', '--executor-reasoning-effort', 'xhigh',
-    '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
-  ]).status, 0);
-  const prepared = prepareOrchestrationDelegation(f.id, {
-    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
-  }, {
-    repoRoot: f.root,
-    supportsLifecycleDelegation: () => true
-  });
-  assert.equal(prepared.status, 'running');
-  assert.equal(orchestrate([
-    'hook-start', '--native-agent', 'agent-infra-lifecycle-executor', '--child-id', 'child-1',
-    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'executor-model',
-    '--actual-reasoning-effort', 'xhigh'
-  ]).status, 0);
-
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-
-  const before = fs.readFileSync(f.file);
-  const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'claude-code', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--orchestrated'
-  ]);
-  assert.equal(completed.status, 1);
-  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_TRANSITION_INVALID');
-  assert.deepEqual(fs.readFileSync(f.file), before);
-});
-
-test('standalone completion ignores a current orchestration run without a pending delegation', () => {
-  const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  fs.writeFileSync(path.join(f.dir, '.runtime', 'orchestration.json'), `${JSON.stringify(currentRun(f.id, {
-    status: 'paused', nextStage: null,
-    pause: { code: 'ORCHESTRATION_RETRYABLE', message: 'retry later', recoverable: true }
-  }), null, 2)}\n`);
-  const runBefore = fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json'));
-
-  const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')
-  ]);
-
-  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.deepEqual(fs.readFileSync(path.join(f.dir, '.runtime', 'orchestration.json')), runBefore);
-});
-
-test('standalone completion ignores a legacy delegation receipt without a current child attempt', () => {
-  const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
-    pendingDelegation: orchestrationReceipt(f.id, {
-      status: 'prepared', parentId: null, childId: null, spawnMode: null,
-      actualModel: null, actualReasoningEffort: null, spawnDispatchMonotonicMs: null,
-      activationDeadlineMonotonicMs: null, spawnDispatchedAt: null, activationDeadlineAt: null,
-      startEvidenceMonotonicMs: null, activatedMonotonicMs: null, activatedAt: null
-    })
-  }), null, 2)}\n`);
-  const runBefore = fs.readFileSync(runPath);
-
-  const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')
-  ]);
-
-  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
-});
-
-test('orchestrated completion advances one matching activated delegation', () => {
-  const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
-    pendingDelegation: orchestrationReceipt(f.id)
-  }), null, 2)}\n`);
-
-  const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--orchestrated'
-  ]);
-
-  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.status, 'stage-completed');
-});
-
-test('orchestrated completion reports a distinct partial-write error when the run commit fails', () => {
-  const f = fixture();
-  assert.equal(run(f.root, [
-    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
-    '--request-id', `test:${f.id}:plan`, '--reason-code', 'user-request'
-  ]).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
-    pendingDelegation: orchestrationReceipt(f.id)
-  }), null, 2)}\n`);
-  const finalized = finalizeLocalArtifact({
-    taskRef: f.id,
-    repoRoot: f.root,
-    family: 'plan',
-    artifact: 'plan.md'
-  });
-  assert.equal(finalized.status, 'passed', finalized.error?.message);
-  const taskBefore = fs.readFileSync(f.file);
-
-  const result = applyTaskEvent({
-    taskRef: f.id,
-    event: 'plan.completed',
-    agent: 'codex',
-    initiator: 'model',
-    requestId: `test:${f.id}:plan`,
-    reasonCode: 'user-request',
-    artifact: 'plan.md',
-    artifactSha256: finalized.artifactSha256!,
-    semanticDigest: finalized.semanticDigest!,
-    orchestrated: true
-  }, {
-    repoRoot: f.root,
-    commitOrchestrationCompletion: () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); }
-  });
-
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'EVENT_ORCHESTRATION_COMMIT_FAILED', JSON.stringify(result));
-  assert.notDeepEqual(fs.readFileSync(f.file), taskBefore);
-  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.status, 'activated');
-});
-
-test('task-event only accepts --orchestrated for lifecycle completion events', () => {
-  const f = fixture();
-  const before = fs.readFileSync(f.file);
-  const result = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--orchestrated']);
-
-  assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'EVENT_PAYLOAD_INVALID');
-  assert.deepEqual(fs.readFileSync(f.file), before);
-});
-
 test('manual validation completion requires coordinator evidence and receipt identity', () => {
   const f = fixture('code-review');
   const started = run(f.root, [f.id, 'manual-validation.started', '--agent', 'codex']);
@@ -1129,32 +929,6 @@ test('dry-run returns planned without changing task bytes for start and completi
   assert.equal(completedResult.status, 'planned');
   assert.equal(completedResult.operations.length, 5);
   assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
-});
-
-test('orchestrated completion dry-run reports a provenance mismatch without pausing the run', () => {
-  const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
-    pendingDelegation: orchestrationReceipt(f.id, {
-      status: 'prepared', parentId: null, childId: null, spawnMode: null,
-      actualModel: null, actualReasoningEffort: null, spawnDispatchMonotonicMs: null,
-      activationDeadlineMonotonicMs: null, spawnDispatchedAt: null, activationDeadlineAt: null,
-      startEvidenceMonotonicMs: null, activatedMonotonicMs: null, activatedAt: null
-    })
-  }), null, 2)}\n`);
-  const taskBefore = fs.readFileSync(f.file);
-  const runBefore = fs.readFileSync(runPath);
-
-  const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan'), '--orchestrated', '--dry-run'
-  ]);
-
-  assert.equal(completed.status, 1);
-  assert.match(JSON.parse(completed.stdout).error.message, /ORCHESTRATION_PROVENANCE_MISMATCH/);
-  assert.deepEqual(fs.readFileSync(f.file), taskBefore);
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {

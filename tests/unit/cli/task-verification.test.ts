@@ -12,14 +12,6 @@ import {
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
-import {
-  activateDelegation,
-  completeDelegationStage,
-  consumeDelegation,
-  dispatchDelegation,
-  prepareDelegation,
-  sealDelegation
-} from '../../../lib/task/delegation-receipts.ts';
 import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 const EXPECTED_EVENTS = [
@@ -29,23 +21,8 @@ const EXPECTED_EVENTS = [
   'commit.completed', 'complete-task.preflight', 'complete-task.hard-preflight', 'complete-task.completed',
   'create-pr.completed', 'create-task.completed', 'import-codescan.completed',
   'import-dependabot.completed', 'import-issue.completed', 'watch-pr.completed',
-  'review-pr.completed',
-  'run-task.paused', 'run-task.completed'
+  'review-pr.completed'
 ] as const;
-
-const codexLifecycleProvenance = {
-  protocolVersion: 3,
-  packageVersion: '0.9.9-alpha.0',
-  internalExecutableBuildHash: 'a'.repeat(64),
-  lifecycleContractHash: 'b'.repeat(64),
-  hookDefinitionHash: 'hook-hash',
-  hookSource: 'project',
-  hookSourcePathDigest: 'c'.repeat(64),
-  hookSourceHash: 'd'.repeat(64),
-  capabilitySessionId: 'parent-1',
-  capabilityTurnId: 'parent-turn'
-} as const;
-
 
 function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
   const { repoRoot: root } = createTaskWorkspaceFixture('task-verification-unit-');
@@ -55,95 +32,6 @@ function fixture(state: 'active' | 'blocked' | 'completed' = 'active') {
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\n---\n`);
   fs.mkdirSync(path.join(taskDir, '.runtime'), { recursive: true });
   return { root, taskId, taskDir };
-}
-
-function currentReceipt(taskId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'receipt-1', taskId, runId: 'run-1', role: 'executor', stage: 'commit',
-    round: 1, artifact: 'commit', client: 'claude-code',
-    requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
-    actualModel: 'executor-model', actualReasoningEffort: 'xhigh',
-    modelFallbackReason: null, reasoningEffortFallbackReason: null,
-    parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: 'claude-code',
-    status: 'consumed', workspaceSnapshotScope: 'task',
-    beforeFingerprint: 'before', afterFingerprint: 'after', changedPaths: [],
-    createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
-    spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
-    spawnDispatchedAt: '2026-01-01T00:00:00.500Z',
-    activationDeadlineAt: '2026-01-01T00:00:15.500Z', startEvidenceMonotonicMs: 2,
-    activatedMonotonicMs: 2, activatedAt: '2026-01-01T00:00:01.000Z',
-    sealedAt: '2026-01-01T00:00:02.000Z', consumedAt: '2026-01-01T00:00:03.000Z',
-    ...overrides
-  };
-}
-
-function producedCodexReceipt(taskId: string) {
-  const prepared = prepareDelegation({
-    taskId, runId: 'run-1', role: 'executor', stage: 'analysis', round: 1,
-    artifact: 'analysis.md', client: 'codex', requestedModel: 'executor-model',
-    requestedReasoningEffort: 'xhigh', workspaceSnapshotScope: 'task',
-    beforeFingerprint: 'before'
-  }, {
-    id: () => 'receipt-1', now: () => '2026-01-01T00:00:00.000Z',
-    monotonicNow: () => 1
-  });
-  const dispatched = dispatchDelegation(prepared, {
-    now: () => '2026-01-01T00:00:00.500Z', monotonicNow: () => 2
-  });
-  assert.equal(dispatched.ok, true);
-  if (!dispatched.ok) throw new Error('failed to dispatch Codex receipt fixture');
-  const activated = activateDelegation(dispatched.receipt, {
-    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-1',
-    parentId: 'parent-1', spawnMode: 'fresh', actualModel: 'executor-model',
-    actualReasoningEffort: 'xhigh', clientEvidence: { records: { lifecycle: { consumer: null, consumedAt: null } }, activationEvidence: {
-      kind: 'codex-lifecycle-v2', startRevision: 4, ...codexLifecycleProvenance,
-      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z'
-    } }
-  }, { now: () => '2026-01-01T00:00:01.000Z', monotonicNow: () => 3 });
-  assert.equal(activated.ok, true);
-  if (!activated.ok) throw new Error('failed to activate Codex receipt fixture');
-  const completed = completeDelegationStage(activated.receipt, {
-    stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
-  });
-  assert.equal(completed.ok, true);
-  if (!completed.ok) throw new Error('failed to complete Codex receipt fixture');
-  const sealed = sealDelegation(completed.receipt, {
-    childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
-    clientEvidence: {
-      records: { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } },
-      activationEvidence: {
-        kind: 'codex-lifecycle-v2', startRevision: 4, ...codexLifecycleProvenance,
-        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
-        stopRevision: 7, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z'
-      }
-    }
-  }, { now: () => '2026-01-01T00:00:02.000Z' });
-  assert.equal(sealed.ok, true);
-  if (!sealed.ok) throw new Error('failed to seal Codex receipt fixture');
-  const consumed = consumeDelegation(sealed.receipt, {
-    now: () => '2026-01-01T00:00:03.000Z'
-  });
-  assert.equal(consumed.ok, true);
-  if (!consumed.ok) throw new Error('failed to consume Codex receipt fixture');
-  return consumed.receipt;
-}
-
-function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    taskId, runId: 'run-1', status: 'completed', nextStage: null, stepCount: 1, maxSteps: 24,
-    modelPolicy: {
-      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
-    },
-    modelPolicySource: {
-      kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
-    },
-    recoveryHistory: [], baseline: '', pendingDelegation: null,
-    receipts: [currentReceipt(taskId)], pause: null,
-    completionEvidence: null,
-    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:03.000Z',
-    ...overrides
-  };
 }
 
 function engine(status: 'pass' | 'fail' | 'blocked') {
@@ -177,9 +65,7 @@ test('verification catalog is a closed mapping of all business events', async ()
     'import-dependabot.completed': ['import-dependabot', 'active', 'gate', undefined, undefined],
     'import-issue.completed': ['import-issue', 'active', 'gate', undefined, undefined],
     'watch-pr.completed': ['watch-pr', 'active', 'gate', undefined, undefined],
-    'review-pr.completed': ['review-pr', 'active', 'gate', 'pr-review', undefined],
-    'run-task.paused': ['run-task', 'active', 'checks', undefined, ['orchestration-state', 'orchestration-evidence']],
-    'run-task.completed': ['run-task', 'active', 'checks', undefined, ['orchestration-state', 'orchestration-evidence']]
+    'review-pr.completed': ['review-pr', 'active', 'gate', 'pr-review', undefined]
   } as const;
   for (const event of EXPECTED_EVENTS) {
     const spec = VERIFICATION_CATALOG[event];
@@ -490,212 +376,8 @@ test('text output does not list names of passing checks', () => {
   assert.doesNotMatch(text, /artifact\.schema|snapshot\.fresh/);
 });
 
-test('unknown events fail with a stable orchestration error', async () => {
+test('unknown events fail with a stable verification error', async () => {
   const f = fixture();
   const unknown = await verifyTaskEvent({ taskRef: f.taskId, event: 'unknown.completed' }, { repoRoot: f.root });
   assert.equal(unknown.error?.code, 'VERIFY_EVENT_UNKNOWN');
-});
-
-test('run-task verification accepts complete current evidence and rejects invalid host identity', async () => {
-  const f = fixture();
-  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
-  }));
-  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
-  const head = 'a'.repeat(40);
-  const tree = 'b'.repeat(40);
-  const run = currentRun(f.taskId, {
-    receipts: [],
-    completionEvidence: {
-      kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
-      head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
-      prNumber: null, prHead: null
-    },
-    updatedAt: '2026-01-01T00:00:05.000Z'
-  });
-  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
-
-  const valid = await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
-  assert.equal(valid.status, 'pass');
-  assert.equal(valid.invocations.length, 2);
-
-  const codexReceipt = producedCodexReceipt(f.taskId);
-  const codexRun = currentRun(f.taskId, {
-    modelPolicySource: { ...run.modelPolicySource, client: 'codex' },
-    receipts: [codexReceipt],
-    completionEvidence: run.completionEvidence,
-    updatedAt: '2026-01-01T00:00:05.000Z'
-  });
-  fs.writeFileSync(runPath, `${JSON.stringify(codexRun, null, 2)}\n`);
-  const codexVerification = await verifyTaskEvent(
-    { taskRef: f.taskId, event: 'run-task.completed' },
-    { repoRoot: f.root }
-  );
-  assert.equal(codexVerification.status, 'pass', JSON.stringify(codexVerification));
-
-  const invalidReceipts = [
-    { ...codexReceipt, activatedAt: null, sealedAt: null, consumedAt: null },
-    { ...codexReceipt, childId: codexReceipt.parentId },
-    { ...codexReceipt, adapterEvidence: null }
-  ];
-  for (const receipt of invalidReceipts) {
-    fs.writeFileSync(runPath, JSON.stringify({ ...codexRun, receipts: [receipt] }));
-    for (const check of ['orchestration-state', 'orchestration-evidence']) {
-      const rejected = await verifyInProcess({
-        mode: 'checks', skillName: 'run-task', taskDir: f.taskDir,
-        checks: [check], repositoryRoot: f.root
-      });
-      assert.equal(rejected.status, 'fail', JSON.stringify({ check, receipt }));
-    }
-  }
-
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...run,
-    receipts: [currentReceipt(f.taskId, { client: 'antigravity-cli', actualModel: null })]
-  }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'fail'
-  );
-});
-
-test('run-task verification accepts only internally consistent clean completion evidence', async () => {
-  const f = fixture();
-  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
-  }));
-  const head = 'a'.repeat(40);
-  const tree = 'b'.repeat(40);
-  const evidence = {
-    kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
-    head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
-    prNumber: 42, prHead: head
-  };
-  const run = currentRun(f.taskId, {
-    runId: 'run-clean', stepCount: 0, receipts: [],
-    completionEvidence: evidence,
-    updatedAt: '2026-01-01T00:00:05.000Z'
-  });
-  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'pass'
-  );
-
-  for (const invalid of [
-    { ...run, completionEvidence: { ...evidence, prHead: 'c'.repeat(40) } },
-    { ...run, completionEvidence: { ...evidence, head: 'c'.repeat(40) } },
-    { ...run, completionEvidence: { ...evidence, worktreeTree: 'c'.repeat(40) } },
-    { ...run, completionEvidence: { ...evidence, headTree: 'not-a-sha' } },
-    { ...run, completionEvidence: { ...evidence, prNumber: -1 } },
-    { ...run, completionEvidence: null },
-    { ...run, status: 'paused' },
-    { ...run, completionEvidence: { ...evidence, observedAt: 'invalid' } }
-  ]) {
-    fs.writeFileSync(runPath, `${JSON.stringify(invalid, null, 2)}\n`);
-    assert.equal(
-      (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-      'fail'
-    );
-  }
-});
-
-test('run-task verification applies current receipt and pause invariants', async () => {
-  const f = fixture();
-  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
-  }));
-  const paused = currentRun(f.taskId, {
-    status: 'paused', stepCount: 0, receipts: [],
-    pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false }
-  });
-  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
-    'pass'
-  );
-
-  const pending = currentReceipt(f.taskId, {
-    stage: 'analysis', artifact: 'analysis.md', status: 'activated',
-    actualModel: null, actualReasoningEffort: null, spawnMode: null, agent: null,
-    afterFingerprint: null, sealedAt: null, consumedAt: null
-  });
-  fs.writeFileSync(runPath, `${JSON.stringify({ ...paused, pendingDelegation: pending }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
-    'pass'
-  );
-
-  for (const invalidReceipt of [
-    { ...pending, parentId: null },
-    { ...pending, modelFallbackReason: 'fabricated reason' },
-    { ...pending, status: 'sealed' }
-  ]) {
-    fs.writeFileSync(runPath, `${JSON.stringify({ ...paused, pendingDelegation: invalidReceipt }, null, 2)}\n`);
-    assert.equal(
-      (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
-      'fail'
-    );
-  }
-});
-
-test('run-task verification accepts only current recovery provenance and rejects legacy structures', async () => {
-  const f = fixture();
-  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
-  }));
-  const head = 'a'.repeat(40);
-  const tree = 'b'.repeat(40);
-  const recovery = {
-    code: 'CLIENT_CAPABILITY_ENABLED', recoveredAt: '2026-01-01T00:00:00.000Z',
-    previousStatus: 'paused',
-    previousPause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: false },
-    client: 'claude-code',
-    guards: {
-      stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
-      pendingDelegation: false, completionEvidenceAbsent: true
-    },
-    resultingStatus: 'running'
-  };
-  const run = currentRun(f.taskId, {
-    runId: 'run-recovered', stepCount: 0, receipts: [], recoveryHistory: [recovery],
-    completionEvidence: {
-      kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
-      head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
-      prNumber: 42, prHead: head
-    }
-  });
-  const runPath = path.join(f.taskDir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'pass'
-  );
-
-  for (const invalid of [
-    { ...run, recoveryHistory: [{ ...recovery, guards: { ...recovery.guards, baselineEmpty: false } }] },
-    { ...run, recoveryHistory: [{ ...recovery, previousSchemaVersion: 3 }] },
-    { ...run, modelPolicySource: { ...run.modelPolicySource, client: 'unknown-client' } },
-    { ...run, modelPolicy: { ...run.modelPolicy, executor: { model: ' ', reasoningEffort: 'high' } } },
-    { ...run, recoveryHistory: [{ ...recovery, code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION' }] },
-    { ...run, schemaVersion: 3 },
-    { ...run, modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model' } }
-  ]) {
-    fs.writeFileSync(runPath, `${JSON.stringify(invalid, null, 2)}\n`);
-    const result = await verifyTaskEvent(
-      { taskRef: f.taskId, event: 'run-task.completed' },
-      { repoRoot: f.root }
-    );
-    assert.equal(result.status, 'fail');
-  }
 });
