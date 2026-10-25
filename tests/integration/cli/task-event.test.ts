@@ -554,6 +554,38 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.deepEqual(parseArtifactReceipts(content).rows.filter((row) => row.output === 'plan.md').map((row) => row.input), ['analysis.md', 'review-analysis.md']);
 });
 
+test('completed replay uses the valid completion fact when its done row is missing or malformed', () => {
+  for (const doneRow of ['missing', 'malformed']) {
+    const f = fixture();
+    try {
+      const requestId = `${f.id}:plan-completion-replay`;
+      const trigger = ['--initiator', 'model', '--request-id', requestId, '--reason-code', 'user-request'];
+      const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);
+      assert.equal(started.status, 0, started.stderr || started.stdout);
+      fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+      const completedArgs = [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...trigger,
+        ...completionDigestArgs(f.root, f.dir, 'plan.md', 'plan')];
+      const completed = run(f.root, completedArgs);
+      assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+      assert.equal(JSON.parse(completed.stdout).status, 'applied');
+
+      const task = fs.readFileSync(f.file, 'utf8');
+      const changedLog = task.split('\n').filter((line) => {
+        if (!line.includes('**Plan Task (Round 1)**')) return true;
+        return doneRow === 'malformed';
+      }).map((line) => doneRow === 'malformed' && line.includes('**Plan Task (Round 1)**')
+        ? '- malformed completion row' : line).join('\n');
+      assert.notEqual(changedLog, task);
+      fs.writeFileSync(f.file, changedLog);
+
+      const replayed = run(f.root, completedArgs);
+      assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
+      assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+      assert.equal(fs.readFileSync(f.file, 'utf8'), changedLog);
+    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+  }
+});
+
 test('plan completion gate allows a valid plan to resume after review-plan advances current_step', async () => {
   const f = fixture();
   try {

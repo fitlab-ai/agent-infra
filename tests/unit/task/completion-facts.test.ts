@@ -83,3 +83,28 @@ test('identity-bearing malformed completion facts remain present and invalid', (
   assert.throws(() => hasOpenArtifactRound(taskDir, openStarted, 'analysis', 2), /completion evidence.*invalid/u);
   assert.notEqual(validateArtifactPublication(taskDir, 'analysis', 'analysis-r2.md'), null);
 });
+
+test('missing and empty completion facts remain resumable while a present scalar fails closed', () => {
+  const taskDir = createTempDir('completion-facts-empty-');
+  const taskPath = path.join(taskDir, 'task.md');
+  fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n');
+  const task = '---\nid: TASK-20260101-000001\n---\n\n# Task\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n';
+  fs.writeFileSync(taskPath, task);
+  const withoutFacts = task;
+  const emptyFacts = task.replace('\n---\n', "\ncompletion_facts: '[]'\n---\n");
+
+  assert.equal(hasArtifactCompletionRecord(withoutFacts, 'analysis.md', 'analyze.completed'), false);
+  assert.equal(hasOpenArtifactRound(taskDir, withoutFacts, 'analysis', 1), true);
+  fs.writeFileSync(taskPath, withoutFacts);
+  assert.equal(validateArtifactPublication(taskDir, 'analysis', 'analysis.md'), null);
+  assert.equal(hasArtifactCompletionRecord(emptyFacts, 'analysis.md', 'analyze.completed'), false);
+  assert.equal(hasOpenArtifactRound(taskDir, emptyFacts, 'analysis', 1), true);
+
+  fs.writeFileSync(taskPath, emptyFacts);
+  assert.equal(validateArtifactPublication(taskDir, 'analysis', 'analysis.md'), null);
+  const scalarFacts = task.replace('\n---\n', '\ncompletion_facts: 42\n---\n');
+  assert.equal(hasArtifactCompletionRecord(scalarFacts, 'analysis.md', 'analyze.completed'), true);
+  assert.throws(() => hasOpenArtifactRound(taskDir, scalarFacts, 'analysis', 1), /completion evidence.*invalid/u);
+  fs.writeFileSync(taskPath, scalarFacts);
+  assert.notEqual(validateArtifactPublication(taskDir, 'analysis', 'analysis.md'), null);
+});

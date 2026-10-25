@@ -68,7 +68,9 @@ export function hasValidArtifactCompletion(taskContent: string, taskDir: string,
 export function hasArtifactCompletionRecord(taskContent: string, artifact: string, event: string): boolean {
   try {
     const raw = parseTypedTaskFrontmatter(taskContent).completion_facts;
-    if (typeof raw !== 'string' || raw.trim() === '') return false;
+    if (raw === undefined) return false;
+    if (typeof raw !== 'string') return true;
+    if (raw.trim() === '') return false;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return true;
     return parsed.some((fact) => fact && typeof fact === 'object' && !Array.isArray(fact)
