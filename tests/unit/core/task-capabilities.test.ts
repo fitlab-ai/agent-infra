@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
-import { sha256File, upsertArtifactReceipt, type ArtifactReceiptEvent } from '../../../lib/task/artifact-receipts.ts';
+import { parseArtifactReceipts, sha256File, upsertArtifactReceipt, type ArtifactReceiptEvent } from '../../../lib/task/artifact-receipts.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { parseLifecyclePathDecision } from '../../../lib/task/lifecycle-path.ts';
@@ -15,6 +15,7 @@ import { buildStatusModel } from '../../../lib/task/commands/status.ts';
 import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 function recordCompletedReports(taskDir: string, content: string): string {
+  const receipts = parseArtifactReceipts(content).rows;
   const names = fs.readdirSync(taskDir).filter((name) => parseArtifactName(name)).sort((left, right) => {
     const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
     return a.family.localeCompare(b.family) || a.round - b.round;
@@ -31,7 +32,10 @@ function recordCompletedReports(taskDir: string, content: string): string {
     const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
     const file = path.join(taskDir, name);
     const bytes = fs.readFileSync(file);
-    facts.push({ event, output: name, outputSha256: createHash('sha256').update(bytes).digest('hex'), semanticDigest: canonicalSemanticDigest(bytes.toString('utf8')), requestId: `request-${name}`, result: 'completed' });
+    const receiptEvent = identity.family === 'analysis' ? 'analysis.completed' : `${identity.family}.completed`;
+    const lifecycleInputs = receipts.filter((receipt) => receipt.output === name && receipt.event === receiptEvent)
+      .map((receipt) => ({ name: receipt.input, sha256: receipt.inputSha256 }));
+    facts.push({ event, output: name, outputSha256: createHash('sha256').update(bytes).digest('hex'), semanticDigest: canonicalSemanticDigest(bytes.toString('utf8')), requestId: `request-${name}`, result: 'completed', lifecycleInputs });
     const step = `${action[identity.family]} (Round ${identity.round})`;
     const timestamp = (offset: number) => `2026-01-01 00:00:${String(offset).padStart(2, '0')}+00:00`;
     entries.push(`- ${timestamp(second++)} — **${step} [started]** by codex — started`);
@@ -613,6 +617,12 @@ test('lifecycle facts use completed review receipts rather than review body form
     assert.deepEqual(result.facts.reviewedInputs, {
       'review-analysis': 'analysis.md', 'review-plan': 'plan.md', 'review-code': 'code.md'
     });
+    const withoutLog = content.replace(/\n## Activity Log\n[\s\S]*$/u, '');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), withoutLog);
+    const withoutLogFacts = buildLifecycleFacts(taskDir, withoutLog, 'active');
+    assert.equal(withoutLogFacts.ok, true);
+    if (!withoutLogFacts.ok) return;
+    assert.deepEqual(withoutLogFacts.facts.reviewedInputs, result.facts.reviewedInputs);
     assert.equal(canStart('plan', result.facts, { ...trigger, requestedAction: 'plan' }).allowed, true);
     assert.equal(canStart('code', result.facts, { ...trigger, requestedAction: 'code' }).allowed, true);
     const manualValidation = canStart('manual-validation', result.facts, { ...trigger, requestedAction: 'manual-validation' });

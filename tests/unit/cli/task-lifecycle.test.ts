@@ -326,6 +326,11 @@ test('restore transports task receipts with artifacts without using mtime', () =
     inputSha256: sha256File(path.join(staging, 'plan.md')), completedAt: '2026-07-18 12:00:00+00:00'
   });
   content = upsertSection(content, mutation).content;
+  const planReceipt = upsertArtifactReceipt(content, {
+    event: 'plan.completed', output: 'plan.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(staging, 'analysis.md')), completedAt: '2026-07-18 12:00:00+00:00'
+  });
+  content = upsertSection(content, planReceipt).content;
   const factSpecs = [
     { name: 'analysis.md', event: 'analyze.completed', step: 'Analyze Task' },
     { name: 'plan.md', event: 'plan.completed', step: 'Plan Task' },
@@ -334,7 +339,12 @@ test('restore transports task receipts with artifacts without using mtime', () =
   const facts = factSpecs.map(({ name, event }) => {
     const file = path.join(staging, name);
     const artifactContent = fs.readFileSync(file, 'utf8');
-    return { event, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(artifactContent), requestId: `restore-${name}`, result: 'completed' };
+    const input = name === 'plan.md' ? 'analysis.md' : name === 'review-plan.md' ? 'plan.md' : null;
+    return {
+      event, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(artifactContent),
+      requestId: `restore-${name}`, result: 'completed',
+      lifecycleInputs: input ? [{ name: input, sha256: sha256File(path.join(staging, input)) }] : []
+    };
   });
   const fmEnd = content.indexOf('\n---', 4);
   content = `${content.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify(facts)}'${content.slice(fmEnd)}`;

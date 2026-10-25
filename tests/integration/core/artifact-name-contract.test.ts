@@ -27,7 +27,7 @@ for (const consumer of ['lifecycle facts', 'review selection'] as const) {
         const family = name.startsWith('analysis') ? 'analysis' : 'review-code';
         const event = family === 'analysis' ? 'analyze.completed' : 'review-code.completed';
         const filePath = path.join(root, name);
-        return { event, output: name, outputSha256: sha256File(filePath), semanticDigest: canonicalSemanticDigest('# Artifact\n'), requestId: `fixture-${name}`, result: 'completed' };
+        return { event, output: name, outputSha256: sha256File(filePath), semanticDigest: canonicalSemanticDigest('# Artifact\n'), requestId: `fixture-${name}`, result: 'completed', lifecycleInputs: [] };
       });
       const logs = completed.flatMap((name) => {
         const family = name.startsWith('analysis') ? 'analysis' : 'review-code';

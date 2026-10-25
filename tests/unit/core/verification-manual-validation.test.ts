@@ -49,7 +49,7 @@ function markReviewCodeCompleted(taskDir: string, content: string): void {
     const round = name === 'review-code.md' ? 1 : Number(/-r(\d+)\.md$/u.exec(name)?.[1]);
     return {
       event: 'review-code.completed', output: name, outputSha256: sha256File(artifact),
-      semanticDigest: canonicalSemanticDigest(artifactContent), requestId: `review-code-test-${round}`, result: 'completed', round
+      semanticDigest: canonicalSemanticDigest(artifactContent), requestId: `review-code-test-${round}`, result: 'completed', lifecycleInputs: [], round
     };
   });
   const taskPath = path.join(taskDir, 'task.md');

@@ -11,7 +11,8 @@ import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { createTempDir, gitSafeEnv } from "../../helpers.ts";
 import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 
 const TASK_A_ID = "TASK-20260731-000001";
 const TASK_B_ID = "TASK-20260731-000002";
@@ -68,22 +69,33 @@ function writeTask(
     "|----|-------|-------|----------|--------|----------|",
     ...ledgerRows
   ].join("\n"));
+  fs.writeFileSync(path.join(taskDir, "code.md"), "# Code\n");
   fs.writeFileSync(path.join(taskDir, "review-code.md"), "# Review\n");
+  const codePath = path.join(taskDir, "code.md");
+  const codeFact = {
+    event: "code.completed", output: "code.md", outputSha256: sha256File(codePath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(codePath, "utf8")), requestId: `fixture-code-${taskId}`, result: "{}", lifecycleInputs: []
+  };
   const reviewPath = path.join(taskDir, "review-code.md");
   const reviewFact = {
     event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(reviewPath),
-    semanticDigest: canonicalSemanticDigest(fs.readFileSync(reviewPath, "utf8")), requestId: `fixture-review-code-${taskId}`, result: "{}"
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(reviewPath, "utf8")), requestId: `fixture-review-code-${taskId}`, result: "{}",
+    lifecycleInputs: [{ name: "code.md", sha256: sha256File(codePath) }]
   };
   const taskPath = path.join(taskDir, "task.md");
   let task = fs.readFileSync(taskPath, "utf8").replace(
     /\n---\n/u,
-    `\ncompletion_facts: ${JSON.stringify(JSON.stringify([reviewFact]))}\n---\n`
+    `\ncompletion_facts: ${JSON.stringify(JSON.stringify([codeFact, reviewFact]))}\n---\n`
   );
   task += "\n## Activity Log\n\n" + [
     "- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started",
     "- 2026-01-01 00:00:01+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md", ""
   ].join("\n");
   fs.writeFileSync(taskPath, task);
+  fs.writeFileSync(taskPath, upsertSection(task, upsertArtifactReceipt(task, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(codePath), completedAt: '2026-01-01 00:00:01+00:00'
+  })).content);
   return taskDir;
 }
 

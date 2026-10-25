@@ -338,7 +338,7 @@ test("code-task decision mode requires a completed approved review identity", ()
   });
   assert.equal(result.status, 2, JSON.stringify(result.output));
   assert.equal(result.output.mode, "error");
-  assert.match(result.output.message, /completed Activity Log identity/i);
+  assert.match(result.output.message, /valid review-code completion fact/i);
 });
 
 test("code-task dual-mode: branch 5 - Approved with findings fails closed (zh-CN review fixture)", () => {

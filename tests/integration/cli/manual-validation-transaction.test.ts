@@ -220,13 +220,14 @@ function createFixture(): Fixture {
   writePrChangeReportAtomic(reportPath, report.value);
   const artifactPath = path.join(taskDir, 'manual-validation.md');
   fs.writeFileSync(artifactPath, '# Manual Validation\n\nValidated.\n');
-  const completionFacts = ['analysis.md', 'review-code.md'].map((name) => {
+  const completionFacts = ['analysis.md', 'code.md', 'review-code.md'].map((name) => {
     const artifactPath = path.join(taskDir, name);
     const content = fs.readFileSync(artifactPath, 'utf8');
-    const family = name === 'analysis.md' ? 'analyze' : 'review-code';
+    const family = name === 'analysis.md' ? 'analyze' : name === 'code.md' ? 'code' : 'review-code';
     return {
       event: `${family}.completed`, output: name, outputSha256: sha256File(artifactPath),
-      semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: name === 'review-code' ? JSON.stringify({ manualValidation: 1 }) : content
+      semanticDigest: canonicalSemanticDigest(content), requestId: `fixture-${name}`, result: name === 'review-code' ? JSON.stringify({ manualValidation: 1 }) : content,
+      lifecycleInputs: name === 'review-code.md' ? [{ name: 'code.md', sha256: sha256File(path.join(taskDir, 'code.md')) }] : []
     };
   });
   let completedTask = fs.readFileSync(taskPath, 'utf8').replace(

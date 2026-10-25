@@ -24,7 +24,7 @@ function fixture() {
   const analysisPath = path.join(dir, 'analysis.md');
   const facts = [{
     event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(analysisPath),
-    semanticDigest: canonicalSemanticDigest(STANDARD_ANALYSIS), requestId: 'fixture-analysis', result: 'completed'
+    semanticDigest: canonicalSemanticDigest(STANDARD_ANALYSIS), requestId: 'fixture-analysis', result: 'completed', lifecycleInputs: []
   }];
   fs.writeFileSync(path.join(dir, 'task.md'), fs.readFileSync(path.join(dir, 'task.md'), 'utf8')
     .replace('current_step: requirement-analysis-review', `current_step: requirement-analysis-review\ncompletion_facts: '${JSON.stringify(facts)}'`)
