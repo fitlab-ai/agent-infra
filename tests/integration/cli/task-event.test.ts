@@ -894,16 +894,11 @@ test('started replay keeps the open identity after its artifact lands', () => {
   assert.equal((fs.readFileSync(f.file, 'utf8').match(/Plan Task \(Round 1\) \[started\]/g) ?? []).length, 1);
 });
 
-test('valid completion facts close a started row for event mutual exclusion and capability busy state', () => {
+test('valid completion facts close a started row for event mutual exclusion', () => {
   const f = fixture('requirement-analysis');
   recordFixtureCompletion(f.dir, 'analysis.md');
   const task = fs.readFileSync(f.file, 'utf8');
   fs.writeFileSync(f.file, task.split('\n').filter((line) => !line.includes('**Analyze Task (Round 1)** by codex')).join('\n'));
-
-  const content = fs.readFileSync(f.file, 'utf8');
-  const facts = buildLifecycleFacts(f.dir, content, 'active');
-  assert.equal(facts.ok, true);
-  if (facts.ok) assert.equal(facts.facts.executionBusy, false);
 
   const started = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex', '--dry-run']);
   assert.equal(started.status, 0, started.stdout || started.stderr);

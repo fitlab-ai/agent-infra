@@ -128,23 +128,19 @@ function openLifecycleRows(content: string, taskDir: string, rows: StepRow[]): S
   });
 }
 
-function hasOpenLifecycleExecution(content: string, taskDir?: string): boolean {
+function hasOpenLifecycleExecution(content: string, taskDir: string): boolean {
   const section = locateActivityLog(content);
   if (!section) return false;
   const rows = pairEntries(section.entries);
-  const open = taskDir ? openLifecycleRows(content, taskDir, rows) : rows;
+  const open = openLifecycleRows(content, taskDir, rows);
   return open.some((row) => row.started && !row.done && LIFECYCLE_STEP_RE.test(row.step));
-}
-
-function openLifecycleExecutionRows(content: string, taskDir: string, rows: StepRow[]): StepRow[] {
-  return openLifecycleRows(content, taskDir, rows);
 }
 
 export {
   activityAttempt,
   appendActivityEntry,
   hasOpenLifecycleExecution,
-  openLifecycleExecutionRows,
+  openLifecycleRows,
   commitAttemptStartedNote,
   inspectActivityLog,
   locateActivityLog,

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 
-import { appendActivityEntry, locateActivityLog, openLifecycleExecutionRows, pairEntries, startedBackedRows } from './activity-log.ts';
+import { appendActivityEntry, locateActivityLog, openLifecycleRows, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
   buildArtifactLinkSection,
   inspectArtifactDirectory,
@@ -639,7 +639,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   let startedRows: ReturnType<typeof pairEntries>;
   try {
     startedRows = startedBackedRows(pairEntries(section.entries));
-    rows = startedBackedRows(openLifecycleExecutionRows(content, resolved.taskDir, startedRows));
+    rows = startedBackedRows(openLifecycleRows(content, resolved.taskDir, startedRows));
   } catch (error) {
     return failed(request, { code: 'EVENT_TRANSITION_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
   }
