@@ -80,10 +80,10 @@ Check whether `task.md` contains a valid `platform_issue_identity`. If not, skip
 
 If a valid `platform_issue_identity` exists, require `applied` / `no-op` without an error for every operation before declaring cancellation fully complete. On failure, retain the local terminal state and recovery record, then retry this skill for the same task after repair:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
-- Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
+- Write the cancellation comment JSON payload to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
-The cancellation comment JSON fields are `taskId`, `title`, `outcome:"cancelled"`, `reason`, `cancelledAt`, and `lastCompletedArtifact`, sourced from task identity, task.md, the recorded cancellation reason/time, and the current artifact registry (`null` when no completed artifact exists). It must include at least:
+The cancellation comment JSON fields are `taskId`, `title`, `outcome:"cancelled"`, `reason`, `cancelledAt`, and `lastCompletedArtifact`. `taskId` must match the current task; the core fills missing values from the task.md title, cancellation reason/time metadata, and artifact registry (`lastCompletedArtifact` is `null` when no completed artifact exists), then renders the comment body. It must include at least:
 - the cancellation reason
 - the selected `status:` label
 

@@ -18,7 +18,7 @@ PR 摘要的语义聚合由模型完成；任务意图 digest、完整三点 dif
 agent-infra-internal platform-pr summary-context {task-id}
 ```
 
-只使用返回的 canonical latest `plan*`、`review-plan*`、`code*`、`review-code*`、`manual-validation*`（包括 `manual-validation.md`）。模型生成 PR 专属 JSON payload：`overview:string`、`tests:{state,detail}`、`review:{state,detail}`、`manualValidation:{state,detail}`、`humanDecisions:{open,resolved,detail}`、`risks:string`。说明字段为非空字符串，计数为非负整数；结构校验不评价内容语义。
+只使用返回的 canonical latest `plan*`、`review-plan*`、`code*`、`review-code*`、`manual-validation*`（包括 `manual-validation.md`）。模型生成 PR 专属 JSON payload：`overview:string`、`tests:{state,detail}`、`review:{state,detail}`、`manualValidation:{state,detail}`、`humanDecisions:{open,resolved,detail}`、`risks:string`。说明字段为非空字符串，计数为非负整数；结构校验不评价内容语义。body file 只包含这些语义字段；不要写入 Markdown envelope、控制 marker 或 canonical report placeholder。core 负责渲染章节并插入 placeholder、summary marker 和权威 HEAD。
 
 测试尚未启动用 `not-started`/`pending`，暂无远端 Review 用 `none`/`not-observed`/`not-published`，待人工校验用 `pending`，不得渲染为通过或零值。决策计数来自当前任务账本。renderer 固定生成完整章节并加入一个 canonical 报告占位符；代码增减仍由现有 report renderer 输出。
 
