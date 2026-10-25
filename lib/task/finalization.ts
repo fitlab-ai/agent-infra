@@ -494,7 +494,7 @@ function issueCapability(receipt: TaskFinalizationReceipt, scope: Exclude<Finali
 
 function capabilityError(code: 'FINALIZATION_CAPABILITY_STALE' | 'FINALIZATION_SCOPE_INVALID', message: string): Error {
   const error = new Error(message);
-  error.name = 'OrchestrationStateError';
+  error.name = 'TaskFinalizationCapabilityError';
   Object.assign(error, { code });
   return error;
 }

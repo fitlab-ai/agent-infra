@@ -143,6 +143,27 @@ test('direct-host task-control help runs without a host service', () => {
   assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/u);
 });
 
+test('the internal launcher permits direct-host task-control help without a sandbox identity', onPlatforms('linux', 'darwin'), (t) => {
+  if (!fixedStatusMountPresent()) {
+    t.skip('fixed status mount is unavailable in this host test environment');
+    return;
+  }
+  const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
+  const isolatedHome = createTempDir('task-control-launcher-home-');
+  try {
+    for (const command of ['task-lifecycle', 'task-finalization']) {
+      const result = runLauncher(command, ['--help'], cleanEnv({
+        HOME: isolatedHome,
+        NODE_OPTIONS: `--require=${preload}`
+      }));
+      assert.equal(result.status, 0, `${command}: ${result.stderr}`);
+      assert.match(result.stdout, new RegExp(`Usage: agent-infra-internal ${command}`));
+    }
+  } finally {
+    fs.rmSync(isolatedHome, { recursive: true, force: true });
+  }
+});
+
 test('direct Node injection matrix cannot reach any task-control local handler', () => {
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   const loader = pathToFileURL(path.resolve('scripts/test-status-mount-isolation-loader.mjs')).href;

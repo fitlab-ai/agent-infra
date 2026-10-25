@@ -211,9 +211,9 @@ echo "$finalizer"
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 产物链接、阶段与完成日志由 completed 事件统一登记
 - 完成业务内容更新后声明完成事件：
-  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --files-modified {n} --tests-passed {n} {execution-flag}`
-  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}`
-  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --implementation-input {input-id} --files-modified {n} --tests-passed {n} {execution-flag}`
+  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --files-modified {n} --tests-passed {n}`
+  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
+  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --implementation-input {input-id} --files-modified {n} --tests-passed {n}`
 
 如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（失败按规则记录 warning，继续本地流程；边界见 `.agents/rules/issue-sync.md`）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`

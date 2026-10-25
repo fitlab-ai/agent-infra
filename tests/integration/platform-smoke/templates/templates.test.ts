@@ -385,6 +385,56 @@ test("split skill reference templates provide zh-CN variants", () => {
   });
 });
 
+test("version validation hooks enforce semver and preserve AI command exit codes", () => {
+  const tempRoot = createTempDir("agent-infra-version-hook-");
+  const hooksDir = path.join(tempRoot, ".git-hooks");
+  const aiHooksDir = path.join(tempRoot, ".agents", "hooks");
+  const configDir = path.join(tempRoot, ".agents");
+  const configPath = path.join(configDir, ".airc.json");
+
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.mkdirSync(aiHooksDir, { recursive: true });
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.copyFileSync(".git-hooks/check-version-format.sh", path.join(hooksDir, "check-version-format.sh"));
+  fs.copyFileSync(".agents/hooks/check-version-format.sh", path.join(aiHooksDir, "check-version-format.sh"));
+  const writeTemplateVersion = (templateVersion: string) => {
+    fs.writeFileSync(configPath, JSON.stringify({ templateVersion }));
+  };
+  const runGitHook = () => spawnSync("sh", [path.join(hooksDir, "check-version-format.sh")], {
+    cwd: tempRoot, encoding: "utf8", input: ""
+  });
+  const runAiHook = (input: string) => spawnSync("sh", [path.join(aiHooksDir, "check-version-format.sh")], {
+    cwd: tempRoot, encoding: "utf8", input
+  });
+
+  try {
+    for (const version of ["v0.0.0", "v1.2.3", "v1.2.3-alpha-beta", "v1.2.3-rc.1", "v1.2.3+build-x.5", "v1.2.3-alpha.0+build-x.5"]) {
+      writeTemplateVersion(version);
+      assert.equal(runGitHook().status, 0);
+    }
+    for (const version of ["1.2.3", "v1.2", "v01.2.3", "v1.2.3-01", "v1.2.3-alpha..1", "v1.2.3+build..1", "v1.2.3-alpha_1"]) {
+      writeTemplateVersion(version);
+      assert.equal(runGitHook().status, 1);
+    }
+
+    assert.equal(runAiHook(JSON.stringify({ tool_input: { command: "git status" } })).status, 0);
+    writeTemplateVersion("v1.2.3-alpha.0+build-x.5");
+    assert.equal(runAiHook(JSON.stringify({ tool_input: { command: "git commit -m test" } })).status, 0);
+    writeTemplateVersion("1.2.3");
+    assert.equal(runAiHook(JSON.stringify({ tool_input: { command: "git commit -m broken" } })).status, 2);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("template JavaScript files do not contain shebang lines", () => {
+  const jsFiles = listFilesRecursive("templates").filter((relativePath) => relativePath.endsWith(".js"));
+  jsFiles.forEach((relativePath) => {
+    const firstLine = read(relativePath).split(/\r?\n/, 1)[0];
+    assert.ok(!(firstLine ?? "").startsWith("#!"), `${relativePath} must not start with a shebang`);
+  });
+});
+
 test("version format validation hooks are wired into templates and local config", () => {
   const packageJson = JSON.parse(read("package.json"));
   const collaborator = JSON.parse(read(".agents/.airc.json"));

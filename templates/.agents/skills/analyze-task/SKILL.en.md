@@ -239,7 +239,7 @@ agent-infra-internal task-artifact {task-id} finalize-local --family analysis --
 - On `status=failed`, correct the formal artifact directly and rerun the finalizer completely; if the current diagnostic remains unresolved, continue to the next attempt.
 - On an external formal-artifact change, an unsafe repair, repeated diagnostics or fingerprints, no progress, or the shared edit limit, stop without publishing a completed event.
 
-Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
+Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 

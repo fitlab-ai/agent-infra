@@ -79,7 +79,7 @@ Other skills continue past deferrable writes according to their local delivery g
   `- {time} — **{base} [started]** by {agent} — started`
 - **done line** (written when the step completes, unchanged from today): the action is the base itself:
   `- {time} — **{base}** by {agent} — {completion summary}`
-- **Commit execution boundary**: the commit skill must not hand-write task Activity Log, review anchors, receipts, or checkpoints. Task-bound direct and orchestrated modes both call the single `commit-operation.execute`; taskless direct is allowed only for `TASK_CONTEXT_NOT_FOUND` and creates no task-state side effects.
+- **Commit execution boundary**: the commit skill must not hand-write task Activity Log, review anchors, receipts, or checkpoints. Commit core uses direct execution; task-bound callers select local checkpoint or push delivery. Taskless direct is allowed only for `TASK_CONTEXT_NOT_FOUND` and creates no task-state side effects.
 - `{base}` is that skill's existing done action text, including `(Round {N})` (e.g. `Plan Task (Round 1)`). started and done must share the same `{base}` to pair.
 
 **Pairing and rendering** (`ai task log`): a started entry pairs with the next same-`{base}` done entry onto one row (repeated executions of the same base pair FIFO by ascending time). The STARTED column shows the start time, DONE the completion time; started with no done = in progress (DONE shows `(in progress)`); done with no started (legacy logs) = a standalone completed row. All three shapes are valid and never error.
