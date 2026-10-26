@@ -111,4 +111,5 @@ jobs:
             node .agents/skills/update-agent-infra/scripts/sync-templates.js >/dev/null
           test -f .agents/skills/code-task/SKILL.md
           test -f .agents/skills/commit/reference/commit-orchestration.md
-          test -x "$SMOKE_DIR/node_modules/.bin/agent-infra-internal"
+          "$SMOKE_DIR/node_modules/.bin/agent-infra-internal" task-lifecycle --help | grep -Fq 'Usage: agent-infra-internal task-lifecycle '
+          "$SMOKE_DIR/node_modules/.bin/agent-infra-internal" task-finalization --help | grep -Fq 'Usage: agent-infra-internal task-finalization '
