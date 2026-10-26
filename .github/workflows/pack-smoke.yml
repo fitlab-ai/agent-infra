@@ -98,7 +98,7 @@ jobs:
           cd "$RUNNER_TEMP/agent-infra-smoke"
           ./node_modules/.bin/agent-infra sandbox --help
 
-      - name: Smoke - init includes orchestration contracts
+      - name: Smoke - init includes direct lifecycle contracts
         shell: bash
         run: |
           set -euxo pipefail
@@ -109,6 +109,6 @@ jobs:
           printf 'smokeproj\nsmokeorg\n\n\n\n\n' | "$SMOKE_DIR/node_modules/.bin/agent-infra" init
           AGENT_INFRA_PACKAGE_ROOT="$SMOKE_DIR/node_modules/@fitlab-ai/agent-infra" \
             node .agents/skills/update-agent-infra/scripts/sync-templates.js >/dev/null
-          test -f .agents/skills/run-task/reference/host-validation.md
-          test -f .agents/skills/run-task/config/verify.json
-          "$SMOKE_DIR/node_modules/.bin/agent-infra-internal" task-orchestration --help
+          test -f .agents/skills/code-task/SKILL.md
+          test -f .agents/skills/commit/reference/commit-orchestration.md
+          test -x "$SMOKE_DIR/node_modules/.bin/agent-infra-internal"
