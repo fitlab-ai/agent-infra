@@ -264,8 +264,7 @@ rename、fsync 旧段并轮换。
 生命周期进度从领域日志读取，不在回执中重复存储。
 broker recovery 只能依据这份绑定以及对应 operation 的领域证据重建 response，区分
 not-executed、in-progress、success、failure 和 unknown。已经 started 但缺少匹配 terminal 或
-领域证据的请求保持 unknown，不会重放。编排 route read 与 `route.clean-completion` 分开；后者
-只有在 reviewed head 和 clean-worktree completion evidence 完整时才允许 success。
+领域证据的请求保持 unknown，不会重放。
 
 client 首先检查 `status.json` 中的 generation 和 broker heartbeat，然后把请求写入
 私有临时文件，再 rename 为 `requests/<request-id>.json`。请求包含协议版本、请求

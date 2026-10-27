@@ -326,9 +326,7 @@ Lifecycle progress is read from the domain journal rather than duplicated here. 
 recovery reconstructs a response only from this binding plus the operation's
 domain evidence. It distinguishes not-executed, in-progress, success,
 failure, and unknown; a started request without matching terminal or domain
-evidence remains unknown and is not replayed. Orchestration route reads are
-separate from `route.clean-completion`, whose success requires the reviewed
-head and clean-worktree completion evidence.
+evidence remains unknown and is not replayed.
 
 The client first checks the generation and broker heartbeat in `status.json`.
 It then writes a request to a private temporary file and renames it to
