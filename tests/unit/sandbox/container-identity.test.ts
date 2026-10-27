@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifySandboxContainerInspection, inspectSandboxControlContainer } from '../../../lib/sandbox/control/container-identity.ts';
-import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 
 const identity = {
   id: 'container-id',
@@ -49,29 +48,41 @@ test('container identity fails closed for same-name replacement and label drift'
   }).state, 'unknown');
 });
 
-test('container inspection maps only an authoritative exact-empty query to absent', async () => {
+test('container inspection maps only a successful exact-empty query to absent', async () => {
   const id = 'f'.repeat(64);
-  const evidence = captureSandboxAuthority('native', {
-    env: { DOCKER_CONTEXT: 'default' },
-    lockDomain: 'e'.repeat(64),
-    probe: (_cmd, args) => ({ status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'daemon-id' : { ApiVersion: '1.50' }), stderr: '', pid: 1, output: [] })
-  });
   const manifest = {
     engine: 'native',
-    containerIdentity: { id, labels: {} },
-    authorityEvidence: evidence
+    containerIdentity: { id, labels: {} }
   } as any;
   const absent = await inspectSandboxControlContainer(manifest, {
-    probe: (_cmd, args) => (args.includes('version') || args.includes('info'))
-      ? ({ status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'daemon-id' : { ApiVersion: '1.50' }), stderr: '', pid: 1, output: [] })
-      : ({ status: 0, signal: null, stdout: '', stderr: '', pid: 1, output: [] })
+    probe: () => ({ status: 0, signal: null, stdout: '', stderr: '', pid: 1, output: [] })
   });
   assert.deepEqual(absent, { state: 'absent', id });
 
   const unknown = await inspectSandboxControlContainer(manifest, {
-    probe: (_cmd, args) => (args.includes('version') || args.includes('info'))
-      ? ({ status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'daemon-id' : { ApiVersion: '1.50' }), stderr: '', pid: 1, output: [] })
-      : ({ status: 1, signal: null, stdout: '', stderr: 'No such container', pid: 1, output: [] })
+    probe: () => ({ status: 1, signal: null, stdout: '', stderr: 'No such container', pid: 1, output: [] })
   });
   assert.equal(unknown.state, 'unknown');
+});
+
+
+test('container inspection resolves the full ID through the configured engine and checks task labels', async () => {
+  const id = 'a'.repeat(64);
+  const labels = { 'demo.sandbox.task-id': 'TASK-20261023-000934' };
+  const calls: string[][] = [];
+  const observed = await inspectSandboxControlContainer({
+    engine: 'orbstack', containerIdentity: { id, labels }
+  } as any, {
+    probe: (_command, args) => {
+      calls.push(args);
+      return { status: 0, signal: null, stderr: '', pid: 1, output: [],
+        stdout: args.includes('ls') ? `${id}\n`
+          : JSON.stringify({ Id: id, State: { Running: true }, Config: { Labels: labels } }) };
+    }
+  });
+  assert.deepEqual(observed, { state: 'found', id, running: true, labels });
+  assert.deepEqual(calls, [
+    ['--context', 'orbstack', 'container', 'ls', '--all', '--no-trunc', '--filter', `id=${id}`, '--format', '{{.ID}}'],
+    ['--context', 'orbstack', 'container', 'inspect', '--format', '{{json .}}', id]
+  ]);
 });

@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
-import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
@@ -36,7 +35,6 @@ export type SandboxControlContainerIdentity = Readonly<{
 export type SandboxControlManifestBase = Readonly<{
   engine: string; repoRoot: string; worktreeRoot: string; project: string; container: string;
   containerIdentity: SandboxControlContainerIdentity;
-  authorityEvidence: SandboxAuthorityEvidenceV1;
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; controlRootId: string; channelDir: string; publicStatusDir: string; processingDir: string;
 }>;

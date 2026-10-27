@@ -42,7 +42,6 @@ import {
   type SandboxRemovalTargetCommit
 } from './control/lifecycle.ts';
 import { inspectSandboxControlContainer } from './control/container-identity.ts';
-import { commandForSandboxAuthority } from './engines/authority.ts';
 import { acquireSandboxResourceLock, type SandboxResourceLock } from './control/native-file-lock.ts';
 import { toolConfigDirCandidates, toolProjectDirCandidates } from './tools.ts';
 import type { SandboxTool } from './tools.ts';

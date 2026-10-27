@@ -16,7 +16,7 @@ function fixture(): { root: string; manifest: SandboxControlManifest } {
   const root = createTempDir('sandbox-control-audit-');
   const manifest = {
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'project', container: 'container',
-    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: {}, branch: 'feature',
+    containerIdentity: { id: 'container-id', labels: {} },  branch: 'feature',
     mode: 'task-bound' as const, taskId: 'TASK-20260904-002407', token: 'private-token',
     generation: 'generation-1', controlRootId: 'a'.repeat(96), channelDir: path.join(root, 'channel'),
     publicStatusDir: path.join(root, 'public'), processingDir: path.join(root, 'processing'), runtimeDir: path.join(root, 'runtime')

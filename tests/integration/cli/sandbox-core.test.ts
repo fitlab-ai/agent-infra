@@ -10,7 +10,6 @@ import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycl
 import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
-import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 
 import {
   createTempDir,
@@ -336,12 +335,6 @@ function writeTaskBoundControlEvidence(
   fs.mkdirSync(publicStatusDir, { recursive: true });
   fs.mkdirSync(processingDir, { recursive: true });
   fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
-  const authorityEvidence = captureSandboxAuthority("docker-desktop", {
-    lockDomain: "a".repeat(64),
-    probe: (_cmd, args) => ({
-      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? "fixture-daemon-id" : { ApiVersion: "1.50" }), stderr: "", pid: 1, output: []
-    })
-  });
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop",
     repoRoot: repoDir,
@@ -349,7 +342,7 @@ function writeTaskBoundControlEvidence(
     project,
     container,
     containerIdentity: { id: containerId, labels: {} },
-    authorityEvidence,
+
     branch,
     mode: "task-bound",
     taskId,
@@ -2000,7 +1993,7 @@ test("sandbox start boots a stopped container for the branch", onPlatforms("linu
   }
 });
 
-test("sandbox start reports a missing container and points to create", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox start requires explicit recreation when no container is found", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = createTempDir("agent-infra-sandbox-start-missing-");
 
   try {
@@ -2010,7 +2003,7 @@ test("sandbox start reports a missing container and points to create", onPlatfor
 
     assert.equal(result.signal, null);
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}\n${result.stderr}`, /Run 'ai sandbox create feature\/restart'/);
+    assert.match(`${result.stdout}\n${result.stderr}`, /Existing task and control data were preserved; use --recreate/);
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "start"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -2040,36 +2033,74 @@ test("sandbox start is a no-op when the container is already running", onPlatfor
   }
 });
 
-test("sandbox start --recreate does not rerun project init for an existing sandbox", onPlatforms("linux", "darwin", "win32"), () => {
-  const tmpDir = createTempDir("agent-infra-sandbox-recreate-init-");
+for (const containerPresent of [true, false]) {
+  test(`sandbox start --recreate restores ${containerPresent ? "an existing" : "a missing"} container without rerunning project init`, onPlatforms("linux", "darwin", "win32"), async () => {
+    const tmpDir = createTempDir("agent-infra-sandbox-recreate-init-");
 
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, {
-      project: "demo",
-      sandbox: { initCommand: "npm ci" },
-      dockerStdoutForPs: "demo-dev-feature..restart\tUp 3 minutes\tdemo.sandbox.branch=feature/restart"
-    });
-    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
-    execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
-    execFileSync("git", ["-C", fixture.repoDir, "add", ".gitignore"], { env: gitSafeEnv() });
-    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
-    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..restart");
-    fs.mkdirSync(path.dirname(worktree), { recursive: true });
-    execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-b", "feature/restart", worktree, "main"], { env: gitSafeEnv() });
+    const aliasParent = `${tmpDir}-alias`;
+    const aliasHome = path.join(aliasParent, path.basename(tmpDir));
+    const controlRoot = sandboxControlPaths({
+      base: path.join(tmpDir, '.agent-infra', 'sandbox-control'), project: 'demo',
+      container: 'demo-dev-feature..restart', identity: { mode: 'branch-only' }
+    }).root;
+    try {
+      const fixture = writeSandboxEngineFixture(tmpDir, {
+        project: "demo",
+        sandbox: { initCommand: "npm ci" },
+        dockerStdoutForPs: containerPresent ? "demo-dev-feature..restart\tUp 3 minutes\tdemo.sandbox.branch=feature/restart" : ""
+      });
+      fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
+      execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
+      execFileSync("git", ["-C", fixture.repoDir, "add", ".gitignore"], { env: gitSafeEnv() });
+      execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
+      const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..restart");
+      fs.mkdirSync(path.dirname(worktree), { recursive: true });
+      execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-b", "feature/restart", worktree, "main"], { env: gitSafeEnv() });
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["start", "--recreate", "feature/restart"]);
+      if (!containerPresent) {
+        execFileSync('git', ['-C', worktree, 'checkout', '-b', 'wrong-branch'], { env: gitSafeEnv() });
+        const rejected = spawnSandboxCli(fixture, tmpDir, ['start', '--recreate', 'feature/restart'], { DOCKER_REMOVAL_UPDATES_INSPECT: '1' });
+        assert.notEqual(rejected.status, 0);
+        assert.match(rejected.stderr, /SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID/);
+        assert.equal(fixture.readDockerCalls().some((call) => call[0] === 'run'), false);
+        execFileSync('git', ['-C', worktree, 'checkout', 'feature/restart'], { env: gitSafeEnv() });
+      }
 
-    assert.equal(result.signal, null);
-    assert.match(`${result.stdout}\n${result.stderr}`, /Sandbox ready/);
-    assert.match(result.stderr, /Replacement sandbox container was not found in a running state/);
-    const calls = fixture.readDockerCalls();
-    assert.ok(calls.some((call) => call[0] === "rm" && call.at(-1) === "demo-dev-feature..restart"));
-    assert.ok(calls.some((call) => call[0] === "run"));
-    assert.equal(calls.some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
+      const result = spawnSandboxCli(fixture, tmpDir, ["start", "--recreate", "feature/restart"], { DOCKER_REMOVAL_UPDATES_INSPECT: "1" });
+
+      assert.equal(result.signal, null);
+      assert.match(`${result.stdout}\n${result.stderr}`, /Sandbox ready/);
+      assert.equal(result.status, 0, result.stderr);
+      const calls = fixture.readDockerCalls();
+      assert.equal(calls.some((call) => call[0] === "rm" && call.at(-1) === "f".repeat(64)), containerPresent);
+      assert.ok(calls.some((call) => call[0] === "run"));
+      assert.equal(calls.some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
+      const manifestPath = path.join(controlRoot, 'manifest.json');
+      assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).containerIdentity.id, 'f'.repeat(64));
+      if (!containerPresent) {
+        fs.symlinkSync(path.dirname(fs.realpathSync.native(tmpDir)), aliasParent, process.platform === 'win32' ? 'junction' : 'dir');
+        const aliased = spawnSandboxCli(fixture, aliasHome, ['start', '--recreate', 'feature/restart'], { DOCKER_REMOVAL_UPDATES_INSPECT: '1' });
+        assert.equal(aliased.status, 0, aliased.stderr);
+        const brokerPath = path.join(controlRoot, 'broker.json');
+        const brokerBefore = fs.readFileSync(brokerPath, 'utf8');
+        const aliases = path.join(tmpDir, '.agent-infra', 'aliases', 'sandbox.sh');
+        fs.rmSync(aliases);
+        fs.mkdirSync(aliases);
+        const beforeFailure = fixture.readDockerCalls().length;
+        const rejected = spawnSandboxCli(fixture, tmpDir, ['start', '--recreate', 'feature/restart'], { DOCKER_REMOVAL_UPDATES_INSPECT: '1' });
+        assert.notEqual(rejected.status, 0);
+        assert.match(rejected.stderr, /EISDIR/);
+        assert.equal(fs.existsSync(path.join(controlRoot, 'quiescing.json')), false);
+        assert.equal(fs.readFileSync(brokerPath, 'utf8'), brokerBefore);
+        assert.equal(fixture.readDockerCalls().slice(beforeFailure).some((call) => ['stop', 'rm'].includes(call[0]!)), false);
+      }
+    } finally {
+      if (fs.existsSync(path.join(controlRoot, 'manifest.json'))) await quiesceSandboxControlRootForCleanup(controlRoot);
+      fs.rmSync(aliasParent, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("sandbox exec --recreate does not rerun project init for an existing sandbox", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = createTempDir("agent-infra-sandbox-exec-recreate-init-");
@@ -2098,7 +2129,7 @@ test("sandbox exec --recreate does not rerun project init for an existing sandbo
     assert.match(`${result.stdout}\n${result.stderr}`, /Container started/);
     assert.match(result.stderr, /Fresh sandbox readiness check failed/);
     const calls = fixture.readDockerCalls();
-    assert.ok(calls.some((call) => call[0] === "rm" && call.at(-1) === "demo-dev-feature..restart"));
+    assert.ok(calls.some((call) => call[0] === "rm" && call.at(-1) === "f".repeat(64)));
     assert.ok(calls.some((call) => call[0] === "run"));
     assert.equal(calls.some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
   } finally {

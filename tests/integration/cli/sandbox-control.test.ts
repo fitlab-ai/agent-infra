@@ -17,7 +17,6 @@ import {
   claimSandboxRemovalJournal,
   clearSandboxRemovalJournal,
   clearSandboxRemovalJournalRecord,
-  garbageCollectSandboxControlRoot,
   readSandboxRemovalJournal,
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
@@ -43,7 +42,6 @@ import {
 } from '../../../lib/sandbox/control/audit.ts';
 import { recoverSandboxControlFromHost } from '../../../lib/sandbox/control/host-recovery.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
-import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { createLocalTask } from '../../../lib/task/create.ts';
@@ -415,17 +413,6 @@ function initializeRepository(root: string): string {
   return execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim();
 }
 
-function fixtureAuthorityEvidence() {
-  return captureSandboxAuthority('native', {
-    env: { DOCKER_CONTEXT: 'default' },
-    lockDomain: 'a'.repeat(64),
-    probe: (_cmd, args) => ({
-      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-daemon-id' : { ApiVersion: '1.50' }),
-      stderr: '', pid: 1, output: []
-    })
-  });
-}
-
 function statusTaskView(taskId: string | null = 'TASK-20260809-010203') {
   return taskId
     ? { state: 'unknown', taskId, observedSource: 'unknown', receipt: null, reasonCode: 'SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE' }
@@ -442,7 +429,7 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
   for (const directory of [channelDir, publicStatusDir, processingDir, runtimeDir]) fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    containerIdentity: { id: 'container-id', labels: {} },  branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
     controlRootId: 'a'.repeat(96), channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
@@ -625,16 +612,8 @@ test('public host recovery discovers task-bound stable roots and rejects a path 
     }).root;
     assert.equal(setup.root, path.join(controlBase, taskWorkspaceProject(root), 'tasks', taskId));
     assert.equal(controlRoot, setup.root);
-    const authorityEvidence = captureSandboxAuthority('docker-desktop', {
-      lockDomain: 'a'.repeat(64),
-      probe: (_cmd, args) => ({
-        status: 0, signal: null,
-        stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-daemon-id' : { ApiVersion: '1.50' }),
-        stderr: '', pid: 1, output: []
-      })
-    });
     const manifest = finalizeSandboxControlManifest(setup, {
-      engine: 'docker-desktop', id: 'fixture-container-id', labels: {}, authorityEvidence
+      engine: 'docker-desktop', id: 'fixture-container-id', labels: {}
     });
     const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'stable-root-recovered\n', stderr: '' });
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({
@@ -691,16 +670,8 @@ test('task-bound host recovery accepts a configured-base ancestor alias', () => 
       base: controlBase, repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root),
       container: 'demo-dev-feature', branch, identity: { mode: 'task-bound', taskId }
     });
-    const authorityEvidence = captureSandboxAuthority('docker-desktop', {
-      lockDomain: 'a'.repeat(64),
-      probe: (_cmd, args) => ({
-        status: 0, signal: null,
-        stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-container-id' : { ApiVersion: '1.50' }),
-        stderr: '', pid: 1, output: []
-      })
-    });
     const manifest = finalizeSandboxControlManifest(setup, {
-      engine: 'docker-desktop', id: 'fixture-container-id', labels: {}, authorityEvidence
+      engine: 'docker-desktop', id: 'fixture-container-id', labels: {}
     });
     const payload = writeSandboxControlPayload(manifest, requestId, { stdout: 'alias-root-recovered\n', stderr: '' });
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({
@@ -845,42 +816,6 @@ test('sandbox control lifecycle accepts a stale broker when the manifest is miss
     assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stale');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('ordinary sandbox control GC removes only a verified absent-container root', async () => {
-  const absentRoot = createTempDir('agent-infra-control-gc-absent-');
-  const foundRoot = createTempDir('agent-infra-control-gc-found-');
-  const unknownRoot = createTempDir('agent-infra-control-gc-unknown-');
-  try {
-    writeControlManifest(absentRoot, initializeRepository(absentRoot), 'gc-absent-generation');
-    await garbageCollectSandboxControlRoot(absentRoot, {
-      timeoutMs: 200,
-      inspectContainer: async () => ({ state: 'absent', id: 'container-id' })
-    });
-    assert.equal(fs.existsSync(absentRoot), false);
-
-    writeControlManifest(foundRoot, initializeRepository(foundRoot), 'gc-found-generation');
-    await assert.rejects(
-      () => garbageCollectSandboxControlRoot(foundRoot, {
-        timeoutMs: 200,
-        inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} })
-      }),
-      /SANDBOX_CONTROL_CONTAINER_REAPPEARED/
-    );
-    assert.equal(fs.existsSync(foundRoot), true);
-
-    writeControlManifest(unknownRoot, initializeRepository(unknownRoot), 'gc-unknown-generation');
-    await assert.rejects(
-      () => garbageCollectSandboxControlRoot(unknownRoot, {
-        timeoutMs: 200,
-        inspectContainer: async () => ({ state: 'unknown', reason: 'probe failed' })
-      }),
-      /SANDBOX_CONTROL_CONTAINER_UNKNOWN/
-    );
-    assert.equal(fs.existsSync(unknownRoot), true);
-  } finally {
-    for (const root of [absentRoot, foundRoot, unknownRoot]) fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1432,80 +1367,50 @@ test('sandbox broker uses configured idle heartbeat and parked binding backoff i
   }
 });
 
-test('sandbox broker self-GCs its control root after an authoritative absent heartbeat', async () => {
-  const root = createTempDir('agent-infra-control-heartbeat-absent-');
-  const controller = new AbortController();
-  let serving: Promise<void> | undefined;
-  let heartbeatQueries = 0;
-  try {
-    const manifestPath = writeControlManifest(root, initializeRepository(root), 'heartbeat-absent-generation');
-    serving = serveSandboxControl(manifestPath, controller.signal, {
-      timing: {
-        controlTickMs: 5,
-        parkedBindingInitialMs: 10,
-        slowCheckMs: 30,
-        containerHeartbeatMs: 5,
-        quiesceDeadlineMs: 200
-      },
-      inspectContainer: async () => {
-        heartbeatQueries += 1;
-        return { state: 'absent', id: 'container-id' };
+for (const missing of [false, true]) {
+  test(`sandbox broker retains records and backs off after ${missing ? 'an absent' : 'an unknown'} heartbeat`, async () => {
+    const root = createTempDir('agent-infra-control-heartbeat-unknown-');
+    const controller = new AbortController();
+    let heartbeatQueries = 0;
+    try {
+      const manifestPath = writeControlManifest(root, initializeRepository(root), 'heartbeat-unknown-generation');
+      const statusDir = path.join(root, 'public');
+      const serving = serveSandboxControl(manifestPath, controller.signal, {
+        timing: {
+          controlTickMs: 5,
+          parkedBindingInitialMs: 10,
+          slowCheckMs: 30,
+          containerHeartbeatMs: 5,
+          quiesceDeadlineMs: 200
+        },
+        inspectContainer: async () => {
+          heartbeatQueries += 1;
+          return heartbeatQueries < 3
+            ? missing ? { state: 'absent', id: 'container-id' } : { state: 'unknown', reason: 'probe unavailable' }
+            : { state: 'found', id: 'container-id', running: false, labels: {} };
+        }
+      });
+      await waitForStatusStateAsync(statusDir, 'parked', 2_000);
+      const parkedStatus = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
+      assert.equal(parkedStatus.reasonCode, missing ? 'SANDBOX_CONTROL_CONTAINER_ABSENT' : 'SANDBOX_CONTROL_CONTAINER_UNKNOWN');
+      assert.equal(fs.existsSync(manifestPath), true);
+      const heartbeatDeadline = Date.now() + 2_000;
+      while (heartbeatQueries < 3 && Date.now() < heartbeatDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
-    });
-    const deadline = Date.now() + 2_000;
-    while (fs.existsSync(root) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(heartbeatQueries >= 3, true);
+      assert.equal(fs.existsSync(root), true);
+      assert.equal(fs.existsSync(path.join(root, 'channel')), true);
+      assert.equal(fs.existsSync(path.join(root, 'broker.json')), true);
+      controller.abort();
+      await serving;
+    } finally {
+      controller.abort();
+      fs.rmSync(root, { recursive: true, force: true });
     }
-    assert.equal(fs.existsSync(root), false);
-    await serving;
-    assert.equal(heartbeatQueries >= 2, true);
-  } finally {
-    controller.abort();
-    await serving;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
+  });
+}
 
-test('sandbox broker retains ownership and backs off after an unknown heartbeat', async () => {
-  const root = createTempDir('agent-infra-control-heartbeat-unknown-');
-  const controller = new AbortController();
-  let heartbeatQueries = 0;
-  try {
-    const manifestPath = writeControlManifest(root, initializeRepository(root), 'heartbeat-unknown-generation');
-    const statusDir = path.join(root, 'public');
-    const serving = serveSandboxControl(manifestPath, controller.signal, {
-      timing: {
-        controlTickMs: 5,
-        parkedBindingInitialMs: 10,
-        slowCheckMs: 30,
-        containerHeartbeatMs: 5,
-        quiesceDeadlineMs: 200
-      },
-      inspectContainer: async () => {
-        heartbeatQueries += 1;
-        return heartbeatQueries < 3
-          ? { state: 'unknown', reason: 'probe unavailable' }
-          : { state: 'found', id: 'container-id', running: false, labels: {} };
-      }
-    });
-    await waitForStatusStateAsync(statusDir, 'parked', 2_000);
-    const parkedStatus = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
-    assert.equal(parkedStatus.reasonCode, 'SANDBOX_CONTROL_CONTAINER_UNKNOWN');
-    const heartbeatDeadline = Date.now() + 2_000;
-    while (heartbeatQueries < 3 && Date.now() < heartbeatDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    assert.equal(heartbeatQueries >= 3, true);
-    assert.equal(fs.existsSync(root), true);
-    assert.equal(fs.existsSync(path.join(root, 'channel')), true);
-    assert.equal(fs.existsSync(path.join(root, 'broker.json')), true);
-    controller.abort();
-    await serving;
-  } finally {
-    controller.abort();
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
 
 test('sandbox broker startup resolves only after matching status is published', async () => {
   const root = createTempDir('agent-infra-control-readiness-');
@@ -1519,7 +1424,7 @@ test('sandbox broker startup resolves only after matching status is published', 
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    containerIdentity: { id: 'container-id', labels: {} },  branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
     controlRootId: 'a'.repeat(96),
     channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
@@ -1555,7 +1460,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    containerIdentity: { id: 'container-id', labels: {} },  branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
     controlRootId: 'a'.repeat(96),
     channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
@@ -1580,7 +1485,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     assert.equal(second.startTime, first.startTime);
     fs.writeFileSync(manifestPath, `${JSON.stringify({
       engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-      containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+      containerIdentity: { id: 'container-id', labels: {} },  branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
       controlRootId: 'b'.repeat(96),
       channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
@@ -2193,7 +2098,7 @@ test(`sandbox control broker enforces task binding with short-id width ${shortId
     project: taskWorkspaceProject(root),
     container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} },
-    authorityEvidence: fixtureAuthorityEvidence(),
+
     branch,
     mode: 'task-bound',
     taskId,
@@ -2359,7 +2264,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-      containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+      containerIdentity: { id: 'container-id', labels: {} },  branch,
     mode: 'branch-only', taskId: null, token, generation, channelDir: 'channel',
     controlRootId: 'a'.repeat(96),
     publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
@@ -2453,7 +2358,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    containerIdentity: { id: 'container-id', labels: {} },  branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96),
     channelDir: 'channel', publicStatusDir: 'public', processingDir: 'processing', runtimeDir: 'runtime'
   })}\n`);
@@ -2479,7 +2384,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   })}\n`);
   const controlManifest = {
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: taskWorkspaceProject(root), container: 'demo-dev-feature',
-    authorityEvidence: fixtureAuthorityEvidence(),
+
     containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound' as const, taskId: 'TASK-20260809-010203',
     token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96), channelDir, publicStatusDir: statusDir, processingDir,
     runtimeDir: path.join(root, 'runtime')

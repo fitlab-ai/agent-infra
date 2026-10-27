@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { nodeEntryArgs } from './control/executor.ts';
 import {
+  containerName,
   containerNameCandidates,
   sandboxBranchLabel,
   sandboxLabel,
@@ -55,7 +56,6 @@ import {
 import { getProcessIdentityState, getProcessStartTime, removePidFileIfMatches } from '../server/process-state.ts';
 import {
   acquireSandboxControlBrokerStartup,
-  garbageCollectSandboxControlRoot,
   isSandboxControlRootQuiescing,
   readSandboxControlManifest,
   type BrokerOwner
@@ -178,7 +178,7 @@ type EnsureSandboxReadyParams = {
   branch: string;
   workspace?: SandboxWorkspaceReference;
   reentry?: 'standard' | 'completed';
-  row: SandboxRow;
+  row: SandboxRow | null;
   allowRecreate?: boolean;
   forceRecreate?: boolean;
   recreate?: (branch: string) => Promise<void>;
@@ -365,9 +365,6 @@ async function ensureSandboxControlBroker(params: {
     throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${containerObservation.reason}`);
   }
   if (containerObservation.state === 'absent') {
-    await garbageCollectSandboxControlRoot(control.root, {
-      inspectContainer: (timeoutMs) => inspectSandboxControlContainer(validatedManifest, { timeoutMs })
-    });
     throw new Error('SANDBOX_CONTROL_CONTAINER_ABSENT: recreate the sandbox container before broker recovery');
   }
   const brokerPath = path.join(control.root, 'broker.json');
@@ -1285,6 +1282,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const deps = params.deps;
   const startFn = deps?.start ?? startSandboxContainer;
   const warnings: string[] = [];
+  const container = params.row?.name ?? containerName(params.config, params.branch);
   let failure: Error | null = null;
   try {
     if (deps?.ensureControlBroker) {
@@ -1292,11 +1290,11 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     } else {
       await ensureSandboxControlBroker({
         config: params.config,
-        container: params.row.name,
+        container: container,
         workspace: params.workspace ?? { mode: 'branch-only' }
       });
     }
-    if (params.forceRecreate || (params.reentry === 'completed' && params.allowRecreate)) {
+    if (!params.row || params.forceRecreate || (params.reentry === 'completed' && params.allowRecreate)) {
       throw new Error('Explicit container recreation requested.');
     }
     if (!params.row.running) {
@@ -1304,7 +1302,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       if (params.reentry === 'completed' && params.workspace?.mode === 'task-bound') {
         const control = sandboxControlPaths({
           base: params.config.controlBase, project: params.config.project,
-          container: params.row.name, identity: params.workspace
+          container: container, identity: params.workspace
         });
         const manifest = readSandboxControlManifest(control.manifestPath);
         if (manifest.taskId !== params.workspace.taskId || manifest.branch !== params.branch) {
@@ -1314,19 +1312,19 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         startCompletedSandboxContainer({
           config: params.config,
           engine: params.engine,
-          container: params.row.name,
+          container: container,
           taskId: params.workspace.taskId,
           start: startFn
         });
       } else {
-        startFn(params.engine, params.row.name);
+        startFn(params.engine, container);
       }
       const initial = assess({
         config: params.config,
         engine: params.engine,
         branch: params.branch,
         workspace: params.workspace,
-        container: params.row.name,
+        container: container,
         deps
       });
       if (initial.findings.some((finding) => finding.repairKind === 'hard-failure')) {
@@ -1337,13 +1335,13 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       const tools = resolveTools(params.config);
       prepareTmpfsMounts({
         engine: params.engine,
-        container: params.row.name,
+        container: container,
         mountPaths: tools.filter((tool) => tool.tmpfs).map((tool) => tool.containerMount),
         deps
       });
       hydrateTmpfsSeedEntries({
         engine: params.engine,
-        container: params.row.name,
+        container: container,
         entries: mountedSeeds(initial.snapshot),
         replace: true,
         deps
@@ -1353,13 +1351,13 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         engine: params.engine,
         branch: params.branch,
         workspace: params.workspace,
-        container: params.row.name,
+        container: container,
         deps
       });
       if (!final.findings.some((finding) => finding.repairKind === 'hard-failure')) {
         repairFindings({
           engine: params.engine,
-          container: params.row.name,
+          container: container,
           findings: final.findings,
           deps
         });
@@ -1368,7 +1366,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
           engine: params.engine,
           branch: params.branch,
           workspace: params.workspace,
-          container: params.row.name,
+          container: container,
           deps
         });
       }
@@ -1384,7 +1382,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         publishCompletedReentry(manifest, evidence);
         await waitForCompletedReentry(manifest, evidence);
       }
-      return { container: params.row.name, path: 'recovered', warnings };
+      return { container: container, path: 'recovered', warnings };
     }
 
     const initial = assess({
@@ -1392,11 +1390,11 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       engine: params.engine,
       branch: params.branch,
       workspace: params.workspace,
-      container: params.row.name,
+      container: container,
       deps
     });
     if (initial.findings.length === 0) {
-      return { container: params.row.name, path: 'healthy', warnings };
+      return { container: container, path: 'healthy', warnings };
     }
     if (initial.findings.some((finding) => finding.repairKind === 'hard-failure')) {
       throw new Error(describeFindings(initial.findings));
@@ -1408,7 +1406,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     if (permissionFindings.length > 0) {
       repairFindings({
         engine: params.engine,
-        container: params.row.name,
+        container: container,
         findings: permissionFindings,
         deps
       });
@@ -1417,7 +1415,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         engine: params.engine,
         branch: params.branch,
         workspace: params.workspace,
-        container: params.row.name,
+        container: container,
         deps
       });
       if (current.findings.some(
@@ -1429,7 +1427,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     }
     repairFindings({
       engine: params.engine,
-      container: params.row.name,
+      container: container,
       findings: current.findings,
       deps
     });
@@ -1438,13 +1436,13 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       engine: params.engine,
       branch: params.branch,
       workspace: params.workspace,
-      container: params.row.name,
+      container: container,
       deps
     });
     if (final.findings.length > 0) {
       throw new Error(describeFindings(final.findings));
     }
-    return { container: params.row.name, path: 'recovered', warnings };
+    return { container: container, path: 'recovered', warnings };
   } catch (error) {
     failure = error instanceof Error ? error : new Error(String(error));
   }
@@ -1455,7 +1453,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     }
     const taskId = params.workspace.taskId;
     const commandChain = [
-      `docker exec -it ${params.row.name} bash /usr/local/bin/sandbox-tmux-entry`,
+      `docker exec -it ${container} bash /usr/local/bin/sandbox-tmux-entry`,
       `ai sandbox rm ${taskId}`,
       `ai sandbox create ${params.branch}`
     ];
@@ -1467,7 +1465,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       : 'Completed sandbox recovery failed; the existing container was not replaced.';
     throw new Error([
       `${code}: ${lead}`,
-      `Task: ${taskId}; container: ${params.row.name}; branch: ${params.branch}.`,
+      `Task: ${taskId}; container: ${container}; branch: ${params.branch}.`,
       'To preserve the current container state, enter it manually with:',
       `  ${commandChain[0]}`,
       'If you intentionally want a replacement, the following is the full interactive sandbox cleanup, not a container-only delete.',

@@ -324,15 +324,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/engines/authority.ts",
-      "ruleId": "complexity",
-      "stableId": "e606700c360e148d6efb2fc9194ec4c69274f7350a9c9e035dc9928f4d875578",
-      "displayName": "captureSandboxAuthority",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/task/verification-engine.ts",
       "ruleId": "complexity",
       "stableId": "138c1e2a7cdf1222e4c7d83e17995a3ad97966e9cf2fb6e5bce6cdfa58200a20",
@@ -582,15 +573,6 @@
       "displayName": "collectSandboxRecoverySnapshot",
       "metric": 25,
       "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/engines/authority.ts",
-      "ruleId": "complexity",
-      "stableId": "f949ebc681678d5af57746b37b47e8c7fde9d2e3ecfa8b52de7a2ed7ae412b19",
-      "displayName": "commandForSandboxAuthority",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
       "count": 1
     },
     {
@@ -1239,15 +1221,6 @@
       "displayName": "isRemovalPermitCommit",
       "metric": 27,
       "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/engines/authority.ts",
-      "ruleId": "complexity",
-      "stableId": "74ca91c6c9730b6c71b72aa5091ad2a1263ef618262b945a8094544774efa997",
-      "displayName": "isSandboxAuthorityEvidence",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
       "count": 1
     },
     {

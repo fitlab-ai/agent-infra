@@ -1,6 +1,5 @@
 import type { SpawnSyncReturns } from 'node:child_process';
 import { commandForEngine, runProbe } from '../shell.ts';
-import { commandForSandboxAuthority, type SandboxAuthorityEvidenceV1 } from './authority.ts';
 
 type ProbeResult = SpawnSyncReturns<string | Buffer>;
 type Probe = (cmd: string, args: string[], options?: { timeout?: number }) => ProbeResult;
@@ -20,7 +19,6 @@ export type ExactContainerDiscovery =
 export type ExactContainerDiscoveryOptions = Readonly<{
   probe?: Probe;
   timeoutMs?: number;
-  authority?: SandboxAuthorityEvidenceV1;
 }>;
 
 const FULL_CONTAINER_ID = /^[a-f0-9]{64}$/u;
@@ -47,9 +45,7 @@ function runDockerProbe(
   args: string[],
   options: ExactContainerDiscoveryOptions
 ): ProbeResult {
-  const command = options.authority
-    ? commandForSandboxAuthority(options.authority, 'docker', args)
-    : commandForEngine(engine, 'docker', args);
+  const command = commandForEngine(engine, 'docker', args);
   return (options.probe ?? runProbe)(
     command.cmd,
     command.args,

@@ -96,12 +96,6 @@ import {
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
-import {
-  captureSandboxAuthority,
-  commandForSandboxAuthority,
-  verifySandboxAuthority,
-  type SandboxAuthorityEvidenceV1
-} from '../engines/authority.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import { removeDirRecursive } from '../../remove-dir.ts';
@@ -933,24 +927,6 @@ function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts:
   return runTaskCommand(command.cmd, command.args, opts);
 }
 
-function runSandboxAuthorityTaskCommand(
-  authority: SandboxAuthorityEvidenceV1,
-  cmd: string,
-  args: string[],
-  opts: { cwd?: string } = {}
-): string {
-  const command = commandForSandboxAuthority(authority, cmd, args);
-  return runTaskCommand(command.cmd, command.args, opts);
-}
-
-function runSandboxAuthoritySafeCommand(
-  authority: SandboxAuthorityEvidenceV1,
-  args: string[]
-): string {
-  const command = commandForSandboxAuthority(authority, 'docker', args);
-  return runSafe(command.cmd, command.args);
-}
-
 // `docker run` args for mounting a tool's containerMount as an in-container
 // tmpfs. containerMount is an in-container path, so it is NOT engine-converted.
 export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string; exec?: boolean }): string[] {
@@ -1317,18 +1293,29 @@ export async function create(
             const previousManifest = fs.existsSync(controlPaths.manifestPath)
               ? readSandboxControlManifest(controlPaths.manifestPath)
               : null;
-            if (hadExistingControlRoot) {
-              await quiesceSandboxControlRoot(controlPaths.root);
-            }
-            const previousCutoverSnapshot = hadExistingControlRoot
-              ? captureSandboxControlCutoverSnapshot(controlPaths.root)
-              : null;
           const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
           const matchedContainers = containerNameCandidates(effectiveConfig, branch)
             .filter((name) => existing.includes(name));
 
+          const oldContainer = previousManifest ? await inspectSandboxControlContainer(previousManifest) : null;
+          if (oldContainer?.state === 'unknown') {
+            throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${oldContainer.reason}`);
+          }
+          if (previousManifest && (previousManifest.branch !== branch
+            || previousManifest.mode !== target.workspace.mode
+            || previousManifest.taskId !== (target.workspace.mode === 'task-bound' ? target.workspace.taskId : null)
+            || fs.realpathSync.native(previousManifest.worktreeRoot) !== fs.realpathSync.native(worktree))) {
+            throw new Error('SANDBOX_WORKSPACE_IDENTITY_CONFLICT: recorded sandbox binding does not match the requested worktree');
+          }
+          const removalIds: string[] = [];
           if (matchedContainers.length > 0) {
             for (const name of matchedContainers) {
+              const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name]).trim();
+              if (!/^[a-f0-9]{64}$/u.test(id)
+                || (previousManifest && id !== previousManifest.containerIdentity.id)) {
+                throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
+              }
+              removalIds.push(id);
               const rawLabels = runSafeEngine(engine, 'docker', [
                 'inspect', '--format', '{{json .Config.Labels}}', name
               ]).trim();
@@ -1359,19 +1346,9 @@ export async function create(
                 );
               }
             }
-            message('Removing old container instance...');
-            for (const name of matchedContainers) {
-              runSafeEngine(engine, 'docker', ['stop', name]);
-              runSafeEngine(engine, 'docker', ['rm', name]);
-            }
           }
-          if (previousManifest) {
-            const oldContainer = await inspectSandboxControlContainer(previousManifest);
-            if (oldContainer.state !== 'absent') {
-              throw new Error(oldContainer.state === 'unknown'
-                ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${oldContainer.reason}`
-                : 'SANDBOX_CONTROL_CONTAINER_STILL_EXISTS');
-            }
+          if (oldContainer?.state === 'found' && !removalIds.includes(oldContainer.id)) {
+            throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
           }
           const aliasesFile = ensureSandboxAliasesFile(
             effectiveConfig.home,
@@ -1455,8 +1432,17 @@ export async function create(
               ? prepareSandboxCompletedTaskMountSource(effectiveConfig.repoRoot, target.workspace.taskId)
               : null;
             prepareSandboxWorkspaceMountTargets(effectiveConfig.repoRoot);
+            if (hadExistingControlRoot) await quiesceSandboxControlRoot(controlPaths.root);
+            const previousCutoverSnapshot = hadExistingControlRoot
+              ? captureSandboxControlCutoverSnapshot(controlPaths.root)
+              : null;
+            if (previousCutoverSnapshot) assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
+            if (removalIds.length > 0) message('Removing old container instance...');
+            for (const id of removalIds) {
+              runEngineTaskCommand(engine, 'docker', ['stop', id]);
+              runEngineTaskCommand(engine, 'docker', ['rm', id]);
+            }
             if (previousCutoverSnapshot) {
-              assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
               if (previousManifest) {
                 const finalOldContainer = await inspectSandboxControlContainer(previousManifest);
                 if (finalOldContainer.state !== 'absent') {
@@ -1559,11 +1545,8 @@ export async function create(
             const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
 
             let createdContainerRef: string | null = null;
-            let creationAuthority: SandboxAuthorityEvidenceV1 | null = null;
             try {
-              creationAuthority = captureSandboxAuthority(engine);
-              commandForSandboxAuthority(creationAuthority, 'docker');
-              const dockerRunId = runSandboxAuthorityTaskCommand(creationAuthority, 'docker', [
+              const dockerRunId = runEngineTaskCommand(engine, 'docker', [
               'run',
               '-d',
               '--init',
@@ -1622,11 +1605,11 @@ export async function create(
               effectiveConfig.imageName
               ]);
               createdContainerRef = dockerRunId.trim();
-              const containerId = runSandboxAuthorityTaskCommand(creationAuthority, 'docker', [
+              const containerId = runEngineTaskCommand(engine, 'docker', [
                 'inspect', '--format', '{{.Id}}', dockerRunId.trim()
               ]).trim();
-              if (!containerId) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
-              const rawContainerLabels = runSandboxAuthorityTaskCommand(creationAuthority, 'docker', [
+              if (!/^[a-f0-9]{64}$/u.test(containerId)) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
+              const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
                 'inspect', '--format', '{{json .Config.Labels}}', containerId
               ]).trim();
               let inspectedLabels: unknown;
@@ -1651,18 +1634,10 @@ export async function create(
               for (const [key, expected] of Object.entries(expectedLabels)) {
                 if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
               }
-              const authorityEvidence = captureSandboxAuthority(engine, {
-                route: creationAuthority,
-                lockDomain: creationAuthority.lockDomain
-              });
-              if (verifySandboxAuthority(creationAuthority, authorityEvidence).state !== 'verified') {
-                throw new Error('SANDBOX_AUTHORITY_DRIFT_DURING_CREATE');
-              }
               finalizeSandboxControlManifest(control, {
                 engine,
                 id: containerId,
-                labels: expectedLabels,
-                authorityEvidence
+                labels: expectedLabels
               });
               replacementLease.clearQuiescing();
               await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
@@ -1673,13 +1648,8 @@ export async function create(
               createdTmpfsSeedPlan = tmpfsSeedPlan;
             } catch (error) {
               if (createdContainerRef) {
-                if (creationAuthority) {
-                  runSandboxAuthoritySafeCommand(creationAuthority, ['stop', createdContainerRef]);
-                  runSandboxAuthoritySafeCommand(creationAuthority, ['rm', createdContainerRef]);
-                } else {
-                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
-                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
-                }
+                runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
+                runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
               }
               if (!hadExistingControlRoot) removeDirRecursive(control.root);
               if (replacementCutover) {

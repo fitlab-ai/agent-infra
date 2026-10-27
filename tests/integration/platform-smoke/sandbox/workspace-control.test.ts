@@ -66,18 +66,7 @@ const manifest: SandboxControlManifest = {
   project: 'p',
   container: 'p-dev-feature',
   containerIdentity: { id: 'container-id', labels: {} },
-  authorityEvidence: {
-    version: 1,
-    provider: 'native',
-    lockDomain: 'a'.repeat(64),
-    routeKind: 'default',
-    routeSelector: { source: 'docker-default' },
-    normalizedEndpoint: 'docker-default',
-    endpointFingerprint: 'b'.repeat(64),
-    daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
-    apiVersion: { major: 1, minor: 50 },
-    authorityFingerprint: 'd'.repeat(64)
-  },
+
   branch: 'feature',
   mode: 'task-bound',
   taskId: 'TASK-20260809-010203',
@@ -621,8 +610,7 @@ test('manifest writer persists control directory names and reader resolves them 
     finalizeSandboxControlManifest(firstSetup, {
       engine: manifest.engine,
       id: manifest.containerIdentity.id,
-      labels: manifest.containerIdentity.labels,
-      authorityEvidence: manifest.authorityEvidence
+      labels: manifest.containerIdentity.labels
     });
     const persisted = fs.readFileSync(firstSetup.manifestPath, 'utf8');
     const persistedValue = JSON.parse(persisted) as Record<string, unknown>;

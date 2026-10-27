@@ -1,6 +1,5 @@
 import type { SandboxControlManifest } from './protocol.ts';
 import { runProbe } from '../shell.ts';
-import { captureSandboxAuthority, isSandboxAuthorityEvidence, verifySandboxAuthority } from '../engines/authority.ts';
 import { discoverExactContainer } from '../engines/docker-exact-discovery.ts';
 
 export type ContainerObservation =
@@ -46,24 +45,10 @@ export async function inspectSandboxControlContainer(
   manifest: SandboxControlManifest,
   options: { probe?: typeof runProbe; timeoutMs?: number } = {}
 ): Promise<ContainerObservation> {
-  if (!isSandboxAuthorityEvidence(manifest.authorityEvidence)) {
-    return { state: 'unknown', reason: 'SANDBOX_AUTHORITY_EVIDENCE_MISSING' };
-  }
   try {
-    const authority = captureSandboxAuthority(manifest.engine, {
-      probe: options.probe,
-      timeoutMs: options.timeoutMs,
-      lockDomain: manifest.authorityEvidence.lockDomain,
-      route: manifest.authorityEvidence
-    });
-    const authorityState = verifySandboxAuthority(manifest.authorityEvidence, authority);
-    if (authorityState.state !== 'verified') {
-      return { state: 'unknown', reason: authorityState.reason ?? 'SANDBOX_AUTHORITY_UNAVAILABLE' };
-    }
     const discovered = discoverExactContainer(manifest.engine, manifest.containerIdentity.id, {
       probe: options.probe,
-      timeoutMs: options.timeoutMs,
-      authority: manifest.authorityEvidence
+      timeoutMs: options.timeoutMs
     });
     if (discovered.state === 'absent') return { state: 'absent', id: discovered.id };
     if (discovered.state === 'conflict') {

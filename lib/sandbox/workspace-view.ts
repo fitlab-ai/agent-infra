@@ -59,7 +59,7 @@ export type SandboxControlSetup = Readonly<{
   controlRootId: string;
 }>;
 
-export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine' | 'authorityEvidence'> & {
+export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine'> & {
   engine: string;
 }>;
 
@@ -355,15 +355,13 @@ export function finalizeSandboxControlManifest(
     engine: string;
     id: string;
     labels: Readonly<Record<string, string>>;
-    authorityEvidence: SandboxControlManifest['authorityEvidence'];
   }>
 ): SandboxControlManifest {
   if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
   const manifest: SandboxControlManifest = {
     ...setup.manifestDraft,
     engine: identity.engine,
-    containerIdentity: { id: identity.id, labels: { ...identity.labels } },
-    authorityEvidence: identity.authorityEvidence
+    containerIdentity: { id: identity.id, labels: { ...identity.labels } }
   };
   const persistedManifest = {
     ...manifest,

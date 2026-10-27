@@ -65,7 +65,6 @@ import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
 import {
   acquireSandboxControlBrokerStartup,
-  garbageCollectSandboxControlRoot,
   isSandboxControlRootQuiescing,
   readSandboxControlManifest
 } from './lifecycle.ts';
@@ -856,29 +855,15 @@ export async function serveSandboxControl(
           containerReasonCode = null;
           containerBackoffMs = timing.parkedBindingInitialMs;
           nextContainerHeartbeatAt = Date.now() + timing.containerHeartbeatMs;
-        } else if (observation.state === 'unknown') {
-          containerReasonCode = 'SANDBOX_CONTROL_CONTAINER_UNKNOWN';
-          appendDiagnosticAudit(manifest, 'container-heartbeat-unknown', { reason: observation.reason });
+        } else {
+          const missing = observation.state === 'absent';
+          containerReasonCode = missing ? 'SANDBOX_CONTROL_CONTAINER_ABSENT' : 'SANDBOX_CONTROL_CONTAINER_UNKNOWN';
+          appendDiagnosticAudit(manifest, missing ? 'container-heartbeat-absent' : 'container-heartbeat-unknown', {
+            reason: observation.state === 'unknown' ? observation.reason : 'recorded container was not found'
+          });
           const backoff = nextSandboxControlBackoff(containerBackoffMs, timing.slowCheckMs);
           nextContainerHeartbeatAt = Date.now() + backoff.delayMs;
           containerBackoffMs = backoff.nextDelayMs;
-        } else {
-          try {
-            await garbageCollectSandboxControlRoot(root, {
-              timeoutMs: timing.quiesceDeadlineMs,
-              inspectContainer: (timeoutMs) => inspectContainer(manifest),
-              selfOwner: broker
-            });
-            active = null;
-            return;
-          } catch (error) {
-            if (!brokerOwns()) break;
-            containerReasonCode = 'SANDBOX_CONTROL_CONTAINER_ABSENT_GC_FAILED';
-            appendDiagnosticAudit(manifest, 'container-gc-failed', { reason: controlError(error).code });
-            const backoff = nextSandboxControlBackoff(containerBackoffMs, timing.slowCheckMs);
-            nextContainerHeartbeatAt = Date.now() + backoff.delayMs;
-            containerBackoffMs = backoff.nextDelayMs;
-          }
         }
       }
 

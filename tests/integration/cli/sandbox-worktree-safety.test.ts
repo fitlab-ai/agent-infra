@@ -2,7 +2,6 @@ import { taskWorkspaceProject, taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -10,7 +9,6 @@ import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { containerNameCandidates } from "../../../lib/sandbox/constants.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { resolveSandboxCleanupTarget } from "../../../lib/sandbox/workspace-identity.ts";
-import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 import {
   clearSandboxRemovalJournalRecord,
   listSandboxRemovalJournals,
@@ -33,16 +31,6 @@ type RmModule = typeof import("../../../lib/sandbox/removal.ts");
 type PruneModule = typeof import("../../../lib/sandbox/commands/prune.ts");
 
 const FIXTURE_CONTAINER_ID = "f".repeat(64);
-const FIXTURE_LOCK_DOMAIN = createHash("sha256").update("sandbox-worktree-safety").digest("hex");
-
-function fixtureAuthorityEvidence() {
-  return captureSandboxAuthority("docker-desktop", {
-    lockDomain: FIXTURE_LOCK_DOMAIN,
-    probe: (_cmd, args) => ({
-      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? "fixture-daemon-id" : { ApiVersion: "1.50" }), stderr: "", pid: 1, output: []
-    })
-  });
-}
 
 function statusTaskView(taskId: string | null) {
   return taskId
@@ -295,7 +283,7 @@ function writeTaskBoundCleanupEvidence(
     project: config.project,
     container,
     containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },
-    authorityEvidence: fixtureAuthorityEvidence(),
+
     branch,
     mode: "task-bound",
     taskId,
@@ -452,7 +440,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     fs.mkdirSync(workspaceViewRoot, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
-      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },  branch,
       mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation", controlRootId: "a".repeat(96),
       channelDir: "channel", publicStatusDir: "public", processingDir: "processing",
       runtimeDir: "runtime"
@@ -525,7 +513,7 @@ test("sandbox rm removes an empty control container parent after control cleanup
     fs.mkdirSync(processingDir, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
-      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },  branch,
       mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation", controlRootId: "a".repeat(96),
       channelDir: "channel", publicStatusDir: "public", processingDir: "processing",
       runtimeDir: "runtime"

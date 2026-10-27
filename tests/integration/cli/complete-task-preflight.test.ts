@@ -46,12 +46,7 @@ function writeControlManifest(root: string, controlRoot: string): void {
     containerIdentity: { id: 'fixture-container-id', labels: {} }, engine: 'docker', generation: 'fixture-generation',
     mode: 'task-bound', processingDir: 'processing', project: taskWorkspaceProject(root), publicStatusDir: 'public',
     repoRoot: root, runtimeDir: 'runtime', taskId: TASK_ID, token: 'fixture-token', worktreeRoot: root,
-    authorityEvidence: {
-      version: 1, provider: 'docker', lockDomain: 'a'.repeat(64), routeKind: 'default', routeSelector: {},
-      normalizedEndpoint: 'unix:///var/run/docker.sock', endpointFingerprint: 'b'.repeat(64),
-      daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
-      apiVersion: { major: 1, minor: 44 }, authorityFingerprint: 'd'.repeat(64)
-    },
+
     controlRootId: 'e'.repeat(96)
   })}\n`);
 }

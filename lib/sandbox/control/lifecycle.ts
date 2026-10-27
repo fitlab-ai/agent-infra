@@ -22,7 +22,6 @@ import {
   resolveSandboxLockNamespace,
   type SandboxResourceLock
 } from './native-file-lock.ts';
-import { isSandboxAuthorityEvidence } from '../engines/authority.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   parseSandboxControlStatus,
@@ -97,7 +96,6 @@ export type SandboxRemovalJournal = Readonly<{
   engine: string;
   containerId: string;
   generation: string;
-  authorityFingerprint: string;
   carrierIdentityDigest: string;
   lockDomain: string;
   owner: ProcessIdentity & Readonly<{ leaseNonce: string }>;
@@ -144,10 +142,14 @@ function removalJournalDomain(lockDomain: string, create = true): string {
 }
 
 function removalJournalPath(manifest: SandboxControlManifest): string {
-  return path.join(
-    removalJournalDomain(manifest.authorityEvidence.lockDomain),
-    `${removalCarrierDigest(manifest.engine, manifest.containerIdentity.id, manifest.generation)}.json`
-  );
+  const digest = removalCarrierDigest(manifest.engine, manifest.containerIdentity.id, manifest.generation);
+  // Existing interrupted removals retain their original native lock namespace.
+  const existing = listSandboxRemovalJournals({ project: manifest.project, branch: manifest.branch })
+    .filter((record) => record.carrierIdentityDigest === digest);
+  if (existing.length > 1) throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_IDENTITY_MISMATCH');
+  if (existing[0]) return removalJournalPathForRecord(existing[0]);
+  const namespace = resolveSandboxLockNamespace('sandbox-removal-journal');
+  return path.join(removalJournalDomain(namespace.lockDomain), `${digest}.json`);
 }
 
 function removalJournalPathForRecord(record: SandboxRemovalJournal): string {
@@ -195,8 +197,10 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
   } catch {
     throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
   }
+  // TODO(compat): Remove obsolete-field normalization after pre-simplification removal journals drain.
+  if (isRecord(value)) delete value.authorityFingerprint;
   if (!isRecord(value) || !hasExactKeys(value, [
-    'authorityFingerprint', 'carrierIdentityDigest', 'containerId', 'engine', 'expectedOldJournalRevision',
+    'carrierIdentityDigest', 'containerId', 'engine', 'expectedOldJournalRevision',
     'generation', 'handoffId', 'lockDomain', 'newOperation', 'oldOperation', 'operation', 'owner', 'phase',
     'recordedAt', 'revision', 'target', 'transitionId', 'version'
   ]) || !isRecord(value.owner) || !hasExactKeys(value.owner, ['leaseNonce', 'pid', 'startTime'])
@@ -211,7 +215,6 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
     || typeof value.engine !== 'string' || value.engine.length === 0
     || typeof value.containerId !== 'string' || value.containerId.length === 0
     || typeof value.generation !== 'string' || value.generation.length === 0
-    || typeof value.authorityFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.authorityFingerprint)
     || typeof value.carrierIdentityDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.carrierIdentityDigest)
     || typeof value.lockDomain !== 'string' || !/^[a-f0-9]{64}$/u.test(value.lockDomain)
     || !Number.isSafeInteger(value.owner.pid) || (value.owner.pid as number) <= 0
@@ -254,7 +257,6 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
     engine: value.engine as string,
     containerId: value.containerId as string,
     generation: value.generation as string,
-    authorityFingerprint: value.authorityFingerprint as string,
     carrierIdentityDigest: value.carrierIdentityDigest as string,
     lockDomain: value.lockDomain as string,
     owner: {
@@ -470,9 +472,7 @@ function startRemovalJournal(
   const target = removalJournalPath(manifest);
   const existing = readRemovalJournalAt(target);
   if (existing && (existing.engine !== manifest.engine || existing.containerId !== manifest.containerIdentity.id
-    || existing.generation !== manifest.generation
-    || existing.authorityFingerprint !== manifest.authorityEvidence.authorityFingerprint
-    || existing.lockDomain !== manifest.authorityEvidence.lockDomain)) {
+    || existing.generation !== manifest.generation)) {
     throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_IDENTITY_MISMATCH');
   }
   const targetCommit = options.target ?? existing?.target ?? defaultRemovalTarget(manifest);
@@ -496,9 +496,8 @@ function startRemovalJournal(
     engine: manifest.engine,
     containerId: manifest.containerIdentity.id,
     generation: manifest.generation,
-    authorityFingerprint: manifest.authorityEvidence.authorityFingerprint,
     carrierIdentityDigest: removalCarrierDigest(manifest.engine, manifest.containerIdentity.id, manifest.generation),
-    lockDomain: manifest.authorityEvidence.lockDomain,
+    lockDomain: existing?.lockDomain ?? resolveSandboxLockNamespace('sandbox-removal-journal').lockDomain,
     owner: { pid: process.pid, startTime, leaseNonce: randomUUID() },
     target: targetCommit
   };
@@ -682,7 +681,6 @@ function recordSandboxRemovalPending(
       phase,
       containerId: manifest.containerIdentity.id,
       generation: manifest.generation,
-      authorityFingerprint: manifest.authorityEvidence.authorityFingerprint,
       recordedAt: Date.now()
     })}\n`, { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, pendingPath);
@@ -1104,11 +1102,13 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
   } catch {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
+  // TODO(compat): Remove obsolete-field normalization after existing sandbox manifests are rewritten by their lifecycle.
+  delete manifest.authorityEvidence;
   const candidate = manifest as Partial<SandboxControlManifest>;
   const expectedKeys = [
     'branch', 'channelDir', 'container', 'containerIdentity', 'engine', 'generation',
     'mode', 'processingDir', 'project', 'publicStatusDir', 'repoRoot', 'runtimeDir',
-    'taskId', 'token', 'worktreeRoot', 'authorityEvidence', 'controlRootId',
+    'taskId', 'token', 'worktreeRoot', 'controlRootId',
   ];
   const actualKeys = Object.keys(manifest).sort().join(',');
   if (actualKeys !== expectedKeys.sort().join(',')) {
@@ -1134,8 +1134,7 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     || typeof candidate.generation !== 'string'
     || typeof candidate.controlRootId !== 'string' || !/^[a-f0-9]{64,128}$/u.test(candidate.controlRootId)
     || (candidate.mode === 'task-bound' && (typeof candidate.taskId !== 'string' || candidate.taskId.length === 0))
-    || (candidate.mode === 'branch-only' && candidate.taskId !== null)
-    || !isSandboxAuthorityEvidence(candidate.authorityEvidence)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+    || (candidate.mode === 'branch-only' && candidate.taskId !== null)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const root = path.dirname(path.resolve(manifestPath));
   const canonicalRoot = fs.realpathSync.native(root);
   const resolveControlChildPath = (candidatePath: string, name: string): string | null => {
@@ -1174,7 +1173,6 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
       id: containerIdentity.id as string,
       labels: { ...(containerIdentity.labels as Record<string, string>) }
     },
-    authorityEvidence: candidate.authorityEvidence,
     branch: candidate.branch,
     mode: candidate.mode,
     taskId: candidate.taskId,
@@ -1489,7 +1487,7 @@ async function removeSandboxControlRootAttempt(
   const manifest = readSandboxControlManifest(manifestPath);
   const resourceLock = options.resourceLock ?? acquireSandboxResourceLock(
     `${manifest.engine}:${manifest.containerIdentity.id}`,
-    { lockDomain: manifest.authorityEvidence.lockDomain }
+    { lockDomain: readSandboxRemovalJournal(manifest)?.lockDomain }
   );
   try {
   if (fs.readFileSync(manifestPath, 'utf8') !== manifestRawBeforeLock) {
@@ -1603,7 +1601,6 @@ async function removeSandboxControlRootAttempt(
   if (currentManifestRaw !== manifestRawBeforeLock
     || currentManifest.engine !== manifest.engine
     || currentManifest.containerIdentity.id !== manifest.containerIdentity.id
-    || currentManifest.authorityEvidence.lockDomain !== manifest.authorityEvidence.lockDomain
     || currentManifest.token !== manifest.token || currentManifest.generation !== manifest.generation
     || !isSandboxControlRootQuiescing(resolvedRoot)) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
@@ -1682,19 +1679,4 @@ async function removeSandboxControlRootAttempt(
   } finally {
     if (!options.resourceLock) resourceLock.release();
   }
-}
-
-export type GarbageCollectSandboxControlOptions = Omit<RemoveSandboxControlOptions, 'removeContainer' | 'requireAbsent'>;
-
-export async function garbageCollectSandboxControlRoot(
-  root: string,
-  options: GarbageCollectSandboxControlOptions = {}
-): Promise<void> {
-  await removeSandboxControlRoot(path.resolve(root), {
-    ...options,
-    requireAbsent: true,
-    removeContainer: async () => {
-      throw new Error('SANDBOX_CONTROL_CONTAINER_REAPPEARED');
-    }
-  });
 }

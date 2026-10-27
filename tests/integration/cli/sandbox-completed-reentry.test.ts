@@ -92,7 +92,6 @@ for (const field of ['id', 'status'] as const) {
 for (const scenario of ['valid', 'task-id', 'source', 'missing-evidence', 'stale'] as const) {
   test(`broker restart revalidates completed identity: ${scenario}`, async (t) => {
     const f = fixture(t);
-    const { captureSandboxAuthority } = await import('../../../lib/sandbox/engines/authority.ts');
     const { serveSandboxControl } = await import('../../../lib/sandbox/control/server.ts');
     const evidence = await prepareCompletedReentry(f.manifest, f.inspect);
     if (scenario !== 'stale') publishCompletedReentry(f.manifest, evidence);
@@ -113,16 +112,10 @@ for (const scenario of ['valid', 'task-id', 'source', 'missing-evidence', 'stale
     } else if (scenario === 'missing-evidence') {
       fs.unlinkSync(path.join(path.dirname(f.manifest.processingDir), 'completed-reentry.json'));
     }
-    const authorityEvidence = captureSandboxAuthority('native', {
-      env: { DOCKER_CONTEXT: 'default' }, lockDomain: 'a'.repeat(64),
-      probe: (_cmd, args) => ({ status: 0, signal: null,
-        stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-daemon-id' : { ApiVersion: '1.50' }),
-        stderr: '', pid: 1, output: [] })
-    });
     const manifestPath = path.join(path.dirname(f.manifest.processingDir), 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify({
       ...f.manifest,
-      authorityEvidence,
+
       channelDir: 'channel',
       publicStatusDir: 'public',
       processingDir: 'processing',
