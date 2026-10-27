@@ -102,11 +102,16 @@ exit 0
 
     Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
     process.chdir(repoDir);
-    process.env = {
+    const testEnv = {
       ...envWithPrependedPath(gitSafeEnv(), binDir),
       HOME: tmpDir,
       ORB_LOG_PATH: orbLogPath
     };
+    // Keep Node's native environment object so command lookup observes PATH.
+    for (const key of Object.keys(process.env)) {
+      if (!(key in testEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, testEnv);
 
     const sandboxVm = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/vm.ts")>("lib/sandbox/commands/vm.js");
     await sandboxVm.vm(["stop"]);
@@ -114,7 +119,10 @@ exit 0
     assert.deepEqual(fs.readFileSync(orbLogPath, "utf8").trim().split("\n"), ["status"]);
   } finally {
     process.chdir(previousCwd);
-    process.env = previousEnv;
+    for (const key of Object.keys(process.env)) {
+      if (!(key in previousEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, previousEnv);
     if (originalPlatformDescriptor) {
       Object.defineProperty(process, "platform", originalPlatformDescriptor);
     }

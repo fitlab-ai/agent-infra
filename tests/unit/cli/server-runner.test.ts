@@ -47,7 +47,10 @@ test('runAi waits for asynchronous chunk callbacks before resolving', async () =
     assert.equal(result.stdout, 'payload');
     assert.deepEqual(chunks, ['payload']);
   } finally {
-    process.env = originalEnv;
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, originalEnv);
   }
 });
 
@@ -65,7 +68,10 @@ test('runAi runs commands from the configured working directory', async () => {
     const result = await runAi(['task', 'ls'], { cwd: tmpDir });
     assert.equal(fs.realpathSync.native(result.stdout), fs.realpathSync.native(tmpDir));
   } finally {
-    process.env = originalEnv;
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, originalEnv);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
