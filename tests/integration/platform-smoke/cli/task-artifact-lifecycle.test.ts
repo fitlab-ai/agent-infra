@@ -319,45 +319,6 @@ test('an open higher round resumes while the prior completed round remains curre
   assert.equal(context.next?.name, 'plan-r3.md');
 });
 
-test('historical input provenance survives later rounds without requiring historical inputs to stay latest', () => {
-  const f = fixture({
-    'analysis.md': STANDARD_ANALYSIS,
-    'review-analysis.md': '# Review Analysis 1\n',
-    'analysis-r2.md': '# Analysis 2\n',
-    'review-analysis-r2.md': '# Review Analysis 2\n',
-    'plan.md': '# Plan 1\n',
-    'review-plan.md': '# Review Plan 1\n',
-    'plan-r2.md': '# Plan 2\n',
-    'review-plan-r2.md': '# Review Plan 2\n'
-  }, false);
-  recordArtifactCompletions(f.taskDir, [
-    { name: 'analysis.md' },
-    { name: 'review-analysis.md', lifecycleInputs: ['analysis.md'] },
-    { name: 'analysis-r2.md', lifecycleInputs: ['review-analysis.md'] },
-    { name: 'review-analysis-r2.md', lifecycleInputs: ['analysis-r2.md'] },
-    { name: 'plan.md', lifecycleInputs: ['analysis-r2.md'] },
-    { name: 'review-plan.md', lifecycleInputs: ['plan.md'] },
-    { name: 'plan-r2.md', lifecycleInputs: ['review-plan.md'] },
-    { name: 'review-plan-r2.md', lifecycleInputs: ['plan-r2.md'] }
-  ]);
-
-  const analysis = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
-  const analysisReviews = inspectTaskArtifacts(TASK_ID, 'review-analysis', { repoRoot: f.repoRoot });
-  const plans = inspectTaskArtifacts(TASK_ID, 'plan', { repoRoot: f.repoRoot });
-  const planReviews = inspectTaskArtifacts(TASK_ID, 'review-plan', { repoRoot: f.repoRoot });
-  assert.equal(analysis.latest?.name, 'analysis-r2.md');
-  assert.equal(analysisReviews.latest?.name, 'review-analysis-r2.md');
-  assert.equal(plans.latest?.name, 'plan-r2.md');
-  assert.equal(planReviews.latest?.name, 'review-plan-r2.md');
-  assert.ok(analysis.completed.some((item) => item.name === 'analysis-r2.md'));
-  assert.ok(plans.completed.some((item) => item.name === 'plan-r2.md'));
-
-  fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), '# Tampered historical input\n');
-  const invalidated = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
-  assert.equal(invalidated.status, 'failed');
-  assert.equal(invalidated.error?.code, 'ARTIFACT_SELECTION_INDETERMINATE');
-});
-
 test('valid completion facts close started rounds when done rows are deleted, damaged, or reordered', () => {
   const mutations = [
     (task: string) => task.replace(/^- .*\*\*Plan Task \(Round 2\)\*\*.*\n?/mu, ''),

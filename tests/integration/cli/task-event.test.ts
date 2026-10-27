@@ -10,6 +10,8 @@ import { createTempDir, INTERNAL_CLI_PATH, onPlatforms, recordArtifactCompletion
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
+import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
+import { buildLifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { parseArtifactReceipts, upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
@@ -18,8 +20,6 @@ import {
   validateLocalArtifact,
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
-import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
-import { buildLifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
@@ -1084,7 +1084,7 @@ test('analysis can restart from code when task requirements expand', () => {
   assert.match(content, /`analysis-r2\.md`/);
 });
 
-test('streamlined design rework stays pending when overwriting analysis invalidates its source history', () => {
+test('streamlined design rework is consumed after the analysis upgrade step', () => {
   const f = fixture('code-review');
   try {
     fs.writeFileSync(path.join(f.dir, 'analysis.md'), FULL_ANALYSIS.replace('完整路径', '精简路径'));
@@ -1106,7 +1106,7 @@ test('streamlined design rework stays pending when overwriting analysis invalida
     assert.equal(completed.status, 0, completed.stdout || completed.stderr);
     const parsed = parseReworkIntentDocument(fs.readFileSync(f.file, 'utf8'));
     assert.equal(parsed.ok, true);
-    if (parsed.ok) assert.equal(parsed.intents[0]?.status, 'pending');
+    if (parsed.ok) assert.equal(parsed.intents[0]?.status, 'consumed');
     const facts = buildLifecycleFacts(f.dir, fs.readFileSync(f.file, 'utf8'));
     assert.equal(facts.ok, true);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }

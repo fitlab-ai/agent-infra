@@ -12,31 +12,29 @@ import { createTempDir, recordArtifactCompletions } from '../../helpers.ts';
 function fixture() {
   const taskDir = createTempDir('completion-facts-');
   fs.writeFileSync(path.join(taskDir, 'task.md'), '---\nid: TASK-20260101-000001\n---\n\n# Task\n');
-  fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n');
   fs.writeFileSync(path.join(taskDir, 'review-analysis.md'), '# Review Analysis\n');
   fs.writeFileSync(path.join(taskDir, 'analysis-r2.md'), '# Analysis Round 2\n');
-  recordArtifactCompletions(taskDir, [
-    { name: 'analysis.md' },
-    { name: 'review-analysis.md', lifecycleInputs: ['analysis.md'] },
-    { name: 'analysis-r2.md', lifecycleInputs: ['review-analysis.md'] }
-  ]);
+  recordArtifactCompletions(taskDir, [{ name: 'analysis-r2.md', lifecycleInputs: ['review-analysis.md'] }]);
   return taskDir;
 }
 
-test('historical completion validates the captured input chain without latest-round lookups', () => {
-  const taskDir = fixture();
-  const taskPath = path.join(taskDir, 'task.md');
-  const task = fs.readFileSync(taskPath, 'utf8');
-
-  assert.equal(hasValidArtifactCompletion(task, taskDir, 'analysis-r2.md', 'analyze.completed'), true);
-});
-
-test('changed historical input bytes invalidate dependent completion facts', () => {
+test('changed direct input bytes invalidate the dependent completion fact', () => {
   const taskDir = fixture();
   fs.writeFileSync(path.join(taskDir, 'review-analysis.md'), '# Changed Review Analysis\n');
   const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
 
   assert.equal(hasValidArtifactCompletion(task, taskDir, 'analysis-r2.md', 'analyze.completed'), false);
+});
+
+test('completion facts without optional lifecycleInputs still validate their direct receipt', () => {
+  const taskDir = fixture();
+  const taskPath = path.join(taskDir, 'task.md');
+  const task = fs.readFileSync(taskPath, 'utf8');
+  const facts = JSON.parse(/^completion_facts: '(.+)'$/mu.exec(task)![1]!) as Array<Record<string, unknown>>;
+  delete facts[0]!.lifecycleInputs;
+  const withoutOptionalInputs = task.replace(/^completion_facts:.*$/mu, `completion_facts: '${JSON.stringify(facts)}'`);
+
+  assert.equal(hasValidArtifactCompletion(withoutOptionalInputs, taskDir, 'analysis-r2.md', 'analyze.completed'), true);
 });
 
 test('missing or extra input receipt edges invalidate a completion fact', () => {

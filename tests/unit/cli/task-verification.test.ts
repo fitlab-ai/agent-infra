@@ -338,11 +338,11 @@ test('artifact verification ignores Activity Log deletion, damage, and reorderin
   }
 });
 
-test('task-meta artifact completion exception remains valid after Activity Log removal', async () => {
+test('artifact completion gate accepts an omitted lifecycleInputs field and current direct receipt', async () => {
   const f = fixture();
   const taskPath = path.join(f.taskDir, 'task.md');
   const task = [
-    '---', `id: ${f.taskId}`, 'type: refactor', 'workflow: refactoring', 'status: active', 'current_step: technical-design-review', 'assigned_to: codex',
+    '---', `id: ${f.taskId}`, 'type: refactor', 'workflow: refactoring', 'status: active', 'current_step: technical-design', 'assigned_to: codex',
     'created_at: 2026-01-01 00:00:00+00:00', 'updated_at: 2026-01-01 00:00:00+00:00',
     'agent_infra_version: v0.9.11-alpha.0', '---', '', '# Task', ''
   ].join('\n');
@@ -352,13 +352,11 @@ test('task-meta artifact completion exception remains valid after Activity Log r
   fs.writeFileSync(taskPath, task);
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
   fs.writeFileSync(path.join(f.taskDir, 'plan.md'), '# Plan\n');
-  recordArtifactCompletions(f.taskDir, [
-    { name: 'analysis.md', lifecycleInputs: [] },
-    { name: 'plan.md', lifecycleInputs: ['analysis.md'] }
-  ]);
-  const withLog = fs.readFileSync(taskPath, 'utf8');
-  const withoutLog = withLog.replace(/\n## Activity Log\n[\s\S]*?(?=\n## |$)/u, '');
-  fs.writeFileSync(taskPath, withoutLog);
+  recordArtifactCompletions(f.taskDir, [{ name: 'plan.md', lifecycleInputs: ['analysis.md'] }]);
+  const withEvidence = fs.readFileSync(taskPath, 'utf8');
+  const facts = JSON.parse(/^completion_facts: '(.+)'$/mu.exec(withEvidence)![1]!) as Array<Record<string, unknown>>;
+  delete facts[0]!.lifecycleInputs;
+  fs.writeFileSync(taskPath, withEvidence.replace(/^completion_facts:.*$/mu, `completion_facts: '${JSON.stringify(facts)}'`));
   try {
     const result = await verifyInProcess({
       mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir, artifactFile: 'plan.md',

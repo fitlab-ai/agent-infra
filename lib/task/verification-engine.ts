@@ -39,7 +39,7 @@ import type { VerificationShared } from "./verification-types.ts";
 import { normalizeVerificationRecord } from './gate-policy.ts';
 import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
-import { sha256File } from "./artifact-receipts.ts";
+import { parseArtifactReceipts, sha256File } from "./artifact-receipts.ts";
 import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
 import { parseArtifactName } from "./artifact-name.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
@@ -586,22 +586,14 @@ function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string
     return failResult("activity-log", `Completion fact for '${output}' is missing or stale; rerun ${skillName} to record a current completion`);
   }
 
-  const frontmatter = parseTypedTaskFrontmatter(task.content);
-  const fact = parseCompletionFacts(frontmatter.completion_facts).find((item) => item.event === stage.event && item.output === output);
-  if (!fact) return failResult("activity-log", `Completion fact for '${output}' is missing; rerun ${skillName}`);
-  if (!Array.isArray(fact.lifecycleInputs)) {
-    return failResult("activity-log", `Completion fact for '${output}' has no input snapshot; rerun ${skillName}`);
-  }
-  for (const input of fact.lifecycleInputs) {
-    if (!input || typeof input.name !== "string" || !/^[a-f0-9]{64}$/u.test(input.sha256)) {
-      return failResult("activity-log", `Completion fact for '${output}' has an invalid input snapshot; rerun ${skillName}`);
-    }
-    const inputIdentity = parseArtifactName(input.name);
-    if (!inputIdentity) return failResult("activity-log", `Completion fact for '${output}' has invalid input '${input.name}'; rerun ${skillName}`);
+  const receipts = parseArtifactReceipts(task.content).rows.filter((receipt) => receipt.output === output);
+  for (const receipt of receipts) {
+    const inputIdentity = parseArtifactName(receipt.input);
+    if (!inputIdentity) return failResult("activity-log", `Completion receipt for '${output}' has invalid input '${receipt.input}'; rerun ${skillName}`);
     const inputInventory = inspectArtifactDirectory(taskDir, inputIdentity.family as any);
-    if (inputInventory.status !== "ready" || inputInventory.latest?.name !== input.name
-      || sha256File(path.join(taskDir, input.name)) !== input.sha256) {
-      return failResult("activity-log", `Input '${input.name}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`);
+    if (inputInventory.status !== "ready" || inputInventory.latest?.name !== receipt.input
+      || sha256File(path.join(taskDir, receipt.input)) !== receipt.inputSha256) {
+      return failResult("activity-log", `Input '${receipt.input}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`);
     }
   }
 
