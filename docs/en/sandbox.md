@@ -142,7 +142,7 @@ Every sandbox has an explicit workspace identity. A branch-only sandbox uses non
 
 When a task-bound container still exists after its task moves to `completed`, `ai sandbox exec <branch>` may re-enter that same container after verifying the container label, the unique completed task, the branch, the task view, and the historical task mount. This re-entry uses the full task ID internally and does not restore or allocate an active short ID. If completed readiness fails, or if `ai sandbox exec --recreate <branch>` is requested, the command fails closed and leaves the original container untouched. Enter the existing container manually, or explicitly run `ai sandbox rm <TASK-id>` followed by `ai sandbox create <branch>` to start a new branch-only sandbox. `ai sandbox rm` is the full interactive sandbox cleanup path, not a container-only delete: it may remove the worktree, local branch, tool/shell state, and branch share.
 
-Both identities may create a new task through the dedicated typed `task-create` control request. The sandbox AI writes one versioned candidate JSON file; the host validates it, derives host-owned metadata, atomically persists the task, allocates its short id, and attempts platform synchronization. This exception grants creation only: it does not expose the host workspace, permit lifecycle or orchestration in branch-only mode, mount the new task, or change the current sandbox identity.
+Both identities may create a new task through the dedicated typed `task-create` control request. The sandbox AI writes one versioned candidate JSON file; the host validates it, derives host-owned metadata, atomically persists the task, allocates its short id, and attempts platform synchronization. This exception grants creation only: it does not expose the host workspace, permit task lifecycle operations in branch-only mode, mount the new task, or change the current sandbox identity.
 
 Creation retries have two identities. Reusing an outer request id is rejected even after a broker restart. After a timeout, the caller uses a new outer id but reuses the original immutable candidate file and business idempotency key; semantically identical JSON returns the original task as `no-op`, while changed field values fail closed. Platform failures retain the local task and short id and return a structured warning.
 
@@ -155,7 +155,7 @@ returns a failed `SANDBOX_CONTROL_OUTPUT_UNAVAILABLE` task result with
 `recovery: inspect-domain-state`; inspect the host task state before deciding
 whether a later retry is safe.
 
-Task lifecycle, finalization, and orchestration use one typed Task Control Authority with separate transport entries. Direct-host commands invoke domain handlers in the current CLI process and do not create a sandbox broker, manifest, or authority root. A sandbox client only creates a control request; the broker-spawned executor becomes the authority caller only after the gate, current manifest, request, owner, lease, and controller checks pass. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity.
+Task lifecycle and finalization use one typed Task Control Authority with separate transport entries. Direct-host commands invoke domain handlers in the current CLI process and do not create a sandbox broker, manifest, or authority root. A sandbox client only creates a control request; the broker-spawned executor becomes the authority caller only after the gate, current manifest, request, owner, lease, and controller checks pass. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity.
 
 The parent-plus-child bind topology from v0.9.7 is legacy and intentionally incompatible with the current per-state topology. On upgrade, or when old code encounters a newer per-state container during rollback, the check fails closed; run `ai sandbox start --recreate <task-ref-or-branch>` once. Container-local processes, tmux sessions, the writable layer, ordinary `/tmp`, and RAM state may be lost, while the worktree, local branch, and host-managed task/tool data are preserved.
 
@@ -167,7 +167,7 @@ The CLI and broker are the task-control entry boundaries. Direct-host commands r
 
 Task-bound workspaces mount a host-created writable task projection. The authoritative task directory remains outside the container writable view. Workflow transport binds the task, generation and a closed operation catalog, preserving arguments for the same domain parser used by the CLI. The authorized executor calls shared artifact operations directly and runs other workflow commands through a one-request CLI worker. That worker is created only after broker authorization and receives no reusable host credential. Responses carry the business exit code, including in failure audits. Rejection before dispatch means no execution; dispatch failures after acceptance mean the result is unknown and must not be automatically retried.
 
-Artifact initialization and repair affect candidates only. Finalization uses authoritative task metadata and inventory, prepares validated content and pending provenance once through shared domain logic, publishes that buffer, then commits provenance without repeating validation. The host verifies recorded projection topology, opens canonical top-level candidates with `O_NOFOLLOW`, and reads and hashes each through the same descriptor with observable identity and metadata checks. Publication never reopens the candidate; projection edits never copy `task.md` or arbitrary files into authority. Recovery reuses the lifecycle journal parser and the complete orchestration evidence contract, including its PR fields. Artifact replacement is atomic, but replacement and provenance are not a cross-file transaction: a failure after publication can require inspecting domain state before retrying.
+Artifact initialization and repair affect candidates only. Finalization uses authoritative task metadata and inventory, prepares validated content and pending provenance once through shared domain logic, publishes that buffer, then commits provenance without repeating validation. The host verifies recorded projection topology, opens canonical top-level candidates with `O_NOFOLLOW`, and reads and hashes each through the same descriptor with observable identity and metadata checks. Publication never reopens the candidate; projection edits never copy `task.md` or arbitrary files into authority. Recovery reuses the lifecycle journal parser and verifies current task, artifact, and Git identity facts. Artifact replacement is atomic, but replacement and provenance are not a cross-file transaction: a failure after publication can require inspecting domain state before retrying.
 
 The controlled lifecycle removal path uses the exact recorded container ID. The configured engine selects the Docker connection; the full container ID identifies the resource, while task labels and the worktree binding identify its task. Docker API versions are not resource identity. The Docker CLI query uses `container ls --all --no-trunc --filter id=<full-id>` with a fixed machine-readable ID format, and only a successful zero-row result proves exact absence. They quiesce the broker and executions, wait through the soft-stop phase, remove the exact container, verify exact-ID absence, recheck the manifest and owner generation, and only then use remaining-deadline force cleanup. A not-found result for the exact ID is not confused with a newly recreated container using the same name. Unknown inspection, removal failure, owner replacement, or an exhausted deadline leaves the control root and evidence in place for a later controlled retry. Cleanup serializes contenders with a per-user native file lock stored outside the control tree; the lock object is retained for future retries.
 
@@ -225,8 +225,8 @@ repository's canonical task auxiliary roots. They delete only a consumed local a
 intent or a synced commit intent when the terminal task, completion receipt,
 artifact or Git identity, and path ownership checks all match. Empty canonical
 auxiliary roots may be removed one level at a time. Task documents, artifacts,
-completion receipts, orchestration evidence, run metadata and output, lifecycle
-records, process-data, control state, and user data remain protected.
+completion facts, managed run metadata and output, lifecycle records,
+process-data, control state, and user data remain protected.
 
 `--unbound` performs this scan even when Docker reports no sandbox rows, so a
 later retry can find cleanup-only work. `--dry-run` reports planned, protected,
@@ -326,9 +326,7 @@ Lifecycle progress is read from the domain journal rather than duplicated here. 
 recovery reconstructs a response only from this binding plus the operation's
 domain evidence. It distinguishes not-executed, in-progress, success,
 failure, and unknown; a started request without matching terminal or domain
-evidence remains unknown and is not replayed. Orchestration route reads are
-separate from `route.clean-completion`, whose success requires the reviewed
-head and clean-worktree completion evidence.
+evidence remains unknown and is not replayed.
 
 The client first checks the generation and broker heartbeat in `status.json`.
 It then writes a request to a private temporary file and renames it to

@@ -134,7 +134,7 @@ ai sandbox create feature/proxy --inherit-proxy
 
 如果 task-bound 容器仍然存在，但任务已经移动到 `completed`，`ai sandbox exec <branch>` 会在核对容器标签、唯一的 completed 任务、分支、task view 和历史任务挂载后，原位重新进入同一个容器。该流程内部使用完整 TASK-id，不会恢复或重新分配 active 短号。如果 completed readiness 失败，或用户执行 `ai sandbox exec --recreate <branch>`，命令会 fail closed，原容器保持不变。需要保留现场时可手动进入原容器；如果明确要新建 branch-only 沙箱，则分开执行 `ai sandbox rm <TASK-id>` 和 `ai sandbox create <branch>`。`ai sandbox rm` 是完整的交互式 sandbox 清理入口，不是只删除容器；它可能删除 worktree、本地分支、工具/shell 状态和 branch share。
 
-两种 identity 都可以通过专用 typed `task-create` 控制请求创建新任务。沙箱 AI 只写一次版本化 candidate JSON；宿主负责严格验证、派生宿主字段、原子持久化、分配短号并尝试平台同步。该例外只授予“创建”能力：不会暴露宿主 workspace，不会让 branch-only 执行 lifecycle/orchestration，不会挂载新任务，也不会改变当前沙箱 identity。
+两种 identity 都可以通过专用 typed `task-create` 控制请求创建新任务。沙箱 AI 只写一次版本化 candidate JSON；宿主负责严格验证、派生宿主字段、原子持久化、分配短号并尝试平台同步。该例外只授予“创建”能力：不会暴露宿主 workspace，不会让 branch-only 执行任务生命周期操作，不会挂载新任务，也不会改变当前沙箱 identity。
 
 创建重试包含两层身份：重复 outer request ID 即使在 broker 重启后也会被拒绝；超时后调用方使用新的 outer ID，但必须复用原不可变 candidate 文件和业务幂等 key。语义相同的 JSON 返回原任务 `no-op`，任一字段值变化均 fail closed。平台失败时保留本地任务和短号，并返回结构化 warning。
 
@@ -196,7 +196,7 @@ Codex 将 `/home/devuser/.codex` 放在 512 MiB、允许执行文件的 tmpfs �
 
 这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --unbound` 批量删除**未绑定当前有效任务短号**的沙箱，包括已完成或归档任务绑定的沙箱；仍绑定有效短号的沙箱及其共享分支状态会保留。可加 `--dry-run` 预览，或 `--yes` 跳过普通确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：`--all` 已移除；旧调用会返回迁移错误，必须改用 `--unbound`。
 
-`ai sandbox rm`、`--unbound` 和 `--purge` 还会扫描仓库中的规范任务辅助目录。只有在任务已终态、完成回执、artifact 或 Git identity 以及路径所有权检查全部匹配时，才会删除已消费的本地 artifact finalization intent 或已同步的 commit intent；规范辅助目录只有在真实为空时才会逐层删除。任务文档、artifact、完成回执、orchestration evidence、run 元数据和输出、生命周期记录、process-data、control 状态以及用户数据继续受保护。
+`ai sandbox rm`、`--unbound` 和 `--purge` 还会扫描仓库中的规范任务辅助目录。只有在任务已终态、完成回执、artifact 或 Git identity 以及路径所有权检查全部匹配时，才会删除已消费的本地 artifact finalization intent 或已同步的 commit intent；规范辅助目录只有在真实为空时才会逐层删除。任务文档、artifact、完成事实、托管 run 元数据和输出、生命周期记录、process-data、control 状态以及用户数据继续受保护。
 
 `--unbound` 即使 Docker 没有返回沙箱行也会执行这次扫描，因此沙箱先消失后仍可重试 cleanup-only 工作。`--dry-run` 会显示 planned、protected、skipped、deleted、failed 和 remaining 项及原因码，但不会停止容器或删除文件。损坏记录、active 或 blocked 任务、未知名称、符号链接、身份变化、开放恢复告警和不完整 Git 证据都会保留，等待后续诊断。
 
@@ -264,8 +264,7 @@ rename、fsync 旧段并轮换。
 生命周期进度从领域日志读取，不在回执中重复存储。
 broker recovery 只能依据这份绑定以及对应 operation 的领域证据重建 response，区分
 not-executed、in-progress、success、failure 和 unknown。已经 started 但缺少匹配 terminal 或
-领域证据的请求保持 unknown，不会重放。编排 route read 与 `route.clean-completion` 分开；后者
-只有在 reviewed head 和 clean-worktree completion evidence 完整时才允许 success。
+领域证据的请求保持 unknown，不会重放。
 
 client 首先检查 `status.json` 中的 generation 和 broker heartbeat，然后把请求写入
 私有临时文件，再 rename 为 `requests/<request-id>.json`。请求包含协议版本、请求

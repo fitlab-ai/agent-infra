@@ -4,7 +4,7 @@ import type { TaskEventRequest, Verdict } from '../task/events.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
+const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--dry-run]
 
 Apply one closed-set task lifecycle event and print a structured JSON result.
 Events: ${eventCatalog.join(', ')}
@@ -35,10 +35,6 @@ export function parseTaskEventRequest(args: readonly string[]): TaskEventRequest
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (flag === '--orchestrated') {
-      if (seen.has(flag)) throw new Error(`duplicate option '${flag}'`);
-      seen.add(flag); request.orchestrated = true; continue;
-    }
     if (flag === '--dry-run') {
       if (seen.has(flag)) throw new Error(`duplicate option '${flag}'`);
       seen.add(flag); request.dryRun = true; continue;

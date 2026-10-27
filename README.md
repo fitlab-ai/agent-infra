@@ -200,14 +200,12 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | Command | Purpose |
 |---------|---------|
 | `create-task` / `import-issue` | Start a task from a description or a GitHub Issue |
-| `run-task` | Resume the lifecycle with fresh isolated executors/reviewers when the selected client exposes verified actual model/effort evidence; Codex now has an experimental Hooks + App Server evidence channel, but orchestration remains disabled until that channel is connected to delegation receipts |
 | `analyze-task` | Capture scope and risks, then select the streamlined, standard, or full path |
 | `review-analysis` | Review the analysis when the selected full path requires an independent requirement checkpoint |
 | `plan-task` / `review-plan` | Design the approach on standard/full paths; independently review it only on the full path |
 | `code-task` → `review-code` | Implement and test; `code-task` creates a local checkpoint, then a structured review checks that checkpoint |
 | `create-pr` → `complete-task` | Publish the approved checkpoint to the task-bound target branch, then archive after merge and final gates |
 
-Start with one atomic role policy, for example: `$run-task --task 42 --executor-model <id> --executor-reasoning-effort <value> --reviewer-model <id> --reviewer-reasoning-effort <value>`. Both roles may use the same model. With no explicit policy, `run-task` reads the current Agent Client's optional `agentClients[].orchestration`; if neither source is complete, it shows the host model-selection guidance before creating any run. Re-entry uses the persisted run policy. Finish or clear active runs before upgrading agent-infra; unsupported disk state fails closed without rewriting.
 
 See the full catalog — task status, release, security, and project-maintenance skills — in [Built-in AI Skills](./docs/en/skills.md).
 

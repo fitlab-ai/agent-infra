@@ -143,13 +143,7 @@ test('direct-host task-control help runs without a host service', () => {
   assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/u);
 });
 
-test('task-control help remains available without a host-control probe', () => {
-  const result = runDirectNode('task-orchestration', ['--help'], cleanEnv());
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Usage: agent-infra-internal task-orchestration/u);
-});
-
-test('the launcher wrapper permits direct-host help without a sandbox identity', onPlatforms('linux', 'darwin'), (t) => {
+test('the internal launcher permits direct-host task-control help without a sandbox identity', onPlatforms('linux', 'darwin'), (t) => {
   if (!fixedStatusMountPresent()) {
     t.skip('fixed status mount is unavailable in this host test environment');
     return;
@@ -157,12 +151,13 @@ test('the launcher wrapper permits direct-host help without a sandbox identity',
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   const isolatedHome = createTempDir('task-control-launcher-home-');
   try {
-    for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
+    for (const command of ['task-lifecycle', 'task-finalization']) {
       const result = runLauncher(command, ['--help'], cleanEnv({
         HOME: isolatedHome,
         NODE_OPTIONS: `--require=${preload}`
       }));
       assert.equal(result.status, 0, `${command}: ${result.stderr}`);
+      assert.match(result.stdout, new RegExp(`Usage: agent-infra-internal ${command}`));
     }
   } finally {
     fs.rmSync(isolatedHome, { recursive: true, force: true });
@@ -182,7 +177,7 @@ test('direct Node injection matrix cannot reach any task-control local handler',
       env: cleanEnv({ AGENT_INFRA_HOST_CONTROL_SOCKET: '/tmp/forged-host-control.sock' })
     }
   ];
-  for (const command of ['task-lifecycle', 'task-orchestration', 'task-finalization']) {
+  for (const command of ['task-lifecycle', 'task-finalization']) {
     for (const injection of cases) {
       const result = runDirectNode(command, ['--help'], injection.env ?? cleanEnv(), injection.nodeArgs);
       assert.equal(result.status, 0, `${command} / ${injection.name}: ${result.stderr}`);
@@ -208,23 +203,6 @@ function snapshotTree(root: string): string[] {
   visit(root);
   return entries;
 }
-
-test('direct-host task-control routes complete with a process result', () => {
-  const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
-  for (const [command, args] of [
-    ['task-lifecycle', [TASK_ID, 'block', '--agent', 'codex']],
-    ['task-orchestration', [TASK_ID, 'route']],
-    ['task-finalization', [TASK_ID, 'complete', '--agent', 'codex']]
-  ] as const) {
-    const fixture = taskFixture(true, true);
-    try {
-      const result = runDirectNode(command, args, cleanEnv({ NODE_OPTIONS: `--require=${preload}` }), [], fixture.root);
-      assert.notEqual(result.status, null, `${command}: ${result.stderr}`);
-    } finally {
-      fs.rmSync(fixture.root, { recursive: true, force: true });
-    }
-  }
-});
 
 test('branch-only control markers keep non-task public commands on the host entry', () => {
   const result = runPublic(['version'], cleanEnv({
@@ -253,20 +231,6 @@ test('top-level usage and version aliases remain available in task-bound environ
     assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
     assert.notEqual(result.stdout, '');
   }
-});
-
-test('task orchestration validates the mounted identity before local execution', () => {
-  const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
-    AGENT_INFRA_SANDBOX: '1',
-    AGENT_INFRA_TASK_ID: TASK_ID,
-    AGENT_INFRA_CONTROL_GENERATION: 'generation',
-    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-    AGENT_INFRA_CONTROL_DIR: '/missing/control',
-    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
-    AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
-  }));
-  assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CONTROL_TRANSPORT_INVALID');
 });
 
 test('partial sandbox or executor markers fail closed before task parsing', () => {

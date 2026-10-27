@@ -28,9 +28,6 @@ import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.
 import { extractReviewBaseline, extractReviewedHead, extractReviewedSnapshotTree } from './review-fingerprint.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
-import { validateLifecycleExecution } from './lifecycle-execution.ts';
-import { commitOrchestrationStageCompletion } from './orchestration.ts';
-import type { OrchestrationStageCompletion } from './orchestration.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { validateLocalArtifact } from './local-artifact-finalization.ts';
@@ -65,14 +62,13 @@ type TaskEventErrorCode =
   | 'EVENT_LOG_MISSING' | 'EVENT_START_MISSING' | 'EVENT_ALREADY_COMPLETED'
   | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | 'EVENT_FINDING_COUNT_MISMATCH'
   | 'EVENT_VERDICT_INVALID'
-  | 'EVENT_ORCHESTRATION_COMMIT_FAILED'
   | 'MANUAL_VALIDATION_RECEIPT_MISSING' | 'MANUAL_VALIDATION_RECEIPT_INVALID'
   | 'MANUAL_VALIDATION_RECEIPT_IDENTITY_MISMATCH'
   | 'MANUAL_VALIDATION_TRANSACTION_MISSING' | 'MANUAL_VALIDATION_TRANSACTION_INVALID'
   | 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH' | 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID'
   | ArtifactErrorCode | TaskWriteErrorCode;
 type TaskEventRequest = {
-  taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean; orchestrated?: boolean;
+  taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean;
   initiator?: TriggerInitiator; requestId?: string; reasonCode?: TriggerReason;
   sourceFinding?: string; sourceArtifact?: string; sourceSha256?: string;
   round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
@@ -83,9 +79,7 @@ type TaskEventRequest = {
   transactionId?: string; receiptDigest?: string; prHeadSha?: string;
 };
 type TaskEventError = { code: TaskEventErrorCode; message: string };
-type TaskEventOptions = TaskWriteOptions & {
-  commitOrchestrationCompletion?: (plan: OrchestrationStageCompletion) => void;
-};
+type TaskEventOptions = TaskWriteOptions;
 type TaskEventResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed'; changed: boolean;
   event: string; requestRef: string; taskId: string | null; taskMdPath: string | null;
@@ -125,17 +119,17 @@ const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun', 'initiator',
 const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] }> = {
   'analyze.started': { optional: ['round'] },
   'analyze.awaiting-input': { required: ['question'] },
-  'analyze.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'orchestrated'] },
+  'analyze.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round'] },
   'review-analysis.started': { optional: ['round'] },
-  'review-analysis.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
+  'review-analysis.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
   'plan.started': { optional: ['round'] },
-  'plan.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'orchestrated'] },
+  'plan.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round'] },
   'review-plan.started': { optional: ['round'] },
-  'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
+  'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
   'code.started': { optional: ['round', 'fixFor', 'implementationInput'] },
-  'code.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
+  'code.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation'] },
   'review-code.started': { optional: ['round'] },
-  'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
+  'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
   'manual-validation.started': { optional: ['round', 'transactionId'] },
   'manual-validation.completed': { required: ['artifact', 'summaryResult', 'transactionId', 'receiptDigest', 'prHeadSha'], optional: ['round'] },
   'validation-run.started': { optional: ['round'] },
@@ -157,7 +151,7 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
     if (value !== undefined && (!Number.isInteger(value) || value < (key === 'round' || key === 'question' ? 1 : 0))) return { code: 'EVENT_PAYLOAD_INVALID', message: `'${key}' must be a ${key === 'round' || key === 'question' ? 'positive' : 'non-negative'} integer` };
   }
   if (request.verdict && !['approved', 'changes-requested', 'rejected'].includes(request.verdict)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'verdict is invalid' };
-  if (request.initiator && !['human', 'model', 'orchestrator'].includes(request.initiator)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'initiator is invalid' };
+  if (request.initiator && !['human', 'model'].includes(request.initiator)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'initiator is invalid' };
   if (request.requestId !== undefined && (!request.requestId.trim() || /[\r\n]/.test(request.requestId))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'requestId must be a non-empty single line' };
   if (request.reasonCode && !['user-request', 'new-requirement', 'upstream-fact-doubt', 'review-finding', 'manual-review-supplement', 'retry', 'validation-rerun'].includes(request.reasonCode)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'reasonCode is invalid' };
   for (const [name, value] of [['sourceFinding', request.sourceFinding], ['sourceArtifact', request.sourceArtifact], ['sourceSha256', request.sourceSha256]] as const) {
@@ -467,7 +461,7 @@ function lifecycleAction(family: EventFamily): LifecycleAction {
 
 function eventTrigger(request: TaskEventRequest, family: EventFamily): ExplicitTrigger {
   return {
-    initiator: request.initiator ?? (request.orchestrated ? 'orchestrator' : request.agent === 'human' ? 'human' : 'model'),
+    initiator: request.initiator ?? (request.agent === 'human' ? 'human' : 'model'),
     requestId: request.requestId ?? `${request.taskRef}:${request.event}:${request.round ?? 1}`,
     requestedAction: lifecycleAction(family),
     reasonCode: request.reasonCode ?? (request.fixFor || request.implementationInput ? 'review-finding' : 'user-request'),
@@ -475,7 +469,7 @@ function eventTrigger(request: TaskEventRequest, family: EventFamily): ExplicitT
     ...(request.sourceArtifact ? { sourceArtifact: request.sourceArtifact } : {}),
     ...(request.sourceSha256 ? { sourceSha256: request.sourceSha256 } : {}),
     ...(request.implementationInput ? { implementationInput: request.implementationInput } : {}),
-    explicitRequest: request.requestId !== undefined || request.reasonCode !== undefined || request.initiator !== undefined || request.orchestrated === true
+    explicitRequest: request.requestId !== undefined || request.reasonCode !== undefined || request.initiator !== undefined
   };
 }
 
@@ -761,7 +755,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
     const capability = canStart(lifecycleAction(eventIdentity.family), facts.facts, trigger);
     const safetyFailure = capability.reasonCode === 'TASK_NOT_ACTIVE'
       || capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN';
-    if (!capability.allowed && (normalized.initiator === 'orchestrator' || safetyFailure)
+    if (!capability.allowed && safetyFailure
       && !(supersededOpenStart && capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN')) {
       return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
@@ -773,29 +767,6 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
     completedArtifact?.path ?? null
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  let orchestrationCompletion: OrchestrationStageCompletion | null = null;
-  if (eventIdentity.phase === 'completed' && normalized.orchestrated
-    && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
-    const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
-    const execution = validateLifecycleExecution(normalized.taskRef, {
-      mode: 'orchestrated',
-      identity: {
-        stage: orchestrationStage,
-        round: normalized.round!,
-        artifact: normalized.artifact!,
-        role: eventIdentity.family.startsWith('review-') ? 'reviewer' : 'executor'
-      },
-      agent: normalized.agent,
-      dryRun: normalized.dryRun
-    }, { repoRoot: options.repoRoot });
-    if (!execution.ok) {
-      return failed(normalized, {
-        code: 'EVENT_TRANSITION_INVALID',
-        message: `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`
-      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
-    }
-    orchestrationCompletion = execution.completionPlan;
-  }
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
@@ -945,27 +916,6 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
-  if (!normalized.dryRun && orchestrationCompletion) {
-    try {
-      (options.commitOrchestrationCompletion ?? commitOrchestrationStageCompletion)(orchestrationCompletion);
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ORCHESTRATION_COMMIT_FAILED',
-        message: `task.md was written but orchestration completion could not be persisted; manual recovery is required: ${error instanceof Error ? error.message : String(error)}`
-      }, {
-        taskId: result.taskId,
-        taskMdPath: result.taskMdPath,
-        fromStep: currentStep,
-        toStep: step,
-        action: eventIdentity.action,
-        phase: eventIdentity.phase,
-        timestamp: result.timestamp,
-        agentInfraVersion: result.agentInfraVersion,
-        operations: result.operations,
-        artifactContext
-      });
-    }
-  }
   return {
     status: result.status, changed: result.changed, event: normalized.event,
     requestRef: normalized.taskRef, taskId: result.taskId, taskMdPath: result.taskMdPath,

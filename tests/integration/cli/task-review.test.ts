@@ -65,53 +65,6 @@ current_step: ${scenario.step}
   return { root, dir, artifact };
 }
 
-function reviewReceipt(artifact: string, overrides: Record<string, unknown> = {}) {
-  const status = typeof overrides.status === 'string' ? overrides.status : 'activated';
-  const adapterEvidence = ['activated', 'stage-completed', 'sealed', 'consumed', 'aborted'].includes(status)
-    ? { codex: {
-        activationEvidence: { kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4, capabilitySessionId: 'parent-1' },
-        records: ['sealed', 'consumed', 'aborted'].includes(status)
-          ? { lifecycle: { consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z' } }
-          : {}
-      } }
-    : {};
-  return {
-    id: 'receipt-1', taskId: TASK_ID, runId: 'run-1', role: 'reviewer',
-    stage: 'review-analysis', round: 1, artifact, client: 'codex',
-    requestedModel: 'reviewer-model', requestedReasoningEffort: 'high',
-    actualModel: 'reviewer-model', actualReasoningEffort: 'high',
-    modelFallbackReason: null, reasoningEffortFallbackReason: null,
-    parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: null,
-    status, workspaceSnapshotScope: 'task', adapterEvidence,
-    beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
-    createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
-    spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
-    spawnDispatchedAt: '2026-01-01T00:00:00.000Z',
-    activationDeadlineAt: '2026-01-01T00:00:15.000Z', startEvidenceMonotonicMs: 2,
-    activatedMonotonicMs: 2, activatedAt: '2026-01-01T00:00:01.000Z',
-    sealedAt: null, consumedAt: null,
-    ...overrides
-  };
-}
-
-function currentRun(overrides: Record<string, unknown> = {}) {
-  return {
-    taskId: TASK_ID, runId: 'run-1', status: 'running', nextStage: 'review-analysis',
-    stepCount: 0, maxSteps: 24,
-    modelPolicy: {
-      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
-    },
-    modelPolicySource: {
-      kind: 'explicit', client: 'codex', resolvedAt: '2026-01-01T00:00:00.000Z'
-    },
-    recoveryHistory: [], baseline: '', pendingDelegation: null, receipts: [], pause: null,
-    completionEvidence: null,
-    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides
-  };
-}
-
 function run(root: string, args: string[]) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-review', ...args], {
     cwd: root,
@@ -152,78 +105,6 @@ test('task-review dry-run reports a plan without changing artifact bytes', () =>
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(JSON.parse(result.stdout).status, 'planned');
   assert.deepEqual(fs.readFileSync(path.join(f.dir, f.artifact)), before);
-});
-
-test('orchestrated finalization dry-run reports a mismatch without pausing the run', () => {
-  const scenario = scenarios[0];
-  const f = fixture(
-    scenario,
-    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
-  );
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
-    pendingDelegation: reviewReceipt(f.artifact, {
-      status: 'prepared', parentId: null, childId: null, spawnMode: null,
-      actualModel: null, actualReasoningEffort: null, spawnDispatchMonotonicMs: null,
-      activationDeadlineMonotonicMs: null, spawnDispatchedAt: null, activationDeadlineAt: null,
-      startEvidenceMonotonicMs: null, activatedMonotonicMs: null, activatedAt: null
-    })
-  }), null, 2)}\n`);
-  const artifactPath = path.join(f.dir, f.artifact);
-  const artifactBefore = fs.readFileSync(artifactPath);
-  const runBefore = fs.readFileSync(runPath);
-
-  const result = run(f.root, [
-    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact,
-    '--orchestrated', '--dry-run'
-  ]);
-
-  assert.equal(result.status, 1);
-  assert.match(JSON.parse(result.stdout).error.message, /ORCHESTRATION_PROVENANCE_MISMATCH/);
-  assert.deepEqual(fs.readFileSync(artifactPath), artifactBefore);
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
-});
-
-test('standalone finalization ignores a current run without a pending delegation', () => {
-  const scenario = scenarios[0];
-  const f = fixture(
-    scenario,
-    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
-  );
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
-    status: 'completed', nextStage: null
-  }), null, 2)}\n`);
-  const runBefore = fs.readFileSync(runPath);
-
-  const result = run(f.root, [
-    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
-  ]);
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.equal(JSON.parse(result.stdout).status, 'applied');
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
-});
-
-test('orchestrated finalization accepts one matching activated delegation without advancing it', () => {
-  const scenario = scenarios[0];
-  const f = fixture(
-    scenario,
-    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
-  );
-  const runPath = path.join(f.dir, '.runtime', 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
-    pendingDelegation: reviewReceipt(f.artifact)
-  }), null, 2)}\n`);
-  const runBefore = fs.readFileSync(runPath);
-
-  const result = run(f.root, [
-    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact, '--orchestrated'
-  ]);
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.equal(JSON.parse(result.stdout).status, 'applied');
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
 test('task-review refreshes numeric finding counts from the current ledger', () => {

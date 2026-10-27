@@ -33,7 +33,6 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'integrated',
     subagents: 'experimental',
-    orchestration: 'experimental',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -43,7 +42,6 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'integrated',
     subagents: 'experimental',
-    orchestration: 'experimental',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -53,7 +51,6 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'compatible',
     subagents: 'unsupported',
-    orchestration: 'unsupported',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -63,7 +60,6 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'compatible',
     subagents: 'unsupported',
-    orchestration: 'unsupported',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -73,7 +69,6 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'compatible',
     subagents: 'experimental',
-    orchestration: 'experimental',
     sandbox: 'integrated',
     verification: 'compatible'
   }
@@ -100,10 +95,6 @@ function adapterInput(
       kind: 'interactive-only',
       command: '/model',
       guidance: 'Use the host model picker.'
-    },
-    delegationEvidence: {
-      actualModel: 'unavailable',
-      actualReasoningEffort: 'unavailable'
     },
     project: {
       ownedPathPrefixes: ['.codex/'],
@@ -221,15 +212,6 @@ test('adapter definitions validate their closed contract without mutating input'
   for (const invalid of invalidInputs) {
     assert.throws(() => defineAgentClientAdapter(invalid as AgentClientAdapter));
   }
-});
-
-test('Codex exposes experimental orchestration backed by App Server evidence', () => {
-  const codex = getAgentClientAdapter('codex');
-  assert.deepEqual(codex.delegationEvidence, {
-    actualModel: 'app-server',
-    actualReasoningEffort: 'app-server'
-  });
-  assert.equal(codex.capabilities.orchestration.level, 'experimental');
 });
 
 test('adapter custom commands validate paths, placeholders, metadata, and immutability', () => {
@@ -550,12 +532,8 @@ test('registry exposes the exact built-in project asset matrix', () => {
   );
 });
 
-test('Codex adapter owns its lifecycle and recovery capabilities', () => {
+test('Codex adapter exposes sandbox recovery capabilities', () => {
   const adapter = getAgentClientAdapter('codex');
-
-  assert.equal(typeof adapter.orchestrationAdapter?.prepareDelegation, 'function');
-  assert.equal(typeof adapter.orchestrationAdapter?.recoverStarted, 'function');
-  assert.ok(Object.isFrozen(adapter.orchestrationAdapter));
 
   assert.deepEqual(
     adapter.sandbox.hooks.map(({ id, phase }) => ({ id, phase })),

@@ -25,7 +25,7 @@ const ARTIFACT_AUDIT_FAMILIES = new Set(['analysis', 'review-analysis', 'plan', 
 type LifecycleAction =
   | 'analysis' | 'review-analysis' | 'plan' | 'review-plan'
   | 'code' | 'review-code' | 'manual-validation' | 'validation-run';
-type TriggerInitiator = 'human' | 'model' | 'orchestrator';
+type TriggerInitiator = 'human' | 'model';
 type TriggerReason = 'user-request' | 'new-requirement' | 'upstream-fact-doubt' | 'review-finding' | 'manual-review-supplement' | 'retry' | 'validation-rerun';
 type ExplicitTrigger = {
   initiator: TriggerInitiator;

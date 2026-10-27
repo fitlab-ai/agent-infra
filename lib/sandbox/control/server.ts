@@ -300,9 +300,6 @@ async function readRecoveryDomain(
   }
 
   if (operation.family === 'task-lifecycle') {
-    if (operation.intent === 'recover-started') {
-      return { domain: null };
-    }
     if (!taskRef || !terminalResult.targetState) return { domain: null };
     const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
     try {

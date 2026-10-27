@@ -8,7 +8,7 @@ description: >
 
 # Run Manual Validation
 
-Lifecycle events require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `validation-rerun`. Reuse the same values for started and completed.
+Lifecycle events require explicit trigger data: ordinary skill invocation uses `model`; use `human` only when the user explicitly requests it. `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` use `user-request` or `validation-rerun`. Reuse the same values for started and completed.
 
 ## Task Context Resolution
 

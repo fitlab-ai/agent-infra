@@ -10,7 +10,7 @@
 ## Commit Execution Boundary
 
 - Do not run `git add` or `git commit` directly. All automatic commits must use the shared `agent-infra-internal git-workflow commit` core and follow the paths, HEAD/tree, and delivery-mode constraints of the applicable skill.
-- The active workflow defines whether a commit is required. Completing `code-task` requires a local checkpoint through the shared core after tests and report preflight pass. This applies to direct calls and `run-task` orchestration; no extra commit authorization or user confirmation is required.
+- The active workflow defines whether a commit is required. Completing `code-task` requires a local checkpoint through the shared core after tests and report preflight pass. The current code-task invocation calls the shared core.
 - A `code-task` checkpoint never pushes to a remote. Other skills may call the shared core only when their workflow explicitly requires it. The standalone `commit` skill still requires an explicit user invocation and follows its push-delivery flow.
 - Do not create a commit when the workflow does not require one. When a separate user commit is needed, remind the user to use the appropriate TUI command.
 

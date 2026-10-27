@@ -7,11 +7,7 @@
         {
           "id": "codex",
           "enabled": true,
-          "installInSandbox": false,
-          "orchestration": {
-            "executor": { "model": "executor-model", "reasoningEffort": "xhigh" },
-            "reviewer": { "model": "reviewer-model", "reasoningEffort": "high" }
-          }
+          "installInSandbox": false
         },
         { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
         { "id": "opencode", "enabled": true, "installInSandbox": false },

@@ -54,12 +54,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'sandbox-control', 'client', 'conditional', 'progress', 'delegated'),
     descriptor('internal', 'agent-client', 'next-steps', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'agent-client', 'model-selection', 'non-task', 'diagnostic', 'none'),
-    descriptor('internal', 'agent-client', 'launch-carrier', 'non-task', 'diagnostic', 'none'),
-    descriptor('internal', 'codex-lifecycle', 'preflight', 'non-task', 'diagnostic', 'none'),
-    descriptor('internal', 'codex-lifecycle', 'hook-event', 'conditional', 'progress'),
-    descriptor('internal', 'codex-lifecycle', 'resolve-start', 'conditional', 'progress'),
-    descriptor('internal', 'codex-lifecycle', 'resolve-stop', 'conditional', 'progress'),
-    descriptor('internal', 'codex-lifecycle', 'consume', 'conditional', 'progress'),
     descriptor('internal', 'git-workflow', 'inspect', 'conditional', 'diagnostic'),
     descriptor('internal', 'git-workflow', 'preview-tree', 'conditional', 'diagnostic'),
     descriptor('internal', 'git-workflow', 'snapshot', 'conditional', 'diagnostic'),
@@ -132,8 +126,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-artifact', 'init', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-artifact', 'preflight', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-artifact', 'finalize-local', 'task-bound', 'artifact-write'),
-    descriptor('internal', 'task-orchestration', 'status', 'task-bound', 'diagnostic'),
-    descriptor('internal', 'task-orchestration', 'progress', 'task-bound', 'progress'),
     descriptor('internal', 'task-review', 'preflight', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-review', 'finalize-summary', 'task-bound', 'progress'),
     descriptor('internal', 'task-event', 'event', 'task-bound', 'progress'),
@@ -212,11 +204,11 @@ export const TASK_OPERATION_DESCRIPTORS = Object.freeze([
 ]);
 
 export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
-  'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle',
+  'task-create', 'task-qualification', 'sandbox-control', 'agent-client',
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-workspace', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
-  'task-orchestration', 'task-review', 'task-event', 'task-lifecycle',
+  'task-review', 'task-event', 'task-lifecycle',
   'task-finalization', 'task-platform-recovery', 'task-short-id', 'task-snapshot', 'task-verify', 'task-validate', 'manual-validation'
 ]);
 export const PUBLIC_DISPATCHER_ROUTES = Object.freeze([
@@ -271,7 +263,6 @@ export function resolveTaskOperation(
 export function resolveDelegatedTaskOperation(args: readonly string[]): TaskOperationDescriptor | null {
   const [operation, ...rest] = args;
   if (operation !== 'client' || !rest[0]) return null;
-  if (rest[0] === 'task-orchestration') return null;
   return resolveTaskOperation('internal', rest[0], rest.slice(1));
 }
 
@@ -298,7 +289,6 @@ function explicitTaskRefForOperation(
     }
     return command === 'merge' ? null : first(args) || null;
   }
-  if (command === 'codex-lifecycle') return optionValue(args, '--task-id') ?? null;
   if (command === 'platform-comment' || command === 'platform-issue') {
     return first(args) === 'list' ? null : args[1] ?? null;
   }

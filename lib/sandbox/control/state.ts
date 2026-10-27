@@ -1,4 +1,3 @@
-import { isCompletionEvidence, type CleanCompletionEvidence } from '../../task/orchestration.ts';
 import { parseControlOutput } from '../../task/control-recovery.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -112,7 +111,6 @@ export type SandboxControlTerminalResult = Readonly<{
   targetState: string | null;
   status: string;
   changed: boolean | null;
-  completionEvidence: CleanCompletionEvidence | null;
 }>;
 
 export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
@@ -126,9 +124,6 @@ export function createSandboxControlTerminalResult(
   output: string
 ): SandboxControlTerminalResult {
   const nested = parseControlOutput(output) ?? {};
-  const run = nested.run && typeof nested.run === 'object' && !Array.isArray(nested.run)
-    ? nested.run as Record<string, unknown> : null;
-  const rawCompletion = nested.completionEvidence ?? run?.completionEvidence;
   const operation = request.operation ?? (typeof nested.intent === 'string' ? nested.intent : null) ?? '';
   return {
     version: 1,
@@ -138,8 +133,7 @@ export function createSandboxControlTerminalResult(
     intentDigest: createHash('sha256').update(`${request.family}\0${operation}`, 'utf8').digest('hex'),
     targetState: typeof nested.targetState === 'string' ? nested.targetState : null,
     status: typeof nested.status === 'string' ? nested.status : 'completed',
-    changed: typeof nested.changed === 'boolean' ? nested.changed : null,
-    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null
+    changed: typeof nested.changed === 'boolean' ? nested.changed : null
   };
 }
 
@@ -168,9 +162,6 @@ export function readSandboxControlTerminalResult(filePath: string): SandboxContr
     || (value.targetState !== null && typeof value.targetState !== 'string')
     || typeof value.status !== 'string'
     || (value.changed !== null && typeof value.changed !== 'boolean')) {
-    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
-  }
-  if (value.completionEvidence !== null && !isCompletionEvidence(value.completionEvidence)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   if (value.changed === undefined) {

@@ -161,32 +161,6 @@ test("SKILL.md reference paths point to existing files", () => {
   });
 });
 
-test("run-task verification configs expose the same ordered local checks", () => {
-  const files = [
-    ".agents/skills/run-task/config/verify.json",
-    "templates/.agents/skills/run-task/config/verify.en.json",
-    "templates/.agents/skills/run-task/config/verify.zh-CN.json"
-  ];
-  const checks = files.map((relativePath) => Object.keys(JSON.parse(read(relativePath)).checks));
-  const baseline = checks[0]!;
-  assert.deepEqual(checks[1], baseline);
-  assert.deepEqual(checks[2], baseline);
-  assert.equal(new Set(baseline).size, baseline.length);
-});
-
-test("run-task skill variants verify route completion before preparing delegation", () => {
-  for (const relativePath of skillDocPaths("run-task")) {
-    const content = read(relativePath);
-    const route = content.indexOf("`route`");
-    const verify = content.indexOf("task-verify {task-id} run-task.completed --format text");
-    const prepare = content.indexOf("`prepare --client {client}");
-    assert.ok(route >= 0 && verify > route && prepare > verify, relativePath);
-  }
-});
-
-// Soft size guard: SKILL.md bodies should stay lean (long rules/templates/scripts
-// belong in reference/ or scripts/). Per the design decision this is a visibility
-// signal, not a red light — oversize files emit a diagnostic but never fail.
 const SKILL_SOFT_LINE_LIMIT = 300;
 
 test("source SKILL.md files stay within the soft size limit", (t) => {
@@ -286,7 +260,7 @@ test("task verification consumers reference the shared output rule", () => {
     "complete-manual-validation", "complete-task", "create-pr", "create-task",
     "import-codescan", "import-dependabot", "import-issue", "plan-task",
     "review-analysis", "review-code", "review-plan", "review-pr",
-    "run-manual-validation", "run-task", "watch-pr"
+    "run-manual-validation", "watch-pr"
   ];
   for (const skill of consumers) {
     for (const relativePath of skillDocPaths(skill)) {
@@ -416,37 +390,6 @@ test("review output templates expose result-preserving stop fields", () => {
     assert.match(content, /\{stop-reason\}/);
     assert.match(content, /\{next-step-commands\}/);
   });
-});
-
-test("orchestrated lifecycle handoffs forward the execution marker to sensitive commands", () => {
-  for (const relativePath of skillDocPaths("run-task")) {
-    assert.ok(read(relativePath).includes("--orchestrated"), `${relativePath} should mark orchestrated handoffs`);
-  }
-
-  for (const { skill, event } of [
-    { skill: "analyze-task", event: "analyze.completed" },
-    { skill: "plan-task", event: "plan.completed" },
-    { skill: "code-task", event: "code.completed" }
-  ]) {
-    for (const relativePath of skillDocPaths(skill)) {
-      const line = read(relativePath).split("\n").find((entry) => entry.includes(`task-event {task-id} ${event}`));
-      assert.ok(line?.includes("{execution-flag}"), `${relativePath} should forward the execution marker`);
-    }
-  }
-
-  for (const { skill, stage, event } of [
-    { skill: "review-analysis", stage: "analysis", event: "review-analysis.completed" },
-    { skill: "review-plan", stage: "plan", event: "review-plan.completed" },
-    { skill: "review-code", stage: "code", event: "review-code.completed" }
-  ]) {
-    for (const relativePath of skillDocPaths(skill)) {
-      const lines = read(relativePath).split("\n");
-      const finalizer = lines.find((entry) => entry.includes(`finalize-summary --stage ${stage}`));
-      const completion = lines.find((entry) => entry.includes(`task-event {task-id} ${event}`));
-      assert.ok(finalizer?.includes("{execution-flag}"), `${relativePath} should mark summary finalization`);
-      assert.ok(completion?.includes("{execution-flag}"), `${relativePath} should mark review completion`);
-    }
-  }
 });
 
 test("review skills reuse one finalized unresolved-count snapshot for completion events", () => {
@@ -2051,7 +1994,6 @@ test("commit skill variants preserve the single commit-core structure", () => {
     const gate = skill.indexOf("agent-infra-internal task-verify {task-id} commit.completed");
     assert.ok(navigation >= 0 && navigation < commit, `${skillPath} should load the protocol before commit`);
     assert.ok(gate > commit, `${skillPath} should verify after the core call`);
-    assert.match(skill, /ORCHESTRATED_COMMIT_REMOVED/);
     assert.match(skill, /commit-operation\.json/);
     assert.match(skill, /--task <ref>/);
     assert.match(skill, /-t <ref>/);

@@ -51,7 +51,7 @@ export type ControlRecoveryDecision = Readonly<{
   reasonCode: string;
 }>;
 
-const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'] as const;
+const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'close-codescan', 'close-dependabot', 'restore'] as const;
 export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperation[] = Object.freeze([
   ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation' })),
   { family: 'task-create', intent: 'create', class: 'task-create' }
@@ -79,7 +79,6 @@ function domainEvidenceMatches(
 ): boolean {
   if (!domain) return false;
   if (domain.consistent !== true) return false;
-  if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') return false;
   return true;
 }
 

@@ -9,7 +9,7 @@ description: >
 # Code Task
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` for initial work and `review-finding` for fixes or decisions. Reuse the same values for started and completed.
+Lifecycle events require explicit trigger data: ordinary skill invocation uses `model`; use `human` only when the user explicitly requests it. `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` use `user-request` for initial work and `review-finding` for fixes or decisions. Reuse the same values for started and completed.
 
 Implement from the input selected by the lifecycle path and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
 
@@ -168,7 +168,7 @@ Do not rescan or manually write digest data; the completion event must include `
 
 ### 11. Update Task Status
 
-After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode add `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --files-modified {n} --tests-passed {n}`; in fix mode add `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `platform_issue_identity`, read `.agents/rules/issue-sync.md`, then run these syncs. Record failures as warnings and continue the local workflow:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`

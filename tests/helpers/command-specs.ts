@@ -147,11 +147,6 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Review pull request $ARGUMENTS.",
     zh: "审查 PR $ARGUMENTS。"
   },
-  "run-task": {
-    usage: "[--task <ref> | -t <ref>] [--executor-model <model> --executor-reasoning-effort <effort> --reviewer-model <model> --reviewer-reasoning-effort <effort>]",
-    en: "Run task lifecycle $ARGUMENTS.",
-    zh: "运行任务生命周期 $ARGUMENTS。"
-  },
   "restore-task": {
     usage: "<issue-token> [task-id]",
     en: "Restore task from Issue: $ARGUMENTS",

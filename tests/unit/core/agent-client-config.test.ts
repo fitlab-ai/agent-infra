@@ -49,7 +49,6 @@ test('agent client vocabulary is closed, unique, and recognized by the shared gu
     'commands',
     'hooks',
     'subagents',
-    'orchestration',
     'sandbox',
     'verification'
   ]);
@@ -123,28 +122,6 @@ test('canonical config rejects a reordered client array instead of silently sort
     code: 'INVALID_AGENT_CLIENTS',
     path: 'agentClients[0].id'
   });
-});
-
-test('canonical config preserves a complete per-client orchestration policy', () => {
-  const policy = {
-    executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-    reviewer: { model: 'executor-model', reasoningEffort: 'high' }
-  };
-  const input = canonical().map((entry) =>
-    entry.id === 'codex' ? { ...entry, orchestration: policy } : entry
-  );
-  const result = normalizeAgentClients({ agentClients: input });
-
-  assert.deepEqual(result.canonical, input);
-  assert.deepEqual(result.state.codex.orchestration, policy);
-  assert.deepEqual(
-    errorDetails(() => normalizeAgentClients({
-      agentClients: canonical().map((entry) => entry.id === 'codex'
-        ? { ...entry, orchestration: { ...policy, reviewer: { model: '', reasoningEffort: 'high' } } }
-        : entry)
-    })),
-    { code: 'INVALID_AGENT_CLIENTS', path: 'agentClients[1].orchestration.reviewer.model' }
-  );
 });
 
 test('serializer returns a new stable array and does not mutate state', () => {

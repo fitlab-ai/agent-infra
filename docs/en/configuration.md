@@ -16,11 +16,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
     {
       "id": "claude-code",
       "enabled": true,
-      "installInSandbox": true,
-      "orchestration": {
-        "executor": { "model": "<model-id>", "reasoningEffort": "<host-value>" },
-        "reviewer": { "model": "<model-id>", "reasoningEffort": "<host-value>" }
-      }
+      "installInSandbox": true
     },
     { "id": "codex", "enabled": true, "installInSandbox": true },
     { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
@@ -119,21 +115,10 @@ An **AI Coding Agent Client**, or **Agent Client** for short, is a supported cod
 | `id` | Closed built-in client identifier: `claude-code`, `codex`, `antigravity-cli`, `opencode`, or `traecli`. |
 | `enabled` | Whether the project enables client-specific files and integration. |
 | `installInSandbox` | Whether sandbox assembly should install this client. This is independent of `enabled`. |
-| `orchestration` | Optional complete default policy for this client. If present, both roles require non-empty `model` and host-native `reasoningEffort`; the role models may be equal. |
 
 Set `installInSandbox` to `false` to uninstall a client from managed sandboxes. The sandbox reconciler removes the client's tool, mounts, and lifecycle hooks after the image/container is rebuilt or recreated. This does not delete host-owned state such as `~/.claude`, Keychain entries, plugins, history, or project credential copies.
 
 TraeCode CLI uses `.agents/skills/` as the canonical Skill source. agent-infra generates lightweight slash-command wrappers under `.traecli/commands/`; each wrapper reads the corresponding shared Skill and forwards `$ARGUMENTS` when that Skill declares arguments. It does not mirror Skill packages into `.trae/skills/`, which remains user-owned for intentional Trae-specific overrides.
-
-`run-task` treats explicit policy as atomic: supplying any role model/effort flag requires all four role fields and never fills omissions from configuration. With no explicit policy, it reads only the selected client's `orchestration`. The selected policy and its source are persisted in the current run structure; changing configuration does not hot-switch an active run. Readers fail closed without rewriting when disk state has unknown fields, missing fields, invalid provenance, or an old run structure. Finish or clear active runs before upgrading agent-infra. Model discovery is reported separately as a `complete` or `partial` catalog, or `interactive-only` guidance. A tool's local override enum is not a complete catalog.
-
-A configured model policy does not imply lifecycle support. `run-task` only delegates when the selected client can report verified actual model and reasoning-effort evidence. Codex and Claude Code orchestration are both experimental. Codex: `prepare` runs lifecycle preflight before snapshotting. Native SubagentStart/Stop can activate and seal the receipt; when a custom role omits those events, trusted parent PostTool spawn uniquely resolves the child from rollout evidence and a completed wait validates the terminal before idempotent sealing. Timed-out waits do nothing. Only empty turns or protocol `inProgress` remain pending; malformed, identity/transport errors, abnormal terminals, or incomplete reconciliation pause the run.
-
-Codex lifecycle evidence combines project hooks with a short-lived App Server connection. Hooks establish spawn/stop liveness and native identities; App Server uses read-only `thread/read` to obtain the child identity and rollout path, then reads bounded `session_meta` and `turn_context` JSONL records for the host-resolved role, model, and reasoning effort. Missing or conflicting evidence fails closed, and the resolver never resumes the active child thread. The channel requires Codex CLI 0.147.0 or newer with `hooks` and `multi_agent` enabled. Run `agent-infra-internal codex-lifecycle preflight --format text` to check the installed version, feature flags, generated App Server schema, exact hook configuration, App Server initialization, and the hooks actually discovered for the repository. Preflight fails closed when Codex does not load all four lifecycle hooks, even if `.codex/hooks.json` is structurally valid. Runtime liveness is reported only when the caller also supplies the exact `--session-id`, `--turn-id`, and `--tool-use-id` for the spawn being verified; omitting that atomic identity reports liveness as not yet observed.
-
-Project hook changes require Codex hook-trust review. The evidence channel records the SHA-256 hash of `.codex/hooks.json` and fails closed on missing identity, forked children, unexplained model/effort changes, abnormal terminal states, or stale/missing runtime evidence. The four managed lifecycle hooks use a 15-second outer timeout while individual App Server requests retain their 5-second timeout. Field-whitelisted Codex lifecycle records are stored in each task's `.runtime/orchestration.json`; raw prompts, messages, transcripts, credentials, and absolute user paths are not persisted.
-
-Claude Code lifecycle evidence is weaker than Codex's and is declared as such: `delegationEvidence.actualModel` is `host-event` and `actualReasoningEffort` is `spawn-ack`, meaning both are recorded only when the native SubagentStart/Stop hook payload happens to carry them, never gated on their presence, and never dispatched per role (`.claude/agents/{executor,reviewer}.md` is a repository-level shared singleton; writing it per role would race across concurrent tasks). Missing or mismatched model/effort evidence is recorded as-is rather than blocking activation. Fork/spawn-mode identity is not available on this host at all, so identity relies solely on parent/child uniqueness plus the receipt's one-shot state machine — a strictly weaker guarantee than Codex's App Server-verified fresh spawn evidence, but still fail-closed on missing or duplicate parent/child identity.
 
 Three configuration concepts remain independent:
 

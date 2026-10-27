@@ -19,9 +19,9 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 
 - An explicit task-resolution failure stops the operation.
 - Without an explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may enter taskless direct mode; detached HEAD, malformed candidates, and multiple matches fail closed.
-- If the literal `--orchestrated` is present in the business operands, fail with `ORCHESTRATED_COMMIT_REMOVED` because the standalone commit stage has been removed; otherwise use `mode=direct`. Never infer the mode from files or environment.
+- Execution mode is always `direct`; the caller selects delivery with `delivery=local|push`.
 - Taskless direct mode does not read, create, or complete task intent, receipt, checkpoint, or task.md records.
-- Task-bound direct mode does not require a delegation receipt; `code-task` calls the shared core for local checkpoints, while standalone `commit` continues to use push delivery.
+- `code-task` creates `delivery=local` checkpoints through the shared core; standalone `commit` uses `delivery=push`.
 - After resolution, use only the core-returned `taskId`; never infer task identity from the environment, branch, or filename.
 
 ## 1. Inspect local changes

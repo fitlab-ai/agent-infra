@@ -13,7 +13,6 @@ const TASK_SCOPE_SKILLS: ReadonlySet<string> = new Set([
   'review-code',
   'review-plan',
   'run-manual-validation',
-  'run-task',
   'watch-pr'
 ]);
 

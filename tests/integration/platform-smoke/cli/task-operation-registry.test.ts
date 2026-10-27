@@ -49,7 +49,6 @@ function routeKey(command: string, selector: string): string {
 function routeKeysFromHandlerBranches(): Set<string> {
   const handlerDirs = [
     path.resolve(process.cwd(), 'lib/internal'),
-    path.resolve(process.cwd(), 'lib/agent-clients/adapters/codex-lifecycle')
   ];
   const marker = /internalHandlerRoute\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/gu;
   const keys = new Set<string>();

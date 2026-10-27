@@ -11,56 +11,6 @@
             "statusMessage": "Checking template version before git commit"
           }
         ]
-      },
-      {
-      "matcher": "^collaborationspawn_agent$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event pre-tool",
-            "timeout": 30,
-            "statusMessage": "Recording Codex lifecycle spawn evidence"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-      "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event post-tool",
-            "timeout": 30,
-            "statusMessage": "Recording Codex lifecycle tool completion"
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event subagent-start",
-            "timeout": 30,
-            "statusMessage": "Recording Codex child identity"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event subagent-stop",
-            "timeout": 30,
-            "statusMessage": "Recording Codex child stop evidence"
-          }
-        ]
       }
     ]
   }

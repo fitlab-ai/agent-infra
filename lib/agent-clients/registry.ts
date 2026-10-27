@@ -108,10 +108,6 @@ function getAgentClientModelSelection(id: unknown) {
   return getAgentClientAdapter(id).modelSelection;
 }
 
-function getAgentClientDelegationEvidence(id: unknown) {
-  return getAgentClientAdapter(id).delegationEvidence;
-}
-
 function listEnabledAgentClientAdaptersByCapability(
   state: AgentClientState,
   capability: AgentClientCapabilityId,
@@ -153,7 +149,6 @@ export {
   createAgentClientManifest,
   getAgentClientAdapter,
   getAgentClientCapability,
-  getAgentClientDelegationEvidence,
   getAgentClientModelSelection,
   listAgentClientAdapters,
   listEnabledAgentClientAdapters,

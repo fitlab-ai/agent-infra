@@ -55,11 +55,10 @@ function normalizeAgentClientConfig(cfg) {
     }
     const keys = Object.keys(candidate);
     if (
-      (keys.length !== 3 && keys.length !== 4)
+      keys.length !== 3
       || !own(candidate, 'id')
       || !own(candidate, 'enabled')
       || !own(candidate, 'installInSandbox')
-      || (keys.length === 4 && !own(candidate, 'orchestration'))
     ) {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
@@ -70,52 +69,9 @@ function normalizeAgentClientConfig(cfg) {
     if (typeof candidate.enabled !== 'boolean' || typeof candidate.installInSandbox !== 'boolean') {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
-    let orchestration;
-    if (own(candidate, 'orchestration')) {
-      const policy = candidate.orchestration;
-      if (
-        !policy
-        || typeof policy !== 'object'
-        || Array.isArray(policy)
-        || Object.keys(policy).length !== 2
-        || !own(policy, 'executor')
-        || !own(policy, 'reviewer')
-      ) {
-        return failure('INVALID_AGENT_CLIENTS', `${entryPath}.orchestration`);
-      }
-      const parseExact = (value, path) => {
-        if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
-          return failure('INVALID_AGENT_CLIENTS', path);
-        }
-        return value;
-      };
-      const parseRole = (role, rolePath) => {
-        if (
-          !role
-          || typeof role !== 'object'
-          || Array.isArray(role)
-          || Object.keys(role).length !== 2
-          || !own(role, 'model')
-          || !own(role, 'reasoningEffort')
-        ) {
-          return failure('INVALID_AGENT_CLIENTS', rolePath);
-        }
-        const model = parseExact(role.model, `${rolePath}.model`);
-        if (typeof model !== 'string') return model;
-        const reasoningEffort = parseExact(role.reasoningEffort, `${rolePath}.reasoningEffort`);
-        if (typeof reasoningEffort !== 'string') return reasoningEffort;
-        return { model, reasoningEffort };
-      };
-      const executor = parseRole(policy.executor, `${entryPath}.orchestration.executor`);
-      if (executor.errorCode) return executor;
-      const reviewer = parseRole(policy.reviewer, `${entryPath}.orchestration.reviewer`);
-      if (reviewer.errorCode) return reviewer;
-      orchestration = { executor, reviewer };
-    }
     entries.set(candidate.id, {
       enabled: candidate.enabled,
-      installInSandbox: candidate.installInSandbox,
-      ...(orchestration ? { orchestration } : {})
+      installInSandbox: candidate.installInSandbox
     });
   }
   if (AGENT_CLIENT_IDS.some((id) => !entries.has(id))) {

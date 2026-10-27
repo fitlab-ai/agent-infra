@@ -7,8 +7,6 @@ import { execFileSync } from 'node:child_process';
 
 import { executeCommitOperation } from '../../../../lib/task/commit-operation.ts';
 import { checkpointIntentDigest, intentPath, readCheckpointIntent, writeCheckpointIntent } from '../../../../lib/task/commit-intent.ts';
-import { activateDelegation, dispatchDelegation, prepareDelegation } from '../../../../lib/task/delegation-receipts.ts';
-import { beginOrResumeOrchestration, readRun } from '../../../../lib/task/orchestration.ts';
 import { createTempDir } from '../../../helpers.ts';
 
 function git(cwd: string, args: string[]): string {
@@ -204,27 +202,12 @@ test('push-only retry refuses an unexpected same-tree HEAD before pushing', () =
   }
 });
 
-test('orchestrated mode fails closed without a task context', () => {
-  const root = fixture();
-  try {
-    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
-    const result = executeCommitOperation(input(root, { mode: 'orchestrated', agent: 'codex' }));
-
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.result, 'blocked');
-    assert.equal(result.error?.code, 'ORCHESTRATION_TASK_REQUIRED');
-    assert.equal(git(root, ['rev-list', '--count', 'HEAD']), '1');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('commit core rejects an unknown runtime mode before writing Git state', () => {
   const root = fixture();
   try {
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
     const result = executeCommitOperation(input(root, {
-      mode: 'orchestrated-typo',
+      mode: 'other',
       agent: 'codex'
     }));
 
@@ -683,72 +666,6 @@ test('no-op task retry records a fresh Commit activity after a later code review
     assert.equal(retry.warnings.length, 0);
     const activity = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
     assert.equal((activity.match(/\*\*Commit\*\*/g) ?? []).length, 2);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('orchestrated commit is rejected because lifecycle commit delegation was removed', () => {
-  const root = fixture();
-  const taskId = 'TASK-20260101-000002';
-  const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
-  try {
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
-    const begun = beginOrResumeOrchestration(taskId, {
-      repoRoot: root,
-      client: 'claude-code',
-      modelPolicy: {
-        executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-        reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
-      },
-      id: () => 'run-1'
-    });
-    assert.ok(begun.run);
-    const prepared = prepareDelegation({
-      taskId,
-      runId: begun.run.runId,
-      role: 'executor',
-      stage: 'commit',
-      round: 1,
-      artifact: 'commit',
-      client: 'claude-code',
-      requestedModel: 'executor-model',
-      requestedReasoningEffort: 'xhigh',
-      workspaceSnapshotScope: 'task',
-      beforeFingerprint: 'before'
-    }, { id: () => 'receipt-1' });
-    const dispatched = dispatchDelegation(prepared);
-    assert.equal(dispatched.ok, true);
-    const activated = activateDelegation(dispatched.ok ? dispatched.receipt : prepared, {
-      nativeAgent: 'agent-infra-lifecycle-executor',
-      childId: 'child-1',
-      parentId: 'parent-1',
-      spawnMode: 'fresh',
-      actualModel: 'executor-model',
-      actualReasoningEffort: 'xhigh'
-    });
-    assert.equal(activated.ok, true);
-    fs.writeFileSync(path.join(taskDir, '.runtime', 'orchestration.json'), JSON.stringify({
-      ...begun.run,
-      nextStage: 'commit',
-      pendingDelegation: activated.ok ? activated.receipt : null
-    }));
-    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
-
-    const result = executeCommitOperation(input(root, {
-      taskRef: taskId,
-      agent: 'claude',
-      mode: 'orchestrated'
-    }));
-
-    assert.equal(result.result, 'blocked');
-    assert.equal(result.taskId, taskId);
-    assert.equal(result.mode, 'orchestrated');
-    assert.equal(result.error?.code, 'ORCHESTRATED_COMMIT_REMOVED');
-    assert.equal(git(root, ['log', '-1', '--format=%s']), 'initial');
-    assert.doesNotMatch(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /\*\*Commit\*\*/);
-    assert.equal(readRun(taskDir)?.pendingDelegation?.status, 'activated');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

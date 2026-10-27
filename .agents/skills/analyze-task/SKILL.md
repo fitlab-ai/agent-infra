@@ -9,7 +9,7 @@ description: >
 # 分析任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。生命周期事件还必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request`、`new-requirement` 或 `upstream-fact-doubt`；started 与 completed 使用同一组值。
+生命周期事件必须携带显式触发信息：普通技能调用使用 `model`；仅用户明确要求时使用 `human`。`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request`、`new-requirement` 或 `upstream-fact-doubt`；started 与 completed 使用同一组值。
 
 ## 行为边界 / 关键规则
 
@@ -241,7 +241,7 @@ agent-infra-internal task-artifact {task-id} init --family analysis --artifact {
   - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
   - `status=failed`：直接修正正式产物并完整重跑 finalizer；若仍失败且诊断未解决，继续下一轮。
   - 当前正式产物发生外部变化、无法安全修复、诊断或指纹重复、无进展，或达到共享规则的编辑上限时停止，不发布 completed 事件。
-- 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
+- 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（任一失败则跳过并继续）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`

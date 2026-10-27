@@ -160,7 +160,6 @@
       ".claude/commands/review-plan.md": "sha256:fba112f44958401915aa44372f58e6dff899f8f410b22fc8488ef228a867c6c5",
       ".claude/commands/review-pr.md": "sha256:8c2c6100b2e3ef783a276757ed4f44d23d7734f27ce9952ede00c5ba58bef8ea",
       ".claude/commands/run-manual-validation.md": "sha256:a1d3c3cae97772fe86120eebbe9a4b6fea7a617c5402d6eed609a9f31318466e",
-      ".claude/commands/run-task.md": "sha256:92b1707e8aa06686bac422c2f09002ddf86ffbdb4ad8779631c341ac787ceddb",
       ".claude/commands/watch-pr.md": "sha256:c4a6f8033c34e5a39296f57c70d9381920a25aa346cfcc93f0e45e9f3b4c7a87",
       ".codex/hooks.json": "sha256:c67cdc0e064f0b8efbe0eb8ae05a457a5544389b42f95a9a97463e02dd344f8b",
       ".opencode/commands/analyze-task.md": "sha256:3bd84f4b2d1112d5cddad6d54fb1eaf1f959467d0e18abe2c8851b2d5eb28bb4",
@@ -190,14 +189,9 @@
       ".opencode/commands/review-plan.md": "sha256:b5fc5a10d229174158f21db61537771a859c3cc4b213624df7c33818e12be803",
       ".opencode/commands/review-pr.md": "sha256:fc9855c9548a5407b8eb307e975cba7f95adc61b0b41737bb42ae3868bd6845d",
       ".opencode/commands/run-manual-validation.md": "sha256:24874d258f5a047b9f567846275580a91a72de76ff96dd8352f1fc7ba977dd19",
-      ".opencode/commands/run-task.md": "sha256:01a83a668fcc4a095949e97606bf2fe4f0c1546aa1adbd95777b6befb68780e1",
       ".opencode/commands/watch-pr.md": "sha256:2e9a5f250b07a0cd870db335651df5c0940c8225013eb0579b9a2aa7f6177ced",
       ".claude/commands/entropy-check.md": "sha256:3cdf6f4a18330c60f2a0e2e5b4831bb7ec13cbcbeb550f0c7a75f998b8ec7f08",
       ".opencode/commands/entropy-check.md": "sha256:0a34b205ca3810ee55e174e41aba322e8b745b1557284766d8045e21d92766b6",
-      ".claude/agents/agent-infra-lifecycle-executor.md": "sha256:c3fb5e83ce91648f1f74122d13113a2a39ef025983c8920703a424187d4a2238",
-      ".claude/agents/agent-infra-lifecycle-reviewer.md": "sha256:08c423761825b5211810ef4a28673c4e9a32e2fa64595d261dae47e7d9a8c1eb",
-      ".codex/agents/agent-infra-lifecycle-executor.toml": "sha256:49dd60ccf8458178c3c0c71d3065bbcf931931bd7abee9a6395b3c28a983c676",
-      ".codex/agents/agent-infra-lifecycle-reviewer.toml": "sha256:0a359e4f454101e45a1271563bd205dad32fbd64e0a178698199f083c7efb96a",
       ".claude/rules/tool-preferences.md": "sha256:610984771f3af595a0b25a94942b5b0aea3ea2fd602c25633de7958dee336f9f",
       ".traecli/commands/update-agent-infra.md": "sha256:e9f2d948c9619c9a4f6ba7bd9385eb7314f9d6233929c3beb54fcda863f5c626",
       ".traecli/commands/entropy-check.md": "sha256:f7d9ee05293aef1a29bda9085d79aa29db06e5eaaa64307e0699c11be26eb9c5"
@@ -210,32 +204,12 @@
     {
       "id": "claude-code",
       "enabled": true,
-      "installInSandbox": true,
-      "orchestration": {
-        "executor": {
-          "model": "claude-sonnet-5",
-          "reasoningEffort": "high"
-        },
-        "reviewer": {
-          "model": "claude-opus-5",
-          "reasoningEffort": "medium"
-        }
-      }
+      "installInSandbox": true
     },
     {
       "id": "codex",
       "enabled": true,
-      "installInSandbox": true,
-      "orchestration": {
-        "executor": {
-          "model": "gpt-5.6-luna",
-          "reasoningEffort": "xhigh"
-        },
-        "reviewer": {
-          "model": "gpt-5.6-sol",
-          "reasoningEffort": "high"
-        }
-      }
+      "installInSandbox": true
     },
     {
       "id": "antigravity-cli",

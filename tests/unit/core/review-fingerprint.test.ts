@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { parseReviewedGitTree } from '../../../lib/task/review-fingerprint.ts';
 
-test('reviewed Git trees accept object IDs and reject orchestration workspace fingerprints', () => {
+test('reviewed Git trees accept object IDs and reject malformed values', () => {
   assert.equal(parseReviewedGitTree('a'.repeat(40)), 'a'.repeat(40));
-  assert.equal(parseReviewedGitTree('ws2:eyJ2ZXJzaW9uIjoyfQ'), null);
+  assert.equal(parseReviewedGitTree('not-a-git-object'), null);
 });

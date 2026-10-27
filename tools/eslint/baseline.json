@@ -45,33 +45,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "349ce60c1f5469abdc05bcd4dc8e1bf7f1ff61ebbd15df347fcf7b7d5af57f72",
-      "displayName": "activateCodexOrchestrationDelegation",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/task/delegation-receipts.ts",
-      "ruleId": "complexity",
-      "stableId": "7ee563a86f7a5da687a59a10083cb00c530cce93a71851e43cc83fc37395269d",
-      "displayName": "activateDelegation",
-      "metric": 49,
-      "normalizedMessage": "complexity=49",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "f3b08acfac08842606e9821be5e6962c61e30856066ddb910ad8cd45c11eebdf",
-      "displayName": "activateMatchingOrchestrationDelegation",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/commands/create.ts",
       "ruleId": "complexity",
       "stableId": "8a38a911f826c787c6f4d03c0d1fd7bcba7380cba6cc21970b8494808822c3c3",
@@ -198,30 +171,12 @@
       "count": 1
     },
     {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "0f5da534153f4b814fd53b632def897c892967cde3c9350ebf126f2a7b81ebb2",
-      "displayName": "awaitOrchestrationDelegationActivation",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/platform/completion-backfill.ts",
       "ruleId": "complexity",
       "stableId": "9616fd047b3f948e370cc81c9c645dc24c810db5c88f1fb18e66fde2aecf12c1",
       "displayName": "backfillCompletionComments",
       "metric": 26,
       "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "01fabcf434e7b04a204a47ad368a792428f1b9764afc4d6aeada830b35ba5bea",
-      "displayName": "beginOrResumeOrchestration",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
       "count": 1
     },
     {
@@ -360,24 +315,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "e330c7e24c462eb8042604232a00c1ee11b816f179024468c4edc957fc410b5a",
-      "displayName": "checkOrchestrationEvidence",
-      "metric": 48,
-      "normalizedMessage": "complexity=48",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "9b4b190faf2280fc21e87e7c8a44273f57a9b296bee4726a408fdea86559be08",
-      "displayName": "checkOrchestrationState",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
       "file": "lib/platform/issue-comments.ts",
       "ruleId": "complexity",
       "stableId": "c0f60845fa2c84cfb229c0e771c93c2c33c3351f928bf04c9a9f776214595ed7",
@@ -504,15 +441,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/cli.ts",
-      "ruleId": "complexity",
-      "stableId": "5e51718c47d5caf066b07da837d4a4acb24695368edd2be0bb3bd4ba3c62ad89",
-      "displayName": "codexLifecycle",
-      "metric": 56,
-      "normalizedMessage": "complexity=56",
-      "count": 1
-    },
-    {
       "file": "lib/merge.ts",
       "ruleId": "complexity",
       "stableId": "518ad7b060bea58e8e9a0b56f3dca06c31b5c28c057954325468b2e0db971842",
@@ -636,15 +564,6 @@
       "displayName": "create.anonymous-object-3.value:task",
       "metric": 81,
       "normalizedMessage": "complexity=81",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/store.ts",
-      "ruleId": "complexity",
-      "stableId": "5d515d92b7a6b1ec9694b5d2f554dd34f1c3bd0f6838c63237d721788a03e07a",
-      "displayName": "createCodexLifecycleStore.applyToSpawn.update callback[2]#1",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {
@@ -783,15 +702,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/evidence.ts",
-      "ruleId": "complexity",
-      "stableId": "419714f47c8d581d5003f13c110eccc9609eb5066bf706638dae4ca75f8b9d42",
-      "displayName": "derive",
-      "metric": 71,
-      "normalizedMessage": "complexity=71",
-      "count": 1
-    },
-    {
       "file": "lib/self-update.ts",
       "ruleId": "complexity",
       "stableId": "9805b8b0ea7a7ed29f063840b342b07d87c3f842543dba71be4452c1ef6317eb",
@@ -861,15 +771,6 @@
       "displayName": "evaluateRequiredChecks",
       "metric": 45,
       "normalizedMessage": "complexity=45",
-      "count": 1
-    },
-    {
-      "file": "lib/task/events.ts",
-      "ruleId": "complexity",
-      "stableId": "9eab3d43ebe5dfb39685f0ddcc46fb7de797adcd8ffe4326773723669645561e",
-      "displayName": "eventTrigger",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {
@@ -1053,15 +954,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/delegation-receipts.ts",
-      "ruleId": "complexity",
-      "stableId": "694c4929c2497f215f22a1f0f0064ed606e7ae35e0653e119d5c4319337b35bf",
-      "displayName": "hasStatusBoundEvidence",
-      "metric": 48,
-      "normalizedMessage": "complexity=48",
-      "count": 1
-    },
-    {
       "file": "lib/task/events.ts",
       "ruleId": "complexity",
       "stableId": "fef94ae3ef60f09fb69ad412d0c4cbe1ea1103cef6002bdd80bb434082b41231",
@@ -1185,24 +1077,6 @@
       "displayName": "invokeProviderOperation",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/evidence.ts",
-      "ruleId": "complexity",
-      "stableId": "bea7367112732ceb4a2626a0c375eb204d4044400733567641888a4f15041f38",
-      "displayName": "isCodexDelegationReceiptEvidence",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/task/delegation-receipts.ts",
-      "ruleId": "complexity",
-      "stableId": "d01323f4a09855e221ed600713e0b8332b09279fc9cd44ba7993ac49f7d6cb94",
-      "displayName": "isDelegationReceipt",
-      "metric": 42,
-      "normalizedMessage": "complexity=42",
       "count": 1
     },
     {
@@ -1386,15 +1260,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "c79f97d77052fdc565cf1dd1d282ae8b043e3156ed88ea3eb11345aef2c06a97",
-      "displayName": "orchestrationStateReasonCodes",
-      "metric": 35,
-      "normalizedMessage": "complexity=35",
-      "count": 1
-    },
-    {
       "file": "lib/internal/agent-client.ts",
       "ruleId": "complexity",
       "stableId": "620151f04652d2fd46925ed520e29168f85b3bab8029e5410abe31dc5188c0db",
@@ -1413,30 +1278,12 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/config.ts",
-      "ruleId": "complexity",
-      "stableId": "df50b750aef8167e14e41bdbc7471f49b2db9cbaec4af70e5ee164d68603ccb8",
-      "displayName": "parseCanonical",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pr-change-report.ts",
       "ruleId": "complexity",
       "stableId": "f8b1997773939d137b388c8035c255c1f0ed4e5f0e39f3cef56dd154efe9b457",
       "displayName": "parseChangeFile",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
-      "ruleId": "complexity",
-      "stableId": "70b43db5059eaa13e70f460f8b26f8158b9121dd9b3594abf127bb60f95af357",
-      "displayName": "parseCodexThreadResolution",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
       "count": 1
     },
     {
@@ -1908,15 +1755,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/state.ts",
-      "ruleId": "complexity",
-      "stableId": "2f895a2bfac9e4eb7fdc8bd232b1878a302172fcb36c99b8318e13b53c136183",
-      "displayName": "readSandboxControlTerminalResult",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/task/activity-intent.ts",
       "ruleId": "complexity",
       "stableId": "7e378fd5974c214146cc3760859aee6a380a77db7dc4ac5be5280ae29d2fb7ca",
@@ -1989,15 +1827,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "b23cee0106a78f87662e9d98a5f23d1ea71d06ebdf7ae8c27bacc0140f84b5b9",
-      "displayName": "recoverActivatedOrchestrationDelegation",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pull-requests.ts",
       "ruleId": "complexity",
       "stableId": "7261515a20bdb4149a020ddf6e297ecdd2e3b0f07fd25b18fd7bfec8f7a6dc35",
@@ -2022,15 +1851,6 @@
       "displayName": "recoverPlatformOperationsOnce",
       "metric": 66,
       "normalizedMessage": "complexity=66",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "4c3945152a48b5599d6d8f10bcae961880860a45a5aaca66a4d7dca6ed05fd85",
-      "displayName": "recoverPreparedOrchestrationDelegation.<anonymous ArrowFunctionExpression#1>",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
       "count": 1
     },
     {
@@ -2097,15 +1917,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commands/status.ts",
-      "ruleId": "complexity",
-      "stableId": "cc643ba877cb063f549e7d1c0258b0f56aa573f3e31b79e68f8a8ac5884d05de",
-      "displayName": "renderStatus",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
       "file": "lib/task/verification.ts",
       "ruleId": "complexity",
       "stableId": "3f3ef88ce0ce1415a12e02fc4b78d94f896cfe0b07449c411c271fce5bfe348e",
@@ -2148,24 +1959,6 @@
       "displayName": "resolveCodeContext",
       "metric": 65,
       "normalizedMessage": "complexity=65",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
-      "ruleId": "complexity",
-      "stableId": "15a58439521ea56d39f90323389f6f0aa8abeb8252620baece261a34b7d56bfd",
-      "displayName": "resolveCodexTerminal",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
-      "ruleId": "complexity",
-      "stableId": "7aadbcafc645ec06d295264f8c9b9d0c24f0b837504efa3cf8959dae7429dafb",
-      "displayName": "resolveCodexThread",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
       "count": 1
     },
     {
@@ -2265,24 +2058,6 @@
       "displayName": "rmPurge",
       "metric": 23,
       "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "74ed217bb7dcc19e8d413dfddd1a6a2b9b4d400b4c106dfc3430af7e9baa9d54",
-      "displayName": "routeResolvedTask",
-      "metric": 58,
-      "normalizedMessage": "complexity=58",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "5481d9de4eac579f22678809f41b59550aa8647150ac01a086c0ce6bebc0c440",
-      "displayName": "runCheck",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
       "count": 1
     },
     {
@@ -2391,15 +2166,6 @@
       "displayName": "sanitizeGitConfig",
       "metric": 27,
       "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapters/codex-orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "47967a1a19b81ba16ad515ac6614189b264d8f16453c57e97395e9a98c20f6ac",
-      "displayName": "sealCodexOrchestrationDelegation",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
       "count": 1
     },
     {
@@ -2592,24 +2358,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "aaa9a0b89d1d7dbe8b537038b6922177a10a2e68e905f6fb06efe2e98f9386b3",
-      "displayName": "taskLifecycle",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "1821d553eb6ee71c04d387a93c8fcf5e668bc934498a1d7c11829bad4feae435",
-      "displayName": "taskOrchestration",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/internal/task-platform-recovery.ts",
       "ruleId": "complexity",
       "stableId": "7719c1acb2452e9925655f9bcd7953ab39a628f64dd9bab2df67a08245a5d64e",
@@ -2715,15 +2463,6 @@
       "displayName": "test callback[1]#15.runCase.pushRebasedBranch callback[1]#1",
       "metric": 16,
       "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
-      "file": "tests/unit/core/codex-orchestration.test.ts",
-      "ruleId": "complexity",
-      "stableId": "0f9ce9db1379b2744c342ea9f57124797096bbb69bd4db59a179d2d8d20bdebb",
-      "displayName": "test callback[1]#16",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
       "count": 1
     },
     {
@@ -2835,15 +2574,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "b2a803d8ba28593c12aaa90b84553213f5e66e6bf833d1c1a36b22d14f8a6855",
-      "displayName": "validateCleanCompletionEvidence",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/task/commit-operation.ts",
       "ruleId": "complexity",
       "stableId": "38f6fe7cd0ec1fe9c5a6749977bc69fe7f8d970584cfa317784851a247e6e440",
@@ -2877,15 +2607,6 @@
       "displayName": "validateLedgerRows",
       "metric": 26,
       "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/task/lifecycle-execution.ts",
-      "ruleId": "complexity",
-      "stableId": "3619e546d73fcb4d206498e09793669cc2f7b17a5140283685a3f66acf6e1211",
-      "displayName": "validateLifecycleExecution",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
       "count": 1
     },
     {
@@ -2967,15 +2688,6 @@
       "displayName": "validateSandboxControlRequest",
       "metric": 46,
       "normalizedMessage": "complexity=46",
-      "count": 1
-    },
-    {
-      "file": "lib/task/orchestration.ts",
-      "ruleId": "complexity",
-      "stableId": "a97081c6c98d8559f7eeccd6c77ec441e2314f32c33141961b756db25a537f72",
-      "displayName": "validateSavedCurrentDiffBase",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
       "count": 1
     },
     {

@@ -19,9 +19,9 @@ commit core 只返回一个主结果：`committed`、`no_op`、`committed_with_w
 
 - 显式 task scope 解析失败时停止。
 - 未显式指定 task scope 时，只有 `TASK_CONTEXT_NOT_FOUND` 可进入 taskless direct；detached HEAD、损坏候选或多匹配必须 fail closed。
-- 入口业务操作数包含字面 `--orchestrated` 时直接失败并返回 `ORCHESTRATED_COMMIT_REMOVED`；普通入口使用 `mode=direct`，不得从 run 文件或环境推断模式。
+- 执行模式固定为 `direct`；调用方通过 `delivery=local|push` 指定交付方式。
 - taskless direct 不读取、创建或完成 task intent、receipt、checkpoint 或 task.md 收尾记录。
-- task-bound direct 不要求 delegation receipt；local checkpoint 由 `code-task` 直接调用共享 core，独立 `commit` 继续使用 push delivery。
+- `code-task` 通过共享 core 创建 `delivery=local` checkpoint；独立 `commit` 使用 `delivery=push`。
 - 解析成功后只使用 core 返回的 `taskId`；不得从环境、分支或文件名猜测任务身份。
 
 ## 1. 检查本地修改

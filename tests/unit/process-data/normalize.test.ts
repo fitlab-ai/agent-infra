@@ -40,7 +40,7 @@ test('normalization classifies tasks, activity telemetry, receipts and operation
     },
     {
       sourceKind: 'structured-telemetry',
-      sourceIdentity: '.agents/workspace/logs/orchestration/receipt.json',
+      sourceIdentity: '.agents/workspace/logs/tasks/task-completion.json',
       sha256: 'c'.repeat(64),
       bytes: 20,
       content: '{"client":"codex","model":"gpt-5"}'
