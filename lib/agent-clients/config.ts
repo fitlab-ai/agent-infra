@@ -116,18 +116,7 @@ function serializeAgentClients(state: AgentClientState): AgentClientsConfig {
   }));
 }
 
-function normalizeAgentClients(
-  input: AgentClientConfigInput
-): NormalizeAgentClientsResult {
-  if (!hasOwn(input, 'agentClients')) fail('MISSING_AGENT_CLIENT', 'agentClients');
-  const state = parseCanonical(input.agentClients);
-  for (const [index, id] of AGENT_CLIENT_IDS.entries()) {
-    const entry = Array.isArray(input.agentClients) ? input.agentClients[index] : undefined;
-    if (!isRecord(entry) || entry.id !== id) {
-      fail('INVALID_AGENT_CLIENTS', `agentClients[${index}].id`);
-    }
-  }
-  if (hasOwn(input, 'tuis')) fail('INVALID_AGENT_CLIENTS', 'tuis');
+function validateSandboxTools(input: AgentClientConfigInput): void {
   const sandbox = isRecord(input.sandbox) ? input.sandbox : undefined;
   if (sandbox && hasOwn(sandbox, 'customTools')) {
     fail('INVALID_AGENT_CLIENTS', 'sandbox.customTools');
@@ -142,6 +131,21 @@ function normalizeAgentClients(
       }
     }
   }
+}
+
+function normalizeAgentClients(
+  input: AgentClientConfigInput
+): NormalizeAgentClientsResult {
+  if (!hasOwn(input, 'agentClients')) fail('MISSING_AGENT_CLIENT', 'agentClients');
+  const state = parseCanonical(input.agentClients);
+  for (const [index, id] of AGENT_CLIENT_IDS.entries()) {
+    const entry = Array.isArray(input.agentClients) ? input.agentClients[index] : undefined;
+    if (!isRecord(entry) || entry.id !== id) {
+      fail('INVALID_AGENT_CLIENTS', `agentClients[${index}].id`);
+    }
+  }
+  if (hasOwn(input, 'tuis')) fail('INVALID_AGENT_CLIENTS', 'tuis');
+  validateSandboxTools(input);
   return {
     state,
     canonical: serializeAgentClients(state)

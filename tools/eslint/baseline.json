@@ -1179,15 +1179,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/config.ts",
-      "ruleId": "complexity",
-      "stableId": "125a001699cf4277048d94e09a674d449df470eea62d8eb3e3aa6ee8978af5e5",
-      "displayName": "normalizeAgentClients",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/task/decision-details.ts",
       "ruleId": "complexity",
       "stableId": "5a2ed6e245f33ceacd50d40f629743107bcd238984a501df95df424137441f5a",
