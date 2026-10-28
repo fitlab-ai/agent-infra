@@ -24,17 +24,19 @@ for (const [label, time, evidence, expected] of [
 }
 
 test('non-decision actions accept absent or empty input tables', async () => {
-  for (const table of ['', header]) assert.equal((await run(table, '', false)).status, 'pass');
+  for (const table of ['', header]) {
+    for (const input of ['N/A', '']) assert.equal((await run(table, '', false, input)).status, 'pass');
+  }
 });
 
-async function run(table: string, evidence: string, decision: boolean) {
+async function run(table: string, evidence: string, decision: boolean, input = decision ? 'II-1' : 'N/A') {
   const root = createTempDir('implementation-contract-');
   try {
     const configDir = path.join(root, '.agents/skills/probe/config');
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({ checks: { 'implementation-input': {} } }));
     const codePath = path.join(root, 'code-r2.md');
-    const code = `# Code\n\n## Implementation Input\n\n- **Decision Input**: \`${decision ? 'II-1' : 'N/A'}\`\n- **Ledger ID**: \`CD-1\`\n- **Decision Evidence**: \`${evidence}\`\n`;
+    const code = `# Code\n\n## Implementation Input\n\n- **Decision Input**: \`${input}\`\n- **Ledger ID**: \`CD-1\`\n- **Decision Evidence**: \`${evidence}\`\n`;
     fs.writeFileSync(codePath, code);
     const fact = {
       event: 'code.completed', output: 'code-r2.md', outputSha256: sha256File(codePath),

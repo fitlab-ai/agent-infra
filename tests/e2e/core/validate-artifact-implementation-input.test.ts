@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
-import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
-import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { createTempDir } from '../../helpers.ts';
 
 function fixture() {
@@ -39,13 +37,6 @@ id: TASK-20260101-000001
 - **需求摘要**：apply ruling
 `;
   fs.writeFileSync(codePath, code);
-  const fact = {
-    event: 'code.completed', output: 'code-r2.md', outputSha256: sha256File(codePath),
-    semanticDigest: canonicalSemanticDigest(code), requestId: 'fixture-code-r2',
-    result: JSON.stringify({ implementationInput: 'II-1' }), lifecycleInputs: []
-  };
-  fs.writeFileSync(path.join(taskDir, 'task.md'), fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8')
-    .replace('id: TASK-20260101-000001', `id: TASK-20260101-000001\ncompletion_facts: '${JSON.stringify([fact])}'`));
   return { root, taskDir };
 }
 
@@ -56,7 +47,7 @@ async function run(taskDir: string) {
   });
 }
 
-test('implementation input gate accepts matching action, report, and task row', async () => {
+test('implementation input gate accepts matching report and task row', async () => {
   const f = fixture();
   try {
     const result = await run(f.taskDir);

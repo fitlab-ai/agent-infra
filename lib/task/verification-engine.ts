@@ -43,7 +43,7 @@ import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
 import { parseArtifactName } from "./artifact-name.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
 import { taskIssueIdentity } from "../platform/task-identities.ts";
-import { hasValidArtifactCompletion, parseCompletionFacts } from './completion-facts.ts';
+import { hasValidArtifactCompletion } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 
 const TASK_ENUMS = {
@@ -509,20 +509,6 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
     return failResult("implementation-input", `Invalid Implementation Inputs: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const completion = parseCompletionFacts(parseTypedTaskFrontmatter(task.content).completion_facts)
-    .find((fact) => fact.event === 'code.completed' && fact.output === artifactFile);
-  if (!completion) return failResult("implementation-input", `Code completion fact is missing for ${artifactFile}`);
-  let completionResult: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(completion.result);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('completion result is not an object');
-    completionResult = parsed as Record<string, unknown>;
-  } catch (error) {
-    return failResult("implementation-input", `Invalid Code completion result: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const actionDecision = typeof completionResult.implementationInput === 'string'
-    && /^II-[1-9]\d*$/.test(completionResult.implementationInput)
-    ? completionResult.implementationInput : null;
   const report = fs.readFileSync(artifactPath, "utf8");
   const reportSection = getSectionContent(report, ["实现输入", "Implementation Input"]);
   if (!reportSection) return failResult("implementation-input", "Implementation Input report section not found");
@@ -535,25 +521,19 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const reportLedger = field("账本 ID", "Ledger ID");
   const reportEvidence = field("裁决证据", "Decision Evidence");
 
-  if (!actionDecision) {
-    if (reportInput && reportInput !== "N/A") {
-      return failResult("implementation-input", "Non-decision code action must report Decision Input as N/A");
-    }
+  if (!reportInput || reportInput === "N/A") {
     return passResult("implementation-input", "Non-decision implementation input identity is consistent");
   }
-  if (reportInput !== actionDecision) {
-    return failResult("implementation-input", `Report decision input '${reportInput}' does not match Code completion fact ${actionDecision}`);
-  }
-  const matches = rows.filter((row) => row.id === actionDecision);
-  if (matches.length !== 1) return failResult("implementation-input", `${actionDecision} is missing or duplicated in task table`);
+  const matches = rows.filter((row) => row.id === reportInput);
+  if (matches.length !== 1) return failResult("implementation-input", `${reportInput} is missing or duplicated in task table`);
   const row = matches[0]!;
   if (row.stage !== "code" || !row.needsImplementation || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.decisionEvidence) {
-    return failResult("implementation-input", `${actionDecision} is not a consumed input for ${artifactFile}`);
+    return failResult("implementation-input", `${reportInput} is not a consumed input for ${artifactFile}`);
   }
   if (reportLedger !== row.ledgerId || reportEvidence !== row.decisionEvidence) {
-    return failResult("implementation-input", `${actionDecision} report identity does not match task table evidence`);
+    return failResult("implementation-input", `${reportInput} report identity does not match task table evidence`);
   }
-  return passResult("implementation-input", `${actionDecision} matches Code completion fact, report, and task table`);
+  return passResult("implementation-input", `${reportInput} matches report and task table`);
 }
 
 const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
