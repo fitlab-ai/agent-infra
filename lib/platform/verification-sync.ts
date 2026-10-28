@@ -977,43 +977,6 @@ function mapTaskTypeToIssueType(taskType: any): any {
   return mapping[taskType] || "Task";
 }
 
-function normalizeIssueFields(payload: any): any {
-  const issue = payload?.data?.repository?.issue;
-  const pinnedFields = Array.isArray(issue?.issueType?.pinnedFields)
-    ? issue.issueType.pinnedFields
-    : [];
-  const values = Array.isArray(issue?.issueFieldValues?.nodes)
-    ? issue.issueFieldValues.nodes
-    : [];
-  const pinnedNames = new Set(
-    pinnedFields
-      .map((field: any) => typeof field?.name === "string" ? field.name : "")
-      .filter(Boolean)
-  );
-  const normalizedValues = new Map();
-
-  for (const value of values) {
-    const fieldName = value?.field?.name;
-    if (!fieldName) {
-      continue;
-    }
-
-    if (value.__typename === "IssueFieldSingleSelectValue") {
-      normalizedValues.set(fieldName, {
-        kind: "single-select",
-        value: normalizeOptionName(value.name)
-      });
-    } else if (value.__typename === "IssueFieldDateValue") {
-      normalizedValues.set(fieldName, {
-        kind: "date",
-        value: normalizeDateValue(value.value)
-      });
-    }
-  }
-
-  return { pinnedNames, values: normalizedValues };
-}
-
 function normalizeExpectedIssueField(metadataKey: any, rawValue: any): any {
   const value = String(rawValue || "").trim();
   if (!value) {

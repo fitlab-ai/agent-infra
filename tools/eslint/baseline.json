@@ -1197,15 +1197,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/verification-sync.ts",
-      "ruleId": "complexity",
-      "stableId": "503091b33e6b5b6919d1d615126aad7dac388ba08a4ba8846aa4248670c1c557",
-      "displayName": "normalizeIssueFields",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/normalize.ts",
       "ruleId": "complexity",
       "stableId": "c8f3daa0d42be18a5af9fb76a480cff4e23fa4d144f73cc81b2d23e195db2181",
