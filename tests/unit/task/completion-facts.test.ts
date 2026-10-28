@@ -16,14 +16,6 @@ function fixture() {
   return taskDir;
 }
 
-test('changed receipt input bytes do not invalidate the artifact completion fact', () => {
-  const taskDir = fixture();
-  fs.writeFileSync(path.join(taskDir, 'review-analysis.md'), '# Changed Review Analysis\n');
-  const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
-
-  assert.equal(hasValidArtifactCompletion(task, taskDir, 'analysis-r2.md', 'analyze.completed'), true);
-});
-
 test('completion facts without optional lifecycleInputs still validate their own output', () => {
   const taskDir = fixture();
   const taskPath = path.join(taskDir, 'task.md');

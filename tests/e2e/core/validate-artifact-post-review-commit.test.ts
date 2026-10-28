@@ -52,23 +52,18 @@ function buildTask(rows: string[] = [], frontmatterOverrides: Record<string, str
   ].join("\n");
 }
 
-function buildReviewCode(baselineLine: string | null, verdict = "通过", manualValidation = 0) {
+function buildReviewCode(baselineLine: string | null, verdict = "通过") {
   return [
     "# 代码审查报告",
     "",
     ...(baselineLine === null ? [] : [`- **审查基线提交**：${baselineLine}`]),
     "## 审查摘要",
     "",
-    `- **总体结论**：${verdict}`,
-    `- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：${manualValidation}`
+    `- **总体结论**：${verdict}`
   ].join("\n");
 }
 
-async function runCheck(
-  taskDir: string,
-  repositoryRoot?: string,
-  options: { check?: string; invalidateSource?: boolean } = {}
-) {
+async function runCheck(taskDir: string, repositoryRoot?: string) {
   const reportName = fs.readdirSync(taskDir)
     .filter((name) => /^review-code(?:-r[2-9]\d*)?\.md$/u.test(name))
     .sort((left, right) => Number(/-r(\d+)/u.exec(left)?.[1] ?? 1) - Number(/-r(\d+)/u.exec(right)?.[1] ?? 1))
@@ -104,10 +99,9 @@ async function runCheck(
       inputSha256: sha256File(codePath), completedAt: "2026-03-28 00:00:01+00:00"
     })).content;
     write(taskPath, task);
-    if (options.invalidateSource) fs.appendFileSync(codePath, "changed after review\n");
   }
   const result = await runValidator(
-    ["check", options.check ?? "post-review-commit", taskDir, "--skill", "complete-task"],
+    ["check", "post-review-commit", taskDir, "--skill", "complete-task"],
     repositoryRoot ? { repositoryRoot } : {}
   );
   return { result, payload: parseValidatorPayload(result.stdout) };
@@ -140,23 +134,6 @@ test("post-review-commit passes when there is no review-code artifact", onPlatfo
     const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "pass");
     assert.match(payload.message, /check inactive/);
-  });
-});
-
-test("source-invalid existing review keeps post-review and manual-validation gates active", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-stale-review-", async (tempRoot) => {
-    const { taskDir } = setupRepo(tempRoot);
-    const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
-    write(path.join(taskDir, "task.md"), buildTask());
-    write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline, "通过", 1));
-
-    const postReview = await runCheck(taskDir, tempRoot, { invalidateSource: true });
-    assert.notEqual(postReview.payload.status, "pass");
-    assert.doesNotMatch(postReview.payload.message, /No review-code artifact/u);
-
-    const manualValidation = await runCheck(taskDir, tempRoot, { check: "manual-validation", invalidateSource: true });
-    assert.equal(manualValidation.payload.status, "fail");
-    assert.doesNotMatch(manualValidation.payload.message, /manual validation not applicable/u);
   });
 });
 

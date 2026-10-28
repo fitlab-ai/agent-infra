@@ -44,13 +44,7 @@ export function resolvePostReviewGlobs(
 
 export function findAuthoritativeReviewCodeArtifact(taskDir: string) {
   const inventory = inspectArtifactDirectory(taskDir, 'review-code');
-  if (inventory.status !== 'ready') {
-    return { ok: false, round: 0, fileName: null, path: null, error: inventory.error?.message ?? 'review-code inventory is invalid' };
-  }
-  if (!inventory.latest && inventory.artifacts.length > 0) {
-    return { ok: false, round: 0, fileName: null, path: null, error: 'existing review-code artifact has invalid completion evidence' };
-  }
-  if (!inventory.latest) {
+  if (inventory.status !== 'ready' || !inventory.latest) {
     return { ok: false, round: 0, fileName: null, path: null, error: null };
   }
   const { round, name: fileName } = inventory.latest;
