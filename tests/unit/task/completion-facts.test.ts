@@ -4,8 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { hasArtifactCompletionRecord, hasValidArtifactCompletion } from '../../../lib/task/completion-facts.ts';
-import { sha256File, upsertArtifactReceipts } from '../../../lib/task/artifact-receipts.ts';
-import { upsertSection } from '../../../lib/task/sections.ts';
 import { hasOpenArtifactRound, validateArtifactPublication } from '../../../lib/task/artifact-lifecycle.ts';
 import { createTempDir, recordArtifactCompletions } from '../../helpers.ts';
 
@@ -18,15 +16,15 @@ function fixture() {
   return taskDir;
 }
 
-test('changed direct input bytes invalidate the dependent completion fact', () => {
+test('changed receipt input bytes do not invalidate the artifact completion fact', () => {
   const taskDir = fixture();
   fs.writeFileSync(path.join(taskDir, 'review-analysis.md'), '# Changed Review Analysis\n');
   const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
 
-  assert.equal(hasValidArtifactCompletion(task, taskDir, 'analysis-r2.md', 'analyze.completed'), false);
+  assert.equal(hasValidArtifactCompletion(task, taskDir, 'analysis-r2.md', 'analyze.completed'), true);
 });
 
-test('completion facts without optional lifecycleInputs still validate their direct receipt', () => {
+test('completion facts without optional lifecycleInputs still validate their own output', () => {
   const taskDir = fixture();
   const taskPath = path.join(taskDir, 'task.md');
   const task = fs.readFileSync(taskPath, 'utf8');
@@ -35,33 +33,6 @@ test('completion facts without optional lifecycleInputs still validate their dir
   const withoutOptionalInputs = task.replace(/^completion_facts:.*$/mu, `completion_facts: '${JSON.stringify(facts)}'`);
 
   assert.equal(hasValidArtifactCompletion(withoutOptionalInputs, taskDir, 'analysis-r2.md', 'analyze.completed'), true);
-});
-
-test('missing or extra input receipt edges invalidate a completion fact', () => {
-  const missingTaskDir = fixture();
-  const missingTaskPath = path.join(missingTaskDir, 'task.md');
-  const validMissingBaseline = fs.readFileSync(missingTaskPath, 'utf8');
-  assert.equal(hasValidArtifactCompletion(validMissingBaseline, missingTaskDir, 'analysis-r2.md', 'analyze.completed'), true);
-  const withoutExpectedEdge = validMissingBaseline.replace(/^\| analysis\.completed \| analysis-r2\.md \| review-analysis\.md \|[^\n]*\n/mu, '');
-  assert.notEqual(withoutExpectedEdge, validMissingBaseline);
-  fs.writeFileSync(missingTaskPath, withoutExpectedEdge);
-  assert.equal(hasValidArtifactCompletion(withoutExpectedEdge, missingTaskDir, 'analysis-r2.md', 'analyze.completed'), false);
-
-  const extraTaskDir = fixture();
-  const extraTaskPath = path.join(extraTaskDir, 'task.md');
-  const validExtraBaseline = fs.readFileSync(extraTaskPath, 'utf8');
-  assert.equal(hasValidArtifactCompletion(validExtraBaseline, extraTaskDir, 'analysis-r2.md', 'analyze.completed'), true);
-  fs.writeFileSync(path.join(extraTaskDir, 'review-analysis-r2.md'), '# Another Review Analysis\n');
-  const extraReceipt = {
-    event: 'analysis.completed' as const,
-    output: 'analysis-r2.md',
-    input: 'review-analysis-r2.md',
-    inputSha256: sha256File(path.join(extraTaskDir, 'review-analysis-r2.md')),
-    completedAt: '2026-01-01 00:00:00+00:00'
-  };
-  const mutation = upsertArtifactReceipts(validExtraBaseline, [extraReceipt]);
-  const withExtraReceipt = upsertSection(validExtraBaseline, mutation).content;
-  assert.equal(hasValidArtifactCompletion(withExtraReceipt, extraTaskDir, 'analysis-r2.md', 'analyze.completed'), false);
 });
 
 test('identity-bearing malformed completion facts remain present and invalid', () => {
@@ -74,7 +45,7 @@ test('identity-bearing malformed completion facts remain present and invalid', (
   assert.equal(hasArtifactCompletionRecord(damaged, 'analysis-r2.md', 'analyze.completed'), true);
   assert.equal(hasValidArtifactCompletion(damaged, taskDir, 'analysis-r2.md', 'analyze.completed'), false);
   const openStarted = damaged.replace(
-    /- 2026-01-01 00:00:05\+00:00 — \*\*Analyze Task \(Round 2\)\*\* by codex — completed → analysis-r2\.md\n/u,
+    /- 2026-01-01 00:00:01\+00:00 — \*\*Analyze Task \(Round 2\)\*\* by codex — completed → analysis-r2\.md\n/u,
     ''
   );
   fs.writeFileSync(taskPath, openStarted);

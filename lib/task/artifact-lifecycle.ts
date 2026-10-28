@@ -42,7 +42,7 @@ function openArtifactRounds(taskDir: string, content: string, family: ArtifactFa
   const expected = new RegExp(`^${step} \\(Round ([1-9]\\d*)${qualifier}\\)$`);
   const event = completionEvent(family);
   return [...new Set(startedBackedRows(pairEntries(activity.entries))
-    .filter((row) => expected.test(row.step))
+    .filter((row) => expected.test(row.step) && !row.done)
     .flatMap((row) => {
       const round = Number(expected.exec(row.step)?.[1]);
       const name = artifactName(family, round);
@@ -303,10 +303,6 @@ function resolveReviewedInput(
     const actualSha256 = sha256File(abs);
     if (actualSha256 !== receipt.inputSha256) {
       throw new Error(`${input.name} content digest does not match receipt`);
-    }
-    const current = inspectArtifactDirectory(taskDir, input.family);
-    if (current.status !== 'ready' || current.latest?.name !== input.name) {
-      throw new Error(`${input.name} is no longer the current ${input.family} input`);
     }
     return { ...input, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch (error) {

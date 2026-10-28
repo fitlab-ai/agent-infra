@@ -198,7 +198,7 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
     fs.writeFileSync(inputPath, '# Analysis changed\n');
     let result = await verify();
     assert.equal(result.status, 'fail');
-    assert.match(result.message, /Current plan artifact is unavailable/);
+    assert.match(result.message, /Input 'analysis\.md' changed or is no longer current/);
 
     fs.writeFileSync(inputPath, '# Analysis\n');
     fs.writeFileSync(taskPath, taskContent([

@@ -62,7 +62,6 @@ export function recordArtifactCompletions(taskDir: string, artifacts: readonly C
       return !rewritten.has(cells[2] ?? '');
     }).join('\n');
   }
-  const capturedInputSha = (_output: string, _event: string, input: string) => sha256File(path.join(taskDir, input));
   const inputsFor = (name: string, inputs: readonly string[] | undefined) => inputs ?? existingReceipts
     .filter((receipt) => receipt.output === name)
     .map((receipt) => receipt.input);
@@ -75,7 +74,7 @@ export function recordArtifactCompletions(taskDir: string, artifacts: readonly C
       event,
       output: name,
       input,
-      inputSha256: capturedInputSha(name, event, input),
+      inputSha256: sha256File(path.join(taskDir, input)),
       completedAt: formatTimestamp(0)
     }));
   });
@@ -93,7 +92,7 @@ export function recordArtifactCompletions(taskDir: string, artifacts: readonly C
       result: 'completed',
       lifecycleInputs: inputsFor(name, lifecycleInputs).map((input) => ({
         name: input,
-        sha256: capturedInputSha(name, identity.family === 'analysis' ? 'analysis.completed' : `${identity.family}.completed`, input)
+        sha256: sha256File(path.join(taskDir, input))
       }))
     };
   });

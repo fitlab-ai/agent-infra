@@ -478,7 +478,7 @@ test('artifact context treats qualification data as context outside analysis and
   }
 });
 
-test('changed historical review inputs invalidate their completion facts', () => {
+test('review references remain optional context after input content changes', () => {
   const f = fixture({
     'analysis.md': '# analysis\n',
     'review-analysis.md': '**审查输入**：`analysis.md`\n'
@@ -495,7 +495,7 @@ test('changed historical review inputs invalidate their completion facts', () =>
   assert.equal(resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot }).status, 'ready');
   fs.appendFileSync(path.join(f.taskDir, 'analysis.md'), 'changed\n');
   const changed = resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
-  assert.equal(changed.status, 'failed');
+  assert.equal(changed.status, 'ready', JSON.stringify(changed.error));
 });
 
 test('change-request reviews create only while they target the latest artifact', () => {
@@ -608,6 +608,23 @@ test('code fix routing trusts the review receipt when code and review family rou
   assert.equal(result.status, 'ready');
   assert.equal(result.codeMode?.mode, 'fix');
   assert.equal(result.codeMode?.reviewArtifact, 'review-code.md');
+});
+
+test('review context preserves a valid receipt for an older input artifact', () => {
+  const f = fixture({
+    'analysis.md': STANDARD_ANALYSIS,
+    'code.md': '# Original code\n',
+    'code-r2.md': '# Current code\n',
+    'review-code.md': '**审查输入**：`code.md`\n'
+  });
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+
+  const context = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(context.status, 'ready', JSON.stringify(context.error));
+  assert.equal(context.reviewedInput?.name, 'code.md');
 });
 
 test('code selection reuses completed work without explicit change evidence', () => {

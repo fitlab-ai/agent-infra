@@ -1556,7 +1556,7 @@ test('review completion rejects replay when its reviewed input later changes', (
   const before = fs.readFileSync(f.file, 'utf8');
   const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
   assert.equal(repeated.status, 1);
-  assert.equal(JSON.parse(repeated.stdout).error.code, 'ARTIFACT_SELECTION_INDETERMINATE');
+  assert.equal(JSON.parse(repeated.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
   assert.deepEqual(fs.readFileSync(f.file, 'utf8'), before);
 });
 
@@ -1891,7 +1891,7 @@ test('code completion keeps its original result counts and permits only exact re
     fs.writeFileSync(f.file, withoutOptionalReceipt);
     const missingOptionalReceipt = run(f.root, completedArgs);
     assert.notEqual(missingOptionalReceipt.status, 0);
-    assert.equal(JSON.parse(missingOptionalReceipt.stdout).error.code, 'ARTIFACT_SELECTION_INDETERMINATE');
+    assert.equal(JSON.parse(missingOptionalReceipt.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
     assert.equal(fs.readFileSync(f.file, 'utf8'), withoutOptionalReceipt);
     const correctedCounts = run(f.root, [...args, '--files-modified', '2', '--tests-passed', '20']);
     assert.notEqual(correctedCounts.status, 0);
