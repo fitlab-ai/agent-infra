@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { createTempDir } from '../../helpers.ts';
 
 function fixture() {
@@ -23,7 +25,8 @@ id: TASK-20260101-000001
 
 - 2026-07-18 10:02:00+08:00 — **Code Task (Round 2, decision II-1)** by codex — Code implemented, 1 files modified, 4 tests passed → code-r2.md
 `);
-  fs.writeFileSync(path.join(taskDir, 'code-r2.md'), `# 实现报告
+  const codePath = path.join(taskDir, 'code-r2.md');
+  const code = `# 实现报告
 
 ## 实现输入
 
@@ -34,7 +37,15 @@ id: TASK-20260101-000001
 - **账本 ID**：\`CD-1\`
 - **裁决证据**：\`task.md#HDR-1\`
 - **需求摘要**：apply ruling
-`);
+`;
+  fs.writeFileSync(codePath, code);
+  const fact = {
+    event: 'code.completed', output: 'code-r2.md', outputSha256: sha256File(codePath),
+    semanticDigest: canonicalSemanticDigest(code), requestId: 'fixture-code-r2',
+    result: JSON.stringify({ implementationInput: 'II-1' }), lifecycleInputs: []
+  };
+  fs.writeFileSync(path.join(taskDir, 'task.md'), fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8')
+    .replace('id: TASK-20260101-000001', `id: TASK-20260101-000001\ncompletion_facts: '${JSON.stringify([fact])}'`));
   return { root, taskDir };
 }
 

@@ -622,7 +622,8 @@ test('merge workspace transports receipt-backed review context across mtime chan
       return {
         event: family === 'analysis' ? 'analyze.completed' : `${family}.completed`, output: name,
         outputSha256: sha256File(artifactPath), semanticDigest: canonicalSemanticDigest(artifactContent),
-        requestId: `fixture-${name}`, result: 'completed'
+        requestId: `fixture-${name}`, result: 'completed',
+        lifecycleInputs: name === 'review-plan.md' ? [{ name: 'plan.md', sha256: sha256File(path.join(sourceTaskDir, 'plan.md')) }] : []
       };
     });
     let completedTask = fs.readFileSync(taskPath, 'utf8').replace(

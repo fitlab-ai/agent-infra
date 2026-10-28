@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 
-import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { appendActivityEntry, locateActivityLog, openLifecycleRows, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
   buildArtifactLinkSection,
   inspectArtifactDirectory,
@@ -40,7 +40,7 @@ import { parseTaskQualification } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
-import { parseCompletionFacts, type CompletionFact } from './completion-facts.ts';
+import { hasValidArtifactCompletion, parseCompletionFacts, type CompletionFact } from './completion-facts.ts';
 import { readManualValidationCompletion } from './manual-validation-completion.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 
@@ -635,7 +635,14 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   const section = locateActivityLog(content);
   if (!section) return failed(request, { code: 'EVENT_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  const rows = startedBackedRows(pairEntries(section.entries));
+  let rows: ReturnType<typeof pairEntries>;
+  let startedRows: ReturnType<typeof pairEntries>;
+  try {
+    startedRows = startedBackedRows(pairEntries(section.entries));
+    rows = startedBackedRows(openLifecycleRows(content, resolved.taskDir, startedRows));
+  } catch (error) {
+    return failed(request, { code: 'EVENT_TRANSITION_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+  }
   let normalized = request;
   let artifactContext: ArtifactContextResult | null = null;
   let supersededOpenStart: { action: string } | null = null;
@@ -668,10 +675,12 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   }
   const eventIdentity = identity(normalized);
   const currentStep = typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '';
-  const matchingRows = rows.filter((item) => item.step === eventIdentity.action);
+  const eventRows = eventIdentity.phase === 'completed' ? startedRows : rows;
+  const matchingRows = eventRows.filter((item) => item.step === eventIdentity.action);
   const manual = eventIdentity.family === 'manual-validation';
-  const openRows = matchingRows.filter((item) => item.started && !item.done);
+  const openRows = rows.filter((item) => item.step === eventIdentity.action && item.started && !item.done);
   const completedRows = matchingRows.filter((item) => item.done);
+  const hasStartedIdentity = matchingRows.some((item) => item.started);
   if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const row = openRows.at(-1);
   let completedArtifact: ArtifactIdentity | null = null;
@@ -686,7 +695,15 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
     }
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
   }
-  if (eventIdentity.phase === 'completed' && !row?.started && completedRows.length === 0) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires a started event or an earlier completed attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  const replayFact = eventIdentity.phase === 'completed' && normalized.artifact && normalized.requestId
+    ? parseCompletionFacts(frontmatter.completion_facts).find((fact) => fact.event === normalized.event
+      && fact.output === normalized.artifact && fact.requestId === normalized.requestId)
+    : undefined;
+  const validReplayFact = Boolean(replayFact && normalized.artifact
+    && hasValidArtifactCompletion(content, resolved.taskDir, normalized.artifact, normalized.event));
+  const completedByHistory = manual || eventIdentity.family === 'validation-run';
+  const completedHistoryReplay = completedByHistory && completedRows.length > 0;
+  if (eventIdentity.phase === 'completed' && !hasStartedIdentity && !completedHistoryReplay && !validReplayFact) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires a started event or an earlier completed attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   if (eventIdentity.phase === 'completed') {
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -798,6 +815,9 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
         frontmatter,
         artifactContext
       );
+    }
+    if (!hasStartedIdentity && !completedHistoryReplay) {
+      return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion replay does not match the existing completion fact' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
     try {
       const rework = reworkIntentMutationForCompletion(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp);

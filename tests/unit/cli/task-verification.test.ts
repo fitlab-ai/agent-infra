@@ -12,7 +12,7 @@ import {
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
-import { createTaskWorkspaceFixture } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, recordArtifactCompletions } from '../../helpers.ts';
 
 const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
@@ -112,11 +112,16 @@ test('artifact lifecycle activity checks accept a current stage record after a d
         result: '{}',
         lifecycleInputs
       };
+      const facts = prerequisiteFact ? [prerequisiteFact, fact] : [fact];
+      const receiptRows = facts.flatMap((completion) => completion.lifecycleInputs.map((relation) => {
+        const event = completion.event === 'analyze.completed' ? 'analysis.completed' : completion.event;
+        return `| ${event} | ${completion.output} | ${relation.name} | ${relation.sha256} | 2026-01-01 00:00:03+00:00 |`;
+      }));
       fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
         '---',
         `id: ${f.taskId}`,
         'status: active',
-        `completion_facts: '${JSON.stringify(prerequisiteFact ? [prerequisiteFact, fact] : [fact])}'`,
+        `completion_facts: '${JSON.stringify(facts)}'`,
         '---',
         '',
         '## Activity Log',
@@ -127,7 +132,10 @@ test('artifact lifecycle activity checks accept a current stage record after a d
         ] : []),
         `- 2026-01-01 00:00:02+00:00 — **${stage.action} (Round 1) [started]** by codex — started`,
         `- 2026-01-01 00:00:03+00:00 — **${stage.action} (Round 1)** by codex — Completed → ${stage.output}`,
-        `- 2026-01-01 00:00:04+00:00 — **${stage.later}** by codex — Later independent stage`
+        `- 2026-01-01 00:00:04+00:00 — **${stage.later}** by codex — Later independent stage`,
+        '', '## Artifact Lifecycle Receipts', '',
+        '| event | output | input | input_sha256 | completed_at |',
+        '| --- | --- | --- | --- | --- |', ...receiptRows
       ].join('\n'));
 
       const result = await verifyInProcess({
@@ -163,10 +171,20 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
     '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started',
     '- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — Completed → analysis.md'
   ];
-  const taskContent = (rows: string[], facts = [fact], extraFacts: typeof fact[] = []) => [
-    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([analysisFact, ...facts, ...extraFacts])}'`, '---',
-    '', '## Activity Log', '', ...analysisRows, ...rows
-  ].join('\n');
+  const taskContent = (rows: string[], facts = [fact], extraFacts: typeof fact[] = []) => {
+    const allFacts = [analysisFact, ...facts, ...extraFacts];
+    const receiptRows = allFacts.flatMap((completion) => completion.lifecycleInputs.map((input) => {
+      const event = completion.event === 'analyze.completed' ? 'analysis.completed' : completion.event;
+      return `| ${event} | ${completion.output} | ${input.name} | ${input.sha256} | 2026-01-01 00:00:03+00:00 |`;
+    }));
+    return [
+      '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify(allFacts)}'`, '---',
+      '', '## Activity Log', '', ...analysisRows, ...rows,
+      '', '## Artifact Lifecycle Receipts', '',
+      '| event | output | input | input_sha256 | completed_at |',
+      '| --- | --- | --- | --- | --- |', ...receiptRows
+    ].join('\n');
+  };
   const verify = async (artifactFile = 'plan.md') => verifyInProcess({
     mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir,
     artifactFile, checks: ['activity-log'], repositoryRoot: process.cwd()
@@ -180,7 +198,7 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
     fs.writeFileSync(inputPath, '# Analysis changed\n');
     let result = await verify();
     assert.equal(result.status, 'fail');
-    assert.match(result.message, /Input 'analysis\.md' changed/);
+    assert.match(result.message, /Input 'analysis\.md' changed or is no longer current/);
 
     fs.writeFileSync(inputPath, '# Analysis\n');
     fs.writeFileSync(taskPath, taskContent([
@@ -214,8 +232,7 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
       '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — Resuming → plan.md'
     ]));
     result = await verify();
-    assert.equal(result.status, 'fail');
-    assert.match(result.message, /Current plan artifact is unavailable/);
+    assert.equal(result.status, 'pass');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -238,6 +255,8 @@ test('plan activity checks preserve completion facts after a human decision', as
     requestId: `${f.taskId}:plan`, result: '{}',
     lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(analysisPath) }]
   };
+  const receiptRows = fact.lifecycleInputs.map((input) =>
+    `| plan.completed | plan.md | ${input.name} | ${input.sha256} | 2026-01-01 00:00:03+00:00 |`);
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
     '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([analysisFact, fact])}'`, '---',
     '', '## Activity Log', '',
@@ -245,12 +264,103 @@ test('plan activity checks preserve completion facts after a human decision', as
     '- 2026-01-01 00:00:01+00:00 — **Analyze Task (Round 1)** by codex — Completed → analysis.md',
     '- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [started]** by codex — started',
     '- 2026-01-01 00:00:03+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
-    '- 2026-01-01 00:00:04+00:00 — **Human Decision** by human — Accepted plan'
+    '- 2026-01-01 00:00:04+00:00 — **Human Decision** by human — Accepted plan',
+    '', '## Artifact Lifecycle Receipts', '',
+    '| event | output | input | input_sha256 | completed_at |',
+    '| --- | --- | --- | --- | --- |', ...receiptRows
   ].join('\n'));
   try {
     const result = await verifyInProcess({
       mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir,
       artifactFile: 'plan.md', checks: ['activity-log'], repositoryRoot: process.cwd()
+    });
+    assert.equal(result.status, 'pass', result.message);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('artifact verification ignores Activity Log deletion, damage, and reordering but rejects changed input facts', async () => {
+  const f = fixture();
+  const analysisPath = path.join(f.taskDir, 'analysis.md');
+  const planPath = path.join(f.taskDir, 'plan.md');
+  fs.writeFileSync(analysisPath, '# Analysis\n');
+  fs.writeFileSync(planPath, '# Plan\n');
+  const analysisFact = {
+    event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(analysisPath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(analysisPath, 'utf8')),
+    requestId: `${f.taskId}:analysis`, result: '{}', lifecycleInputs: []
+  };
+  const fact = {
+    event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(planPath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(planPath, 'utf8')),
+    requestId: `${f.taskId}:plan`, result: '{}',
+    lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(analysisPath) }]
+  };
+  const receipt = `| plan.completed | plan.md | analysis.md | ${sha256File(analysisPath)} | 2026-01-01 00:00:03+00:00 |`;
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const base = [
+    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([analysisFact, fact])}'`, '---',
+    '', '## Activity Log', '',
+    '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+    '- 2026-01-01 00:00:01+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
+    '', '## Artifact Lifecycle Receipts', '',
+    '| event | output | input | input_sha256 | completed_at |', '| --- | --- | --- | --- | --- |', receipt
+  ].join('\n');
+  const verify = () => verifyInProcess({
+    mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir,
+    artifactFile: 'plan.md', checks: ['activity-log'], repositoryRoot: process.cwd()
+  });
+  try {
+    fs.writeFileSync(taskPath, base);
+    assert.equal((await verify()).status, 'pass');
+
+    const withoutLog = base.replace(/\n## Activity Log\n[\s\S]*?(?=\n## Artifact Lifecycle Receipts)/u, '');
+    fs.writeFileSync(taskPath, withoutLog);
+    assert.equal((await verify()).status, 'pass');
+
+    const damaged = base.replace('**Plan Task (Round 1)** by codex', '**Plan Task (Round 1) by codex');
+    fs.writeFileSync(taskPath, damaged);
+    assert.equal((await verify()).status, 'pass');
+
+    const reordered = base.replace(
+      /(- 2026-01-01 00:00:00\+00:00 — \*\*Plan Task \(Round 1\) \[started\]\*\* by codex — started)\n(- 2026-01-01 00:00:01\+00:00 — \*\*Plan Task \(Round 1\)\*\* by codex — Completed → plan\.md)/u,
+      '$2\n$1'
+    );
+    fs.writeFileSync(taskPath, reordered);
+    assert.equal((await verify()).status, 'pass');
+
+    fs.writeFileSync(analysisPath, '# Changed Analysis\n');
+    const invalid = await verify();
+    assert.equal(invalid.status, 'fail');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('artifact completion gate accepts an omitted lifecycleInputs field and current direct receipt', async () => {
+  const f = fixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const task = [
+    '---', `id: ${f.taskId}`, 'type: refactor', 'workflow: refactoring', 'status: active', 'current_step: technical-design', 'assigned_to: codex',
+    'created_at: 2026-01-01 00:00:00+00:00', 'updated_at: 2026-01-01 00:00:00+00:00',
+    'agent_infra_version: v0.9.11-alpha.0', '---', '', '# Task', ''
+  ].join('\n');
+  const verifyConfig = path.join(f.root, '.agents', 'skills', 'plan-task', 'config', 'verify.json');
+  fs.mkdirSync(path.dirname(verifyConfig), { recursive: true });
+  fs.copyFileSync(path.join(process.cwd(), '.agents', 'skills', 'plan-task', 'config', 'verify.json'), verifyConfig);
+  fs.writeFileSync(taskPath, task);
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'plan.md'), '# Plan\n');
+  recordArtifactCompletions(f.taskDir, [{ name: 'plan.md', lifecycleInputs: ['analysis.md'] }]);
+  const withEvidence = fs.readFileSync(taskPath, 'utf8');
+  const facts = JSON.parse(/^completion_facts: '(.+)'$/mu.exec(withEvidence)![1]!) as Array<Record<string, unknown>>;
+  delete facts[0]!.lifecycleInputs;
+  fs.writeFileSync(taskPath, withEvidence.replace(/^completion_facts:.*$/mu, `completion_facts: '${JSON.stringify(facts)}'`));
+  try {
+    const result = await verifyInProcess({
+      mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir, artifactFile: 'plan.md',
+      checks: ['task-meta', 'activity-log'], repositoryRoot: f.root
     });
     assert.equal(result.status, 'pass', result.message);
   } finally {

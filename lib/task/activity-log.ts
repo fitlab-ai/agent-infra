@@ -1,4 +1,6 @@
 import { scanVisibleMarkdown } from './markdown.ts';
+import { artifactName, type ArtifactFamily } from './artifact-name.ts';
+import { hasArtifactCompletionRecord, hasValidArtifactCompletion } from './completion-facts.ts';
 const ENTRY_RE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.*)$/;
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;
@@ -101,16 +103,44 @@ function startedBackedRows(rows: StepRow[]): StepRow[] {
   return rows.filter((row) => row.started !== '');
 }
 
-function hasOpenLifecycleExecution(content: string): boolean {
+function artifactRoundForStep(step: string): { family: ArtifactFamily; round: number } | null {
+  const labels: Readonly<Record<string, ArtifactFamily>> = {
+    'Analyze Task': 'analysis', 'Review Analysis': 'review-analysis', 'Plan Task': 'plan',
+    'Review Plan': 'review-plan', 'Code Task': 'code', 'Review Code': 'review-code'
+  };
+  const match = /^(Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code) \(Round ([1-9]\d*)(?:, .*)?\)$/u.exec(step);
+  const family = match && labels[match[1]!];
+  return family && match ? { family, round: Number(match[2]) } : null;
+}
+
+function openLifecycleRows(content: string, taskDir: string, rows: StepRow[]): StepRow[] {
+  return rows.filter((row) => {
+    if (!row.started || row.done) return true;
+    const identity = artifactRoundForStep(row.step);
+    if (!identity) return true;
+    const name = artifactName(identity.family, identity.round);
+    const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
+    if (!hasArtifactCompletionRecord(content, name, event)) return true;
+    if (!hasValidArtifactCompletion(content, taskDir, name, event)) {
+      throw new Error(`completion evidence for started ${identity.family} Round ${identity.round} is invalid`);
+    }
+    return false;
+  });
+}
+
+function hasOpenLifecycleExecution(content: string, taskDir: string): boolean {
   const section = locateActivityLog(content);
   if (!section) return false;
-  return pairEntries(section.entries).some((row) => row.done === '' && LIFECYCLE_STEP_RE.test(row.step));
+  const rows = pairEntries(section.entries);
+  const open = openLifecycleRows(content, taskDir, rows);
+  return open.some((row) => row.started && !row.done && LIFECYCLE_STEP_RE.test(row.step));
 }
 
 export {
   activityAttempt,
   appendActivityEntry,
   hasOpenLifecycleExecution,
+  openLifecycleRows,
   commitAttemptStartedNote,
   inspectActivityLog,
   locateActivityLog,

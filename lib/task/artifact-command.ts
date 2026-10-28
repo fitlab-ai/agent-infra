@@ -98,7 +98,7 @@ export function executeArtifactCommand(
       matchingInitializedSkeleton = existing.includes(`<!-- artifact-context:${resolved.taskId}:${family}:${parsed.round} -->`);
     } catch { /* an absent candidate is created only for the selected identity */ }
     if ((context.status !== 'ready' && !matchingInitializedSkeleton) || (context.next?.name !== artifact
-      && !hasOpenArtifactRound(fs.readFileSync(resolved.taskMdPath, 'utf8'), family, parsed.round)
+      && !hasOpenArtifactRound(taskDir, fs.readFileSync(resolved.taskMdPath, 'utf8'), family, parsed.round)
       && !matchingInitializedSkeleton)) {
       return fail('ARTIFACT_INIT_CONTEXT_INVALID', context.error?.message ?? `artifact '${artifact}' is not the next ${family} artifact`);
     }

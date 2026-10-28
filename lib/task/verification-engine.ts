@@ -39,12 +39,12 @@ import type { VerificationShared } from "./verification-types.ts";
 import { normalizeVerificationRecord } from './gate-policy.ts';
 import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
-import { sha256File } from "./artifact-receipts.ts";
+import { parseArtifactReceipts, sha256File } from "./artifact-receipts.ts";
 import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
 import { parseArtifactName } from "./artifact-name.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
 import { taskIssueIdentity } from "../platform/task-identities.ts";
-import { hasArtifactCompletionFact, hasArtifactCompletionLog, parseCompletionFacts } from './completion-facts.ts';
+import { hasValidArtifactCompletion, parseCompletionFacts } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 
 const TASK_ENUMS = {
@@ -67,7 +67,6 @@ const DEFAULT_REQUIRED_FIELDS = [
 
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
 // Started rows do not represent completed lifecycle actions.
-const ACTIVITY_LOG_STARTED_RE = /\s*\[started\]\s*$/;
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Review disagreement ledger (see .agents/rules/review-handshake.md).
@@ -193,12 +192,9 @@ function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFil
   if (expectedStep && metadata.current_step !== expectedStep) {
     let validLifecycleArtifact = false;
     if (currentTask) {
-      const { section, invalidEntries } = inspectActivityLog(task.content);
-      if (section && invalidEntries.length === 0) {
-        validLifecycleArtifact = checkArtifactLifecycleActivityLog(
-          taskDir, artifactFile, skillName, task, section.entries
-        )?.status === "pass";
-      }
+      validLifecycleArtifact = checkArtifactLifecycleActivityLog(
+        taskDir, artifactFile, skillName, task
+      )?.status === "pass";
     }
     if (!validLifecycleArtifact) {
       return failResult(
@@ -515,12 +511,20 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
     return failResult("implementation-input", `Invalid Implementation Inputs: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const doneActions = (inspectActivityLog(task.content).section?.entries ?? [])
-    .filter((entry) => !ACTIVITY_LOG_STARTED_RE.test(entry.step))
-    .map((entry) => entry.step)
-    .filter((step) => /^(?:Code Task|Code) \(Round \d+/.test(step));
-  const latestAction = doneActions.at(-1) || "";
-  const actionDecision = /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] || null;
+  const completion = parseCompletionFacts(parseTypedTaskFrontmatter(task.content).completion_facts)
+    .find((fact) => fact.event === 'code.completed' && fact.output === artifactFile);
+  if (!completion) return failResult("implementation-input", `Code completion fact is missing for ${artifactFile}`);
+  let completionResult: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(completion.result);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('completion result is not an object');
+    completionResult = parsed as Record<string, unknown>;
+  } catch (error) {
+    return failResult("implementation-input", `Invalid Code completion result: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const actionDecision = typeof completionResult.implementationInput === 'string'
+    && /^II-[1-9]\d*$/.test(completionResult.implementationInput)
+    ? completionResult.implementationInput : null;
   const report = fs.readFileSync(artifactPath, "utf8");
   const reportSection = getSectionContent(report, ["实现输入", "Implementation Input"]);
   if (!reportSection) return failResult("implementation-input", "Implementation Input report section not found");
@@ -540,7 +544,7 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
     return passResult("implementation-input", "Non-decision implementation input identity is consistent");
   }
   if (reportInput !== actionDecision) {
-    return failResult("implementation-input", `Report decision input '${reportInput}' does not match Activity Log ${actionDecision}`);
+    return failResult("implementation-input", `Report decision input '${reportInput}' does not match Code completion fact ${actionDecision}`);
   }
   const matches = rows.filter((row) => row.id === actionDecision);
   if (matches.length !== 1) return failResult("implementation-input", `${actionDecision} is missing or duplicated in task table`);
@@ -551,19 +555,19 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   if (reportLedger !== row.ledgerId || reportEvidence !== row.decisionEvidence) {
     return failResult("implementation-input", `${actionDecision} report identity does not match task table evidence`);
   }
-  return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
+  return passResult("implementation-input", `${actionDecision} matches Code completion fact, report, and task table`);
 }
 
-const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string; action: string }>> = {
-  "analyze-task": { family: "analysis", event: "analyze.completed", action: "Analyze Task" },
-  "plan-task": { family: "plan", event: "plan.completed", action: "Plan Task" },
-  "review-analysis": { family: "review-analysis", event: "review-analysis.completed", action: "Review Analysis" },
-  "review-plan": { family: "review-plan", event: "review-plan.completed", action: "Review Plan" },
-  "code-task": { family: "code", event: "code.completed", action: "Code Task" },
-  "review-code": { family: "review-code", event: "review-code.completed", action: "Review Code" }
+const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
+  "analyze-task": { family: "analysis", event: "analyze.completed" },
+  "plan-task": { family: "plan", event: "plan.completed" },
+  "review-analysis": { family: "review-analysis", event: "review-analysis.completed" },
+  "review-plan": { family: "review-plan", event: "review-plan.completed" },
+  "code-task": { family: "code", event: "code.completed" },
+  "review-code": { family: "review-code", event: "review-code.completed" }
 };
 
-function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, task: any, entries: any[]): any {
+function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, task: any): any {
   const stage = ARTIFACT_ACTIVITY_STAGES[skillName];
   if (!stage) return null;
   const inventory = inspectArtifactDirectory(taskDir, stage.family as any);
@@ -578,38 +582,21 @@ function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string
   if (!identity || identity.family !== stage.family) {
     return failResult("activity-log", `Artifact '${output}' does not belong to ${stage.family}`);
   }
-  if (!hasArtifactCompletionFact(task.content, path.join(taskDir, output), stage.event)) {
+  if (!hasValidArtifactCompletion(task.content, taskDir, output, stage.event)) {
     return failResult("activity-log", `Completion fact for '${output}' is missing or stale; rerun ${skillName} to record a current completion`);
   }
 
-  const frontmatter = parseTypedTaskFrontmatter(task.content);
-  const fact = parseCompletionFacts(frontmatter.completion_facts).find((item) => item.event === stage.event && item.output === output);
-  if (!fact) return failResult("activity-log", `Completion fact for '${output}' is missing; rerun ${skillName}`);
-  if (!Array.isArray(fact.lifecycleInputs)) {
-    return failResult("activity-log", `Completion fact for '${output}' has no input snapshot; rerun ${skillName}`);
-  }
-  for (const input of fact.lifecycleInputs) {
-    if (!input || typeof input.name !== "string" || !/^[a-f0-9]{64}$/u.test(input.sha256)) {
-      return failResult("activity-log", `Completion fact for '${output}' has an invalid input snapshot; rerun ${skillName}`);
-    }
-    const inputIdentity = parseArtifactName(input.name);
-    if (!inputIdentity) return failResult("activity-log", `Completion fact for '${output}' has invalid input '${input.name}'; rerun ${skillName}`);
+  const receipts = parseArtifactReceipts(task.content).rows.filter((receipt) => receipt.output === output);
+  for (const receipt of receipts) {
+    const inputIdentity = parseArtifactName(receipt.input);
+    if (!inputIdentity) return failResult("activity-log", `Completion receipt for '${output}' has invalid input '${receipt.input}'; rerun ${skillName}`);
     const inputInventory = inspectArtifactDirectory(taskDir, inputIdentity.family as any);
-    if (inputInventory.status !== "ready" || inputInventory.latest?.name !== input.name
-      || sha256File(path.join(taskDir, input.name)) !== input.sha256) {
-      return failResult("activity-log", `Input '${input.name}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`);
+    if (inputInventory.status !== "ready" || inputInventory.latest?.name !== receipt.input
+      || sha256File(path.join(taskDir, receipt.input)) !== receipt.inputSha256) {
+      return failResult("activity-log", `Input '${receipt.input}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`);
     }
   }
 
-  const roundActionPattern = new RegExp(`^${stage.action} \\(Round ${identity.round}(?:, [^)]+)?\\)$`);
-  const roundAction = entries.find((entry) => {
-    return !ACTIVITY_LOG_STARTED_RE.test(entry.step)
-      && roundActionPattern.test(entry.step)
-      && entry.note.includes(`→ ${output}`);
-  });
-  if (!roundAction) {
-    return failResult("activity-log", `No completed Activity Log row records '${output}' for ${skillName} Round ${identity.round}`);
-  }
   return passResult("activity-log", `Current ${stage.family} completion '${output}' is valid for Round ${identity.round}`);
 }
 
@@ -618,6 +605,9 @@ function checkActivityLog({ taskDir, skillName, artifactFile }: any): any {
   if (!task.ok) {
     return failResult("activity-log", task.message);
   }
+
+  const artifactLifecycleResult = checkArtifactLifecycleActivityLog(taskDir, artifactFile, skillName, task);
+  if (artifactLifecycleResult) return artifactLifecycleResult;
 
   const { section, invalidEntries } = inspectActivityLog(task.content);
   if (!section) return failResult("activity-log", "Activity Log section not found or ambiguous");
@@ -628,11 +618,6 @@ function checkActivityLog({ taskDir, skillName, artifactFile }: any): any {
   for (const entry of entries) {
     if (!entry.note.trim()) return failResult("activity-log", "Activity Log entry note is required");
   }
-
-  const artifactLifecycleResult = checkArtifactLifecycleActivityLog(
-    taskDir, artifactFile, skillName, task, entries
-  );
-  if (artifactLifecycleResult) return artifactLifecycleResult;
 
   return passResult("activity-log", "Activity Log is valid");
 }
@@ -1049,11 +1034,8 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
   }
 
   const content = fs.readFileSync(resolvedArtifact.path, "utf8");
-  if (!hasArtifactCompletionFact(task.content, resolvedArtifact.path, 'review-code.completed')) {
+  if (!hasValidArtifactCompletion(task.content, taskDir, path.basename(resolvedArtifact.path), 'review-code.completed')) {
     return failResult("review-fact", `Review Code completion fact does not match ${path.basename(resolvedArtifact.path)}`);
-  }
-  if (!hasArtifactCompletionLog(task.content, path.basename(resolvedArtifact.path), 'review-code.completed')) {
-    return failResult("review-fact", `Review Code completion entry does not reference ${path.basename(resolvedArtifact.path)}`);
   }
   const verdict = parseReviewVerdict(content);
   const reviewTargetHead = extractReviewTargetHead(content);

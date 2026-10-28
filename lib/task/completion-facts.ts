@@ -1,7 +1,7 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { canonicalSemanticDigest } from './artifact-operations.ts';
-import { inspectActivityLog, pairEntries } from './activity-log.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { sha256File } from './artifact-receipts.ts';
@@ -35,54 +35,56 @@ export function parseCompletionFacts(value: unknown): CompletionFact[] {
   }
 }
 
-export function hasArtifactCompletionFact(taskContent: string, artifactPath: string, event: string): boolean {
+function completionEvent(family: string): string | null {
+  if (family === 'analysis') return 'analyze.completed';
+  if (family === 'review-analysis') return 'review-analysis.completed';
+  if (family === 'plan') return 'plan.completed';
+  if (family === 'review-plan') return 'review-plan.completed';
+  if (family === 'code') return 'code.completed';
+  if (family === 'review-code') return 'review-code.completed';
+  return null;
+}
+
+/** Validates an artifact's own completion fact and output evidence. */
+export function hasValidArtifactCompletion(taskContent: string, taskDir: string, artifact: string, event: string): boolean {
   try {
-    const frontmatter = parseTypedTaskFrontmatter(taskContent);
-    const output = artifactPath.split(/[\\/]/u).at(-1) ?? '';
-    const content = fs.readFileSync(artifactPath, 'utf8');
-    const outputSha256 = sha256File(artifactPath);
-    const semanticDigest = canonicalSemanticDigest(content);
-    return parseCompletionFacts(frontmatter.completion_facts).some((fact) =>
-      fact.event === event && fact.output === output
-      && fact.outputSha256 === outputSha256 && fact.semanticDigest === semanticDigest
-      && fact.requestId.length > 0
-    );
+    const fact = findCompletionFact(taskContent, artifact, event);
+    return Boolean(fact && validateOutput(taskDir, artifact, fact));
   } catch {
     return false;
   }
 }
 
-export function hasArtifactCompletionLog(taskContent: string, artifact: string, event: string): boolean {
-  return artifactCompletionOrder(taskContent, artifact, event) !== null;
+/** Distinguishes an invalidated completion fact from a round that has never completed. */
+export function hasArtifactCompletionRecord(taskContent: string, artifact: string, event: string): boolean {
+  try {
+    const raw = parseTypedTaskFrontmatter(taskContent).completion_facts;
+    if (raw === undefined) return false;
+    if (typeof raw !== 'string') return true;
+    if (raw.trim() === '') return false;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return true;
+    return parsed.some((fact) => fact && typeof fact === 'object' && !Array.isArray(fact)
+      && (fact as { event?: unknown }).event === event
+      && (fact as { output?: unknown }).output === artifact);
+  } catch {
+    return true;
+  }
 }
 
-/** Returns the stable Activity Log position of a paired completion row. */
-export function artifactCompletionOrder(taskContent: string, artifact: string, event: string): number | null {
+function findCompletionFact(taskContent: string, artifact: string, event: string): CompletionFact | null {
   const identity = parseArtifactName(artifact);
-  if (!identity) return null;
-  const family = event === 'analysis.completed' || event === 'analyze.completed' ? 'analysis'
-    : event === 'review-analysis.completed' ? 'review-analysis'
-      : event === 'plan.completed' ? 'plan'
-        : event === 'review-plan.completed' ? 'review-plan'
-          : event === 'code.completed' ? 'code'
-            : event === 'review-code.completed' ? 'review-code' : null;
-  if (!family || family !== identity.family) return null;
-  const action = family === 'analysis' ? 'Analyze Task'
-    : family === 'review-analysis' ? 'Review Analysis'
-      : family === 'plan' ? 'Plan Task'
-        : family === 'review-plan' ? 'Review Plan'
-          : family === 'code' ? 'Code Task' : 'Review Code';
-  const { section, invalidEntries } = inspectActivityLog(taskContent);
-  if (!section || invalidEntries.length > 0) return null;
-  const ordered = section.entries.map((entry, sourceOrder) => ({ entry, sourceOrder }))
-    .sort((left, right) => Date.parse(left.entry.time.replace(' ', 'T')) - Date.parse(right.entry.time.replace(' ', 'T')) || left.sourceOrder - right.sourceOrder);
-  const entries = ordered.map(({ entry }) => entry);
-  const roundPattern = new RegExp(`^${action} \\(Round ${identity.round}(?:, [^)]+)?\\)$`);
-  const row = pairEntries(entries).find((candidate) => candidate.started !== ''
-    && candidate.done !== '' && roundPattern.test(candidate.step)
-    && candidate.note.includes(`→ ${artifact}`));
-  if (!row) return null;
-  const doneIndex = ordered.findIndex(({ entry }) => entry.time === row.done
-    && entry.step === row.step && entry.note === row.note);
-  return doneIndex < 0 ? null : doneIndex;
+  if (!identity || completionEvent(identity.family) !== event) return null;
+  const fact = parseCompletionFacts(parseTypedTaskFrontmatter(taskContent).completion_facts)
+    .find((candidate) => candidate.event === event && candidate.output === artifact);
+  return fact && fact.requestId.length > 0 ? fact : null;
+}
+
+function validateOutput(taskDir: string, artifact: string, fact: CompletionFact): boolean {
+  const outputPath = path.join(taskDir, artifact);
+  const stat = fs.lstatSync(outputPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) return false;
+  const content = fs.readFileSync(outputPath, 'utf8');
+  return sha256File(outputPath) === fact.outputSha256
+    && canonicalSemanticDigest(content) === fact.semanticDigest;
 }

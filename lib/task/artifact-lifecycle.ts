@@ -10,7 +10,7 @@ import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, receiptsForOutput, sha256File } from './artifact-receipts.ts';
-import { artifactCompletionOrder, hasArtifactCompletionFact, hasArtifactCompletionLog, parseCompletionFacts } from './completion-facts.ts';
+import { hasArtifactCompletionRecord, hasValidArtifactCompletion } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
@@ -28,11 +28,11 @@ const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
 };
 
 /** Init, repair and finalization share the same authoritative round identity. */
-export function hasOpenArtifactRound(content: string, family: string, round: number): boolean {
-  return openArtifactRounds(content, family).includes(round);
+export function hasOpenArtifactRound(taskDir: string, content: string, family: ArtifactFamily, round: number): boolean {
+  return openArtifactRounds(taskDir, content, family).includes(round);
 }
 
-function openArtifactRounds(content: string, family: string): number[] {
+function openArtifactRounds(taskDir: string, content: string, family: ArtifactFamily): number[] {
   const activity = locateActivityLog(content);
   const step = ARTIFACT_STEPS[family];
   if (!activity || !step) return [];
@@ -40,16 +40,24 @@ function openArtifactRounds(content: string, family: string): number[] {
     ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d*))?'
     : '';
   const expected = new RegExp(`^${step} \\(Round ([1-9]\\d*)${qualifier}\\)$`);
+  const event = completionEvent(family);
   return [...new Set(startedBackedRows(pairEntries(activity.entries))
     .filter((row) => expected.test(row.step) && !row.done)
-    .map((row) => Number(expected.exec(row.step)?.[1])))].sort((left, right) => left - right);
+    .flatMap((row) => {
+      const round = Number(expected.exec(row.step)?.[1]);
+      const name = artifactName(family, round);
+      if (!event || !hasArtifactCompletionRecord(content, name, event)) return [round];
+      if (!hasValidArtifactCompletion(content, taskDir, name, event)) {
+        throw new Error(`completion evidence for started ${family} Round ${round} is invalid`);
+      }
+      return [];
+    }))].sort((left, right) => left - right);
 }
 
-function hasCompletedArtifactRound(content: string, family: string, round: number, name: string): boolean {
+function hasCompletedArtifactRound(taskDir: string, content: string, family: string, round: number, name: string): boolean {
   const event = completionEvent(family);
   return Boolean(event && parseArtifactName(name)?.round === round
-    && artifactCompletionOrder(content, name, event) !== null
-    && hasArtifactCompletionFact(content, name, event));
+    && hasValidArtifactCompletion(content, taskDir, name, event));
 }
 
 function completionEvent(family: string): string | null {
@@ -238,7 +246,14 @@ function inspectArtifactDirectory(
   }
   artifacts.sort((left, right) => left.round - right.round);
   knownArtifacts.sort((left, right) => left.round - right.round);
-  const openRounds = openArtifactRounds(taskContent, family);
+  let openRounds: number[];
+  try { openRounds = openArtifactRounds(taskDir, taskContent, family); }
+  catch (error) {
+    return failure(requestRef, family, {
+      code: 'ARTIFACT_SELECTION_INDETERMINATE',
+      message: error instanceof Error ? error.message : String(error)
+    }, { taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null });
+  }
   const knownRounds = new Set(knownArtifacts.map((item) => item.round));
   for (const round of openRounds) knownRounds.add(round);
   const max = Math.max(...knownRounds, 0);
@@ -248,11 +263,8 @@ function inspectArtifactDirectory(
   }
   const event = completionEvent(family);
   const completed = event
-    ? artifacts.flatMap((artifact) => {
-      const order = artifactCompletionOrder(taskContent, artifact.name, event);
-      return order !== null && hasArtifactCompletionFact(taskContent, artifact.path, event)
-        ? [{ artifact, order }] : [];
-    }).sort((left, right) => left.order - right.order).map(({ artifact }) => artifact)
+    ? artifacts.filter((artifact) => hasValidArtifactCompletion(taskContent, taskDir, artifact.name, event))
+      .sort((left, right) => left.round - right.round)
     : [];
   if (openRounds.length > 1) diagnostics.push(diagnostic('MULTIPLE_OPEN_ROUNDS', family, null, `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`));
   const latest = completed.at(-1) ?? null;
@@ -387,8 +399,8 @@ function hasSelectionEvidence(
         const reportContent = fs.readFileSync(context.latest.path, 'utf8');
         const identity = inspectReviewIdentity(context.taskDir!, reportContent, options.repoRoot);
         return identity.status !== 'matched'
-          || !hasArtifactCompletionFact(content, context.latest.path, 'review-code.completed')
-          || !hasArtifactCompletionLog(content, context.latest.name, 'review-code.completed');
+          || !context.taskDir
+          || !hasValidArtifactCompletion(content, context.taskDir, context.latest.name, 'review-code.completed');
       } catch {
         return true;
       }
@@ -428,13 +440,10 @@ function attachArtifactSelection(
     ...context, status: 'failed', selection: null, error: { code, message }
   });
   if (!context.next) return fail('ARTIFACT_SELECTION_INDETERMINATE', 'artifact inventory did not provide a writable identity');
-  let taskContent: string;
-  try {
-    taskContent = fs.readFileSync(path.join(context.taskDir, 'task.md'), 'utf8');
-  } catch (error) {
-    return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
-  }
-  const openRounds = openArtifactRounds(taskContent, family);
+  const state = readArtifactSelectionState(context.taskDir, family);
+  if (!state.ok) return fail('ARTIFACT_SELECTION_INDETERMINATE', state.message);
+  const taskContent = state.content;
+  const openRounds = state.openRounds;
   if (openRounds.length > 1) return fail('ARTIFACT_TOPOLOGY_CONFLICT', `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`);
   const openRound = openRounds[0] ?? null;
   const selectedIdentity = openRound === null ? context.next : {
@@ -456,6 +465,17 @@ function attachArtifactSelection(
     };
   } catch (error) {
     return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function readArtifactSelectionState(taskDir: string, family: ArtifactFamily):
+  | { ok: true; content: string; openRounds: number[] }
+  | { ok: false; message: string } {
+  try {
+    const content = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    return { ok: true, content, openRounds: openArtifactRounds(taskDir, content, family) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -555,8 +575,7 @@ function resolveCodeContext(
     const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
     const hasPendingImplementation = parseImplementationInputs(taskContent).rows.some((input) => input.needsImplementation && input.status === 'pending');
     if (hasPendingImplementation && !reviewCode.latest) {
-      const candidate = reviewCode.artifacts.at(-1)?.name ?? 'review-code.md';
-      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `cannot find completed Activity Log identity for ${candidate}`);
+      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', 'no valid review-code completion fact is available for pending implementation inputs');
     }
   } catch (error) {
     return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
@@ -577,7 +596,7 @@ function resolveCodeContext(
         const openVerdict = review ? parseVerdict(review.path) : null;
         const openRow = locateActivityLog(taskContent)
           ? startedBackedRows(pairEntries(locateActivityLog(taskContent)!.entries))
-            .find((row) => row.step.startsWith(`Code Task (Round ${openRound}`) && !row.done)
+            .find((row) => row.step.startsWith(`Code Task (Round ${openRound}`))
           : null;
         const decisionInput = /, decision (II-[1-9]\d*)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
         const fixInput = /, fix for (review-code(?:-r\d+)?\.md)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
@@ -617,7 +636,7 @@ function resolveCodeContext(
   if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
   const verdict = parseVerdict(review.path);
   if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, review.name);
-  const decision = resolveDecisionImplementationInput(inventory, review);
+  const decision = resolveDecisionImplementationInput(reviewCode, review);
   if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
   if (decision.input) {
     return withCodeMode(
@@ -680,12 +699,10 @@ function resolveDecisionImplementationInput(
   catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
   const pending = rows.filter((row) => row.needsImplementation && row.status === 'pending');
   if (pending.length === 0) return { input: null };
-  const activity = locateActivityLog(content);
-  if (!activity) return { error: 'task has no unique Activity Log section' };
-  const completed = activity.entries.some((entry) =>
-    /^Review Code \(Round \d+\)$/.test(entry.step) && entry.note.includes(`→ ${review.name}`)
-  );
-  if (!completed) return { error: `cannot find completed Activity Log identity for ${review.name}` };
+  if (inventory.latest?.name !== review.name
+    || !inventory.completed.some((artifact) => artifact.name === review.name)) {
+    return { error: `Review Code completion facts do not validate ${review.name}` };
+  }
   try { return { input: selectPendingImplementationInput(rows) }; }
   catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
 }
@@ -720,14 +737,12 @@ export function validateArtifactPublication(taskDir: string, family: ArtifactFam
   if (existing) {
     try {
       const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
-      if (hasCompletedArtifactRound(task, family, existing.round, name)) {
+      if (hasCompletedArtifactRound(taskDir, task, family, existing.round, name)) {
         return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completed artifact '${name}' is immutable` };
       }
       const event = completionEvent(family);
-      const frontmatter = parseTypedTaskFrontmatter(task);
-      const completionFactExists = event !== null && parseCompletionFacts(frontmatter.completion_facts)
-        .some((fact) => fact.event === event && fact.output === name);
-      if (event && completionFactExists && artifactCompletionOrder(task, name, event) !== null) {
+      const completionFactExists = event !== null && hasArtifactCompletionRecord(task, name, event);
+      if (event && completionFactExists) {
         return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completion evidence for '${name}' does not match its current content` };
       }
     } catch (error) {

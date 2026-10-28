@@ -6,7 +6,8 @@ import { spawnSync } from "node:child_process";
 
 import { gitSafeEnv, initIsolatedGitRepo, onPlatforms, taskWorkspaceProject, taskWorkspaceRoot, filePath } from "../../helpers.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 import {
   buildTaskFrontmatter,
   parseValidatorPayload,
@@ -72,12 +73,20 @@ async function runCheck(taskDir: string, repositoryRoot?: string) {
     const round = Number(/-r(\d+)/u.exec(reportName)?.[1] ?? 1);
     const taskPath = path.join(taskDir, "task.md");
     let task = fs.readFileSync(taskPath, "utf8");
+    const codePath = path.join(taskDir, "code.md");
+    write(codePath, "# Code fixture\n");
+    const codeFact = {
+      event: "code.completed", output: "code.md", outputSha256: sha256File(codePath),
+      semanticDigest: canonicalSemanticDigest(fs.readFileSync(codePath, "utf8")),
+      requestId: "post-review-code-fixture", result: "{}", lifecycleInputs: []
+    };
     const fact = {
       event: "review-code.completed", output: reportName, outputSha256: sha256File(reportPath),
       semanticDigest: canonicalSemanticDigest(fs.readFileSync(reportPath, "utf8")),
-      requestId: "post-review-commit-fixture", result: "completed"
+      requestId: "post-review-commit-fixture", result: "completed",
+      lifecycleInputs: [{ name: "code.md", sha256: sha256File(codePath) }]
     };
-    task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
+    task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([codeFact, fact]))}\n---\n`);
     task = task.replace("## 活动日志\n\n- 2026-03-28 00:00:00+00:00 — **Completed** by codex — archived", [
       "## Activity Log",
       "",
@@ -85,6 +94,10 @@ async function runCheck(taskDir: string, repositoryRoot?: string) {
       `- 2026-03-28 00:00:01+00:00 — **Review Code (Round ${round})** by codex — Verdict: Approved → ${reportName}`,
       "- 2026-03-28 00:00:02+00:00 — **Completed** by codex — archived"
     ].join("\n"));
+    task = upsertSection(task, upsertArtifactReceipt(task, {
+      event: "review-code.completed", output: reportName, input: "code.md",
+      inputSha256: sha256File(codePath), completedAt: "2026-03-28 00:00:01+00:00"
+    })).content;
     write(taskPath, task);
   }
   const result = await runValidator(

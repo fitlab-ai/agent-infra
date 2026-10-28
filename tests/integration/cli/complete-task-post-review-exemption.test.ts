@@ -9,7 +9,8 @@ import { renderTaskVerification } from "../../../lib/task/verification.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { createTempDir, gitSafeEnv } from "../../helpers.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
-import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 
 test("complete-task renders an exemption covering multiple post-review commits", async () => {
   const root = createTempDir("complete-task-post-review-exemption-");
@@ -36,15 +37,22 @@ test("complete-task renders an exemption covering multiple post-review commits",
 
     const taskDir = path.join(taskWorkspaceRoot(root),  "active", taskId);
     fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "code.md"), "# Code\n");
     fs.writeFileSync(path.join(taskDir, "review-code.md"), "# Review\n");
+    const codePath = path.join(taskDir, "code.md");
+    const codeFact = {
+      event: "code.completed", output: "code.md", outputSha256: sha256File(codePath),
+      semanticDigest: canonicalSemanticDigest(fs.readFileSync(codePath, "utf8")), requestId: "fixture-code", result: "{}", lifecycleInputs: []
+    };
     const reviewPath = path.join(taskDir, "review-code.md");
     const reviewFact = {
       event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(reviewPath),
-      semanticDigest: canonicalSemanticDigest(fs.readFileSync(reviewPath, "utf8")), requestId: "fixture-review-code", result: "{}"
+      semanticDigest: canonicalSemanticDigest(fs.readFileSync(reviewPath, "utf8")), requestId: "fixture-review-code", result: "{}",
+      lifecycleInputs: [{ name: "code.md", sha256: sha256File(codePath) }]
     };
     fs.writeFileSync(path.join(taskDir, "task.md"), [
       "---", `id: ${taskId}`, "status: active", "current_step: code-review", `last_reviewed_commit: ${reviewedHead}`,
-      `completion_facts: ${JSON.stringify(JSON.stringify([reviewFact]))}`, "---", "",
+      `completion_facts: ${JSON.stringify(JSON.stringify([codeFact, reviewFact]))}`, "---", "",
       "## Activity Log", "",
       "- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1) [started]** by codex — started",
       "- 2026-01-01 00:00:01+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md", "",
@@ -52,6 +60,12 @@ test("complete-task renders an exemption covering multiple post-review commits",
       "| id | stage | round | severity | status | evidence |", "|----|-------|-------|----------|--------|----------|",
       "| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed two subsequent commits |", ""
     ].join("\n"));
+    const taskPath = path.join(taskDir, "task.md");
+    const task = fs.readFileSync(taskPath, "utf8");
+    fs.writeFileSync(taskPath, upsertSection(task, upsertArtifactReceipt(task, {
+      event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+      inputSha256: sha256File(codePath), completedAt: '2026-01-01 00:00:01+00:00'
+    })).content);
     const configDir = path.join(root, ".agents", "skills", "complete-task", "config");
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(path.join(configDir, "verify.json"), JSON.stringify({ skill: "complete-task", checks: { "post-review-commit": {} } }));

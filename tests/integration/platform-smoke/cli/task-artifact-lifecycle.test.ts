@@ -11,17 +11,19 @@ import {
   inspectTaskArtifacts,
   resolveArtifactContext,
   resolveArtifactContextForResolvedTask,
+  validateArtifactPublication,
   validateCompletedArtifact
 } from '../../../../lib/task/artifact-lifecycle.ts';
 import { resolveTaskRef } from '../../../../lib/task/resolve-ref.ts';
 import { artifactName, parseArtifactName } from '../../../../lib/task/artifact-name.ts';
-import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../../lib/task/artifact-receipts.ts';
+import { parseArtifactReceipts, sha256File, upsertArtifactReceipt } from '../../../../lib/task/artifact-receipts.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../../lib/task/sections.ts';
 import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.ts';
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
+import { parseTypedTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
 import { createTempDir, recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -47,14 +49,44 @@ function recordFixtureCompletions(taskDir: string) {
     const a = parseArtifactName(left)!; const b = parseArtifactName(right)!;
     return a.family.localeCompare(b.family) || a.round - b.round;
   });
-  recordArtifactCompletions(taskDir, names.map((name) => ({ name })));
+  const identities = names.map((name) => parseArtifactName(name)!);
+  const receiptRows = parseArtifactReceipts(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8')).rows;
+  const findInput = (family: string, round?: number) => {
+    const matches = identities.filter((identity) => identity.family === family
+      && (round === undefined || identity.round === round));
+    return (matches.at(-1) ?? identities.filter((identity) => identity.family === family).at(-1))?.name;
+  };
+  recordArtifactCompletions(taskDir, identities.map((identity) => {
+    const name = identity.name;
+    const existingReceipt = receiptRows.find((receipt) => receipt.output === name);
+    const input = existingReceipt?.input ?? (identity.family === 'analysis' ? undefined
+      : identity.family === 'review-analysis' ? findInput('analysis', identity.round)
+      : identity.family === 'plan' ? findInput('review-analysis', identity.round) ?? findInput('analysis')
+      : identity.family === 'review-plan' ? findInput('plan', identity.round)
+      : identity.family === 'code' ? findInput('plan') ?? findInput('analysis')
+      : identity.family === 'review-code' ? findInput('code')
+      : undefined);
+    return { name, lifecycleInputs: input ? [input] : [] };
+  }));
 }
 
 function addReceipt(f: ReturnType<typeof fixture>, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
   const taskPath = path.join(f.taskDir, 'task.md');
-  const content = fs.readFileSync(taskPath, 'utf8');
+  let content = fs.readFileSync(taskPath, 'utf8');
+  const escapedEvent = receipt.event.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const escapedOutput = receipt.output.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  content = content.replace(new RegExp(`^\\| ${escapedEvent} \\| ${escapedOutput} \\|[^\\n]*\\n?`, 'gmu'), '');
   const mutation = upsertArtifactReceipt(content, receipt);
-  fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+  content = upsertSection(content, mutation).content;
+  const rawFacts = parseTypedTaskFrontmatter(content).completion_facts;
+  if (typeof rawFacts === 'string') {
+    const facts = JSON.parse(rawFacts) as Array<Record<string, unknown>>;
+    const factEvent = receipt.event === 'analysis.completed' ? 'analyze.completed' : receipt.event;
+    const fact = facts.find((candidate) => candidate.event === factEvent && candidate.output === receipt.output);
+    if (fact) fact.lifecycleInputs = [{ name: receipt.input, sha256: receipt.inputSha256 }];
+    content = content.replace(/^completion_facts:.*$/mu, `completion_facts: ${JSON.stringify(JSON.stringify(facts))}`);
+  }
+  fs.writeFileSync(taskPath, content);
 }
 
 function enableQualification(f: ReturnType<typeof fixture>) {
@@ -104,13 +136,13 @@ function completedReviewFixture(f: ReturnType<typeof fixture>, options: { includ
   fs.writeFileSync(analysisPath, STANDARD_ANALYSIS);
   const analysisFact = {
     event: 'analyze.completed', output: 'analysis.md', outputSha256: sha256File(analysisPath),
-    semanticDigest: canonicalSemanticDigest(STANDARD_ANALYSIS), requestId: 'fixture-analysis', result: 'completed'
+    semanticDigest: canonicalSemanticDigest(STANDARD_ANALYSIS), requestId: 'fixture-analysis', result: 'completed', lifecycleInputs: []
   };
   const reviewPath = path.join(f.taskDir, 'review-code.md');
   fs.writeFileSync(reviewPath, report);
   const fact = {
     event: 'review-code.completed', output: 'review-code.md', outputSha256: sha256File(reviewPath),
-    semanticDigest: canonicalSemanticDigest(report), requestId: 'fixture-review', result: '{}'
+    semanticDigest: canonicalSemanticDigest(report), requestId: 'fixture-review', result: '{}', lifecycleInputs: []
   };
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
     '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
@@ -287,6 +319,44 @@ test('an open higher round resumes while the prior completed round remains curre
   assert.equal(context.next?.name, 'plan-r3.md');
 });
 
+test('valid completion facts close started rounds when done rows are deleted, damaged, or reordered', () => {
+  const mutations = [
+    (task: string) => task.replace(/^- .*\*\*Plan Task \(Round 2\)\*\*.*\n?/mu, ''),
+    (task: string) => task.replace(/^- .*\*\*Plan Task \(Round 2\)\*\*.*$/mu, 'this is not a valid Activity Log row'),
+    (task: string) => task.replace(/(- .*\*\*Plan Task \(Round 2\) \[started\]\*\*.*\n)(- .*\*\*Plan Task \(Round 2\)\*\*.*)/u, '$2\n$1')
+  ];
+  for (const mutate of mutations) {
+    const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# Plan 1\n', 'plan-r2.md': '# Plan 2\n' });
+    const taskPath = path.join(f.taskDir, 'task.md');
+    fs.appendFileSync(taskPath, '- 2026-01-01 00:02:00+00:00 — **Plan Task (Round 3) [started]** by codex — started\n');
+    const before = inspectTaskArtifacts(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+    const task = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(taskPath, mutate(task));
+
+    const after = inspectTaskArtifacts(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+    assert.deepEqual(after.completed.map((item) => item.name), before.completed.map((item) => item.name));
+    assert.equal(after.latest?.name, before.latest?.name);
+    assert.deepEqual(after.openRounds, [3]);
+    assert.equal(validateArtifactPublication(f.taskDir, 'plan', 'plan-r2.md')?.code, 'ARTIFACT_IDENTITY_INVALID');
+    const context = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+    assert.equal(context.selection?.disposition, 'resume');
+    assert.equal(context.selection?.artifact.name, 'plan-r3.md');
+    assert.notEqual(context.selection?.artifact.name, 'plan-r2.md');
+  }
+});
+
+test('a completed lower round and a genuinely started higher round select the higher round for resume', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# Plan 1\n' });
+  fs.appendFileSync(path.join(f.taskDir, 'task.md'), '- 2026-01-01 00:02:00+00:00 — **Plan Task (Round 2) [started]** by codex — started\n');
+
+  const inventory = inspectTaskArtifacts(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+  assert.equal(inventory.latest?.name, 'plan.md');
+  assert.deepEqual(inventory.openRounds, [2]);
+  const context = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+  assert.equal(context.selection?.disposition, 'resume');
+  assert.equal(context.selection?.artifact.name, 'plan-r2.md');
+});
+
 test('unknown families fail without resolving outside the catalog', () => {
   const f = fixture();
   const result = inspectTaskArtifacts(TASK_ID, 'unknown', { repoRoot: f.repoRoot });
@@ -378,7 +448,7 @@ test('artifact context accepts available inputs without qualification authorizat
 
   writeQualifiedArtifact(f, 'analysis.md');
   const planRecovery = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
-  assert.equal(planRecovery.status, 'ready');
+  assert.equal(planRecovery.status, 'ready', JSON.stringify(planRecovery.error));
   assert.deepEqual(planRecovery.inputs.map((item) => item.name), ['analysis.md', 'review-analysis.md', 'review-plan.md']);
 });
 
@@ -387,7 +457,7 @@ test('artifact context treats qualification data as context outside analysis and
   enableQualification(codeFixture);
   writeQualifiedArtifact(codeFixture, 'plan.md');
   const code = resolveArtifactContext(TASK_ID, 'code', { repoRoot: codeFixture.repoRoot });
-  assert.equal(code.status, 'ready');
+  assert.equal(code.status, 'ready', JSON.stringify(code.error));
 
   const reviewCodeFixture = fixture({
     'analysis.md': STANDARD_ANALYSIS,
@@ -425,7 +495,7 @@ test('review references remain optional context after input content changes', ()
   assert.equal(resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot }).status, 'ready');
   fs.appendFileSync(path.join(f.taskDir, 'analysis.md'), 'changed\n');
   const changed = resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
-  assert.equal(changed.status, 'ready');
+  assert.equal(changed.status, 'ready', JSON.stringify(changed.error));
 });
 
 test('change-request reviews create only while they target the latest artifact', () => {
@@ -491,21 +561,22 @@ test('change-request reviews create only while they target the latest artifact',
 test('standard-path code replan routing compares plan content with the code input receipt', () => {
   const f = fixture({
     'analysis.md': STANDARD_ANALYSIS,
-    'plan.md': '# new plan\n',
+    'plan.md': '# old plan\n',
+    'plan-r2.md': '# new plan\n',
     'code.md': '# code\n',
-    'review-plan.md': '**审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'
+    'review-plan.md': '**审查输入**：`plan-r2.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'
   });
   addReceipt(f, {
     event: 'code.completed', output: 'code.md', input: 'plan.md',
-    inputSha256: sha256Bytes(Buffer.from('# old plan\n')), completedAt: '2026-01-01 00:00:00+00:00'
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
   addReceipt(f, {
-    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
-    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:01:00+00:00'
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan-r2.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan-r2.md')), completedAt: '2026-01-01 00:01:00+00:00'
   });
 
   const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
-  assert.equal(result.status, 'ready');
+  assert.equal(result.status, 'ready', JSON.stringify(result.error));
   assert.equal(result.codeMode?.mode, 'init');
   assert.equal(result.codeMode?.reviewArtifact, null);
 });
@@ -537,6 +608,23 @@ test('code fix routing trusts the review receipt when code and review family rou
   assert.equal(result.status, 'ready');
   assert.equal(result.codeMode?.mode, 'fix');
   assert.equal(result.codeMode?.reviewArtifact, 'review-code.md');
+});
+
+test('review context preserves a valid receipt for an older input artifact', () => {
+  const f = fixture({
+    'analysis.md': STANDARD_ANALYSIS,
+    'code.md': '# Original code\n',
+    'code-r2.md': '# Current code\n',
+    'review-code.md': '**审查输入**：`code.md`\n'
+  });
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+
+  const context = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(context.status, 'ready', JSON.stringify(context.error));
+  assert.equal(context.reviewedInput?.name, 'code.md');
 });
 
 test('code selection reuses completed work without explicit change evidence', () => {

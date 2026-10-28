@@ -7,9 +7,7 @@ import { createHash } from 'node:crypto';
 
 import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
-import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
-import { sha256File } from '../../../lib/task/artifact-receipts.ts';
-import { createTaskWorkspaceFixture } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, recordArtifactCompletions } from '../../helpers.ts';
 
 const METADATA = { timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' };
 
@@ -23,16 +21,14 @@ function fixture(rows: string[] = []) {
 }
 
 function completeReview(taskDir: string, name: string, family: 'review-analysis' | 'review-plan' | 'review-code') {
-  const taskPath = path.join(taskDir, 'task.md');
-  const content = fs.readFileSync(taskPath, 'utf8');
+  const source = family === 'review-analysis' ? 'analysis.md' : family === 'review-plan' ? 'plan.md' : 'code.md';
+  const sourcePath = path.join(taskDir, source);
+  if (!fs.existsSync(sourcePath)) fs.writeFileSync(sourcePath, `# ${source}\n`);
   const file = path.join(taskDir, name);
-  const report = fs.readFileSync(file, 'utf8');
-  const fact = { event: `${family}.completed`, output: name, outputSha256: sha256File(file), semanticDigest: canonicalSemanticDigest(report), requestId: `fixture-${name}`, result: 'completed' };
-  const fmEnd = content.indexOf('\n---', 4);
-  const withFacts = `${content.slice(0, fmEnd)}\ncompletion_facts: '${JSON.stringify([fact])}'${content.slice(fmEnd)}`;
-  const round = name === `${family}.md` ? 1 : Number(/-r(\d+)\.md$/u.exec(name)?.[1] ?? 1);
-  const action = family === 'review-analysis' ? 'Review Analysis' : family === 'review-plan' ? 'Review Plan' : 'Review Code';
-  fs.writeFileSync(taskPath, `${withFacts}\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **${action} (Round ${round}) [started]** by codex — started\n- 2026-01-01 00:00:01+00:00 — **${action} (Round ${round})** by codex — completed → ${name}\n`);
+  recordArtifactCompletions(taskDir, [
+    { name: source, lifecycleInputs: [] },
+    { name, lifecycleInputs: [source] }
+  ]);
 }
 
 test('finding upsert allocates per-stage ids and replays as no-op', () => {

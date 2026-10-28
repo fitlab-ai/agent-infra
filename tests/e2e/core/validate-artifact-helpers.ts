@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import type { ArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { upsertSection } from "../../../lib/task/sections.ts";
 import { buildBoundFact, buildSkippedFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { parseTypedTaskFrontmatter } from "../../../lib/task/frontmatter.ts";
@@ -185,12 +186,14 @@ function attachArtifactCompletionFact(taskDir: string, family: "code" | "review-
   const escapedFacts = JSON.stringify(JSON.stringify(facts));
   task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${escapedFacts}\n---\n`);
   task = task.replace(/(## (?:Activity Log|活动日志)\s*\n)/u, `$1\n${activityRows.join("\n")}\n`);
-  if (family === "review-code") {
-    const mutation = upsertArtifactReceipt(task, {
-      event: "review-code.completed", output, input,
-      inputSha256: sha256File(inputPath), completedAt: timestamp
-    });
-    task = upsertSection(task, mutation).content;
+  for (const fact of facts) {
+    for (const lifecycleInput of fact.lifecycleInputs ?? []) {
+      const mutation = upsertArtifactReceipt(task, {
+        event: fact.event as ArtifactReceipt["event"], output: fact.output, input: lifecycleInput.name,
+        inputSha256: lifecycleInput.sha256, completedAt: timestamp
+      });
+      task = upsertSection(task, mutation).content;
+    }
   }
   write(taskPath, task);
 }

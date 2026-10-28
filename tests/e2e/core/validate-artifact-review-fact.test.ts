@@ -129,7 +129,7 @@ function addCompletionEvidence(taskDir: string): void {
   const codeFact = {
     event: "code.completed", output: "code.md", outputSha256: sha256File(inputPath),
     semanticDigest: canonicalSemanticDigest(code), requestId: "code-test", result: "{}",
-    lifecycleInputs: [{ name: "plan.md", sha256: sha256File(planPath) }]
+    lifecycleInputs: []
   };
   const fact = {
     event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(artifactPath),

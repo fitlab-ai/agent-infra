@@ -15,7 +15,7 @@ import type { QualificationAudit, TaskQualification } from './qualification-audi
 import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
 import type { LifecyclePathState } from './lifecycle-path.ts';
 import { parseImplementationInputs } from './implementation-inputs.ts';
-import { hasArtifactCompletionFact, hasArtifactCompletionLog } from './completion-facts.ts';
+import { hasValidArtifactCompletion } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
 import { executionInputsMatchLatest as executionReceiptsMatchLatest } from './execution-inputs.ts';
@@ -395,8 +395,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       if (family === 'review-code') {
         const identity = inspectReviewIdentity(taskDir, reviewContent, repositoryRoot);
         reviewCodeIdentityValid = identity.status === 'matched'
-          && hasArtifactCompletionFact(content, path.join(taskDir, latest), 'review-code.completed')
-          && hasArtifactCompletionLog(content, latest, 'review-code.completed');
+          && hasValidArtifactCompletion(content, taskDir, latest, 'review-code.completed');
       }
       const parsed = parseReviewSummary(reviewContent);
       if (!parsed.ok) continue;
@@ -455,7 +454,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       reviewedInputs, executionInputs, artifactHashes,
       reworkIntents: rework.intents,
       unresolvedLedger,
-      executionBusy: executionBusy || hasOpenLifecycleExecution(content),
+      executionBusy: hasOpenLifecycleExecution(content, taskDir) || executionBusy,
       recommendedAction: null,
       qualificationStale: qualificationStaleArtifacts.length > 0,
       qualificationStaleArtifacts
