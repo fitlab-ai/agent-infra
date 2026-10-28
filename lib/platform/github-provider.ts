@@ -15,7 +15,6 @@ import type {
   ChangeRequestSnapshot,
   CheckLogSnapshot,
   CheckRunSnapshot,
-  GitEvidenceSnapshot,
   IssueSnapshot,
   LabelReconciliation,
   MutationReceipt,
@@ -32,7 +31,6 @@ import type {
   ReleaseSnapshot,
   RemoteCommentSnapshot,
   ReviewSnapshot,
-  SecurityAlertKind,
   SecurityAlertSnapshot,
   VerificationRemoteFacts
 } from './provider-contract.ts';

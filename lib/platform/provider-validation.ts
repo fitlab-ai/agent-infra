@@ -1,33 +1,6 @@
 import { parseResourceIdentity, serializeResourceIdentity } from './resource-identity.ts';
 import type { ProviderIdentityDeclaration, ResourceIdentityKind } from './resource-identity.ts';
-import type {
-  ChangeRequestSnapshot,
-  CheckLogSnapshot,
-  CheckRunSnapshot,
-  GitEvidenceSnapshot,
-  LabelDefinition,
-  LabelReconciliation,
-  IssueSnapshot,
-  MilestoneDefinition,
-  MilestoneInitialization,
-  MilestoneReconciliation,
-  MutationReceipt,
-  PlatformContextSnapshot,
-  ProviderError,
-  PlatformProvider,
-  ProviderResult,
-  ReleaseNoteAuthor,
-  ReleaseNoteIssue,
-  ReleaseNotesFacts,
-  ReleaseSnapshot,
-  RemoteCommentSnapshot,
-  RepositoryMetadataSnapshot,
-  RequiredCheckSnapshot,
-  ReviewSnapshot,
-  SecurityAlertKind,
-  SecurityAlertSnapshot,
-  VerificationRemoteFacts
-} from './provider-contract.ts';
+import type { ChangeRequestSnapshot, CheckLogSnapshot, CheckRunSnapshot, GitEvidenceSnapshot, LabelReconciliation, IssueSnapshot, MilestoneInitialization, MilestoneReconciliation, MutationReceipt, PlatformContextSnapshot, ProviderError, PlatformProvider, ReleaseNoteAuthor, ReleaseNoteIssue, ReleaseNotesFacts, ReleaseSnapshot, RemoteCommentSnapshot, RepositoryMetadataSnapshot, RequiredCheckSnapshot, ReviewSnapshot, SecurityAlertKind, SecurityAlertSnapshot, VerificationRemoteFacts } from './provider-contract.ts';
 import type { JsonValue } from './provider-contract.ts';
 import type { PlatformError } from './types.ts';
 
@@ -336,16 +309,6 @@ function validateSecurityAlert(value: unknown): SecurityAlertSnapshot {
   };
 }
 
-function validateLabelDefinition(value: unknown, label: string): LabelDefinition {
-  const item = record(value, label);
-  exactKeys(item, ['name', 'color', 'description'], label);
-  return {
-    name: stringValue(item.name, `${label}.name`),
-    color: stringValue(item.color, `${label}.color`),
-    description: stringValue(item.description, `${label}.description`, true)
-  };
-}
-
 function validateLabelReconciliation(value: unknown): LabelReconciliation {
   const item = record(value, 'label reconciliation');
   exactKeys(item, ['changed', 'created', 'updated', 'removed', 'skipped'], 'label reconciliation');
@@ -356,17 +319,6 @@ function validateLabelReconciliation(value: unknown): LabelReconciliation {
     updated: names('updated'),
     removed: names('removed'),
     skipped: names('skipped')
-  };
-}
-
-function validateMilestoneDefinition(value: unknown, label: string): MilestoneDefinition {
-  const item = record(value, label);
-  exactKeys(item, ['title', 'description', 'state'], label);
-  if (item.state !== 'open' && item.state !== 'closed') throw new Error(`${label}.state is invalid`);
-  return {
-    title: stringValue(item.title, `${label}.title`),
-    description: stringValue(item.description, `${label}.description`, true),
-    state: item.state
   };
 }
 

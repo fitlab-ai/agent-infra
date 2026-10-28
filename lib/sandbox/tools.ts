@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createSandboxCapabilityPlan } from './agent-client-reconciler.ts';
-import { safeNameCandidates, sanitizeBranchName } from './constants.ts';
+import { safeNameCandidates } from './constants.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 import type { SandboxTool, SandboxToolInstall } from './tool-types.ts';
 
@@ -285,10 +285,6 @@ export function parseCustomTools(value: unknown, options: { home: string }): San
 
 export function resolveTools(config: ToolsConfig): SandboxTool[] {
   return [...createSandboxCapabilityPlan(config).tools];
-}
-
-export function toolConfigDir(tool: SandboxTool, project: string, branch: string): string {
-  return hostJoin(tool.sandboxBase, project, sanitizeBranchName(branch));
 }
 
 export function toolConfigDirCandidates(tool: SandboxTool, project: string, branch: string): string[] {

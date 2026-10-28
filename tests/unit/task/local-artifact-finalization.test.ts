@@ -7,7 +7,7 @@ import {
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
-const PLAN_SECTIONS = [
+[
   ['问题理解', '范围说明'],
   ['约束条件', '当前契约'],
   ['方案对比', '采用方案 A'],
@@ -18,7 +18,7 @@ const PLAN_SECTIONS = [
   ['状态核对', '```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```']
 ] as const;
 
-const CODE_SECTIONS = [
+[
   ['实现输入', '本轮实现输入'],
   ['变更文件', '文件列表'],
   ['关键代码说明', '实现说明'],
@@ -94,7 +94,7 @@ test('non-whitelisted content changes and ambiguous candidates fail closed', () 
 test('code reports diagnose the same one-line heading issue without normalizing the digest', () => {
   const malformed = artifact('code').replace('## 测试结果\n', '## 测试结果：\n');
   const failed = validateLocalArtifact(malformed, { family: 'code' });
-  const repair = diagnostic(failed, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
+  diagnostic(failed, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
 
   const repaired = validateLocalArtifact(malformed.replace('## 测试结果：', '## 测试结果'), { family: 'code' });
   assert.equal(repaired.ok, true);

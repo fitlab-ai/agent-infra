@@ -32,10 +32,6 @@ export function markdownMessage(markdown: string): DisplayMessage {
   return { kind: 'markdown', markdown };
 }
 
-export function tableMessage(columns: string[], rows: string[][], title?: string): DisplayMessage {
-  return { kind: 'table', title, columns, rows };
-}
-
 export function statusCard(
   title: string,
   tone: DisplayTone,
@@ -57,16 +53,6 @@ export function streamEvent(
   if (exitCode !== undefined) message.exitCode = exitCode;
   if (signal !== undefined) message.signal = signal;
   return message;
-}
-
-export function commandResult(
-  title: string,
-  exitCode: number | null,
-  signal: NodeJS.Signals | null,
-  stdout?: string,
-  stderr?: string
-): DisplayMessage {
-  return { kind: 'command-result', title, exitCode, signal, stdout, stderr };
 }
 
 export function normalizeOutbound(message: OutboundMessage): DisplayMessage {

@@ -1,14 +1,9 @@
-import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 
 import {
   normalizeShortIdInput,
-  lookupShortIdByBranch
 } from '../../../lib/task/short-id.ts';
-import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 type ShortIdCase = {
   input: string;
@@ -66,70 +61,3 @@ for (const c of NORMALIZE_CASES) {
     }
   });
 }
-
-function mkRegistryFixture(): { repoRoot: string; activeDir: string } {
-  const { repoRoot } = createTaskWorkspaceFixture('shortid-lookup-');
-  const activeDir = path.join(taskWorkspaceRoot(repoRoot),  'active');
-  fs.mkdirSync(activeDir, { recursive: true });
-  return { repoRoot, activeDir };
-}
-
-function writeTaskWithBranch(activeDir: string, taskId: string, branch: string): void {
-  fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
-  fs.writeFileSync(
-    path.join(activeDir, taskId, 'task.md'),
-    `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`
-  );
-}
-
-function writeRegistry(activeDir: string, ids: Record<string, string>): void {
-  fs.writeFileSync(
-    path.join(activeDir, '.short-ids.json'),
-    JSON.stringify({ version: 1, ids }, null, 2)
-  );
-}
-
-test('lookupShortIdByBranch returns bare NN when branch matches one active task', () => {
-  const { repoRoot, activeDir } = mkRegistryFixture();
-  writeTaskWithBranch(activeDir, 'TASK-20260101-000001', 'feature-foo');
-  writeRegistry(activeDir, { '07': 'TASK-20260101-000001' });
-  assert.equal(lookupShortIdByBranch('feature-foo', repoRoot), '07');
-});
-
-test('lookupShortIdByBranch returns null when no match', () => {
-  const { repoRoot, activeDir } = mkRegistryFixture();
-  writeTaskWithBranch(activeDir, 'TASK-20260101-000002', 'feature-foo');
-  writeRegistry(activeDir, { '07': 'TASK-20260101-000002' });
-  assert.equal(lookupShortIdByBranch('feature-other', repoRoot), null);
-});
-
-test('lookupShortIdByBranch warns and returns first when multiple tasks share a branch', () => {
-  const { repoRoot, activeDir } = mkRegistryFixture();
-  writeTaskWithBranch(activeDir, 'TASK-20260101-000003', 'shared');
-  writeTaskWithBranch(activeDir, 'TASK-20260101-000004', 'shared');
-  writeRegistry(activeDir, {
-    '03': 'TASK-20260101-000003',
-    '04': 'TASK-20260101-000004'
-  });
-  const original = process.stderr.write.bind(process.stderr);
-  const captured: string[] = [];
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    const result = lookupShortIdByBranch('shared', repoRoot);
-    assert.ok(result === '03' || result === '04');
-    assert.ok(
-      captured.some((line) => /multiple active tasks/.test(line)),
-      'expected stderr warning about multiple tasks'
-    );
-  } finally {
-    process.stderr.write = original;
-  }
-});
-
-test('lookupShortIdByBranch returns null when registry missing', () => {
-  const { repoRoot } = mkRegistryFixture();
-  assert.equal(lookupShortIdByBranch('anything', repoRoot), null);
-});

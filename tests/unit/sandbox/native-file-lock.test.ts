@@ -7,7 +7,6 @@ import {
   acquireSandboxResourceLock,
   probeNativeLockCapability,
   resolveSandboxLockNamespace,
-  stableSandboxLockPath
 } from '../../../lib/sandbox/control/native-file-lock.ts';
 import { createTempDir } from '../../helpers.ts';
 
@@ -19,7 +18,6 @@ test('native lock namespace is stable and outside the carrier tree', (t) => {
   const second = resolveSandboxLockNamespace('native:' + 'b'.repeat(64), { home, lockDomain: domain });
 
   assert.equal(first.lockPath, second.lockPath);
-  assert.equal(stableSandboxLockPath('native:' + 'b'.repeat(64), domain, { home }), first.lockPath);
   assert.equal(first.lockPath.startsWith(path.join(home, '.agent-infra', 'sandbox-locks')), true);
 });
 
@@ -51,7 +49,7 @@ test('native lock capability reports the platform locking primitive', () => {
 test('native lock preserves a replacement file during acquisition', onPlatforms('darwin', 'linux'), (t) => {
   const home = createTempDir('sandbox-lock-mode-');
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const lockPath = stableSandboxLockPath('descriptor-mode', undefined, { home });
+  const lockPath = resolveSandboxLockNamespace('descriptor-mode', { home }).lockPath;
   const movedPath = `${lockPath}.moved`;
   const open = fs.openSync;
   let replaced = false;

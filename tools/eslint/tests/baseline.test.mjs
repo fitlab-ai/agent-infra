@@ -343,7 +343,7 @@ test('inline ESLint comments cannot suppress either gated complexity rule', asyn
       ['max-depth-disable', '/* eslint-disable max-depth */\n', depthSource, 'max-depth'],
       ['max-depth-off', '/* eslint max-depth: "off" */\n', depthSource, 'max-depth']
     ];
-    for (const [name, comment, source, ruleId] of cases) {
+    for (const [name, comment, source] of cases) {
       writeSource(`lib/${name}.ts`, `${comment}${source}\n`);
     }
     const result = run();

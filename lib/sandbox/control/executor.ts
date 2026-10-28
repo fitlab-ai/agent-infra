@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -423,8 +423,4 @@ function readJsonExecution(filePath: string): SandboxControlExecution {
   const value = JSON.parse(fs.readFileSync(filePath, 'utf8')) as SandboxControlExecution;
   if (!value || value.requestId.length === 0) throw new Error('SANDBOX_CONTROL_EXECUTION_INVALID');
   return value;
-}
-
-export function disconnectExecutor(child: ChildProcess): void {
-  if (child.connected) child.disconnect();
 }

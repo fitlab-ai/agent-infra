@@ -2,13 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  commandResult,
   normalizeOutbound,
   outboundToText,
   replyOutbound,
   statusCard,
   streamEvent,
-	  tableMessage
 	} from '../../../lib/server/display.ts';
 import type { OutboundMessage } from '../../../lib/server/display.ts';
 
@@ -20,7 +18,7 @@ test('normalizeOutbound preserves display messages and wraps plain text', () => 
 
 test('outboundToText renders table, status, stream, and command result fallbacks', () => {
   assert.equal(
-    outboundToText(tableMessage(['name', 'state'], [['task', 'active']], 'Tasks')),
+    outboundToText({ kind: 'table', columns: ['name', 'state'], rows: [['task', 'active']], title: 'Tasks' }),
     'Tasks\nname | state\n--- | ---\ntask | active'
   );
   assert.equal(outboundToText(statusCard('Deploy', 'success', [['env', 'prod']], 'done')), 'Deploy\nenv: prod\ndone');
@@ -31,7 +29,7 @@ test('outboundToText renders table, status, stream, and command result fallbacks
     'finished ai task ls exitCode=0 signal=null'
   );
   assert.equal(
-    outboundToText(commandResult('ai task ls', 1, null, 'out', 'err')),
+    outboundToText({ kind: 'command-result', title: 'ai task ls', exitCode: 1, signal: null, stdout: 'out', stderr: 'err' }),
     'finished ai task ls exitCode=1 signal=null\nout\nerr'
 	  );
 	});

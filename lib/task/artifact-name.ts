@@ -44,12 +44,5 @@ export function parseArtifactName(name: string): { family: ArtifactFamily; round
   return { family: match[1] as ArtifactFamily, round, name };
 }
 
-export function maxArtifactRound(names: readonly string[], family: string): number {
-  return names.reduce((max, name) => {
-    const identity = parseArtifactName(name);
-    return identity?.family === family ? Math.max(max, identity.round) : max;
-  }, 0);
-}
-
 export { ARTIFACT_FAMILY_CATALOG };
 export type { ArtifactFamily, ArtifactFamilySpec };

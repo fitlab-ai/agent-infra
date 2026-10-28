@@ -12,7 +12,7 @@ import {
   removePidFileIfMatches,
   writePidRecord
 } from './process-state.ts';
-import type { PidRecord, ProcessIdentity, ProcessState } from './process-state.ts';
+import type { PidRecord, ProcessIdentity } from './process-state.ts';
 
 export { isProcessAlive } from './process-state.ts';
 

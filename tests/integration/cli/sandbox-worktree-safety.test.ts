@@ -6,14 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
-import { containerNameCandidates } from "../../../lib/sandbox/constants.ts";
+import "../../../lib/sandbox/constants.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { resolveSandboxCleanupTarget } from "../../../lib/sandbox/workspace-identity.ts";
-import {
-  clearSandboxRemovalJournalRecord,
-  listSandboxRemovalJournals,
-  removeSandboxControlRoot
-} from "../../../lib/sandbox/control/lifecycle.ts";
+import "../../../lib/sandbox/control/lifecycle.ts";
 import {
   createTempDir,
   cliArgs,
@@ -28,8 +24,6 @@ import {
 type SafetyModule = typeof import("../../../lib/sandbox/worktree-safety.ts");
 type ManagedFsModule = typeof import("../../../lib/sandbox/managed-fs.ts");
 type RmModule = typeof import("../../../lib/sandbox/removal.ts");
-type PruneModule = typeof import("../../../lib/sandbox/commands/prune.ts");
-
 const FIXTURE_CONTAINER_ID = "f".repeat(64);
 
 function statusTaskView(taskId: string | null) {
@@ -349,43 +343,6 @@ function writeTaskBoundCleanupEvidence(
       workspaceViewRoots: []
     }
   };
-}
-
-function makeCompletedUnboundDigestMismatch(config: SandboxConfig, taskId: string): void {
-  const receiptPath = path.join(taskWorkspaceRoot(config.repoRoot, config.home), "completed", taskId, ".task-finalization.json");
-  const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
-  delete receipt.controlBinding;
-  fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`, "utf8");
-  fs.writeFileSync(
-    path.join(taskWorkspaceRoot(config.repoRoot, config.home), "completed", taskId, "plan.md"),
-    "# Plan changed\n",
-    "utf8"
-  );
-}
-
-function addControlRootVariant(
-  sourceRoot: string,
-  config: SandboxConfig,
-  taskId: string,
-  container: string,
-  containerId: string
-): string {
-  const root = sandboxControlPaths({
-    base: config.controlBase,
-    project: config.project,
-    container,
-    identity: { mode: "task-bound", taskId }
-  }).root;
-  fs.cpSync(sourceRoot, root, { recursive: true });
-  const manifestPath = path.join(root, "manifest.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, any>;
-  manifest.container = container;
-  manifest.containerIdentity = { ...manifest.containerIdentity, id: containerId };
-  for (const field of ["channelDir", "publicStatusDir", "processingDir", "runtimeDir"]) {
-    manifest[field] = path.basename(manifest[field]);
-  }
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
-  return root;
 }
 
 async function cleanRmOneFixture(
@@ -1440,7 +1397,7 @@ test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("
 
     await withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
       confirm: async () => true,
-      isCancel: (value): value is typeof import("@clack/prompts").CANCEL_SYMBOL => false
+      isCancel: (_value): _value is typeof import("@clack/prompts").CANCEL_SYMBOL => false
     }));
 
     assert.equal(fs.existsSync(evidence.controlRoot), true);

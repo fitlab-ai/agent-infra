@@ -1119,44 +1119,44 @@ test("review-code risk lenses and cross-platform reference chain stay complete",
   );
 });
 
-test("review verify configs require shared review report sections", () => {
+test("review verify configs select their review schema", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
-    for (const [relativePath, sections] of [
-      [`.agents/skills/${skill}/config/verify.json`, ["检视覆盖声明", "追踪矩阵"]],
-      [`templates/.agents/skills/${skill}/config/verify.zh-CN.json`, ["检视覆盖声明", "追踪矩阵"]],
-      [`templates/.agents/skills/${skill}/config/verify.en.json`, ["Review Coverage Declaration", "Traceability Matrix"]]
-    ] as Array<[string, string[]]>) {
+    for (const relativePath of [
+                                             `.agents/skills/${skill}/config/verify.json`,
+                                             `templates/.agents/skills/${skill}/config/verify.zh-CN.json`,
+                                             `templates/.agents/skills/${skill}/config/verify.en.json`
+                                           ]) {
       assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, skill);
     }
   }
 });
 
-test("review-analysis verify configs require stage-specific coverage", () => {
-  for (const [relativePath, section] of [
-    [".agents/skills/review-analysis/config/verify.json", "需求分析专项覆盖"],
-    ["templates/.agents/skills/review-analysis/config/verify.zh-CN.json", "需求分析专项覆盖"],
-    ["templates/.agents/skills/review-analysis/config/verify.en.json", "Requirement Analysis Coverage"]
-  ] as Array<[string, string]>) {
+test("review-analysis verify configs select the analysis schema", () => {
+  for (const relativePath of [
+                                          ".agents/skills/review-analysis/config/verify.json",
+                                          "templates/.agents/skills/review-analysis/config/verify.zh-CN.json",
+                                          "templates/.agents/skills/review-analysis/config/verify.en.json"
+                                        ]) {
     assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-analysis");
   }
 });
 
-test("review-plan verify configs require architecture coverage", () => {
-  for (const [relativePath, section] of [
-    [".agents/skills/review-plan/config/verify.json", "技术方案架构覆盖"],
-    ["templates/.agents/skills/review-plan/config/verify.zh-CN.json", "技术方案架构覆盖"],
-    ["templates/.agents/skills/review-plan/config/verify.en.json", "Technical Plan Architecture Coverage"]
-  ] as Array<[string, string]>) {
+test("review-plan verify configs select the plan schema", () => {
+  for (const relativePath of [
+                                          ".agents/skills/review-plan/config/verify.json",
+                                          "templates/.agents/skills/review-plan/config/verify.zh-CN.json",
+                                          "templates/.agents/skills/review-plan/config/verify.en.json"
+                                        ]) {
     assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-plan");
   }
 });
 
-test("review-code verify configs require implementation coverage", () => {
-  for (const [relativePath, section] of [
-    [".agents/skills/review-code/config/verify.json", "代码实现专项覆盖"],
-    ["templates/.agents/skills/review-code/config/verify.zh-CN.json", "代码实现专项覆盖"],
-    ["templates/.agents/skills/review-code/config/verify.en.json", "Code Implementation Coverage"]
-  ] as Array<[string, string]>) {
+test("review-code verify configs select the code schema", () => {
+  for (const relativePath of [
+                                          ".agents/skills/review-code/config/verify.json",
+                                          "templates/.agents/skills/review-code/config/verify.zh-CN.json",
+                                          "templates/.agents/skills/review-code/config/verify.en.json"
+                                        ]) {
     assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-code");
   }
 });

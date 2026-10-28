@@ -62,21 +62,6 @@ function containsPlaceholders(src: string): boolean {
   return content.includes('{{project}}') || content.includes('{{org}}');
 }
 
-function variantExt(relativePath: string): string {
-  return path.extname(relativePath);
-}
-
-function variantBase(relativePath: string): string {
-  const ext = variantExt(relativePath);
-  return relativePath.slice(0, -ext.length);
-}
-
-function withVariant(relativePath: string, variant: string): string {
-  const ext = variantExt(relativePath);
-  const base = variantBase(relativePath);
-  return `${base}.${variant}${ext}`;
-}
-
 function stripVariant(relativePath: string, variant: string): string {
   return relativePath.replace(new RegExp(`\\.${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.`), '.');
 }

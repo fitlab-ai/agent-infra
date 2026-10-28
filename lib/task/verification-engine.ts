@@ -1,7 +1,6 @@
 // frontmatter, ledger, Git snapshot and platform domains are imported below.
 import fs from "node:fs";
 import path from "node:path";
-import process from "node:process";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -70,7 +69,6 @@ const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Review disagreement ledger (see .agents/rules/review-handshake.md).
-const LEDGER_SECTION_NAMES = ["审查分歧账本", "Review Disagreement Ledger"];
 const POST_REVIEW_COMMIT_STAGE = "post-review-commit";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
 
@@ -659,18 +657,7 @@ function checkCompletionChecklist({ taskDir, config }: any): any {
   return passResult("completion-checklist", `Completion Checklist valid (${items.length} items checked)`);
 }
 
-function resolveReviewSetting(config: any, key: any, fallback: any, repoRoot: string): any {
-  if (config && config[key] !== undefined && config[key] !== null) {
-    return config[key];
-  }
-  const reviewConfig = loadPostReviewConfig(repoRoot);
-  if (reviewConfig[key] !== undefined && reviewConfig[key] !== null) {
-    return reviewConfig[key];
-  }
-  return fallback;
-}
-
-function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
+function checkReviewLedger({ taskDir, config }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("review-ledger", task.message);
@@ -1185,13 +1172,6 @@ function normalizeContent(text: any): any {
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function interpolate(template: any, taskDir: any, artifactFile: any): any {
-  const artifactStem = artifactFile ? path.basename(artifactFile, path.extname(artifactFile)) : "";
-  return template
-    .replace(/\{task-id\}/g, path.basename(taskDir))
-    .replace(/\{artifact-stem\}/g, artifactStem);
 }
 
 function summarizeGate(checks: any): any {

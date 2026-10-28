@@ -493,10 +493,6 @@ function buildPrChangeReport(
   });
 }
 
-function reportFilePath(taskDir: string): string {
-  return path.join(taskDir, REPORT_FILE_NAME);
-}
-
 function readPrChangeReport(file: string): ValidationResult<PrChangeReport> {
   try {
     const stat = fs.lstatSync(file);
@@ -765,7 +761,6 @@ export {
   readPrChangeReport,
   renderCanonicalChangeReport,
   replaceCanonicalReportPlaceholder,
-  reportFilePath,
   runMechanicalChangeReport,
   taskIntentDigest,
   taskIntentProjection,

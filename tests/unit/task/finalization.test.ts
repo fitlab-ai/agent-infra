@@ -223,7 +223,6 @@ test('completion backfill eligibility rejects a referenced artifact symlink', on
 
 test('host finalization waits for completion backfill before lifecycle and repeats the idempotent check on replay', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -360,7 +359,6 @@ test('finalization verifies required Issue metadata independently of in-label st
 
 test('final task comment uses the warning projection after summary recovery', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -422,7 +420,6 @@ test('completed finalization does not replay lifecycle for a backfill warning', 
 test('completed finalization schedules backfill from an eligible task artifact warning', async () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# analysis\n');
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -457,7 +454,6 @@ test('completed finalization schedules backfill from an eligible task artifact w
 
 test('completed finalization fails closed when an artifact warning references a symlink', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -926,7 +922,6 @@ test('host finalization keeps a blocked terminal gate pending for a completed ta
 
 test('host finalization seals a staged summary after core verification and retains its retry input', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   const stagingPath = path.join(f.taskDir, '.delivery-summary.json');
   fs.writeFileSync(stagingPath, `${JSON.stringify({
     ...deliveryStage
@@ -960,7 +955,6 @@ test('host finalization seals a staged summary after core verification and retai
 
 test('host finalization skips terminal verification and summary when no recovery fact is pending', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -986,7 +980,6 @@ test('host finalization skips terminal verification and summary when no recovery
 
 test('host finalization records a terminal verification exception and recovers on replay', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -1112,7 +1105,6 @@ test('host finalization keeps a receipt persistence error blocked when warnings 
 
 test('host finalization reports lifecycle changes when verification and receipt persistence fail', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   const receiptDirectory = path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID);
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
@@ -1157,7 +1149,6 @@ test('host finalization reports lifecycle changes when verification and receipt 
 
 test('host finalization resolves a summary warning after a successful retry', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);
@@ -1331,7 +1322,6 @@ test('host finalization retries only the pending terminal steps after a comment 
 
 test('host finalization projects every stable warning key for a step before resolving projection', async () => {
   const f = fixture();
-  const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     ...deliveryStage
   })}\n`);

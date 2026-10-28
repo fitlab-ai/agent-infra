@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const NO_FOLLOW = fs.constants.O_NOFOLLOW ?? 0;
-const DIRECTORY = fs.constants.O_DIRECTORY ?? 0;
 
 export class SecureFileError extends Error {
   readonly code: string;
@@ -40,10 +39,6 @@ function assertNoSymlinkAncestors(candidate: string): void {
   }
 }
 
-export async function readStableFile(candidate: string, options: Readonly<{ maxBytes: number; expectedSha256?: string }>): Promise<StableFile> {
-  return readStableFileSync(candidate, options);
-}
-
 export function readStableFileSync(candidate: string, options: Readonly<{ maxBytes: number; expectedSha256?: string }>): StableFile {
   if (!path.isAbsolute(candidate)) conflict('candidate path must be absolute and terminal');
   assertNoSymlinkAncestors(candidate);
@@ -72,42 +67,5 @@ export function readStableFileSync(candidate: string, options: Readonly<{ maxByt
     throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', error instanceof Error ? error.message : String(error));
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
-  }
-}
-
-export async function writeAtomicFile(target: string, bytes: Buffer, mode = 0o600, expectedSha256?: string): Promise<void> {
-  const parent = path.dirname(target);
-  let current = path.resolve(parent);
-  while (true) {
-    let stat: fs.Stats;
-    try { stat = await fs.promises.lstat(current); }
-    catch { throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative parent directory is missing'); }
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative parent directory is not a real directory');
-    const next = path.dirname(current);
-    if (next === current) break;
-    current = next;
-  }
-  try {
-    const existing = await fs.promises.lstat(target);
-    if (existing.isSymbolicLink() || !existing.isFile()) throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative target is not a regular file');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  const temporary = path.join(parent, `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
-  let handle: fs.promises.FileHandle | undefined;
-  try {
-    handle = await fs.promises.open(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, mode);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await handle.chmod(mode);
-    await handle.close();
-    handle = undefined;
-    if (expectedSha256 !== undefined) readStableFileSync(target, { maxBytes: 1024 * 1024, expectedSha256 });
-    fs.renameSync(temporary, target);
-    const directory = await fs.promises.open(parent, fs.constants.O_RDONLY | DIRECTORY);
-    try { await directory.sync(); } finally { await directory.close(); }
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await fs.promises.rm(temporary, { force: true }).catch(() => undefined);
   }
 }

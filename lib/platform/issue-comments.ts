@@ -178,10 +178,6 @@ function renderTaskComment(content: string, taskId: string, _agent: string, lang
   return renderTaskCommentResult(content, taskId, language).body;
 }
 
-function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', _agent = 'codex'): boolean {
-  return renderTaskCommentResult(content, taskId).byteLength > COMMENT_BYTE_LIMIT;
-}
-
 function taskCommentLanguage(repoRoot: string): string {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { language?: unknown };
@@ -407,21 +403,6 @@ function chunkArtifactComment(input: {
 
 function findMarkerComments(comments: RemoteComment[], marker: string): RemoteComment[] {
   return comments.filter((comment) => normalizeCommentContent(String(comment.body || '')).split('\n', 1)[0] === marker);
-}
-
-function flattenComments(value: unknown): RemoteComment[] {
-  if (!Array.isArray(value)) return [];
-  const flattened = value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]);
-  return flattened.filter((entry): entry is RemoteComment =>
-    Boolean(entry && typeof entry === 'object' && (typeof entry.id === 'number' || typeof entry.id === 'string') && typeof entry.body === 'string')
-  );
-}
-
-function listRemoteComments(client: PlatformClient, repo: string, issue: number, cwd: string) {
-  const result = client.json<unknown>([
-    'api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`
-  ], { cwd });
-  return result.ok ? { ok: true as const, value: flattenComments(result.value) } : result;
 }
 
 function contextFields(context: PlatformResult): Partial<PlatformResult> {
@@ -1060,14 +1041,12 @@ export {
   chunkArtifactComment,
   inspectPlatformCommentOperation,
   findMarkerComments,
-  listRemoteComments,
   checkPlatformCommentOwner,
   listPlatformComments,
   normalizeCommentContent,
   renderTaskComment,
   renderTaskCommentResult,
   syncCommentPlan,
-  isTaskCommentTooLarge,
   syncPlatformComment,
   validateRelatedMarkerSet
 };

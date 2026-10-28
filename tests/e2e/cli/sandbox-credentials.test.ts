@@ -720,58 +720,12 @@ test("writeClaudeCredentialsToHost preserves Linux host credentials when rename 
   }
 });
 
-test("syncClaudeCredentialsFromKeychain writes only when destination bytes differ", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
-  const rawBlob = validBlob({ expiresAt: 123456 });
-  const writes: Array<[string, string, string]> = [];
-
-  withPlatform("darwin", () => {
-    assert.deepEqual(credentials.syncClaudeCredentialsFromKeychain("/Users/demo", "agent-infra", {
-      execFn: () => rawBlob,
-      existsFn: () => false,
-      writeFn: (home: string, project: string, blob: string) => writes.push([home, project, blob])
-    }), { status: "OK", written: true, expiresAt: 123456 });
-
-    assert.deepEqual(credentials.syncClaudeCredentialsFromKeychain("/Users/demo", "agent-infra", {
-      execFn: () => rawBlob,
-      existsFn: () => true,
-      readFn: () => rawBlob,
-      writeFn: (home: string, project: string, blob: string) => writes.push([home, project, blob])
-    }), { status: "OK", written: false, expiresAt: 123456 });
-
-    assert.deepEqual(credentials.syncClaudeCredentialsFromKeychain("/Users/demo", "agent-infra", {
-      execFn: () => rawBlob,
-      existsFn: () => true,
-      readFn: () => "old",
-      writeFn: (home: string, project: string, blob: string) => writes.push([home, project, blob])
-    }), { status: "OK", written: true, expiresAt: 123456 });
-
-    assert.equal(writes.length, 2);
-  });
-});
-
-test("syncClaudeCredentialsFromKeychain and formatRemaining handle unavailable or coarse states", async () => {
+test("formatRemaining handles unavailable or coarse states", async () => {
   const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const now = 1_700_000_000_000;
   const originalNow = Date.now;
-  let writeCalled = false;
-
   try {
     Date.now = () => now;
-    withPlatform("darwin", () => {
-      assert.deepEqual(credentials.syncClaudeCredentialsFromKeychain("/Users/demo", "agent-infra", {
-        execFn: () => {
-          throw Object.assign(new Error("missing"), {
-            stderr: Buffer.from("security: SecKeychainSearchCopyNext: The specified item could not be found.")
-          });
-        },
-        writeFn: () => {
-          writeCalled = true;
-        }
-      }), { status: "MISSING", written: false });
-      assert.equal(writeCalled, false);
-    });
-
     assert.equal(credentials.formatRemaining(null), "unknown");
     assert.equal(credentials.formatRemaining(now - 1), "EXPIRED");
     assert.equal(credentials.formatRemaining(now + 47 * 60_000), "47m");

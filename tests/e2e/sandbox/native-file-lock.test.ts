@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs';
-import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { acquireSandboxResourceLock } from '../../../lib/sandbox/control/native-file-lock.ts';

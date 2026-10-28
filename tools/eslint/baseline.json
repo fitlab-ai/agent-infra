@@ -468,15 +468,6 @@
       "count": 1
     },
     {
-      "file": "lib/process-data/sources.ts",
-      "ruleId": "complexity",
-      "stableId": "e80097023c1235f7472a8efd7813a4095d4cf50b2a6ba3a6e734b65402daaae4",
-      "displayName": "collectGitHubObjects",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/pr-review/evidence-grading.ts",
       "ruleId": "complexity",
       "stableId": "f764753156f9d30702edf3a0b71c4ced988489eef8a107031704e0aa40077056",
@@ -855,15 +846,6 @@
       "count": 1
     },
     {
-      "file": "lib/process-data/sources.ts",
-      "ruleId": "complexity",
-      "stableId": "b8d2057ba1da7b4c8ed959f41e81b7c46fe473a8fe55ca8cd1b3f653a029ccbe",
-      "displayName": "fetchRestCollection",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-sandbox.ts",
       "ruleId": "complexity",
       "stableId": "c85ceb427f81fd0c46dbd9c725cb5d83ba601fb1547d9708787b0ec58c4e57f9",
@@ -1185,15 +1167,6 @@
       "displayName": "normalizeIssue",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/process-data/normalize.ts",
-      "ruleId": "complexity",
-      "stableId": "c8f3daa0d42be18a5af9fb76a480cff4e23fa4d144f73cc81b2d23e195db2181",
-      "displayName": "normalizeObjects",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
       "count": 1
     },
     {

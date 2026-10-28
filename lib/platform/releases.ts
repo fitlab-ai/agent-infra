@@ -1,17 +1,9 @@
-import fs from 'node:fs';
-import crypto from 'node:crypto';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
 import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
 
-type ReleaseSnapshot = { tag: string; published: boolean; draft: boolean; url: string | null };
 type ReleaseOptions = { cwd?: string; client?: PlatformClient };
-
-function flattenPages(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]).filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object');
-}
 
 async function inspectPlatformRelease(tag: string, options: ReleaseOptions = {}) {
   const loaded = await resolvePlatformProviderContext({ cwd: options.cwd, client: options.client });
@@ -34,37 +26,6 @@ async function inspectPlatformRelease(tag: string, options: ReleaseOptions = {})
     };
   }
   return { ...platformResult('failed'), platform: context.platform, release: null, workflows: [], error: context.error };
-}
-
-async function upsertPlatformRelease(input: { tag: string; title?: string; notesFile?: string }, options: ReleaseOptions = {}) {
-  const inspected = await inspectPlatformRelease(input.tag, options);
-  if (inspected.release?.published) return { ...inspected, status: 'no-op' as const, changed: false, operations: [] };
-  if (inspected.status === 'blocked' || inspected.status === 'failed') return { ...inspected, changed: false, operations: [] };
-  if (!inspected.platform.repository) return { ...inspected, status: 'no-op' as const, changed: false, operations: [] };
-  const loaded = await resolvePlatformProviderContext({ cwd: options.cwd, client: options.client });
-  if (loaded.ok) {
-    let notes: { text: string; sha256: string; byteLength: number } | undefined;
-    if (input.notesFile) {
-      try {
-        const bytes = fs.readFileSync(input.notesFile);
-        notes = { text: bytes.toString('utf8'), sha256: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`, byteLength: bytes.byteLength };
-      } catch {
-        return { ...inspected, status: 'failed' as const, changed: false, operations: [{ name: 'create-release', status: 'failed' }], error: { code: 'RELEASE_NOTES_FILE_UNREADABLE', message: 'notes-file could not be read', retryable: false } };
-      }
-    }
-    const created = loaded.value.provider.releases?.create
-      ? await loaded.value.provider.releases.create({
-        context: providerOperationContext(loaded.value),
-        tag: input.tag,
-        title: input.title ?? input.tag,
-        ...(notes ? { notes } : {}),
-        mutation: { idempotencyKey: `release:create:${input.tag}` }
-      })
-      : unsupportedProviderOperation(loaded.value.provider, 'releases.create');
-    if (!created.ok) return { ...inspected, status: providerStatus(created.error), changed: false, operations: [{ name: 'create-release', status: 'failed' }], error: providerError(created.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
-    return { ...inspected, status: 'applied' as const, changed: created.value.changed, operations: [{ name: 'create-release', status: 'applied' }], error: null };
-  }
-  return { ...inspected, status: 'failed' as const, changed: false, operations: [{ name: 'create-release', status: 'failed' }], error: { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false } };
 }
 
 async function reconcileReleaseMilestones(version: string, options: ReleaseOptions = {}) {
@@ -114,4 +75,4 @@ async function reconcileReleaseMilestones(version: string, options: ReleaseOptio
   return { status: 'failed' as const, changed: false, operations: [], error: { code: 'PLATFORM_CAPABILITY_UNSUPPORTED', message: 'Release milestone reconciliation is unavailable', retryable: false } };
 }
 
-export { inspectPlatformRelease, reconcileReleaseMilestones, upsertPlatformRelease };
+export { inspectPlatformRelease, reconcileReleaseMilestones };

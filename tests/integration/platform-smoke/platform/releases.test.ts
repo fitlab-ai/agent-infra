@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-import { inspectPlatformRelease, reconcileReleaseMilestones, upsertPlatformRelease } from '../../../../lib/platform/releases.ts';
+import { inspectPlatformRelease, reconcileReleaseMilestones } from '../../../../lib/platform/releases.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { createTempDir } from '../../../helpers.ts';
 
@@ -68,16 +68,7 @@ test('release inspection requests workflow identity and ordering fields', async 
   }
 });
 
-test('release upsert is idempotent once the release is published', async () => {
-  const root = fixture();
-  try {
-    const result = await upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }) });
-    assert.equal(result.status, 'no-op');
-    assert.equal(result.changed, false);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
+
 
 test('platform-free release operations are no-op without probing GitHub', async () => {
   const root = fixture();
@@ -95,7 +86,6 @@ test('platform-free release operations are no-op without probing GitHub', async 
   };
   try {
     assert.equal((await inspectPlatformRelease('v0.8.6', { cwd: root, client: unavailable })).status, 'no-op');
-    assert.equal((await upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: unavailable })).status, 'no-op');
     assert.equal((await reconcileReleaseMilestones('0.8.6', { cwd: root, client: unavailable })).status, 'no-op');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

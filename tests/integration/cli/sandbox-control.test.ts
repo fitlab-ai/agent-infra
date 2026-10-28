@@ -4,9 +4,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import test, { type TestContext } from 'node:test';
+import test from 'node:test';
 import {
-  recoverSandboxControl,
   recoverSandboxControlFromChannel,
   requestSandboxControl,
   SandboxControlClientError,
@@ -25,7 +24,7 @@ import {
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { prepareSandboxControlExecution, type PreparedSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
+import '../../../lib/sandbox/control/executor.ts';
 import {
   atomicWriteJson,
   createSandboxControlTerminalResult,
@@ -46,7 +45,7 @@ import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { createLocalTask } from '../../../lib/task/create.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
-import { serializeTaskFinalizationEnvelope } from '../../../lib/task/finalization-envelope.ts';
+import '../../../lib/task/finalization-envelope.ts';
 import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
 import { createTempDir, onPlatforms } from '../../helpers.ts';
 import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/sandbox/environment.ts';
@@ -81,45 +80,6 @@ function waitForAbsent(filePath: string, timeoutMs: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   throw new Error(`Timed out waiting for ${filePath} to disappear`);
-}
-
-async function waitForReceiptLifecycleDoneAsync(root: string, taskId: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(taskWorkspaceRoot(root),  state, taskId, '.task-finalization.json'));
-  while (Date.now() < deadline) {
-    try {
-      if (receiptPaths.some((receiptPath) => { try { return (JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as { lifecycle?: unknown }).lifecycle === 'done'; } catch { return false; } })) return;
-    } catch {
-      // The receipt may still be between atomic updates.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`Timed out waiting for completed finalization receipt for ${taskId}`);
-}
-
-async function waitForReceiptTerminalAsync(root: string, taskId: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  const receiptPaths = ['active', 'completed', 'blocked'].map((state) => path.join(taskWorkspaceRoot(root),  state, taskId, '.task-finalization.json'));
-  while (Date.now() < deadline) {
-    try {
-      const receiptPath = receiptPaths.find((candidate) => fs.existsSync(candidate));
-      if (!receiptPath) throw new Error('receipt not found');
-      const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as {
-        lifecycle?: unknown;
-        taskComment?: unknown;
-        verification?: unknown;
-        warningProjection?: unknown;
-      };
-      if (receipt.lifecycle === 'done'
-        && receipt.taskComment !== 'pending'
-        && receipt.verification !== 'pending'
-        && receipt.warningProjection === 'done') return;
-    } catch {
-      // The receipt may still be between atomic updates.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`Timed out waiting for terminal finalization receipt for ${taskId}`);
 }
 
 function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
@@ -189,25 +149,6 @@ async function waitForResultEvidenceAsync(processingDir: string, timeoutMs: numb
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for result evidence in ${processingDir}`);
-}
-
-function observeResultEvidence(t: TestContext, processingDir: string): Promise<{ requestId: string; resultPath: string }> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timed out waiting for result read-back')), SANDBOX_CONTROL_TEST_TIMEOUT_MS);
-    t.after(() => clearTimeout(timer));
-    const readFile = fs.readFileSync;
-    const observer = t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
-      const contents = readFile(...args);
-      const resultPath = String(args[0]);
-      if (path.basename(resultPath) === 'result.json' && path.dirname(path.dirname(resultPath)) === processingDir) {
-        observer.mock.restore();
-        clearTimeout(timer);
-        // Resume after the broker records the read-back, before its next publication tick.
-        resolve({ requestId: path.basename(path.dirname(resultPath)), resultPath });
-      }
-      return contents;
-    });
-  });
 }
 
 type CollectedChild = {
@@ -1060,7 +1001,7 @@ for (const removalFails of [false, true]) {
       waitForFile(brokerReadyPath, 5_000);
       waitForFile(executionReadyPath, 5_000);
       const branch = initializeRepository(root);
-      const manifestPath = writeControlManifest(root, branch, 'remove-stages-generation');
+      writeControlManifest(root, branch, 'remove-stages-generation');
       const brokerStartTime = getProcessStartTime(brokerProcess.pid!);
       const executionStartTime = getProcessStartTime(executionProcess.pid!);
       assert.ok(brokerStartTime);
@@ -2430,7 +2371,7 @@ test('broker recovery returns inspectable task-create output when the payload is
     const manifest = readSandboxControlManifest(manifestPath);
     const processingDirectory = path.join(manifest.processingDir, requestId);
     fs.mkdirSync(processingDirectory, { recursive: true });
-    const issuedAt = Date.now() - 1_000;
+    Date.now() - 1_000;
     const candidate = {
       version: 1 as const,
       idempotencyKey: '12345678-1234-4123-8123-123456789abc',
@@ -2515,7 +2456,7 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
     const processingDirectory = path.join(manifest.processingDir, requestId);
     fs.mkdirSync(processingDirectory, { recursive: true });
     fs.mkdirSync(path.join(manifest.channelDir, 'responses'), { recursive: true });
-    const issuedAt = Date.now() - 1_000;
+    Date.now() - 1_000;
     const candidate = {
       version: 1 as const,
       idempotencyKey: '12345678-1234-4123-8123-123456789abc',

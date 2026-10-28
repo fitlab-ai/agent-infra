@@ -13,7 +13,6 @@ import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.t
 import { upsertSection } from "../../../lib/task/sections.ts";
 import {
   buildTaskContent,
-  buildTaskFrontmatter,
   formatTimestamp,
   parseValidatorPayload,
   runValidator,

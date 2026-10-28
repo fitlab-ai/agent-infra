@@ -28,7 +28,7 @@ function renderPlaceholders(content: string, replacements: Replacements): string
     .replace(/\{\{org\}\}/g, replacements.org);
 }
 
-function buildCommandSyncFiles(project: string): [string, string][] {
+function buildCommandSyncFiles(): [string, string][] {
   const managedSkills = listSkillNames().filter((skill) =>
     exists(`templates/.agents/skills/${skill}/SKILL.en.md`) ||
     exists(`templates/.agents/skills/${skill}/SKILL.zh-CN.md`) ||

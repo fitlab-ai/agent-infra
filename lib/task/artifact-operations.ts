@@ -124,7 +124,7 @@ function diagnostic(
   return { code, message, sectionId, line };
 }
 
-function sectionHeadings(schema: ArtifactSchema, section: ArtifactSection): readonly string[] {
+function sectionHeadings(section: ArtifactSection): readonly string[] {
   return [section.headings.zh, section.headings.en];
 }
 
@@ -152,7 +152,7 @@ function inspectArtifactStructure(
 
   const headingsBySection = new Map<string, typeof scanned.headings>();
   for (const section of schema.sections) {
-    const aliases = sectionHeadings(schema, section);
+    const aliases = sectionHeadings(section);
     const exact = scanned.headings.filter((heading) => heading.level === 2 && aliases.includes(heading.text));
     const punctuated = scanned.headings.filter((heading) => heading.level === 2 && aliases.some((alias) => heading.text === `${alias}:` || heading.text === `${alias}：`));
     headingsBySection.set(section.id, exact.length > 0 ? exact : punctuated);
@@ -283,7 +283,7 @@ function inspectArtifactStateCheck(
 
   const scanned = scanVisibleMarkdown(content);
   const headings = scanned.headings.filter((heading) => (
-    heading.level === 2 && sectionHeadings(schema, stateCheck).includes(heading.text)
+    heading.level === 2 && sectionHeadings(stateCheck).includes(heading.text)
   ));
   if (headings.length !== 1) {
     return { ok: true, family: schema.family, semanticDigest: canonicalSemanticDigest(content), diagnostics: [] };

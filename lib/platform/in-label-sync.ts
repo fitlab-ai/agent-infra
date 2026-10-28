@@ -182,16 +182,6 @@ function flattenPages(value: unknown): unknown[] {
   return value.flatMap((page) => Array.isArray(page) ? page : [page]);
 }
 
-function extractRepositoryLabelNames(value: unknown): string[] {
-  return flattenPages(value).flatMap((entry) => {
-    if (typeof entry === 'string') return [entry];
-    if (entry && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string') {
-      return [(entry as { name: string }).name];
-    }
-    return [];
-  }).filter(Boolean).sort();
-}
-
 function extractPullRequestFileNames(value: unknown): string[] | null {
   const entries = flattenPages(value);
   if (!Array.isArray(value) || entries.some((entry) => !entry || typeof entry !== 'object')) return null;
@@ -200,20 +190,14 @@ function extractPullRequestFileNames(value: unknown): string[] | null {
   return [...new Set(names as string[])].sort();
 }
 
-function resourceSnapshot(kind: InLabelResource['kind'], number: number, labels: readonly string[]): InLabelResource {
-  return { kind, number, labels: [...labels].sort() };
-}
-
 export {
   extractPullRequestFileNames,
-  extractRepositoryLabelNames,
   flattenPages,
   inLabels,
   inLabelMappingDigest,
   labelDelta,
   mergeInLabels,
   planInLabelUpdate,
-  resourceSnapshot,
   syncLabelDelta,
   validateInLabelMapping,
   validateRepositoryLabelPayload

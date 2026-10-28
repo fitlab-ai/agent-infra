@@ -5,9 +5,8 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
 
-import { createTempDir, loadFreshEsm, onPlatforms, read, supportsPosixModeBits } from "../../helpers.ts";
+import { createTempDir, loadFreshEsm, onPlatforms, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {

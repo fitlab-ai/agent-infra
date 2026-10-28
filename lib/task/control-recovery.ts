@@ -73,8 +73,6 @@ function bindingMatchesResult(binding: ControlRecoveryBinding, result: Readonly<
 }
 
 function domainEvidenceMatches(
-  operation: ControlRecoveryOperation,
-  result: Readonly<Record<string, unknown>>,
   domain: Readonly<Record<string, unknown>> | null | undefined
 ): boolean {
   if (!domain) return false;
@@ -109,7 +107,7 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
   if (result.changed === null) {
     return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_CHANGE_FLAG_MISSING' };
   }
-  if (!domainEvidenceMatches(input.operation, result, input.domain)) {
+  if (!domainEvidenceMatches(input.domain)) {
     if (input.journal?.exists && (input.journal.completedSteps?.length ?? 0) > 0) {
       return { outcome: 'in-progress', responseReconstructable: false, reasonCode: 'RECOVERY_DOMAIN_EVIDENCE_INCOMPLETE' };
     }

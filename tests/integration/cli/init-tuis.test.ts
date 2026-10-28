@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { createTempDir, CLI_PATH, cliArgs } from "../../helpers.ts";
+import { createTempDir, cliArgs } from "../../helpers.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 function canonical(enabled: readonly string[]) {

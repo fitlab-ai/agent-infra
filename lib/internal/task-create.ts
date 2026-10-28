@@ -11,7 +11,6 @@ import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../task
 import {
   createTask,
   parseTaskCreateResult,
-  projectTaskCreateResult,
   taskCreateExitCode,
   taskCreateFailure,
   type TaskCreateControl,

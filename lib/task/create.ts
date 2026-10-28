@@ -59,7 +59,6 @@ function payloadError(message: string): never {
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string, optional: readonly string[] = []): void {
   const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
   const allowed = new Set([...expected, ...optional]);
   if (actual.some((key) => !allowed.has(key))) {
     payloadError(`${label} has unknown or missing fields`);
@@ -168,10 +167,6 @@ function formatTimestamp(date: Date): string {
 function taskIdFor(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `TASK-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
-}
-
-function yamlString(value: string): string {
-  return JSON.stringify(value);
 }
 
 function markdownBlock(value: string): string {

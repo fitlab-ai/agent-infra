@@ -7,7 +7,7 @@ import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
-import type { PlatformOperation, PlatformResult } from './types.ts';
+import type { PlatformResult } from './types.ts';
 import {
   providerError,
   providerOperationContext,

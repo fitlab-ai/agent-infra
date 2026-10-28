@@ -4,7 +4,6 @@ import type {
   ProviderError,
   ProviderOperationContext,
   PlatformProvider,
-  ProviderResult,
   ResourceIdentity
 } from './provider-contract.ts';
 import {

@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 export type DeliveryTarget = Readonly<{
   remote: string;
@@ -82,49 +81,10 @@ function resolveDeliveryTarget(
   return bindDeliveryTarget({ defaults: defaults.value, existing, explicit });
 }
 
-function gitText(repoRoot: string, args: readonly string[]): string {
-  return execFileSync('git', [...args], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
-  }).trim();
-}
-
-function resolveTargetHead(repoRoot: string, target: DeliveryTarget): DeliveryTargetResult & { head?: string } {
-  try {
-    const output = gitText(repoRoot, ['ls-remote', '--refs', target.remote, `refs/heads/${target.baseRef}`]);
-    const head = output.split(/\s+/)[0] ?? '';
-    if (!/^[a-f0-9]{40}$/i.test(head)) {
-      return { ok: false, code: 'DELIVERY_TARGET_UNAVAILABLE', message: `Delivery target ${target.remote}/${target.baseRef} is unavailable` };
-    }
-    try { gitText(repoRoot, ['cat-file', '-e', `${head}^{commit}`]); }
-    catch {
-      return { ok: false, code: 'DELIVERY_TARGET_OBJECT_MISSING', message: `Delivery target commit ${head} is not available locally` };
-    }
-    return { ok: true, value: target, head };
-  } catch (error) {
-    return { ok: false, code: 'DELIVERY_TARGET_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-function resolveDiffBase(repoRoot: string, reviewedHead: string, targetHead: string): DiffBaseResult {
-  try {
-    const diffBase = gitText(repoRoot, ['merge-base', reviewedHead, targetHead]);
-    if (!/^[a-f0-9]{40}$/i.test(diffBase)) {
-      return { ok: false, code: 'DELIVERY_DIFF_BASE_UNAVAILABLE', message: 'Git returned an invalid diff base' };
-    }
-    return { ok: true, diffBase };
-  } catch (error) {
-    return { ok: false, code: 'DELIVERY_DIFF_BASE_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 export {
   bindDeliveryTarget,
   readDeliveryDefaults,
   resolveDeliveryTarget,
-  resolveTargetHead,
-  resolveDiffBase,
   validateBaseRef,
   validateRemote
 };

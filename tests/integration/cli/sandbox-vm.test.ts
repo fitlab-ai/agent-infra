@@ -11,7 +11,7 @@ import {
   loadFreshEsm,
   onPlatforms
 } from "../../helpers.ts";
-import { runVerbose } from "../../../lib/sandbox/shell.ts";
+import "../../../lib/sandbox/shell.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 type AdapterModule<T extends string> = Record<`${T}Adapter`, SandboxAdapterFixture>;
@@ -42,7 +42,6 @@ type SandboxEngineModule = {
   ensureDocker(config: Record<string, unknown>, onMessage: ((message: string) => void) | null, deps?: Record<string, unknown>): Promise<void>;
   startManagedVm(config: Record<string, unknown>, deps?: Record<string, unknown>): string;
   stopManagedVm(config: Record<string, unknown>, deps?: Record<string, unknown>): string;
-  isVmManaged(config?: Record<string, unknown>, deps?: Record<string, unknown>): boolean;
   engineDisplayName(engine: string): string;
 };
 type NativeModule = AdapterModule<"native"> & {
@@ -760,14 +759,8 @@ test("stopManagedVm does not change the current Docker context", async () => {
   }
 });
 
-test("isVmManaged and engineDisplayName describe supported engines", async () => {
+test("engineDisplayName describes supported engines", async () => {
   const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
-  const macDependencies = { platformFn: () => "darwin" };
-
-  assert.equal(sandboxEngine.isVmManaged({ engine: "colima" }, macDependencies), true);
-  assert.equal(sandboxEngine.isVmManaged({ engine: "orbstack" }, macDependencies), true);
-  assert.equal(sandboxEngine.isVmManaged({ engine: "docker-desktop" }, macDependencies), false);
-  assert.equal(sandboxEngine.isVmManaged({}, { platformFn: () => "win32" }), true);
   assert.equal(sandboxEngine.engineDisplayName("orbstack"), "OrbStack");
   assert.equal(sandboxEngine.engineDisplayName("docker-desktop"), "Docker Desktop");
   assert.equal(sandboxEngine.engineDisplayName("wsl2"), "WSL2");

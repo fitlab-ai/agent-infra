@@ -3,7 +3,7 @@ import path from 'node:path';
 import { loadServerConfig } from '../server/config.ts';
 import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from '../sandbox/workspace-identity.ts';
 import { createRunId, runInSandbox, type SandboxRunMetadata } from '../sandbox/capture.ts';
-import { loadShortIdByTaskId, normalizeShortIdInput } from '../task/short-id.ts';
+import { normalizeShortIdInput } from '../task/short-id.ts';
 import { resolveProjectTaskWorkspaceRoot } from '../task/workspace-root.ts';
 import { buildTuiCommand, renderPrompt, selectTui } from './tui.ts';
 import { getSkillRunSpec } from './skills.ts';

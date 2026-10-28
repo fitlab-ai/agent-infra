@@ -12,7 +12,6 @@ import {
   initIsolatedGitRepo,
   onPlatforms,
   pathWithPrependedBin,
-  read,
   writeNodeCommandShim
 } from "../../helpers.ts";
 import {

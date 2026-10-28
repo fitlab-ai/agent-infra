@@ -61,13 +61,6 @@ type SandboxCreateModule = {
   writeGpgCache(home: string, project: string, pub: Buffer, sec: Buffer, fingerprint: string, signingKey?: string): boolean;
 };
 
-function required<T>(value: T | undefined, message = "expected value"): T {
-  if (value === undefined) {
-    throw new Error(message);
-  }
-  return value;
-}
-
 const managedGitHubConfig = [
   "[credential]",
   "\thelper = !gh auth git-credential",

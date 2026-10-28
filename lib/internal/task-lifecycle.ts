@@ -6,7 +6,6 @@ import {
 } from '../task/control-authority.ts';
 import { lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
-import type { TaskLifecycleResult } from '../task/lifecycle.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { loadSandboxControlLocation } from '../sandbox/config.ts';
 

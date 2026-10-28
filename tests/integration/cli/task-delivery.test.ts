@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
-import { sha256File } from '../../../lib/task/artifact-receipts.ts';
+import '../../../lib/task/artifact-receipts.ts';
 import { deliverTaskBranch } from '../../../lib/task/delivery.ts';
 import { createTempDir } from '../../helpers.ts';
 

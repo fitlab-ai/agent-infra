@@ -4,8 +4,6 @@ import assert from 'node:assert/strict';
 import {
   MANUAL_VALIDATION_EVIDENCE_SCHEMA,
   createManualValidationEvidence,
-  manualValidationEvidenceDigest,
-  validateManualValidationEvidence
 } from '../../../lib/task/manual-validation-evidence.ts';
 
 const baseInput = {
@@ -30,34 +28,4 @@ test('manual-validation evidence creates the current allowlisted envelope', () =
   assert.equal(evidence.mode, 'branch-only');
   assert.equal(evidence.taskId, null);
   assert.equal(evidence.recoverable, false);
-  assert.deepEqual(validateManualValidationEvidence(evidence), { ok: true, value: evidence });
-  assert.match(manualValidationEvidenceDigest(evidence), /^[a-f0-9]{64}$/);
-  assert.deepEqual(validateManualValidationEvidence(evidence, {
-    taskId: null,
-    branch: evidence.branch,
-    commit: evidence.commit
-  }), { ok: true, value: evidence });
-});
-
-test('manual-validation evidence rejects unknown fields and stale identity', () => {
-  const evidence = createManualValidationEvidence({ ...baseInput, mode: 'task-bound', taskId: 'TASK-20260910-000001', recoverable: true });
-  const withUnknown = { ...evidence, transcript: '/private/path' };
-  const invalid = validateManualValidationEvidence(withUnknown);
-  assert.equal(invalid.ok, false);
-  if (!invalid.ok) assert.equal(invalid.error.code, 'MANUAL_VALIDATION_EVIDENCE_INVALID');
-
-  const mismatch = validateManualValidationEvidence(evidence, {
-    taskId: 'TASK-20260910-000002',
-    branch: evidence.branch,
-    commit: evidence.commit
-  });
-  assert.equal(mismatch.ok, false);
-  if (!mismatch.ok) assert.equal(mismatch.error.code, 'MANUAL_VALIDATION_EVIDENCE_IDENTITY_MISMATCH');
-});
-
-test('manual-validation evidence rejects unsuccessful validation results', () => {
-  const evidence = createManualValidationEvidence({ ...baseInput, exitCode: 1 });
-  const result = validateManualValidationEvidence(evidence);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.error.code, 'MANUAL_VALIDATION_EVIDENCE_UNSUCCESSFUL');
 });

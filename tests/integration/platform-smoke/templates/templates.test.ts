@@ -300,7 +300,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/hooks/check-version-format.sh", "templates/.agents/hooks/check-version-format.sh"],
     [".agents/hooks/auto-resume.sh", "templates/.agents/hooks/auto-resume.sh"],
     [".codex/hooks.json", "templates/.codex/hooks.json"],
-    ...buildCommandSyncFiles(project),
+    ...buildCommandSyncFiles(),
     ...referenceSyncFiles
   ];
 
@@ -343,9 +343,6 @@ test("Claude command disable-model-invocation settings match command frequency",
 });
 
 test("project-local commands are not distributed through templates", () => {
-  const collaborator = JSON.parse(read(".agents/.airc.json"));
-  const project = collaborator.project;
-
   projectLocalCommands.forEach((command) => {
     [
       `.claude/commands/${command}.md`,

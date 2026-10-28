@@ -57,12 +57,7 @@ import {
   runSandboxHooks,
   runBoundedSandboxHookCommand
 } from '../agent-client-reconciler.ts';
-import {
-  resolveTools,
-  tmpfsSeedStagingPath,
-  tmpfsSeedTargetPath,
-  toolConfigDirCandidates
-} from '../tools.ts';
+import { tmpfsSeedStagingPath, tmpfsSeedTargetPath, toolConfigDirCandidates } from '../tools.ts';
 import type { SandboxTool, TmpfsSeedEntry } from '../tools.ts';
 import {
   assertFreshSandboxReady,
@@ -149,7 +144,6 @@ const MANAGED_GITHUB_GIT_CONFIG = [
 ];
 
 type SandboxCreateConfig = ReturnType<typeof loadConfig>;
-type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
 type ResolvedTool = { tool: SandboxTool; dir: string };
 type TmpfsSeedPlanEntry = TmpfsSeedEntry & {
   volumeArgs: string[];
@@ -169,7 +163,6 @@ type EngineRunSafeFn = EngineRunFn;
 type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
 type DirectRunFn = (cmd: string, args: string[], opts?: { cwd?: string }) => string;
 type DirectRunSafeFn = DirectRunFn;
-type DirectRunVerboseFn = (cmd: string, args: string[], opts?: { cwd?: string }) => void;
 type HostShellConfig = {
   hostDir: string;
   mounts: Array<{ hostPath: string; containerPath: string }>;

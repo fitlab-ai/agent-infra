@@ -15,7 +15,7 @@ import {
 } from '../../../../lib/task/commit-intent.ts';
 import { checkpointCommitMatches } from '../../../../lib/task/commit-identity.ts';
 
-function intent(root: string): CheckpointIntent {
+function intent(): CheckpointIntent {
   return {
     version: 1,
     taskId: 'TASK-20260101-000001',
@@ -43,7 +43,7 @@ test('checkpoint intent is atomically persisted and removed after synchronizatio
   const taskDir = path.join(root, 'TASK-20260101-000001');
   try {
     fs.mkdirSync(taskDir);
-    const value = intent(root);
+    const value = intent();
     writeCheckpointIntent(taskDir, value);
     assert.equal(fs.existsSync(intentPath(taskDir)), true);
     assert.deepEqual(readCheckpointIntent(taskDir, value.taskId), value);
@@ -62,7 +62,7 @@ test('checkpoint intent rejects a task directory mismatch and inconsistent state
   try {
     fs.mkdirSync(taskDir);
     fs.mkdirSync(otherDir);
-    const value = intent(root);
+    const value = intent();
     assert.throws(() => writeCheckpointIntent(otherDir, value), /COMMIT_INTENT_INVALID/);
     fs.writeFileSync(intentPath(taskDir), JSON.stringify({ ...value, state: 'committed' }));
     assert.throws(() => readCheckpointIntent(taskDir, value.taskId), /COMMIT_INTENT_INVALID/);
@@ -77,7 +77,7 @@ test('checkpoint intent rejects a symlink at its task-local path', onPlatforms('
   try {
     fs.mkdirSync(taskDir);
     const external = path.join(root, 'external.json');
-    fs.writeFileSync(external, JSON.stringify(intent(root)));
+    fs.writeFileSync(external, JSON.stringify(intent()));
     fs.symlinkSync(external, intentPath(taskDir));
     assert.throws(() => readCheckpointIntent(taskDir, 'TASK-20260101-000001'), /COMMIT_INTENT_INVALID/);
   } finally {
@@ -104,7 +104,7 @@ test('checkpoint commit identity requires parent, tree, subject, and changed pat
     git('commit', '-q', '-m', 'checkpoint');
     const head = git('rev-parse', 'HEAD');
     const base: CheckpointIntent = {
-      ...intent(root),
+      ...intent(),
       expectedHead,
       expectedTree,
       paths: ['tracked.txt'],
@@ -112,7 +112,7 @@ test('checkpoint commit identity requires parent, tree, subject, and changed pat
       committedHead: head,
       state: 'synced',
       digest: checkpointIntentDigest({
-        ...intent(root), expectedHead, expectedTree, paths: ['tracked.txt'], message: 'checkpoint'
+        ...intent(), expectedHead, expectedTree, paths: ['tracked.txt'], message: 'checkpoint'
       })
     };
     assert.equal(checkpointCommitMatches(root, base, head), true);

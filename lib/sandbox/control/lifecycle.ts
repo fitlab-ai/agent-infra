@@ -573,21 +573,6 @@ export function advanceSandboxRemovalJournalPhase(
   }
 }
 
-export function advanceSandboxRemovalJournalToPhase(
-  journal: SandboxRemovalJournal,
-  phase: SandboxRemovalJournalPhase,
-  resourceLock: SandboxResourceLock
-): SandboxRemovalJournal {
-  let current = journal;
-  while (phaseIndex(current.phase) < phaseIndex(phase)) {
-    const next = current.phase === 'target-committed' && phase === 'container-absent'
-      ? phase : SANDBOX_REMOVAL_JOURNAL_PHASES[phaseIndex(current.phase) + 1];
-    if (!next) throw new Error('SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID');
-    current = advanceSandboxRemovalJournalPhase(current, next, { resourceLock });
-  }
-  return current;
-}
-
 async function awaitWithDeadline<T>(
   operation: () => Promise<T>,
   deadlineAt: number,

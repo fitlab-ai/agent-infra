@@ -67,18 +67,8 @@ function assertGitWorktreeBinding(
   return worktree;
 }
 
-function assertGitRepositoryBinding(stateRoot: string, worktreeRoot: string): GitWorktreeIdentity {
-  const state = resolveGitWorktreeIdentity(stateRoot);
-  const worktree = resolveGitWorktreeIdentity(worktreeRoot);
-  if (!sameFilesystemEntry(state.commonDir, worktree.commonDir)) {
-    throw new Error('SANDBOX_CONTROL_WORKTREE_INVALID: state and worktree roots have different Git common directories');
-  }
-  return worktree;
-}
-
 export {
   assertGitWorktreeBinding,
-  assertGitRepositoryBinding,
   normalizeCanonicalPath,
   resolveGitWorktreeIdentity,
   sameFilesystemEntry

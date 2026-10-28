@@ -91,13 +91,6 @@ function isHumanCountField(field: string): boolean {
   return fieldNumber(field, 'manual-validation') !== undefined || fieldNumber(field, 'human-decision') !== undefined;
 }
 
-// A step is human-executed when its agent token is not a known AI token.
-// Known long names classify as AI; empty or unknown tokens classify as non-AI
-// (human).
-export function isHumanAgent(agent: string): boolean {
-  return classifyAgent(agent).status !== 'ai';
-}
-
 // Fold the two human counts into a review row's verdict NOTE: comma-joined, right
 // after the blockers/major/minor list and before the ` → artifact` link, mirroring
 // the review count line. Review done notes already carry `Manual-validation` as a

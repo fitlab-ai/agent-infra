@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ARTIFACT_FAMILY_CATALOG, artifactName, maxArtifactRound, parseArtifactName } from '../../../lib/task/artifact-name.ts';
+import { ARTIFACT_FAMILY_CATALOG, artifactName, parseArtifactName } from '../../../lib/task/artifact-name.ts';
 
 test('artifact identities round-trip across every supported family', () => {
   for (const { family } of ARTIFACT_FAMILY_CATALOG) {
@@ -16,9 +16,4 @@ test('artifact identities round-trip across every supported family', () => {
   for (const name of ['../analysis.md', 'nested/analysis.md', 'nested\\analysis.md', 'unknown.md', 'Analysis.md', 'analysis-r2.md\n']) {
     assert.equal(parseArtifactName(name), null);
   }
-});
-
-test('maximum artifact round ignores other families and noncanonical names', () => {
-  assert.equal(maxArtifactRound([], 'analysis'), 0);
-  assert.equal(maxArtifactRound(['analysis.md', 'analysis-r2.md', 'analysis-r099.md', 'analysis-r9007199254740992.md', 'review-code-r9.md'], 'analysis'), 2);
 });

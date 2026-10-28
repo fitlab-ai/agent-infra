@@ -188,7 +188,6 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
   const taskViewEffect = taskViewEffectForRequest(request);
   const hostGeneration = preflight(statusDir, taskViewEffect);
-  const identityPath = path.join(statusDir, 'identity.json');
   if (fs.existsSync(statusDir)) {
     const identity = readSandboxControlIdentitySentinel(statusDir);
     const requestTask = canonicalRequestTask(request);

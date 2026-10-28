@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { applyTaskLifecycle, inspectTaskLifecycleProgress, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
+import { applyTaskLifecycle, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
-import { createTempDir, createTaskWorkspaceFixture, supportsPosixModeBits } from '../../helpers.ts';
+import { createTaskWorkspaceFixture, supportsPosixModeBits } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {

@@ -1,4 +1,3 @@
-import { normalizePullRequest, type RemotePullRequest } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -262,48 +261,6 @@ function expectedHead(repository: string, head: string): { repository: string; r
   if (colon === -1) return { repository, ref: head };
   const repoName = repository.split('/')[1] || '';
   return { repository: `${head.slice(0, colon)}/${repoName}`, ref: head.slice(colon + 1) };
-}
-
-function selectPullRequest(remotes: RemotePullRequest[], repository: string, head: string, base: string, expectedSha?: string):
-  | { status: 'resolved'; pullRequest: PullRequestSnapshot }
-  | { status: 'missing' | 'ambiguous' | 'head-mismatch'; pullRequest: null } {
-  const wanted = expectedHead(repository, head);
-  const matches = remotes.flatMap((remote) => {
-    const normalized = normalizePullRequest(remote, repository);
-    return normalized && normalized.state === 'open' && normalized.head.repository === wanted.repository &&
-      normalized.head.ref === wanted.ref && normalized.base.repository === repository && normalized.base.ref === base
-      ? [normalized] : [];
-  });
-  if (expectedSha && matches.some((match) => match.head.sha !== expectedSha)) {
-    return { status: 'head-mismatch', pullRequest: null };
-  }
-  if (matches.length === 1) return { status: 'resolved', pullRequest: matches[0]! };
-  return { status: matches.length === 0 ? 'missing' : 'ambiguous', pullRequest: null };
-}
-
-function validateBoundPullRequest(
-  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
-  pullRequest: PullRequestSnapshot | null,
-  head: string,
-  baseRef: string,
-  expectedSha: string
-): { ok: true } | { ok: false; error: { code: string; message: string; retryable: boolean } } {
-  if (!pullRequest) return {
-    ok: false,
-    error: { code: 'PR_BIND_RECHECK_FAILED', message: 'Bound pull request identity is unavailable', retryable: false }
-  };
-  const wanted = expectedHead(base.context.platform.repository!, head);
-  if (
-    pullRequest.head.repository !== wanted.repository
-    || pullRequest.head.ref !== wanted.ref
-    || pullRequest.head.sha !== expectedSha
-    || pullRequest.base.repository !== base.context.platform.repository
-    || pullRequest.base.ref !== baseRef
-  ) return {
-    ok: false,
-    error: { code: 'PR_BIND_IDENTITY_MISMATCH', message: 'Bound pull request identity does not match the current expected head/base', retryable: false }
-  };
-  return { ok: true };
 }
 
 type BindingIdentityOptions = {
@@ -1173,7 +1130,7 @@ async function createPlatformPullRequestImpl(taskRef: string, options: CreateOpt
     }), PRECONDITION_NOT_CREATED);
   }
   try {
-    return await createExternalPullRequest(taskRef, options, base);
+    return await createExternalPullRequest(options, base);
   } catch (error) {
     return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
       platform: base.context.platform,
@@ -1248,7 +1205,6 @@ async function createPlatformPullRequest(taskRef: string, options: CreateOptions
 }
 
 async function createExternalPullRequest(
-  taskRef: string,
   options: CreateOptions,
   base: Extract<Awaited<ReturnType<typeof resolvedContext>>, { ok: true }>
 ): Promise<PullRequestResult> {
@@ -1669,6 +1625,6 @@ async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOpt
   }
 }
 
-export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, recoverCreatedPullRequest, resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, selectPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
+export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, recoverCreatedPullRequest, resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
 export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SkipFactOptions, SyncOptions };
 export { warningResultForPrimary };

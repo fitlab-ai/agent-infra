@@ -44,10 +44,6 @@ export type TaskControlOperation =
 
 export type TaskControlDispatchResult = TaskLifecycleResult | TaskFinalizationResult;
 
-export function taskControlOperationKey(operation: TaskControlOperation): string {
-  return operation.family === 'task-finalization' ? 'complete' : operation.request.intent;
-}
-
 export type TaskLifecycleControlRequest = TaskLifecycleRequest;
 
 function invalidContext(message: string): never {
@@ -283,11 +279,6 @@ function parseValues(
 function value(values: Record<string, string | boolean>, flag: string): string | undefined {
   const current = values[flag];
   return typeof current === 'string' ? current : undefined;
-}
-
-function required(values: Record<string, string | boolean>, flags: readonly string[]): void {
-  const missing = flags.find((flag) => value(values, flag) === undefined);
-  if (missing) operationInvalid(`option '${missing}' is required`);
 }
 
 export function parseTaskControlOperation(

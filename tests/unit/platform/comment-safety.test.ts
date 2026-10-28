@@ -3,9 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   CONTROL_MARKER_PATTERN,
-  escapeHtmlAttribute,
   escapeHtmlText,
-  escapeMarkdownLiteral,
   renderSafeCodeFence,
   sanitizeMarkdownDocument,
   splitDocumentPlaceholder
@@ -76,6 +74,4 @@ test('splits exactly one canonical placeholder only when it is outside fences an
 
 test('escapes HTML, attributes, and Markdown literal values', () => {
   assert.equal(escapeHtmlText(`<x a="b"> & 'q'`), '&lt;x a=&quot;b&quot;&gt; &amp; &#39;q&#39;');
-  assert.equal(escapeHtmlAttribute(`a"b'&<>`), 'a&quot;b&#39;&amp;&lt;&gt;');
-  assert.equal(escapeMarkdownLiteral('a *b* [c] <d>'), 'a \\*b\\* \\[c\\] \\<d\\>');
 });

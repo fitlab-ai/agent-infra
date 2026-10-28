@@ -67,16 +67,8 @@ export function containerNameCandidates(config: Pick<SandboxPathConfig, 'contain
   return safeNameCandidates(branch).map((name) => `${config.containerPrefix}-${name}`);
 }
 
-export function worktreeDir(config: Pick<SandboxPathConfig, 'worktreeBase'>, branch: string): string {
-  return hostJoin(config.worktreeBase, sanitizeBranchName(branch));
-}
-
 export function worktreeDirCandidates(config: Pick<SandboxPathConfig, 'worktreeBase'>, branch: string): string[] {
   return safeNameCandidates(branch).map((name) => hostJoin(config.worktreeBase, name));
-}
-
-export function shareDir(config: Pick<SandboxPathConfig, 'shareBase'>): string {
-  return config.shareBase;
 }
 
 export function shareCommonDir(config: Pick<SandboxPathConfig, 'shareBase'>): string {

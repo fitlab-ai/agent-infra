@@ -8,10 +8,6 @@ export function hostJoin(basePath: string, ...segments: string[]): string {
   return basePath.startsWith('/') ? path.posix.join(basePath, ...segments) : path.join(basePath, ...segments);
 }
 
-export function isWindowsDrivePath(value: unknown): boolean {
-  return typeof value === 'string' && WINDOWS_DRIVE_PATH_PATTERN.test(value);
-}
-
 export function isUncPath(value: unknown): boolean {
   return typeof value === 'string' && UNC_PATH_PATTERN.test(value);
 }

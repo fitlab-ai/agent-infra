@@ -17,10 +17,7 @@ import { providerError, providerOperationContext, resourceIdentityNumber, unsupp
 import { taskIssueIdentity } from "./task-identities.ts";
 import { MARKERS, renderTaskCommentResult } from "./issue-comments.ts";
 import {
-  CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
-  renderSafeCodeFence,
-  sanitizeMarkdownDocument
 } from "./comment-safety.ts";
 
 const CHECK_TYPE = "platform-sync";
@@ -56,11 +53,6 @@ export function getDefaults(): any {
       prSummary: "<!-- sync-pr:{task-id}:summary -->"
     }
   };
-}
-
-function sanitizeCommentContent(content: string): string | null {
-  const result = sanitizeMarkdownDocument(content, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
-  return result.ok ? result.value : null;
 }
 
 function infoResult(message: string): any {
@@ -877,36 +869,6 @@ function extractCommentBody(commentBody: any): any {
   return lines.slice(start, end).join("\n");
 }
 
-function buildExpectedTaskBody(taskContent: any, shared: VerificationShared): any {
-  const frontmatterMatch = taskContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!frontmatterMatch) {
-    return sanitizeCommentContent(taskContent.trim());
-  }
-
-  const body = sanitizeCommentContent(taskContent.slice(frontmatterMatch[0].length).trim());
-  if (body === null) {
-    return null;
-  }
-  return [
-    buildTaskFrontmatterSummary(shared),
-    "",
-    renderSafeCodeFence(frontmatterMatch[0].trim(), "yaml"),
-    "",
-    "</details>",
-    "",
-    body
-  ].join("\n").trim();
-}
-
-function buildTaskFrontmatterSummary(shared: VerificationShared): any {
-  const language = loadProjectLanguage(shared);
-  if (language === "en" || language === "en-US") {
-    return "<details><summary>Metadata (frontmatter)</summary>";
-  }
-
-  return "<details><summary>元数据 (frontmatter)</summary>";
-}
-
 function loadProjectLanguage(shared: VerificationShared): any {
   const override = process.env.VALIDATE_ARTIFACT_LANGUAGE;
   if (!shared.isBlank(override)) {
@@ -1085,25 +1047,6 @@ function gitText(args: any, cwd: any): any {
       message: stderr || `git ${args.join(" ")} failed`
     };
   }
-}
-
-function resolvePrHeadSha(context: any): any {
-  const fallback = () => gitText(["rev-parse", "HEAD"], context.taskDir);
-  const branch = String(context.task?.metadata?.branch || "").trim();
-  if (!branch) {
-    return fallback();
-  }
-
-  const matchedWorktree = resolveBranchWorktree(context.taskDir, branch);
-  if (!matchedWorktree) {
-    return {
-      ok: false,
-      type: "check_failed",
-      message: `Task branch '${branch}' is not checked out in a usable worktree`
-    };
-  }
-
-  return gitText(["rev-parse", "HEAD"], matchedWorktree);
 }
 
 function interpolate(template: any, taskDir: any, artifactFile: any): any {

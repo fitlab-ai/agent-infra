@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { inspectActivityLog, parseActivityLog, pairEntries, startedBackedRows } from '../../../lib/task/activity-log.ts';
-import { isHumanAgent } from '../../../lib/task/commands/log.ts';
 
 // Separator in real entries is an em-dash (U+2014), not an ASCII hyphen.
 const ZH = '## 活动日志';
@@ -140,27 +139,6 @@ test('distinguishes a present-but-empty section (no valid entries)', () => {
   const { sectionFound, entries } = parseActivityLog(content);
   assert.equal(sectionFound, true);
   assert.equal(entries.length, 0);
-});
-
-// --- isHumanAgent: classify the executor token of a step ---
-
-test('isHumanAgent treats every known AI token as non-human', () => {
-  // The full AI token set: workflow recommended_agents + the opencode TUI.
-  for (const ai of ['claude', 'codex', 'antigravity', 'opencode', 'cursor', 'traecli']) {
-    assert.equal(isHumanAgent(ai), false, ai);
-  }
-});
-
-test('isHumanAgent treats human executors (incl. CJK names and annotations) as human', () => {
-  for (const human of ['张三', '张三 (executed on host)', 'Alice', 'human']) {
-    assert.equal(isHumanAgent(human), true, human);
-  }
-});
-
-test('isHumanAgent treats known long names as non-human', () => {
-  for (const ai of ['claude-code', 'antigravity-cli']) {
-    assert.equal(isHumanAgent(ai), false, ai);
-  }
 });
 
 // --- pairEntries: collapse started/done markers into per-step rows ---

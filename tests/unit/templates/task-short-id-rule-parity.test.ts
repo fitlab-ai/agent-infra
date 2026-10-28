@@ -35,8 +35,7 @@ test('task-short-id rule doc (en template) embeds the executable SKILL parser gu
 });
 
 // Structural check: the resolution-scope table for sandbox entrypoints must
-// reference both `ai sandbox exec` and `ai sandbox create` (canonical entry
-// points after this PR — they share `resolveTaskBranch`).
+// reference both `ai sandbox exec` and `ai sandbox create`.
 const SANDBOX_EXEC = '`ai sandbox exec';
 const SANDBOX_CREATE = '`ai sandbox create';
 

@@ -551,14 +551,6 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
   return resolveArtifactContextFromTask(taskRef, family, options);
 }
 
-export function resolveArtifactContextForResolvedTask(
-  resolvedTask: ResolvedTaskRef,
-  family: string,
-  options: InspectOptions = {}
-): ArtifactContextResult {
-  return resolveArtifactContextFromTask(resolvedTask.taskId, family, options, resolvedTask);
-}
-
 function resolveCodeContext(
   inventory: ArtifactInventoryResult,
   options: InspectOptions,

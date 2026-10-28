@@ -294,7 +294,7 @@ for (const [index, name] of DEMO_ASSET_NAMES.entries()) {
 }
 
 test('recovery rejects a journal path outside assets without deleting it', () => {
-  const { root, assets, staging } = fixture();
+  const { root, staging } = fixture();
   const sentinel = path.join(path.dirname(root), 'demo-promotion-sentinel');
   fs.writeFileSync(sentinel, 'keep me\n');
   try {

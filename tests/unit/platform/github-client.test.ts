@@ -163,7 +163,7 @@ test('the declared gh floor covers every gh flag the platform layer uses', () =>
 test('metadata JSON boundary returns the final successful attempt and parses the final response block', () => {
   let attempts = 0;
   const client = createGitHubClient({
-    runner(args) {
+    runner() {
       attempts += 1;
       if (attempts === 1) return { status: 1, stdout: '', stderr: 'HTTP 503: unavailable' };
       return {

@@ -7,7 +7,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
-import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
@@ -15,7 +14,6 @@ import {
   createTempDir,
   cliArgs,
   envWithPrependedPath,
-  filePath,
   gitSafeEnv,
   INTERNAL_CLI_PATH,
   loadFreshEsm,
@@ -311,96 +309,6 @@ function sandboxRow(
 ): string {
   const taskLabel = taskId ? `,${project}.sandbox.task-id=${taskId}` : "";
   return `${name}\tUp 1 minute\t${project}.sandbox.branch=${branch},${project}.sandbox=true,${project}.sandbox.workspace-mode=${workspaceMode}${taskLabel}`;
-}
-
-function writeTaskBoundControlEvidence(
-  tmpDir: string,
-  repoDir: string,
-  project: string,
-  container: string,
-  taskId: string,
-  branch: string,
-  containerId = "f".repeat(64)
-): string {
-  const controlRoot = sandboxControlPaths({
-    base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
-    project,
-    container,
-    identity: { mode: "task-bound", taskId }
-  }).root;
-  const channelDir = path.join(controlRoot, "channel");
-  const publicStatusDir = path.join(controlRoot, "public");
-  const processingDir = path.join(controlRoot, "processing");
-  fs.mkdirSync(channelDir, { recursive: true });
-  fs.mkdirSync(publicStatusDir, { recursive: true });
-  fs.mkdirSync(processingDir, { recursive: true });
-  fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
-  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-    engine: "docker-desktop",
-    repoRoot: repoDir,
-    worktreeRoot: repoDir,
-    project,
-    container,
-    containerIdentity: { id: containerId, labels: {} },
-
-    branch,
-    mode: "task-bound",
-    taskId,
-    token: `${taskId}-token`,
-    generation: `${taskId}-generation`,
-    controlRootId: "a".repeat(96),
-    channelDir: "channel",
-    publicStatusDir: "public",
-    processingDir: "processing",
-    runtimeDir: "runtime"
-  })}\n`, "utf8");
-  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 3,
-    generation: `${taskId}-generation`,
-    broker: { pid: 999_999_999, startTime: 0, brokerId: `${taskId}-broker` },
-    state: "healthy",
-    reasonCode: null,
-    activeRequestId: null,
-    updatedAt: Date.now(),
-    taskView: {
-      state: "unknown",
-      taskId,
-      observedSource: "unknown",
-      receipt: null,
-      reasonCode: "SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE"
-    }
-  })}\n`, "utf8");
-  return controlRoot;
-}
-
-function addSandboxWorktree(
-  fixture: ReturnType<typeof writeSandboxEngineFixture>,
-  tmpDir: string,
-  branch: string
-): string {
-  try {
-    execFileSync("git", ["-C", fixture.repoDir, "rev-parse", "--verify", "HEAD"], {
-      env: gitSafeEnv(),
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-  } catch {
-    fs.writeFileSync(path.join(fixture.repoDir, "tracked.txt"), "initial\n", "utf8");
-    execFileSync("git", ["-C", fixture.repoDir, "add", "tracked.txt"], { env: gitSafeEnv() });
-    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "initial"], {
-      env: gitSafeEnv()
-    });
-  }
-  const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", branch.replaceAll("/", ".."));
-  fs.mkdirSync(path.dirname(worktree), { recursive: true });
-  execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-q", "-b", branch, worktree, "HEAD"], {
-    env: gitSafeEnv(),
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  return worktree;
-}
-
-function hasDockerVerb(calls: string[][], verb: string): boolean {
-  return calls.some((call) => call[0] === verb);
 }
 
 test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanup", () => {
@@ -1326,7 +1234,6 @@ test("share helpers compose project share namespace under shareBase", async () =
   const sandboxConstants = await loadFreshEsm<typeof import("../../../lib/sandbox/constants.ts")>("lib/sandbox/constants.js");
   const config = { shareBase: "/tmp/share/demo" };
 
-  assert.equal(sandboxConstants.shareDir(config), "/tmp/share/demo");
   assert.equal(sandboxConstants.shareCommonDir(config), "/tmp/share/demo/common");
   assert.equal(
     sandboxConstants.shareBranchDir(config, "feat/foo"),
@@ -1343,211 +1250,6 @@ test("shell config helpers compose branch dirs under shellConfigBase", async () 
     "/tmp/config/demo/feat..foo",
     "/tmp/config/demo/feat-foo"
   ]);
-});
-
-test("resolveTaskBranch returns plain branch names unchanged", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-
-  assert.equal(
-    taskResolver.resolveTaskBranch("agent-infra-feature-cli-generic-sandbox", process.cwd()),
-    "agent-infra-feature-cli-generic-sandbox"
-  );
-});
-
-test("resolveTaskBranch reads branch from task frontmatter", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = createTempDir("agent-infra-sandbox-task-frontmatter-");
-  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180000");
-
-  try {
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, "task.md"), [
-      "---",
-      "id: TASK-20260401-180000",
-      "type: feature",
-      "branch: agent-infra-feature-cli-generic-sandbox",
-      "---",
-      "",
-      "# task"
-    ].join("\n"));
-
-    assert.equal(
-      taskResolver.resolveTaskBranch("TASK-20260401-180000", tmpDir),
-      "agent-infra-feature-cli-generic-sandbox"
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("resolveTaskBranch strips matching quotes from task branch metadata", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = createTempDir("agent-infra-sandbox-task-quotes-");
-  const cases: Array<[string, string]> = [
-    ["TASK-20260401-180010", "branch: \"agent-infra-feature-cli-generic-sandbox\""],
-    ["TASK-20260401-180011", "branch: 'agent-infra-feature-cli-generic-sandbox'"]
-  ];
-
-  try {
-    for (const [taskId, branchLine] of cases) {
-      const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", taskId);
-      fs.mkdirSync(taskDir, { recursive: true });
-      fs.writeFileSync(path.join(taskDir, "task.md"), [
-        "---",
-        `id: ${taskId}`,
-        "type: feature",
-        branchLine,
-        "---",
-        "",
-        "# task"
-      ].join("\n"));
-
-      assert.equal(
-        taskResolver.resolveTaskBranch(taskId, tmpDir),
-        "agent-infra-feature-cli-generic-sandbox"
-      );
-    }
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = createTempDir("agent-infra-sandbox-task-context-");
-  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180001");
-
-  try {
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, "task.md"), [
-      "---",
-      "id: TASK-20260401-180001",
-      "type: feature",
-      "---",
-      "",
-      "## 上下文",
-      "",
-      "- **分支**：agent-infra-feature-cli-generic-sandbox"
-    ].join("\n"));
-
-    assert.equal(
-      taskResolver.resolveTaskBranch("TASK-20260401-180001", tmpDir),
-      "agent-infra-feature-cli-generic-sandbox"
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("resolveTaskBranch strips matching quotes from legacy context branch metadata", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = createTempDir("agent-infra-sandbox-task-context-quotes-");
-  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180012");
-
-  try {
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, "task.md"), [
-      "---",
-      "id: TASK-20260401-180012",
-      "type: feature",
-      "---",
-      "",
-      "## Context",
-      "",
-      "- **Branch**：\"feature/quoted-context\""
-    ].join("\n"));
-
-    assert.equal(
-      taskResolver.resolveTaskBranch("TASK-20260401-180012", tmpDir),
-      "feature/quoted-context"
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-for (const workspaceDir of ["completed", "blocked", "archive"]) {
-  test(`resolveTaskBranch resolves tasks in ${workspaceDir} directory`, async () => {
-    const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-    const tmpDir = createTempDir(`agent-infra-sandbox-task-${workspaceDir}-`);
-    const taskDir = workspaceDir === "archive"
-      ? path.join(taskWorkspaceRoot(tmpDir),  workspaceDir, "2026", "04", "01", "TASK-20260401-180003", "local")
-      : path.join(taskWorkspaceRoot(tmpDir),  workspaceDir, "TASK-20260401-180003");
-
-    try {
-      fs.mkdirSync(taskDir, { recursive: true });
-      fs.writeFileSync(path.join(taskDir, "task.md"), [
-        "---",
-        "id: TASK-20260401-180003",
-        "type: bugfix",
-        "branch: agent-infra-bugfix-some-fix",
-        "---",
-        "",
-        "# task"
-      ].join("\n"));
-
-      assert.equal(
-        taskResolver.resolveTaskBranch("TASK-20260401-180003", tmpDir),
-        "agent-infra-bugfix-some-fix"
-      );
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-}
-
-test("resolveTaskBranch prefers active over completed when both exist", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = createTempDir("agent-infra-sandbox-task-priority-");
-  const activeDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180004");
-  const completedDir = path.join(taskWorkspaceRoot(tmpDir),  "completed", "TASK-20260401-180004");
-
-  try {
-    fs.mkdirSync(activeDir, { recursive: true });
-    fs.mkdirSync(completedDir, { recursive: true });
-    fs.writeFileSync(path.join(activeDir, "task.md"), [
-      "---",
-      "id: TASK-20260401-180004",
-      "branch: agent-infra-bugfix-active-wins",
-      "---"
-    ].join("\n"));
-    fs.writeFileSync(path.join(completedDir, "task.md"), [
-      "---",
-      "id: TASK-20260401-180004",
-      "branch: agent-infra-bugfix-should-be-ignored",
-      "---"
-    ].join("\n"));
-
-    assert.equal(
-      taskResolver.resolveTaskBranch("TASK-20260401-180004", tmpDir),
-      "agent-infra-bugfix-active-wins"
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("resolveTaskBranch rejects missing task files and missing branch metadata", async () => {
-  const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-  const tmpDir = createTempDir("agent-infra-sandbox-task-errors-");
-  const taskDir = path.join(taskWorkspaceRoot(tmpDir),  "active", "TASK-20260401-180002");
-
-  try {
-    assert.throws(
-      () => taskResolver.resolveTaskBranch("TASK-20260401-180002", tmpDir),
-      /Task not found/
-    );
-
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, "task.md"), "---\nid: TASK-20260401-180002\n---\n\n# task\n");
-
-    assert.throws(
-      () => taskResolver.resolveTaskBranch("TASK-20260401-180002", tmpDir),
-      /has no branch field/
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
 });
 
 test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {

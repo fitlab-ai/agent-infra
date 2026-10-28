@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExecFileSyncOptions, StdioOptions, SpawnSyncOptions, SpawnSyncReturns } from 'node:child_process';
+import type { ExecFileSyncOptions, StdioOptions, SpawnSyncReturns } from 'node:child_process';
 import { getAdapter } from './engines/index.ts';
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;

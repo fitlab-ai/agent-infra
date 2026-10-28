@@ -86,14 +86,6 @@ export function resolveSandboxLockNamespace(
   };
 }
 
-export function stableSandboxLockPath(
-  carrierIdentity: string,
-  lockDomain?: string,
-  options: Readonly<{ home?: string }> = {}
-): string {
-  return resolveSandboxLockNamespace(carrierIdentity, { lockDomain, home: options.home }).lockPath;
-}
-
 export function acquireSandboxResourceLock(
   carrierIdentity: string,
   options: Readonly<{ lockDomain?: string; home?: string }> = {}

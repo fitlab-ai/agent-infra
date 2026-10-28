@@ -5,13 +5,11 @@ const ENTRY_RE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;
 const ATTEMPT_RE = /(?:^|;\s*)attempt=([A-Za-z0-9-]{8,64})(?:;|$)/;
-const COMMIT_STARTED_RE = /^started; attempt=([A-Za-z0-9-]{8,64}); baseline=([a-f0-9]{40,64}); agent=([a-z-]+)$/;
 const LIFECYCLE_STEP_RE = /^(?:Complete Manual Validation|(?:Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code|Run Manual Validation) \(Round [1-9]\d*(?:(?:, fix for review-code(?:-r[2-9]|-r[1-9]\d+)?\.md)|(?:, decision II-[1-9]\d*))?\))$/;
 
 type LogEntry = { time: string; step: string; agent: string; note: string };
 type StepRow = { step: string; agent: string; started: string; done: string; note: string; attempt?: string };
 type ActivityLogSection = { heading: string; body: string; entries: LogEntry[] };
-type CommitAttempt = Readonly<{ attempt: string; baseline: string; agent: string }>;
 
 function parseActivityLog(content: string): { sectionFound: boolean; entries: LogEntry[] } {
   const section = locateActivityLog(content);
@@ -53,15 +51,6 @@ function appendActivityEntry(section: ActivityLogSection, entry: LogEntry): stri
 
 function activityAttempt(note: string): string | null {
   return ATTEMPT_RE.exec(note)?.[1] ?? null;
-}
-
-function parseCommitAttemptStarted(note: string): CommitAttempt | null {
-  const match = COMMIT_STARTED_RE.exec(note);
-  return match ? { attempt: match[1]!, baseline: match[2]!, agent: match[3]! } : null;
-}
-
-function commitAttemptStartedNote(attempt: CommitAttempt): string {
-  return `started; attempt=${attempt.attempt}; baseline=${attempt.baseline}; agent=${attempt.agent}`;
 }
 
 function pairEntries(entries: LogEntry[]): StepRow[] {
@@ -141,12 +130,10 @@ export {
   appendActivityEntry,
   hasOpenLifecycleExecution,
   openLifecycleRows,
-  commitAttemptStartedNote,
   inspectActivityLog,
   locateActivityLog,
   pairEntries,
   parseActivityLog,
-  parseCommitAttemptStarted,
   startedBackedRows
 };
-export type { ActivityLogSection, CommitAttempt, LogEntry, StepRow };
+export type { ActivityLogSection, LogEntry, StepRow };

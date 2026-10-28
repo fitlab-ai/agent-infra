@@ -581,25 +581,6 @@ export function reconcileClaudeCredentials(home: string, options: ReconcileOptio
   };
 }
 
-export function syncClaudeCredentialsFromKeychain(home: string, project: string, options: ReconcileOptions = {}) {
-  const result = reconcileClaudeCredentials(home, {
-    ...options,
-    singleProject: project
-  });
-  if (result.status !== 'OK' && result.status !== 'KEYCHAIN_WRITE_FAILED') {
-    return {
-      status: result.status,
-      written: false
-    };
-  }
-
-  return {
-    status: result.status === 'KEYCHAIN_WRITE_FAILED' ? 'OK' : result.status,
-    written: result.filesWritten.includes(project),
-    expiresAt: result.expiresAt
-  };
-}
-
 export function formatRemaining(expiresAt: unknown): string {
   if (typeof expiresAt !== 'number') {
     return 'unknown';

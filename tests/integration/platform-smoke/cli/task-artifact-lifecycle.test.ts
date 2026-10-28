@@ -10,11 +10,9 @@ import {
   buildArtifactLinkSection,
   inspectTaskArtifacts,
   resolveArtifactContext,
-  resolveArtifactContextForResolvedTask,
   validateArtifactPublication,
   validateCompletedArtifact
 } from '../../../../lib/task/artifact-lifecycle.ts';
-import { resolveTaskRef } from '../../../../lib/task/resolve-ref.ts';
 import { artifactName, parseArtifactName } from '../../../../lib/task/artifact-name.ts';
 import { parseArtifactReceipts, sha256File, upsertArtifactReceipt } from '../../../../lib/task/artifact-receipts.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../../lib/task/qualification-audit.ts';
@@ -195,18 +193,6 @@ test('review-code can start with the current git diff when no code artifact exis
   assert.deepEqual(result.inputs, []);
   assert.equal(result.selection?.disposition, 'create');
   assert.equal(result.selection?.artifact.name, 'review-code.md');
-});
-
-test('resolved artifact context reuses an already resolved task identity', () => {
-  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
-  const resolved = resolveTaskRef(TASK_ID, { repoRoot: f.repoRoot });
-  assert.equal(resolved.ok, true);
-  if (!resolved.ok) return;
-
-  const result = resolveArtifactContextForResolvedTask(resolved, 'plan', { repoRoot: f.repoRoot });
-  assert.equal(result.status, 'ready', JSON.stringify(result.error));
-  assert.equal(result.taskId, TASK_ID);
-  assert.deepEqual(result.selection?.artifact, { family: 'plan', round: 1, name: 'plan.md' });
 });
 
 test('review-code reuses only a completed report bound to the current commit', () => {

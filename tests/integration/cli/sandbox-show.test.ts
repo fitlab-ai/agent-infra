@@ -6,7 +6,6 @@ import path from 'node:path';
 
 import {
   createTempDir,
-  CLI_PATH,
   INTERNAL_CLI_PATH,
   cliArgs,
   envWithPrependedPath,

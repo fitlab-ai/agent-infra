@@ -94,14 +94,6 @@ function escapeHtmlText(value: string): string {
   return escapeHtml(value);
 }
 
-function escapeHtmlAttribute(value: string): string {
-  return escapeHtml(value);
-}
-
-function escapeMarkdownLiteral(value: string): string {
-  return value.replace(/[\\`*_{}\[\]()#+.!|<>-]/g, '\\$&');
-}
-
 function markerSafe(value: string, markers: readonly RegExp[]): string {
   let result = value;
   for (const marker of markers) {
@@ -250,9 +242,7 @@ function splitDocumentPlaceholder(value: string, placeholder: string): Sanitizat
 
 export {
   CONTROL_MARKER_PATTERN,
-  escapeHtmlAttribute,
   escapeHtmlText,
-  escapeMarkdownLiteral,
   fenceRanges,
   renderSafeCodeFence,
   canonicalizeCommentBody,

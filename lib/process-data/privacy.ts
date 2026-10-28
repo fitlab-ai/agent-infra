@@ -1,6 +1,4 @@
-import { sha256 } from './store.ts';
-
-import type { CapturedObject, PrivacyDisposition, SourceKind } from './types.ts';
+import type { PrivacyDisposition } from './types.ts';
 
 type ScannedDisposition =
   | Extract<PrivacyDisposition, { state: 'included' }>
@@ -23,19 +21,4 @@ function inspectPrivacy(content: string): ScannedDisposition {
   return { state: 'included' };
 }
 
-function captureText(sourceKind: SourceKind, sourceIdentity: string, content: string): CapturedObject {
-  const bytes = Buffer.byteLength(content);
-  const digest = sha256(Buffer.from(content, 'utf8'));
-  const disposition = inspectPrivacy(content);
-  return disposition.state === 'included'
-    ? { sourceKind, sourceIdentity, sha256: digest, bytes, content, disposition }
-    : { sourceKind, sourceIdentity, sha256: digest, bytes, disposition };
-}
-
-function redactExcerpt(content: string, maxBytes = 4096): string | null {
-  if (inspectPrivacy(content).state !== 'included') return null;
-  const buffer = Buffer.from(content, 'utf8');
-  return buffer.subarray(0, maxBytes).toString('utf8').replace(/\b(token|password|secret)=\S+/gi, '$1=[REDACTED]');
-}
-
-export { captureText, inspectPrivacy, redactExcerpt };
+export { inspectPrivacy };

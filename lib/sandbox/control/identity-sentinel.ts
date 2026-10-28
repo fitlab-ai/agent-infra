@@ -127,11 +127,3 @@ export function validateSandboxControlIdentity(params: Readonly<{
   }
   return { state: 'valid', sentinel };
 }
-
-export function assertSandboxControlIdentity(params: Parameters<typeof validateSandboxControlIdentity>[0]): SandboxControlIdentitySentinel {
-  const result = validateSandboxControlIdentity(params);
-  if (result.state !== 'valid' || !result.sentinel) {
-    throw new Error(`SANDBOX_CONTROL_IDENTITY_${result.state.replaceAll('-', '_').toUpperCase()}`);
-  }
-  return result.sentinel;
-}

@@ -2,12 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 import {
   bindDeliveryTarget,
   readDeliveryDefaults,
-  resolveDiffBase,
   validateBaseRef,
   validateRemote
 } from '../../../../lib/task/delivery-target.ts';
@@ -52,30 +50,6 @@ test('delivery target validators reject ambiguous refs and accept nested branch 
   assert.equal(validateBaseRef('release/2026'), true);
   assert.equal(validateBaseRef('../main'), false);
   assert.equal(validateBaseRef('refs/heads/main'), false);
-});
-
-test('merge-base resolution returns a stable diff base', () => {
-  const root = createTempDir('delivery-target-');
-  try {
-    const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
-    git(['init', '-q', '-b', 'main']);
-    git(['config', 'user.name', 'Test']);
-    git(['config', 'user.email', 'test@example.com']);
-    fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
-    git(['add', 'base.txt']);
-    git(['commit', '-qm', 'base']);
-    const base = git(['rev-parse', 'HEAD']);
-    git(['switch', '-c', 'feature']);
-    fs.writeFileSync(path.join(root, 'feature.txt'), 'feature\n');
-    git(['add', 'feature.txt']);
-    git(['commit', '-qm', 'feature']);
-    const head = git(['rev-parse', 'HEAD']);
-    const result = resolveDiffBase(root, head, base);
-    assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.diffBase, base);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test('delivery classifies only the last delivered remote head as safely replaceable', () => {

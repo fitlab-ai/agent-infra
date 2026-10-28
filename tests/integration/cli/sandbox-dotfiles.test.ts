@@ -200,7 +200,7 @@ test("buildContainerEnvFile keeps the WSL2 engine token as the preferred result"
   let hostEnvDir = "";
 
   try {
-    const envFile = sandboxCreate.buildContainerEnvFile([], "wsl2", () => "ghp_engine_token", {
+    sandboxCreate.buildContainerEnvFile([], "wsl2", () => "ghp_engine_token", {
       tmpDir,
       mkdtempFn: (prefix: string) => {
         hostEnvDir = fs.mkdtempSync(prefix);

@@ -632,22 +632,6 @@ function mergeTemplateSources(baseRoot, sources, report) {
   };
 }
 
-function writeIfChanged(projectRoot, targetPath, content, reportBucket) {
-  const fullPath = path.join(projectRoot, targetPath);
-  const exists = fs.existsSync(fullPath);
-
-  if (exists && fs.readFileSync(fullPath, 'utf8') === content) {
-    reportBucket.unchanged.push(targetPath);
-    return;
-  }
-
-  const dir = path.dirname(fullPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(fullPath, content, 'utf8');
-
-  (exists ? reportBucket.updated : reportBucket.generated).push(targetPath);
-}
-
 function syncCustomSkillSources(projectRoot, sources, report, templateSkillNames) {
   const skillsDir = path.join(projectRoot, '.agents/skills');
   const syncedSkills = new Map();
@@ -1058,7 +1042,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     && !Array.isArray(cfg.files.managedBaselines)
     ? { ...cfg.files.managedBaselines }
     : {};
-  let baselinesChanged = false;
+
 
   for (const target of Object.keys(managedBaselines)) {
     if (
@@ -1067,7 +1051,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       && !allClientManaged.some((entry) => assetMatches(entry, target))
     ) {
       delete managedBaselines[target];
-      baselinesChanged = true;
     }
   }
 
@@ -1162,7 +1145,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
         if (!fs.existsSync(candidatePath)) {
           if (Object.prototype.hasOwnProperty.call(managedBaselines, candidate)) {
             delete managedBaselines[candidate];
-            baselinesChanged = true;
           }
           continue;
         }
@@ -1188,7 +1170,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
         }
         if (Object.prototype.hasOwnProperty.call(managedBaselines, candidate)) {
           delete managedBaselines[candidate];
-          baselinesChanged = true;
         }
       }
       removeEmptyDirs(target);
@@ -1208,7 +1189,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.managed.removed.push(entry);
       if (Object.prototype.hasOwnProperty.call(managedBaselines, entry)) {
         delete managedBaselines[entry];
-        baselinesChanged = true;
       }
     } else {
       report.managed.protected.push({
@@ -1277,7 +1257,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
     if (rawBaseline !== undefined && baseline === null) {
       delete managedBaselines[target];
-      baselinesChanged = true;
     }
     if (baseline === null && localHash !== null && localHash !== templateHash) {
       report.managed.conflicts.push({
@@ -1318,7 +1297,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       bucket.unchanged.push(target);
       if (managedBaselines[target] !== templateHash) {
         managedBaselines[target] = templateHash;
-        baselinesChanged = true;
       }
       return false;
     }
@@ -1327,7 +1305,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(dstFull, content);
     managedBaselines[target] = templateHash;
-    baselinesChanged = true;
     if (Object.prototype.hasOwnProperty.call(bucket, 'written')) {
       (exists ? bucket.written : bucket.created).push(target);
     } else {
@@ -1373,7 +1350,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.managed.removed.push(renderedTarget);
       if (Object.prototype.hasOwnProperty.call(managedBaselines, renderedTarget)) {
         delete managedBaselines[renderedTarget];
-        baselinesChanged = true;
       }
       continue;
     }
@@ -1435,7 +1411,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       if (localHash === null) {
         if (Object.prototype.hasOwnProperty.call(managedBaselines, target)) {
           delete managedBaselines[target];
-          baselinesChanged = true;
         }
         continue;
       }
@@ -1448,7 +1423,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
         report.managed.removed.push(target);
         if (Object.prototype.hasOwnProperty.call(managedBaselines, target)) {
           delete managedBaselines[target];
-          baselinesChanged = true;
         }
         removeEmptyDirs(path.dirname(dstFull));
         continue;
@@ -1564,7 +1538,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
             if (baseline !== null && localHash === baseline) {
               fs.unlinkSync(path.join(projectRoot, projFile));
               delete managedBaselines[projFile];
-              baselinesChanged = true;
               report.managed.removed.push(projFile);
             } else {
               report.managed.protected.push({
@@ -1671,7 +1644,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
   if (Object.keys(managedBaselines).length > 0) {
     cfg.files.managedBaselines = managedBaselines;
   } else {
-    if (Object.prototype.hasOwnProperty.call(cfg.files, 'managedBaselines')) baselinesChanged = true;
     delete cfg.files.managedBaselines;
   }
   cfg.templateVersion = version;

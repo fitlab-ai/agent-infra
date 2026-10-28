@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

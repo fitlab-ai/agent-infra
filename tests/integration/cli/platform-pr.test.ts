@@ -781,7 +781,7 @@ test('platform-pr create does not require commit finalization evidence before re
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'aaa', 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     execFileSync('git', ['config', `url.${remote}.insteadOf`, 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const taskId = 'TASK-20260101-000001';
     const taskDir = path.join(taskWorkspaceRoot(root),  'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });

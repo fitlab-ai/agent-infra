@@ -31,7 +31,6 @@ import { findSectionHeading } from './sections.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { validateLocalArtifact } from './local-artifact-finalization.ts';
-import type { LocalArtifactFamily } from './local-artifact-finalization.ts';
 import { buildLifecycleFacts, canStart, effectiveReworkTarget } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';

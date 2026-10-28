@@ -447,15 +447,6 @@ function readRegistry(repoRoot: string): RegistrySchema | null {
   }
 }
 
-function readBranchFromTaskMd(repoRoot: string, taskId: string): string | null {
-  const taskMdPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId, 'task.md');
-  if (!fs.existsSync(taskMdPath)) return null;
-  const content = fs.readFileSync(taskMdPath, 'utf8');
-  const m = content.match(/^branch:\s*(.+)$/m);
-  if (!m || !m[1]) return null;
-  return m[1].trim().replace(/^(["'])(.*)\1$/, '$2');
-}
-
 function loadShortIdByTaskId(repoRoot: string): Map<string, string> {
   const registry = readRegistry(repoRoot);
   const map = new Map<string, string>();
@@ -527,44 +518,10 @@ function inspectShortIdRegistry(
   }
 }
 
-/**
- * Resolve a branch to its active-task short id (`NN`), or `null` when no
- * active task is bound to that branch.
- *
- * Two-state semantics: this only consults the active registry
- * (`active/.short-ids.json`) plus each `active/{taskId}/task.md`. Tasks moved
- * to completed/blocked/cancelled/archive have already released their short id,
- * so their branches return `null` — in `ai sandbox ls` that surfaces as `-`,
- * meaning the sandbox is free to remove.
- */
-function lookupShortIdByBranch(
-  branch: string,
-  repoRoot: string,
-  _opts?: { shortIdLength?: number }
-): string | null {
-  const registry = readRegistry(repoRoot);
-  if (!registry) return null;
-  const matches: string[] = [];
-  for (const [key, taskId] of Object.entries(registry.ids)) {
-    const taskBranch = readBranchFromTaskMd(repoRoot, taskId);
-    if (taskBranch && taskBranch === branch) {
-      matches.push(key);
-    }
-  }
-  if (matches.length === 0) return null;
-  if (matches.length > 1) {
-    process.stderr.write(
-      `Warning: branch '${branch}' is bound to multiple active tasks: ${matches.join(', ')}; using ${matches[0]}\n`
-    );
-  }
-  return matches[0]!;
-}
-
 export {
   normalizeShortIdInput,
   isRemovedHashShortIdInput,
   resolveShortIdReadOnly,
-  lookupShortIdByBranch,
   loadShortIdByTaskId,
   inspectShortIdRegistry,
   configuredShortIdLength,

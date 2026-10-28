@@ -202,7 +202,6 @@ function prepareReviewSummaryCandidate(
   catch (error) { return reject('REVIEW_ARTIFACT_NOT_REGULAR', String(error)); }
   const artifactSha256 = sha256Content(artifactContent);
   const semanticDigest = canonicalSemanticDigest(artifactContent);
-  const digests = { artifactSha256, semanticDigest };
   try {
     const ledger = parseLedgerDocument(taskContent);
     if (!ledger.present) return reject('REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);
@@ -240,14 +239,6 @@ function prepareReviewSummaryCandidate(
       error: null
     },
   };
-}
-
-function commitReviewSummaryProvenance(
-  prepared: ReviewSummaryCandidatePreparation,
-  repoRoot: string,
-  options: Readonly<{ afterPublish?: () => void }> = {}
-): ReviewFinalizationResult {
-  return prepared.result;
 }
 
 function replaceCurrentArtifactAtomically(file: string, content: string): void {
@@ -299,7 +290,7 @@ function finalizeReviewSummary(
   }
 }
 
-export { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate, commitReviewSummaryProvenance };
+export { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate };
 export type {
   ReviewFinalizationError,
   ReviewFinalizationErrorCode,

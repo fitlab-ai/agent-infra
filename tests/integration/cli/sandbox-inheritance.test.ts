@@ -6,7 +6,6 @@ import * as toml from "smol-toml";
 
 import {
   createTempDir,
-  filePath,
   loadFreshEsm,
   onPlatforms,
   supportsPosixModeBits
@@ -94,7 +93,7 @@ async function loadSandboxCreate(): Promise<SandboxCreateModule> {
 }
 
 test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-");
 
   try {
@@ -108,7 +107,7 @@ test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace 
 });
 
 test("ensureClaudeOnboarding preserves existing fields", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-existing-");
 
   try {
@@ -128,7 +127,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
   // written `hasCompletedOnboarding: true` without ever touching the projects
   // map (e.g. if no project was opened). We must still preseed the workspace
   // trust entry and persist it to disk.
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-partial-");
 
   try {
@@ -147,7 +146,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
 });
 
 test("ensureClaudeOnboarding skips write when flag already set", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-noop-");
   const filePath = path.join(tmpDir, ".claude.json");
 
@@ -166,7 +165,7 @@ test("ensureClaudeOnboarding skips write when flag already set", async () => {
 });
 
 test("ensureClaudeOnboarding inherits host model when sandbox model is absent", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-model-");
   const hostHome = createTempDir("agent-infra-claude-host-model-");
 
@@ -183,7 +182,7 @@ test("ensureClaudeOnboarding inherits host model when sandbox model is absent", 
 });
 
 test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-keep-model-");
   const hostHome = createTempDir("agent-infra-claude-host-keep-model-");
 
@@ -200,7 +199,7 @@ test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
 });
 
 test("ensureClaudeOnboarding skips host model when it is missing", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-missing-model-");
   const hostHome = createTempDir("agent-infra-claude-host-missing-model-");
 
@@ -216,7 +215,7 @@ test("ensureClaudeOnboarding skips host model when it is missing", async () => {
 });
 
 test("ensureClaudeOnboarding skips empty host model", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-empty-model-");
   const hostHome = createTempDir("agent-infra-claude-host-empty-model-");
 
@@ -232,7 +231,7 @@ test("ensureClaudeOnboarding skips empty host model", async () => {
 });
 
 test("ensureClaudeOnboarding ignores malformed host json", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-onboarding-malformed-host-");
   const hostHome = createTempDir("agent-infra-claude-host-malformed-");
 
@@ -249,7 +248,7 @@ test("ensureClaudeOnboarding ignores malformed host json", async () => {
 });
 
 test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absent", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-launchpin-inherit-");
   const hostHome = createTempDir("agent-infra-claude-launchpin-host-");
 
@@ -269,7 +268,7 @@ test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absen
 });
 
 test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-launchpin-preserve-");
   const hostHome = createTempDir("agent-infra-claude-launchpin-host-preserve-");
 
@@ -294,7 +293,7 @@ test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", 
 });
 
 test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-launchpin-omit-");
   const hostHome = createTempDir("agent-infra-claude-launchpin-host-omit-");
 
@@ -310,7 +309,7 @@ test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async ()
 });
 
 test("ensureClaudeOnboarding inherits all matching launch-pin flags for future models", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-launchpin-future-");
   const hostHome = createTempDir("agent-infra-claude-launchpin-host-future-");
 
@@ -334,7 +333,7 @@ test("ensureClaudeOnboarding inherits all matching launch-pin flags for future m
 });
 
 test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly true", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-launchpin-nonboolean-");
   const hostHome = createTempDir("agent-infra-claude-launchpin-host-nonboolean-");
 
@@ -360,7 +359,7 @@ test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly 
 });
 
 test("ensureClaudeSettings creates settings.json with skipDangerousModePermissionPrompt", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-");
 
   try {
@@ -373,7 +372,7 @@ test("ensureClaudeSettings creates settings.json with skipDangerousModePermissio
 });
 
 test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is already set", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-noop-");
   const settingsPath = path.join(tmpDir, "settings.json");
 
@@ -391,7 +390,7 @@ test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is
 });
 
 test("ensureClaudeSettings inherits host effort level when sandbox field is absent", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-effort-");
   const hostHome = createTempDir("agent-infra-claude-host-effort-");
 
@@ -413,7 +412,7 @@ test("ensureClaudeSettings inherits host effort level when sandbox field is abse
 });
 
 test("ensureClaudeSettings preserves existing sandbox effort level", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-keep-effort-");
   const hostHome = createTempDir("agent-infra-claude-host-keep-effort-");
 
@@ -439,7 +438,7 @@ test("ensureClaudeSettings preserves existing sandbox effort level", async () =>
 });
 
 test("ensureClaudeSettings skips missing host effort level", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-missing-effort-");
   const hostHome = createTempDir("agent-infra-claude-host-missing-effort-");
 
@@ -456,7 +455,7 @@ test("ensureClaudeSettings skips missing host effort level", async () => {
 });
 
 test("ensureClaudeSettings skips empty host effort level", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-empty-effort-");
   const hostHome = createTempDir("agent-infra-claude-host-empty-effort-");
 
@@ -473,7 +472,7 @@ test("ensureClaudeSettings skips empty host effort level", async () => {
 });
 
 test("ensureClaudeSettings inherits host provider env and model settings", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-provider-");
   const hostHome = createTempDir("agent-infra-claude-host-provider-");
 
@@ -542,7 +541,7 @@ test("ensureClaudeSettings inherits host provider env and model settings", async
 });
 
 test("ensureClaudeSettings preserves sandbox provider fields and fills missing env", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-provider-keep-");
   const hostHome = createTempDir("agent-infra-claude-host-provider-keep-");
 
@@ -587,7 +586,7 @@ test("ensureClaudeSettings preserves sandbox provider fields and fills missing e
 });
 
 test("ensureClaudeSettings skips invalid host env values and non-object sandbox env", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-provider-invalid-");
   const hostHome = createTempDir("agent-infra-claude-host-provider-invalid-");
 
@@ -624,7 +623,7 @@ test("ensureClaudeSettings skips invalid host env values and non-object sandbox 
 });
 
 test("ensureClaudeSettings skips non-object host env without defaulting effort env", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-host-env-invalid-");
   const hostHome = createTempDir("agent-infra-claude-host-env-invalid-");
 
@@ -641,7 +640,7 @@ test("ensureClaudeSettings skips non-object host env without defaulting effort e
 });
 
 test("ensureClaudeSettings skips malformed host settings", async () => {
-  const sandboxCreate = await loadSandboxCreate();
+  await loadSandboxCreate();
   const tmpDir = createTempDir("agent-infra-claude-settings-malformed-host-");
   const hostHome = createTempDir("agent-infra-claude-host-malformed-settings-");
 

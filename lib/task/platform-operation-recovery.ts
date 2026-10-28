@@ -7,8 +7,8 @@ import { inspectPlatformCommentOperation, syncPlatformComment } from '../platfor
 import { parseDeliverySummaryContent, renderDeliverySummaryContent, parseCancelSummaryContent, renderCancelSummaryContent } from '../platform/issue-summary-content.ts';
 import { enumerateArtifacts } from './artifacts.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
-import { resolvePlatformProviderContext } from '../platform/context.ts';
-import { providerOperationContext, providerError, unsupportedProviderOperation } from '../platform/provider-bridge.ts';
+import '../platform/context.ts';
+import '../platform/provider-bridge.ts';
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
 import { bindPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
 import { replayPullRequestSummary } from '../platform/pr-summary.ts';
@@ -23,7 +23,7 @@ import { platformResult } from '../platform/types.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from './platform-operation-journal.ts';
-import { providerErrorRetryable } from '../platform/provider-validation.ts';
+import '../platform/provider-validation.ts';
 
 type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; attempts?: number; excludeId?: string }>;
 const DEFAULT_RECOVERY_ATTEMPTS = 3;
@@ -292,7 +292,7 @@ async function recoverPlatformOperationsOnce(
   const recovered: string[] = [];
   const pending: string[] = [];
   const selected = candidates.slice(0, limit);
-  for (const [index, operation] of selected.entries()) {
+  for (const operation of selected) {
     {
       try {
         recordPlatformOperation({

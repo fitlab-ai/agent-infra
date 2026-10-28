@@ -19,10 +19,8 @@ import {
   AGENT_CLIENT_REGISTRY,
   createAgentClientManifest,
   getAgentClientAdapter,
-  getAgentClientCapability,
   listAgentClientAdapters,
   listEnabledAgentClientAdapters,
-  listEnabledAgentClientAdaptersByCapability,
   listInstalledAgentClientAdapters
 } from '../../../lib/agent-clients/registry.ts';
 
@@ -674,30 +672,6 @@ test('registry queries preserve canonical order and keep enabled separate from s
     AGENT_CLIENT_IDS
   );
 
-  assert.deepEqual(
-    listEnabledAgentClientAdaptersByCapability(
-      stateFor(AGENT_CLIENT_IDS),
-      'hooks',
-      ['integrated']
-    ).map((adapter) => adapter.id),
-    ['claude-code', 'codex']
-  );
-  assert.deepEqual(
-    listEnabledAgentClientAdaptersByCapability(
-      stateFor(['antigravity-cli', 'opencode']),
-      'hooks',
-      ['compatible', 'compatible']
-    ).map((adapter) => adapter.id),
-    ['antigravity-cli', 'opencode']
-  );
-  assert.deepEqual(
-    listEnabledAgentClientAdaptersByCapability(
-      stateFor(AGENT_CLIENT_IDS),
-      'sandbox',
-      []
-    ),
-    []
-  );
 });
 
 test('sandbox descriptors validate ids, hooks, aliases, timeouts, and frozen output', () => {
@@ -773,9 +747,6 @@ test('sandbox descriptors validate ids, hooks, aliases, timeouts, and frozen out
 
 test('single adapter and capability queries reject unknown runtime IDs', () => {
   assert.equal(getAgentClientAdapter('codex').displayName, 'Codex');
-  assert.deepEqual(getAgentClientCapability('codex', 'commands'), {
-    level: 'integrated'
-  });
   assert.throws(
     () => getAgentClientAdapter('unknown'),
     /No Agent Client adapter registered for 'unknown'/

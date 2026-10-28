@@ -115,28 +115,6 @@ function findTaskMd(
 }
 
 /**
- * Enumerate every task directory under the flat workspace states
- * (active / blocked / completed) — archive is intentionally excluded so a
- * full-tree scan never pulls in cold data. Ordered by state, then task id
- * ascending, giving callers a deterministic traversal.
- */
-function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string }[] {
-  const out: { taskId: string; taskDir: string }[] = [];
-  const workspaceRoot = taskRoot(repoRoot);
-  for (const sub of FLAT_WORKSPACE_DIRS) {
-    const base = path.join(workspaceRoot, sub);
-    if (!fs.existsSync(base)) continue;
-    for (const entry of fs.readdirSync(base).sort()) {
-      if (!TASK_ID_RE.test(entry)) continue;
-      const taskDir = path.join(base, entry);
-      if (!fs.existsSync(path.join(taskDir, 'task.md'))) continue;
-      out.push({ taskId: entry, taskDir });
-    }
-  }
-  return out;
-}
-
-/**
  * Enumerate every task directory, including the cold YYYY/MM/DD archive.
  * Invalid directory names, symlinks and entries without task.md are ignored;
  * duplicate task ids fail closed because their identity would be ambiguous.
@@ -364,7 +342,6 @@ export {
   resolveTaskRef,
   resolveTaskContext,
   detectRepoRoot,
-  enumerateTaskDirs,
   enumerateAllTaskDirs,
   locateHotTaskDirs,
   TASK_ID_RE

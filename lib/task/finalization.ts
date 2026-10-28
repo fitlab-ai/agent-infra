@@ -16,7 +16,6 @@ import {
   applyTaskLifecycle,
   inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
-  type TaskLifecycleRequest,
   type TaskLifecycleResult,
   type TaskCompletionProjection,
   previewTaskCompletion

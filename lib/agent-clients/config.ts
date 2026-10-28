@@ -53,13 +53,6 @@ function fail(code: AgentClientDiagnosticCode, path: string): never {
   throw new AgentClientConfigError({ code, path });
 }
 
-function parseExactText(value: unknown, path: string): string {
-  if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
-    fail('INVALID_AGENT_CLIENTS', path);
-  }
-  return value;
-}
-
 function parseCanonical(value: unknown): AgentClientState {
   if (!Array.isArray(value)) fail('INVALID_AGENT_CLIENTS', 'agentClients');
 

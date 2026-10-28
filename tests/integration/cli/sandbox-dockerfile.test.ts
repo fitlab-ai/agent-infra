@@ -12,6 +12,20 @@ import {
   onPlatforms
 } from "../../helpers.ts";
 
+const preparedDockerfiles: Array<{ cleanup(): void }> = [];
+test.after(() => {
+  for (const prepared of preparedDockerfiles) prepared.cleanup();
+});
+
+function prepareDockerfileForTest(
+  prepare: typeof import("../../../lib/sandbox/dockerfile.ts").prepareDockerfile,
+  ...args: Parameters<typeof prepare>
+): string {
+  const prepared = prepare(...args);
+  preparedDockerfiles.push(prepared);
+  return prepared.path;
+}
+
 type CommandOptions = Record<string, unknown> & {
   env?: NodeJS.ProcessEnv;
   input?: Buffer | string;
@@ -102,12 +116,12 @@ function required<T>(value: T | undefined, message = "expected value"): T {
   return value;
 }
 
-test("composeDockerfile joins runtime fragments in order", async () => {
+test("prepareDockerfile joins runtime fragments in order", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-dockerfile-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20", "python3"],
@@ -125,9 +139,9 @@ test("composeDockerfile joins runtime fragments in order", async () => {
   }
 });
 
-test("composeDockerfile applies selected adapter image contributions after the generic base", async () => {
+test("prepareDockerfile applies selected adapter image contributions after the generic base", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
-  const compose = sandboxDockerfile.composeDockerfile as unknown as (
+  const compose = prepareDockerfileForTest.bind(null, sandboxDockerfile.prepareDockerfile) as unknown as (
     config: Record<string, unknown>,
     image: { dockerfileFragments: string[]; dotfilesExclusions: string[] }
   ) => string;
@@ -168,7 +182,7 @@ test("node runtime setup fails fast on NodeSource download errors", async () => 
   const tmpDir = createTempDir("agent-infra-sandbox-node-runtime-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node22"],
@@ -189,13 +203,13 @@ test("node runtime setup fails fast on NodeSource download errors", async () => 
 // against a stubbed `npm` and a synthetic 3-package list, then assert each
 // package was installed at least once. Form-agnostic — accepts `for` loops,
 // `xargs -n1`, or any equivalent rewrite that preserves the semantic.
-test("composeDockerfile installs each AI tool package separately", onPlatforms("linux", "darwin"), async () => {
+test("prepareDockerfile installs each AI tool package separately", onPlatforms("linux", "darwin"), async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-ai-tools-loop-");
   const stubDir = createTempDir("agent-infra-sandbox-npm-stub-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -246,12 +260,12 @@ test("composeDockerfile installs each AI tool package separately", onPlatforms("
   }
 });
 
-test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => {
+test("prepareDockerfile includes gh CLI and bash_aliases sourcing", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-gh-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -270,12 +284,12 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
   }
 });
 
-test("composeDockerfile installs tmux for in-container session recovery", async () => {
+test("prepareDockerfile installs tmux for in-container session recovery", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-tmux-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -291,12 +305,12 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
   }
 });
 
-test("composeDockerfile installs tzdata for runtime TZ resolution", async () => {
+test("prepareDockerfile installs tzdata for runtime TZ resolution", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-tzdata-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -310,12 +324,12 @@ test("composeDockerfile installs tzdata for runtime TZ resolution", async () => 
   }
 });
 
-test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
+test("prepareDockerfile bakes sandbox-tmux-entry script", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-tmux-entry-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -338,12 +352,12 @@ test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
   }
 });
 
-test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
+test("prepareDockerfile bakes sandbox-dotfiles-link script", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-dotfiles-link-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -371,12 +385,12 @@ test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
   }
 });
 
-test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", async () => {
+test("prepareDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-dotfiles-entry-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -428,7 +442,7 @@ test("built-in Dockerfile signature covers the runtime script validation", async
     runtimes: ["node20"],
     dockerfile: null
   };
-  const dockerfilePath = sandboxDockerfile.composeDockerfile(config);
+  const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, config);
 
   try {
     const content = fs.readFileSync(dockerfilePath, "utf8");
@@ -442,12 +456,12 @@ test("built-in Dockerfile signature covers the runtime script validation", async
   }
 });
 
-test("composeDockerfile configures tmux extended keys and terminal env forwarding", async () => {
+test("prepareDockerfile configures tmux extended keys and terminal env forwarding", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = createTempDir("agent-infra-sandbox-tmux-config-");
 
   try {
-    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+    const dockerfilePath = prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
       repoRoot: tmpDir,
       project: "demo",
       runtimes: ["node20"],
@@ -482,7 +496,7 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     "sig-123",
     {
       engine: "native",
-      runFn(cmd: string, args: string[]) {
+      runFn() {
         const [, actualCmd, actualArgs] = arguments;
         calls.push({ type: "run", cmd: actualCmd, args: actualArgs });
         if (actualCmd === "id" && actualArgs[0] === "-u") {
@@ -796,10 +810,10 @@ test("base.dockerfile handles the preinstalled ubuntu UID conflict", onPlatforms
   }
 });
 
-test("composeDockerfile rejects unknown runtimes", async () => {
+test("prepareDockerfile rejects unknown runtimes", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
 
-  assert.throws(() => sandboxDockerfile.composeDockerfile({
+  assert.throws(() => prepareDockerfileForTest(sandboxDockerfile.prepareDockerfile, {
     repoRoot: process.cwd(),
     project: "demo",
     runtimes: ["ruby3"],

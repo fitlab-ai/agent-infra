@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import {
   extractPullRequestFileNames,
-  extractRepositoryLabelNames,
   labelDelta,
   mergeInLabels,
   planInLabelUpdate,
@@ -27,7 +26,6 @@ test('in-label planner computes a deterministic target and preserves unrelated l
 });
 
 test('paginated GitHub values are normalized without accepting malformed file payloads', () => {
-  assert.deepEqual(extractRepositoryLabelNames([[{ name: 'in: core' }], [{ name: 'type: bug' }]]), ['in: core', 'type: bug']);
   assert.deepEqual(extractPullRequestFileNames([[{ filename: 'a.ts' }], [{ filename: 'b.ts' }]]), ['a.ts', 'b.ts']);
   assert.equal(extractPullRequestFileNames([{ filename: 'a.ts' }, { status: 'renamed' }]), null);
 });

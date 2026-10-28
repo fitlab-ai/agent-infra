@@ -183,12 +183,6 @@ function prepareLocalArtifact(
 
 }
 
-function commitLocalArtifactProvenance(
-  prepared: LocalArtifactPreparation
-): LocalArtifactFinalizationResult {
-  return prepared.result;
-}
-
 function finalizeLocalArtifact(
   request: LocalArtifactFinalizationRequest
 ): LocalArtifactFinalizationResult {
@@ -208,7 +202,6 @@ export {
   finalizeLocalArtifact,
   preflightLocalArtifact,
   prepareLocalArtifact,
-  commitLocalArtifactProvenance,
   canonicalSemanticDigest as semanticDigest,
   sha256Content,
   validateLocalArtifact

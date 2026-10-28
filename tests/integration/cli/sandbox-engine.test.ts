@@ -1,4 +1,3 @@
-import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -9,7 +8,7 @@ import {
   filePath,
   loadFreshEsm
 } from "../../helpers.ts";
-import { runInteractive } from "../../../lib/sandbox/shell.ts";
+import "../../../lib/sandbox/shell.ts";
 
 type FakeSelinuxFs = {
   reads: number;
@@ -102,7 +101,6 @@ type SandboxEngineModule = {
   ensureDocker(config: Record<string, unknown>, onMessage: ((message: string) => void) | null, deps?: Record<string, unknown>): Promise<void>;
   startManagedVm(config: Record<string, unknown>, deps?: Record<string, unknown>): string;
   stopManagedVm(config: Record<string, unknown>, deps?: Record<string, unknown>): string;
-  isVmManaged(config?: Record<string, unknown>, deps?: Record<string, unknown>): boolean;
   engineDisplayName(engine: string): string;
 };
 type EnginesIndexModule = {
@@ -121,7 +119,6 @@ type ImageBuildModule = {
 };
 type Wsl2PathsModule = {
   hostJoin(basePath: string, ...segments: string[]): string;
-  isWindowsDrivePath(value: unknown): boolean;
   isUncPath(value: unknown): boolean;
   windowsPathToWslPath(value: string): string;
   toEnginePath(engine: string, value: string): string;
@@ -669,22 +666,6 @@ test("detectEngine throws an actionable error on unsupported platforms", async (
   assert.throws(
     () => sandboxEngine.detectEngine({ engine: "native" }, { platformFn: () => "freebsd" }),
     /"sandbox\.engine" value "native" is not supported on freebsd.*Supported engines on freebsd: none/s
-  );
-});
-
-test("isVmManaged returns false on unsupported platforms instead of throwing", async () => {
-  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
-
-  assert.equal(sandboxEngine.isVmManaged({}, { platformFn: () => "freebsd" }), false);
-  assert.equal(sandboxEngine.isVmManaged({ engine: "native" }, { platformFn: () => "freebsd" }), false);
-});
-
-test("isVmManaged keeps invalid sandbox engine config errors actionable", async () => {
-  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
-
-  assert.throws(
-    () => sandboxEngine.isVmManaged({ engine: "podman" }, { platformFn: () => "darwin" }),
-    /invalid "sandbox\.engine" value "podman".*unknown sandbox engine.*Valid engines:.*colima.*orbstack.*docker-desktop.*native.*wsl2/s
   );
 });
 

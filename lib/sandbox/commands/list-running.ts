@@ -2,8 +2,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runSafeEngine, runVerboseEngine } from '../shell.ts';
-import { resolveTaskBranch } from '../task-resolver.ts';
-import { isRemovedHashShortIdInput } from '../../task/short-id.ts';
 import { parseSandboxWorkspaceIdentity } from '../workspace-identity.ts';
 import { resolveProjectTaskWorkspaceRoot } from '../../task/workspace-root.ts';
 
@@ -189,23 +187,6 @@ export function resolveTaskShortRef(
       `bare N resolves only via the registry (not by row position in 'ai sandbox ls'); ` +
       `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
   );
-}
-
-/**
- * Resolve a sandbox command argument (`<branch | TASK-id | N>`) to a
- * branch name, mirroring `ai sandbox exec` so that `start` and `exec` share one
- * input contract. Short refs go through the registry-only resolver (which throws
- * an actionable error on a miss); everything else flows through resolveTaskBranch
- * (plain branch names pass through unchanged, TASK-ids resolve via task.md).
- * Callers still run assertValidBranchName on the result.
- */
-export function resolveBranchArg(arg: string, ctx: { repoRoot: string }): string {
-  if (isRemovedHashShortIdInput(arg)) {
-    throw new Error(`Invalid task short id '${arg}': task short ids must use bare digits`);
-  }
-  return isTaskShortRef(arg)
-    ? resolveTaskShortRef(arg, ctx)
-    : resolveTaskBranch(arg, ctx.repoRoot);
 }
 
 /**

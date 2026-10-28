@@ -27,9 +27,7 @@ import {
   labelDelta,
   inLabelMappingDigest,
   planInLabelUpdate,
-  syncLabelDelta,
   validateInLabelMapping,
-  validateRepositoryLabelPayload
 } from './in-label-sync.ts';
 import {
   providerError,

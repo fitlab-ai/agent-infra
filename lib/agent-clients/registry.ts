@@ -5,12 +5,7 @@ import type {
   AgentClientManifestEntry,
   AgentClientRegistry
 } from './adapter.ts';
-import type {
-  AgentClientCapabilityId,
-  AgentClientCapabilitySupport,
-  AgentClientState,
-  AgentClientSupportLevel
-} from './types.ts';
+import type { AgentClientState } from './types.ts';
 
 function buildRegistry(): Readonly<{
   registry: AgentClientRegistry;
@@ -97,29 +92,8 @@ function listInstalledAgentClientAdapters(
   );
 }
 
-function getAgentClientCapability(
-  id: unknown,
-  capability: AgentClientCapabilityId
-): AgentClientCapabilitySupport {
-  return getAgentClientAdapter(id).capabilities[capability];
-}
-
 function getAgentClientModelSelection(id: unknown) {
   return getAgentClientAdapter(id).modelSelection;
-}
-
-function listEnabledAgentClientAdaptersByCapability(
-  state: AgentClientState,
-  capability: AgentClientCapabilityId,
-  acceptedLevels: readonly AgentClientSupportLevel[]
-): readonly AgentClientAdapter[] {
-  const accepted = new Set(acceptedLevels);
-  return Object.freeze(
-    AGENT_CLIENT_ADAPTERS.filter((adapter) =>
-      state[adapter.id].enabled
-      && accepted.has(adapter.capabilities[capability].level)
-    )
-  );
 }
 
 function createAgentClientManifest(): readonly AgentClientManifestEntry[] {
@@ -148,10 +122,8 @@ export {
   AGENT_CLIENT_REGISTRY,
   createAgentClientManifest,
   getAgentClientAdapter,
-  getAgentClientCapability,
   getAgentClientModelSelection,
   listAgentClientAdapters,
   listEnabledAgentClientAdapters,
-  listEnabledAgentClientAdaptersByCapability,
   listInstalledAgentClientAdapters
 };

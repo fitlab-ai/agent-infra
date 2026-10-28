@@ -143,14 +143,3 @@ export function prepareDockerfile(
     }
   };
 }
-
-export function composeDockerfile(
-  config: DockerfileConfig,
-  image: DockerfileImageContribution = EMPTY_IMAGE_CONTRIBUTION
-): string {
-  const content = dockerfileContent(config, image);
-
-  const tempPath = path.join(os.tmpdir(), `${config.project}-sandbox.Dockerfile`);
-  fs.writeFileSync(tempPath, content, 'utf8');
-  return tempPath;
-}

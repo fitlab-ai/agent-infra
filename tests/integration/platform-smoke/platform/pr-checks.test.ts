@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { classifyPullRequestReadiness, classifyRequiredChecks, resolveRunCandidate, watchPullRequestReadiness } from '../../../../lib/platform/pr-checks.ts';
+import { classifyPullRequestReadiness, classifyRequiredChecks, watchPullRequestReadiness } from '../../../../lib/platform/pr-checks.ts';
 import { fetchCheckLogText, parseRunJobIdentity } from '../../../../lib/platform/github-data.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
@@ -95,14 +95,6 @@ test('PR readiness requires both terminal checks and explicit mergeability for o
 
 test('run identity prefers validated details URLs and exact unique fallback', () => {
   assert.deepEqual(parseRunJobIdentity('https://github.com/o/r/actions/runs/42/job/99'), { runId: 42, jobId: 99 });
-  assert.deepEqual(resolveRunCandidate([
-    { id: 4, name: 'build', headSha: 'abc' },
-    { id: 5, name: 'test', headSha: 'abc' }
-  ], 'abc', 'build'), { status: 'resolved', runId: 4, jobId: null });
-  assert.equal(resolveRunCandidate([
-    { id: 4, name: 'build', headSha: 'abc' },
-    { id: 6, name: 'build', headSha: 'abc' }
-  ], 'abc', 'build').status, 'ambiguous');
 });
 
 test('check logs retry API responses that require explicit escape-sequence output', () => {

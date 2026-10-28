@@ -6,7 +6,6 @@ import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformProviderContext } from "./context.ts";
 import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
-import { resourceIdentityNumber } from "./resource-identity.ts";
 
 const CHECK_TYPE = "required-checks";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -36,7 +35,6 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   }
   const fact = factRead.status === "valid" ? factRead.fact : null;
   const prIdentity = fact?.state === "bound" ? fact.identity.resource : null;
-  const prNumber = resourceIdentityNumber(prIdentity);
   if (prFlow === "disabled" || fact?.state === "skipped" || !prIdentity) {
     return shared.passResult(CHECK_TYPE, "Skipped: required checks are not applicable to this task");
   }

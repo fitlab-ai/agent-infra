@@ -475,7 +475,7 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   fs.mkdirSync(taskSource, { recursive: true });
   fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\nbranch: feature/demo\n---\n`, "utf8");
   const completedTaskSource = prepareSandboxCompletedTaskMountSource(config.repoRoot, taskId);
-  const view = materializeSandboxWorkspaceView({
+  materializeSandboxWorkspaceView({
     base: config.workspaceViewBase,
     project: config.project,
     container: "demo-dev-feature..demo",

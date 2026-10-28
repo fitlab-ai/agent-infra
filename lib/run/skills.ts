@@ -28,7 +28,3 @@ export function getSkillRunSpec(skill: string): SkillRunSpec | null {
   }
   return null;
 }
-
-export function allowedSkillNames(): string[] {
-  return ['create-task', ...TASK_SKILLS].sort();
-}

@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { createTempDir, INTERNAL_CLI_PATH, onPlatforms, recordArtifactCompletions, sandboxControlSafeEnv, taskWorkspaceProject } from '../../helpers.ts';
-import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { createTempDir, INTERNAL_CLI_PATH, recordArtifactCompletions, sandboxControlSafeEnv, taskWorkspaceProject } from '../../helpers.ts';
+import '../../../lib/task/events.ts';
 import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
@@ -241,11 +241,6 @@ function sha256File(filePath: string) {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function testTimestamp(offsetSeconds: number): string {
-  const value = new Date(Date.now() + offsetSeconds * 1000).toISOString();
-  return `${value.slice(0, 10)} ${value.slice(11, 19)}+00:00`;
-}
-
 function localArtifact(family: LocalArtifactFamily, suffix = '', artifact = `${family}.md`) {
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   if (family === 'analysis') {
@@ -260,7 +255,6 @@ function localArtifact(family: LocalArtifactFamily, suffix = '', artifact = `${f
 }
 
 function completionDigestArgs(repoRoot: string, dir: string, artifact: string, family: LocalArtifactFamily): string[] {
-  const file = path.join(dir, artifact);
   const result = finalizeLocalArtifact({
     taskRef: path.basename(dir),
     repoRoot,

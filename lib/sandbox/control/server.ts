@@ -36,7 +36,6 @@ import {
   writeSandboxControlReservation,
   writeSandboxControlResultEvidence,
   writeSandboxControlTerminalResult,
-  appendSandboxControlAudit,
   terminateSandboxControlExecution,
   writeSandboxControlStatus,
   readSandboxControlStatus
@@ -75,7 +74,6 @@ import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
   taskViewForManifest,
-  type SandboxTaskView
 } from './task-view.ts';
 import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts';
 
@@ -286,7 +284,6 @@ function taskCreateDomainEvidence(
 
 async function readRecoveryDomain(
   manifest: SandboxControlManifest,
-  manifestPath: string,
   request: SandboxControlRequest,
   operation: ReturnType<typeof findSandboxControlRecoveryOperation>,
   terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
@@ -336,7 +333,6 @@ function readCommittedCriticalPhases(manifest: SandboxControlManifest, requestId
 
 export async function recoveryResponse(
   manifest: SandboxControlManifest,
-  manifestPath: string,
   request: SandboxControlRequest,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
@@ -351,7 +347,7 @@ export async function recoveryResponse(
     }, payload.stdout);
     if (JSON.stringify(payloadTerminal) !== JSON.stringify(terminalResult)) return unknown(request.id);
   }
-  const recovery = await readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
+  const recovery = await readRecoveryDomain(manifest, request, operation, terminalResult, payload?.stdout ?? null);
   const binding = operationRecoveryBinding(request.id, manifest.generation, manifest.taskId, request.family, operationName!);
   const decision = classifySandboxControlRecovery({
     operation,
@@ -369,13 +365,11 @@ export async function recoveryResponse(
 }
 
 async function terminalMatchesEvidence(
-  manifest: SandboxControlManifest,
   request: SandboxControlRequest,
   response: SandboxControlResponse,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
-  payloadInvalid: boolean,
-  terminalResult: ReturnType<typeof readSandboxControlTerminalResult> | null
+  payloadInvalid: boolean
 ): Promise<{ valid: boolean; payloadReferenced: boolean }> {
   if (response.version !== 2 || response.id !== request.id || response.phase !== 'completed'
     || response.exitCode !== evidence.exitCode || response.error !== null) {
@@ -418,7 +412,7 @@ function publishExecutionResult(
   brokerOwns: () => boolean
 ): boolean {
   const normalized = sanitizeSandboxControlResult(manifest, result);
-  const terminalResult = writeSandboxControlTerminalResult(manifest, {
+  writeSandboxControlTerminalResult(manifest, {
     id: request.id,
     family: request.family,
     operation: operationKey(request)
@@ -531,7 +525,7 @@ function assertCurrentSandboxControlIdentity(manifest: SandboxControlManifest, m
   }
 }
 
-async function recoverProcessing(manifest: SandboxControlManifest, manifestPath: string, broker: BrokerOwner, brokerOwns: () => boolean): Promise<boolean> {
+async function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => boolean): Promise<boolean> {
   for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/.test(entry.name)) continue;
     if (!brokerOwns()) return false;
@@ -637,13 +631,11 @@ async function recoverProcessing(manifest: SandboxControlManifest, manifestPath:
       if (terminal && request && resultEvidence) {
         if (!terminalResult && request.family !== 'task-create') continue;
         const reconciliation = await terminalMatchesEvidence(
-          manifest,
           request,
           existingTerminalResponse!,
           resultEvidence,
           payload,
-          payloadInvalid,
-          terminalResult
+          payloadInvalid
         );
         if (!reconciliation.valid) continue;
         terminalReconciled = true;
@@ -665,7 +657,7 @@ async function recoverProcessing(manifest: SandboxControlManifest, manifestPath:
       if (!terminal) {
         if (!brokerOwns()) return false;
         if (!resultEvidence || !request || payloadInvalid) continue;
-        const recovered = await recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult!);
+        const recovered = await recoveryResponse(manifest, request, resultEvidence, payload, terminalResult!);
         if (!recovered) continue;
         writeSandboxControlResponse(manifest, recovered);
         const preserveRecoveryEvidence = recovered.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN';
@@ -810,7 +802,7 @@ export async function serveSandboxControl(
       pid: broker.pid,
       brokerId: broker.brokerId
     });
-    if (!await recoverProcessing(manifest, manifestPath, broker, brokerOwns)) return;
+    if (!await recoverProcessing(manifest, brokerOwns)) return;
     try {
       const published = readSandboxControlStatus(manifest.publicStatusDir);
       if (published.generation === manifest.generation) taskView = published.taskView;

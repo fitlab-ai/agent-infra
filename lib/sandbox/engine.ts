@@ -195,23 +195,6 @@ export async function ensureDocker(
   adapter.syncResources(effectiveConfig, onMessage, fns, { vmJustStarted });
 }
 
-export function isVmManaged(config: EngineConfig = {}, dependencies: EngineDependencies = {}): boolean {
-  try {
-    const engine = detectEngine(config, dependencies);
-    return isManagedEngine(engine);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '';
-    if (
-      message.startsWith('sandbox: platform "')
-      || / is not supported on [^.]+\. Supported engines on [^:]+: none\./.test(message)
-    ) {
-      return false;
-    }
-
-    throw error;
-  }
-}
-
 export function isManagedEngine(engine: string): boolean {
   try {
     return getAdapter(engine).managed;

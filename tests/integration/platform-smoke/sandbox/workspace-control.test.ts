@@ -20,7 +20,6 @@ import {
   SANDBOX_CONTROL_RESERVATION_BYTES,
   validateSandboxControlRequest,
   type SandboxControlManifest,
-  type SandboxControlRequest
 } from '../../../../lib/sandbox/control/protocol.ts';
 import {
   appendSandboxControlAudit,
@@ -54,7 +53,7 @@ import {
   nodeEntryArgs
 } from '../../../../lib/sandbox/control/executor.ts';
 import { createTask } from '../../../../lib/task/create-service.ts';
-import { SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
+import '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import { finalizeSandboxControlManifest } from '../../../../lib/sandbox/workspace-view.ts';
 import { createTempDir, onPlatforms, taskWorkspaceProject } from '../../../helpers.ts';

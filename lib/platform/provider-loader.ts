@@ -10,11 +10,7 @@ import {
   isPlatformProviderFactory,
   validatePlatformProvider
 } from './provider-contract.ts';
-import type {
-  JsonValue,
-  PlatformProvider,
-  PlatformProviderFactoryInput
-} from './provider-contract.ts';
+import type { JsonValue, PlatformProviderFactoryInput } from './provider-contract.ts';
 import { createGitHubProvider } from './github-provider.ts';
 import { createNoneProvider } from './none-provider.ts';
 import { wrapProviderOperations } from './provider-validation.ts';

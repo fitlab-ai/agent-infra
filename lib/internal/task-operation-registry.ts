@@ -1,9 +1,7 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 import {
   accessSandboxTaskView,
-  parseSandboxTaskView,
   taskViewFromStatus,
   type SandboxTaskView,
   type TaskViewAccessEffect
@@ -14,7 +12,7 @@ import {
   PUBLIC_CLI_SELECTOR_ALIASES,
   internalRouteSelector
 } from './cli-route-inventory.ts';
-import { hasSandboxControlMarker, resolveSandboxControlTransport, sandboxTaskMarkerState } from '../sandbox/environment.ts';
+import { hasSandboxControlMarker, sandboxTaskMarkerState } from '../sandbox/environment.ts';
 export { resolveSandboxControlTransport } from '../sandbox/environment.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
@@ -438,8 +436,4 @@ export function guardTaskOperation(
     );
   }
   return { descriptor: selected, taskView };
-}
-
-export function assertTaskViewStatus(value: unknown): SandboxTaskView {
-  return parseSandboxTaskView(value);
 }

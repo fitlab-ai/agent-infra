@@ -15,7 +15,6 @@ import {
   providerError,
   providerOperationContext,
   providerStatus,
-  resourceIdentity,
   resourceIdentityNumber,
   unsupportedProviderOperation
 } from './provider-bridge.ts';
@@ -54,14 +53,6 @@ function classifyPullRequestReadiness(input: {
   if (input.checks.state === 'failed' || input.checks.state === 'cancelled') return { state: 'checks-failed', headSha: input.headSha };
   if (input.mergeability === 'unknown' || input.checks.state === 'pending') return { state: 'pending', headSha: input.headSha };
   return { state: 'ready', headSha: input.headSha };
-}
-
-function resolveRunCandidate(candidates: RunCandidate[], headSha: string, checkName: string):
-  | { status: 'resolved'; runId: number; jobId: number | null }
-  | { status: 'missing' | 'ambiguous'; runId: null; jobId: null } {
-  const matches = candidates.filter((candidate) => candidate.headSha === headSha && candidate.name === checkName);
-  if (matches.length === 1) return { status: 'resolved', runId: matches[0]!.id, jobId: matches[0]!.jobId || null };
-  return { status: matches.length === 0 ? 'missing' : 'ambiguous', runId: null, jobId: null };
 }
 
 function checksResult(status: PlatformResult['status'], overrides: Partial<ChecksResult> = {}): ChecksResult {
@@ -256,5 +247,5 @@ async function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & 
   }
 }
 
-export { classifyPullRequestReadiness, classifyRequiredChecks, fetchPlatformCheckLogs, inspectRequiredChecks, inspectPullRequestReadiness, resolvePlatformCheckRun, resolveRunCandidate, watchPullRequestReadiness };
+export { classifyPullRequestReadiness, classifyRequiredChecks, fetchPlatformCheckLogs, inspectRequiredChecks, inspectPullRequestReadiness, resolvePlatformCheckRun, watchPullRequestReadiness };
 export type { CheckBucket, CheckSnapshot, ChecksResult, ChecksSnapshot, CheckState, ReadinessSnapshot, ReadinessState, RunCandidate };

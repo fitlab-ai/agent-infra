@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { inspectPlatformPullRequestByNumber, selectExternalPullRequest, selectPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels, warningResultForPrimary } from '../../../../lib/platform/pull-requests.ts';
+import { inspectPlatformPullRequestByNumber, selectExternalPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels, warningResultForPrimary } from '../../../../lib/platform/pull-requests.ts';
 import { inspectGitHubIssueClosingChangeRequests, normalizePullRequest } from '../../../../lib/platform/github-data.ts';
 import type { GitHubClient, RequestOptions } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
@@ -501,14 +501,6 @@ test('in-label PR sync preserves an unrelated label added after the initial read
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
-});
-
-test('PR selection fails closed for zero or multiple exact head/base matches', () => {
-  assert.deepEqual(selectPullRequest([remote(1), remote(2, 'other')], 'o/r', 'feature', 'main'), {
-    status: 'resolved', pullRequest: normalizePullRequest(remote(1), 'o/r')
-  });
-  assert.equal(selectPullRequest([], 'o/r', 'feature', 'main').status, 'missing');
-  assert.equal(selectPullRequest([remote(1), remote(2)], 'o/r', 'feature', 'main').status, 'ambiguous');
 });
 
 test('external PR selection filters before uniqueness and accepts a merged fork PR', () => {

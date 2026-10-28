@@ -16,7 +16,7 @@ import { writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
 import { parseLegacyReworkIntentDocument, parseReworkIntentDocument, reworkIntentMutation, upsertReworkIntent } from './rework-intent.ts';
 import type { ReworkClassification, ReworkIntent, ReworkTarget } from './rework-intent.ts';
-import { extractSection, extractSubSection } from './sections.ts';
+import { extractSection } from './sections.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
 import { inspectArtifactDirectory } from './artifact-lifecycle.ts';

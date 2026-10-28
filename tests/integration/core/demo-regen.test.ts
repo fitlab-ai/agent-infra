@@ -189,8 +189,8 @@ esac
 
   return {
     repoDir,
-    assetsDir,
     binDir,
+    assetsDir,
     capturedTapePath,
     capturedAiOutPath,
     sourceGifPath,
@@ -287,7 +287,6 @@ test("demo-regen ignores local settings and uses canonical recording parameters"
   const fixture = setupDemoRegenFixture({ withLocalSettings: true });
   const {
     repoDir,
-    assetsDir,
     capturedTapePath,
     env
   } = fixture;

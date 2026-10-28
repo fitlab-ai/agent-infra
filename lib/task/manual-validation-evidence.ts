@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import {
   MANUAL_VALIDATION_SHA40 as SHA40,
   MANUAL_VALIDATION_TASK_ID as TASK_ID,
@@ -46,11 +44,6 @@ type ManualValidationEvidenceInput = {
   exitCode: number;
   signal: string | null;
   cleanup: ManualValidationCleanup;
-};
-type ManualValidationEvidenceIdentity = {
-  taskId: string | null;
-  branch: string;
-  commit?: string;
 };
 type ManualValidationEvidenceErrorCode =
   | 'MANUAL_VALIDATION_EVIDENCE_MISSING'
@@ -151,56 +144,17 @@ function manualValidationEvidenceSummary(evidence: ManualValidationEvidence): Ma
   };
 }
 
-function validateManualValidationEvidence(value: unknown, expected?: ManualValidationEvidenceIdentity): ManualValidationEvidenceResult {
-  const shape = validateShape(value);
-  if (!shape.ok) return shape;
-  const evidence = shape.value;
-  if (evidence.result.exitCode !== 0 || evidence.result.signal !== null || evidence.result.cleanup !== 'completed') {
-    return { ok: false, error: { code: 'MANUAL_VALIDATION_EVIDENCE_UNSUCCESSFUL', message: 'validation must exit 0 without a signal and complete cleanup' } };
-  }
-  if (expected) {
-    if (evidence.taskId !== expected.taskId || evidence.branch !== expected.branch) {
-      return { ok: false, error: { code: 'MANUAL_VALIDATION_EVIDENCE_IDENTITY_MISMATCH', message: 'evidence task or branch does not match the expected identity' } };
-    }
-    if (expected.commit !== undefined && evidence.commit !== expected.commit) {
-      return { ok: false, error: { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence commit does not match the current head' } };
-    }
-  }
-  return shape;
-}
-
-function readManualValidationEvidence(file: string, expected?: ManualValidationEvidenceIdentity): ManualValidationEvidenceResult {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? 'MANUAL_VALIDATION_EVIDENCE_MISSING'
-      : 'MANUAL_VALIDATION_EVIDENCE_INVALID';
-    return { ok: false, error: { code, message: error instanceof Error ? error.message : String(error) } };
-  }
-  return validateManualValidationEvidence(parsed, expected);
-}
-
-function manualValidationEvidenceDigest(evidence: ManualValidationEvidence): string {
-  return createHash('sha256').update(JSON.stringify(evidence), 'utf8').digest('hex');
-}
-
 export {
   MANUAL_VALIDATION_EVIDENCE_SCHEMA,
   MANUAL_VALIDATION_EVIDENCE_VERSION,
   createManualValidationEvidence,
-  manualValidationEvidenceSummary,
-  manualValidationEvidenceDigest,
-  readManualValidationEvidence,
-  validateManualValidationEvidence
+  manualValidationEvidenceSummary
 };
 export type {
   ManualValidationCleanup,
   ManualValidationEvidence,
   ManualValidationEvidenceError,
   ManualValidationEvidenceErrorCode,
-  ManualValidationEvidenceIdentity,
   ManualValidationEvidenceInput,
   ManualValidationEvidenceResult,
   ManualValidationEvidenceSummary,

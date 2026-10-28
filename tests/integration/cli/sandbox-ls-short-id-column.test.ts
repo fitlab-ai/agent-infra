@@ -1,47 +1,7 @@
-import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 
-import { createTempDir, loadFreshEsm } from '../../helpers.ts';
-import { lookupShortIdByBranch } from '../../../lib/task/short-id.ts';
-
-function mkFixture(): { repoRoot: string; activeDir: string } {
-  const repoRoot = createTempDir('sb-ls-shortid-');
-  const activeDir = path.join(taskWorkspaceRoot(repoRoot),  'active');
-  fs.mkdirSync(activeDir, { recursive: true });
-  return { repoRoot, activeDir };
-}
-
-function writeTaskWithBranch(activeDir: string, taskId: string, branch: string): void {
-  fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
-  fs.writeFileSync(
-    path.join(activeDir, taskId, 'task.md'),
-    `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`
-  );
-}
-
-function writeRegistry(activeDir: string, ids: Record<string, string>): void {
-  fs.writeFileSync(
-    path.join(activeDir, '.short-ids.json'),
-    JSON.stringify({ version: 1, ids }, null, 2)
-  );
-}
-
-test('lookupShortIdByBranch returns bare NN for a branch bound to an active task', () => {
-  const { repoRoot, activeDir } = mkFixture();
-  writeTaskWithBranch(activeDir, 'TASK-20260101-000001', 'feature-bound');
-  writeRegistry(activeDir, { '07': 'TASK-20260101-000001' });
-  assert.equal(lookupShortIdByBranch('feature-bound', repoRoot), '07');
-});
-
-test("lookupShortIdByBranch returns null for branches without an active task", () => {
-  const { repoRoot, activeDir } = mkFixture();
-  writeTaskWithBranch(activeDir, 'TASK-20260101-000001', 'feature-bound');
-  writeRegistry(activeDir, { '07': 'TASK-20260101-000001' });
-  assert.equal(lookupShortIdByBranch('main', repoRoot), null);
-});
+import { loadFreshEsm } from '../../helpers.ts';
 
 test('formatContainerTable now uses short id / "-" instead of running-index', async () => {
   const { formatContainerTable } = await loadFreshEsm<typeof import('../../../lib/sandbox/commands/ls.ts')>(

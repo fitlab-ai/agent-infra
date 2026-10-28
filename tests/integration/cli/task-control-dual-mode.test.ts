@@ -185,25 +185,6 @@ test('direct Node injection matrix cannot reach any task-control local handler',
   }
 });
 
-function snapshotTree(root: string): string[] {
-  const entries: string[] = [];
-  function visit(directory: string): void {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-      const absolute = path.join(directory, entry.name);
-      const relative = path.relative(root, absolute);
-      if (entry.isDirectory()) {
-        visit(absolute);
-      } else if (entry.isSymbolicLink()) {
-        entries.push(`${relative}\0link:${fs.readlinkSync(absolute)}`);
-      } else {
-        entries.push(`${relative}\0file:${fs.readFileSync(absolute, 'utf8')}`);
-      }
-    }
-  }
-  visit(root);
-  return entries;
-}
-
 test('branch-only control markers keep non-task public commands on the host entry', () => {
   const result = runPublic(['version'], cleanEnv({
     AGENT_INFRA_SANDBOX: '1',

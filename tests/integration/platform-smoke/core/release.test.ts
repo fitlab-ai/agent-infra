@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import * as semver from "semver";
 import { parse } from "yaml";
 
-import { CLI_PATH, cliArgs, filePath, listFilesRecursive, read } from "../../../helpers.ts";
+import { cliArgs, listFilesRecursive, read } from "../../../helpers.ts";
 
 type WorkflowStep = {
   uses?: string;
