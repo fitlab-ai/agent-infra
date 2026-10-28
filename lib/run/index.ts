@@ -101,11 +101,21 @@ function extractHostOptions(args: string[]): {
   return { positionals, forwarded, skill, taskRef, tui, recreate };
 }
 
+function parseCreateTaskArgs(skill: string, options: ReturnType<typeof extractHostOptions>): ParsedRunArgs {
+  const { taskRef, recreate, positionals, forwarded, tui } = options;
+  if (taskRef !== null) throw new Error("create-task does not accept '--task'");
+  if (recreate) throw new Error('--recreate is only valid for sandbox task runs');
+  const createArgs = [...positionals, ...forwarded];
+  if (createArgs.length === 0) throw new Error('create-task requires a description');
+  return { skill, taskRef: null, args: createArgs, tui };
+}
+
 export function parseRunArgs(args: string[]): ParsedRunArgs {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     throw new Error(USAGE);
   }
-  const { positionals, forwarded, skill, taskRef, tui, recreate } = extractHostOptions(args);
+  const options = extractHostOptions(args);
+  const { positionals, forwarded, skill, taskRef, tui, recreate } = options;
   if (!skill) throw new Error("option '--skill' is required");
   const spec = getSkillRunSpec(skill);
   if (!spec) throw new Error(`Unknown skill '${skill}'`);
@@ -114,11 +124,7 @@ export function parseRunArgs(args: string[]): ParsedRunArgs {
     throw new Error(`Unsupported run route '${routeSelector}'`);
   }
   if (spec.kind === 'create') {
-    if (taskRef !== null) throw new Error("create-task does not accept '--task'");
-    if (recreate) throw new Error('--recreate is only valid for sandbox task runs');
-    const createArgs = [...positionals, ...forwarded];
-    if (createArgs.length === 0) throw new Error('create-task requires a description');
-    return { skill, taskRef: null, args: createArgs, tui };
+    return parseCreateTaskArgs(skill, options);
   }
   if (positionals.length > 0) {
     throw new Error('ai run requires --skill and --task; positional host arguments are not supported');

@@ -1350,15 +1350,6 @@
       "count": 1
     },
     {
-      "file": "lib/run/index.ts",
-      "ruleId": "complexity",
-      "stableId": "a31e42122dab40c576651695260292be8d59503f4a22905b2d0d7f5f2a158e74",
-      "displayName": "parseRunArgs",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/identity-sentinel.ts",
       "ruleId": "complexity",
       "stableId": "543614e2fbc498a4c1b709d86d6e7df658ed077c62ed562967f2306df96987bb",
