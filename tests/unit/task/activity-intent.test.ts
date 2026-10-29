@@ -122,7 +122,7 @@ test('identical PR review start and terminal intents replay as no-op', () => {
 
     const updated = fs.readFileSync(path.join(fixture.taskDir, 'task.md'), 'utf8');
     assert.equal((updated.match(/Review PR \(Round 1\) \[started\]/g) ?? []).length, 1);
-    assert.equal((updated.match(/Verdict: Approved/g) ?? []).length, 1);
+    assert.equal((updated.match(/— \*\*Review PR \(Round 1\)\*\* by codex — Verdict: Approved/g) ?? []).length, 1);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -328,4 +328,22 @@ test('PR review intents reject a task that is not active', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('PR review lifecycle survives a missing Activity Log and preserves normal execution state', () => {
+  const f = fixtureTask();
+  try {
+    const file = path.join(f.taskDir, 'task.md');
+    const before = fs.readFileSync(file, 'utf8').replace(/## 活动日志\n[\s\S]*$/, '');
+    fs.writeFileSync(file, before);
+    writeArtifact(f.taskDir);
+    const start = { kind: 'pr-review-start' as const, taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD };
+    assert.equal(applyPrReviewActivityIntent(start, { repoRoot: f.root }).status, 'applied');
+    setArtifactStatus(f.taskDir, 'pr-review.md', 'applied');
+    assert.equal(inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root }).snapshot?.open?.artifact, 'pr-review.md');
+    const complete = { kind: 'pr-review-complete' as const, taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD, verdict: 'approved' as const, blockers: 0, major: 0, minor: 0 };
+    assert.equal(applyPrReviewActivityIntent(complete, { repoRoot: f.root }).status, 'applied');
+    assert.equal(applyPrReviewActivityIntent(complete, { repoRoot: f.root }).status, 'no-op');
+    assert.equal(inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root }).snapshot?.open, null);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });

@@ -8,9 +8,9 @@ import { checkpointCommitMatches } from './commit-identity.ts';
 import { resolveTaskContext, resolveTaskRef } from './resolve-ref.ts';
 import { commitPushDecision } from './commit-policy.ts';
 import { mergeOperationWarnings, type OperationWarning } from './operation-outcome.ts';
-import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
+import { activityWarnings, appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
-import type { TaskMutation } from './write.ts';
+import type { TaskMutation, TaskWriteOptions } from './write.ts';
 import {
   checkpointIntentDigest,
   readCheckpointIntent,
@@ -193,44 +193,32 @@ function validateCommon(input: CommitOperationInput, branch: string | null): Rea
   return null;
 }
 
+// Log presentation only; checkpoint identity and recovery never depend on this projection.
+function commitLogProjection(activity: ReturnType<typeof locateActivityLog>, timestamp: string, agent: string, commitNote: string): TaskMutation[] {
+  if (!activity) return [];
+  let lastCommit = -1;
+  for (const [index, entry] of activity.entries.entries()) {
+    if (entry.step === 'Commit' && entry.note === commitNote) lastCommit = index;
+  }
+  const reviewedAfter = activity.entries.slice(lastCommit + 1).some((entry) => /^Review Code \(Round \d+\)$/.test(entry.step));
+  if (lastCommit >= 0 && !reviewedAfter) return [];
+  return [{ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: activity.heading,
+    body: appendActivityEntry(activity, { time: timestamp, step: 'Commit', agent, note: commitNote }) }];
+}
+
 function syncTaskCommit(
   input: CommitOperationInput,
   task: BoundTask,
-  committedHead: string
+  committedHead: string,
+  writeOptions: TaskWriteOptions = {}
 ): OperationWarning | null {
   let content: string;
   try {
     content = fs.readFileSync(task.taskMdPath, 'utf8');
     const activity = locateActivityLog(content);
-    if (!activity) return warning(
-      'TASK_STATUS_SYNC_FAILED',
-      'task has no unique Activity Log section',
-      true,
-      'task',
-      task.taskId,
-      'ACTION_REQUIRED'
-    );
     const metadata = captureTaskWriteMetadata();
     const commitNote = gitText(task.repoRoot, ['show', '-s', '--format=%h %s', committedHead]);
-    let matchingCommitIndex = -1;
-    for (let index = activity.entries.length - 1; index >= 0; index -= 1) {
-      const entry = activity.entries[index]!;
-      if (entry.step === 'Commit' && entry.note === commitNote) {
-        matchingCommitIndex = index;
-        break;
-      }
-    }
-    const reviewedAfterCommit = matchingCommitIndex >= 0 && activity.entries
-      .slice(matchingCommitIndex + 1)
-      .some((entry) => /^Review Code \(Round \d+\)$/.test(entry.step));
-    const alreadyLogged = matchingCommitIndex >= 0 && !reviewedAfterCommit;
-    const mutations: TaskMutation[] = [];
-    if (!alreadyLogged) mutations.push({
-      kind: 'section',
-      aliases: ['活动日志', 'Activity Log'],
-      heading: activity.heading,
-      body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Commit', agent: input.agent!, note: commitNote })
-    });
+    const mutations = commitLogProjection(activity, metadata.timestamp, input.agent!, commitNote);
     const frontmatter: Record<string, string> = {
       assigned_to: input.agent!,
       checkpoint_commit: committedHead
@@ -241,7 +229,7 @@ function syncTaskCommit(
       taskRef: task.taskId,
       expectedState: 'active',
       mutations
-    }, { repoRoot: task.repoRoot, metadataProvider: () => metadata });
+    }, { ...writeOptions, repoRoot: task.repoRoot, metadataProvider: () => metadata });
     if (written.status === 'failed') return warning(
       'TASK_STATUS_SYNC_FAILED',
       written.error.message,
@@ -250,7 +238,8 @@ function syncTaskCommit(
       task.taskId,
       'ACTION_REQUIRED'
     );
-    return null;
+    const logWarning = activityWarnings(content)[0];
+    return logWarning ? warning(logWarning.code, logWarning.message, true, 'task', task.taskId, 'IMPORTANT') : null;
   } catch (error) {
     return warning(
       'TASK_STATUS_SYNC_FAILED',
@@ -281,7 +270,7 @@ function checkpointTimestamp(): string {
   return new Date().toISOString();
 }
 
-function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
+function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode, writeOptions: TaskWriteOptions): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
   const branch = inspected.snapshot.branch;
@@ -457,13 +446,13 @@ function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask
   }
   if (task && (committed.status === 'applied' || committed.status === 'no-op')) {
     const committedHead = checkpointCommittedHead ?? committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']);
-    const taskWarning = syncTaskCommit(input, task, committedHead);
+    const taskWarning = syncTaskCommit(input, task, committedHead, writeOptions);
     if (taskWarning) {
       warnings.push(taskWarning);
       status = 'applied';
       result = 'committed_with_warnings';
     }
-    if (delivery.mode === 'local' && !taskWarning && pendingIntent && checkpointCommittedHead) {
+    if (delivery.mode === 'local' && taskWarning?.code !== 'TASK_STATUS_SYNC_FAILED' && pendingIntent && checkpointCommittedHead) {
       const synced = updateCheckpointIntent(pendingIntent, {
         state: 'synced', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
       });
@@ -484,7 +473,7 @@ function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask
   };
 }
 
-function executeCommitOperation(input: CommitOperationInput): CommitOperationResult {
+function executeCommitOperation(input: CommitOperationInput, writeOptions: TaskWriteOptions = {}): CommitOperationResult {
   if (input.mode !== undefined && !isCommitExecutionMode(input.mode)) return {
     status: 'blocked',
     changed: false,
@@ -507,7 +496,7 @@ function executeCommitOperation(input: CommitOperationInput): CommitOperationRes
   if (resolved.kind === 'error') return resolved.result;
   const task = resolved.kind === 'bound' ? resolved.task : null;
   try {
-    return executeCommitOperationCore(normalizedInput, task, mode);
+    return executeCommitOperationCore(normalizedInput, task, mode, writeOptions);
   } catch (error) {
     const code = 'COMMIT_OPERATION_FAILED';
     return failure(normalizedInput, mode, task?.taskId ?? null, code, error instanceof Error ? error.message : String(error), 'blocked');

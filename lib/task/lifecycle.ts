@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
+import { activityWarnings, appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { artifactFamilyCatalog, inspectArtifactDirectory } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from './frontmatter.ts';
@@ -96,6 +96,7 @@ type TaskLifecycleResult = {
   completedSteps: readonly LifecycleStep[];
   pendingSteps: readonly LifecycleStep[];
   error: LifecycleError | null;
+  warnings?: readonly { code: string; message: string }[];
 };
 type LifecycleFileSystem = {
   renameSync: (source: string, target: string) => void;
@@ -401,11 +402,23 @@ function actionAndNote(request: TaskLifecycleRequest, restoredFiles = 0): { acti
   return { action: 'Restore Task', note: `Restored ${restoredFiles} files from Issue #${request.issueNumber}` };
 }
 
+type LifecycleCompletionKey = { action: string; agent: string; note: string };
+
+function completionKeys(content: string): LifecycleCompletionKey[] {
+  const value = parseTypedTaskFrontmatter(content).lifecycle_transition;
+  if (value === undefined) return [];
+  if (typeof value !== 'string') throw new Error('invalid lifecycle transition');
+  const state: unknown = JSON.parse(value);
+  if (!state || typeof state !== 'object' || !('completedKeys' in state) || !Array.isArray(state.completedKeys)) throw new Error('invalid lifecycle transition');
+  return state.completedKeys.map((key: unknown) => {
+    if (!key || typeof key !== 'object' || !('action' in key) || typeof key.action !== 'string' || !('agent' in key) || typeof key.agent !== 'string' || !('note' in key) || typeof key.note !== 'string') throw new Error('invalid lifecycle completion identity');
+    return key as LifecycleCompletionKey;
+  });
+}
+
 function matchingCompletion(content: string, request: TaskLifecycleRequest, restoredFiles = 0): boolean {
-  const section = locateActivityLog(content);
-  if (!section) return false;
   const identity = actionAndNote(request, restoredFiles);
-  return section.entries.some((entry) => entry.step === identity.action && entry.agent === request.agent && entry.note === identity.note);
+  return completionKeys(content).some((entry) => entry.action === identity.action && entry.agent === request.agent && entry.note === identity.note);
 }
 
 function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent: 'restore' }>, repoRoot: string, taskId: string): LifecycleError | { stagingDir: string; fileCount: number } {
@@ -458,12 +471,17 @@ function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent:
   return { stagingDir, fileCount: entries.filter((entry) => !entry.name.startsWith('.')).length };
 }
 
-function mutationsFor(request: TaskLifecycleRequest, content: string, metadata: TaskWriteMetadata, restoredFiles: number, allowMissingActivityLog = false): TaskMutation[] | LifecycleError {
-  const section = locateActivityLog(content) ?? (allowMissingActivityLog ? { heading: 'Activity Log', body: '', entries: [] } : null);
-  if (!section) return { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' };
-  const identity = actionAndNote(request, restoredFiles);
+function lifecycleActivityMutation(content: string, request: TaskLifecycleRequest, metadata: TaskWriteMetadata, identity: { action: string; note: string }, allowMissing: boolean): TaskMutation[] {
+  const section = locateActivityLog(content) ?? (allowMissing ? { heading: 'Activity Log', body: '', entries: [] } : null);
+  if (!section) return [];
   let body = appendActivityEntry(section, { time: metadata.timestamp, step: `${identity.action} [started]`, agent: request.agent, note: 'started' });
   body = appendActivityEntry({ ...section, body }, { time: metadata.timestamp, step: identity.action, agent: request.agent, note: identity.note });
+  return [{ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body }];
+}
+
+function mutationsFor(request: TaskLifecycleRequest, content: string, metadata: TaskWriteMetadata, restoredFiles: number, allowMissingActivityLog = false): TaskMutation[] | LifecycleError {
+  const identity = actionAndNote(request, restoredFiles);
+  const activityMutation = lifecycleActivityMutation(content, request, metadata, identity, allowMissingActivityLog);
   const set: Record<string, string> = {};
   const remove: string[] = [];
   if (request.intent === 'block') {
@@ -481,9 +499,12 @@ function mutationsFor(request: TaskLifecycleRequest, content: string, metadata: 
     const frontmatter = parseTypedTaskFrontmatter(content);
     if (frontmatter.target_date === '') set.target_date = metadata.timestamp.slice(0, 10);
   }
+  const completedKeys = completionKeys(content);
+  if (!matchingCompletion(content, request, restoredFiles)) completedKeys.push({ ...identity, agent: request.agent });
+  set.lifecycle_transition = JSON.stringify({ completedKeys });
   const mutations: TaskMutation[] = [
     { kind: 'frontmatter', set, remove: [...new Set(remove)] },
-    { kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body }
+    ...activityMutation
   ];
   if (request.intent === 'block') {
     mutations.splice(1, 0, {
@@ -675,7 +696,6 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   try { frontmatter = parseTypedTaskFrontmatter(content); }
   catch (error) { return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
   if (frontmatter.id !== taskId) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'task.md id does not match its lifecycle task id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  if (!locateActivityLog(content)) return failed(request, { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   if (spec.target === 'active') {
     const contract = validateCurrentTaskContract(content);
     if (!contract.ok) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contract.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
@@ -897,9 +917,21 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   };
 }
 
+function applyTaskLifecycleWithWarnings(request: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  const taskFile = resolved.ok ? resolved.taskMdPath : request.intent === 'restore' ? path.join(request.stagingDir, 'task.md') : null;
+  let warnings: ReturnType<typeof activityWarnings> = [];
+  if (taskFile) {
+    try { warnings = activityWarnings(fs.readFileSync(taskFile, 'utf8')); }
+    catch { /* The lifecycle operation reports its own read failure. */ }
+  }
+  const result = applyTaskLifecycle(request, options);
+  return result.status === 'failed' || !warnings.length ? result : { ...result, warnings };
+}
+
 export {
   lifecycleIntentCatalog, lifecycleFailureCatalog, lifecycleProducerCatalog,
-  applyTaskLifecycle, previewTaskCompletion
+  applyTaskLifecycleWithWarnings as applyTaskLifecycle, previewTaskCompletion
 };
 export type {
   TaskLifecycleIntent, TaskLifecycleRequest, TaskLifecycleResult, TaskLifecycleOptions,

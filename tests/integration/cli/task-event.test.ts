@@ -2081,3 +2081,55 @@ test('code-r7 completion accepts a directly repaired report', () => {
   assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.equal((fs.readFileSync(f.file, 'utf8').match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
 });
+
+test('awaiting input updates task state when the activity log is missing', () => {
+  const f = fixture('technical-design');
+  try {
+    const before = fs.readFileSync(f.file, 'utf8').replace('## Activity Log\n\n', '');
+    fs.writeFileSync(f.file, before);
+    const result = run(f.root, [f.id, 'analyze.awaiting-input', '--agent', 'codex', '--question', '1']);
+    assert.equal(result.status, 0, result.stdout || result.stderr);
+    const content = fs.readFileSync(f.file, 'utf8');
+    assert.match(content, /^current_step: requirement-analysis$/m);
+    assert.match(content, /^assigned_to: codex$/m);
+    assert.ok(JSON.parse(result.stdout).warnings?.length > 0);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('awaiting input keeps the same business state across ambiguous and malformed logs', () => {
+  for (const log of ['## Activity Log\n\n## 活动日志\n', '## Activity Log\n\n- malformed\n']) {
+    const f = fixture('technical-design');
+    try {
+      fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('## Activity Log\n\n', log));
+      const result = run(f.root, [f.id, 'analyze.awaiting-input', '--agent', 'codex', '--question', '1']);
+      assert.equal(result.status, 0, result.stdout || result.stderr);
+      assert.ok(JSON.parse(result.stdout).warnings?.length);
+      const task = fs.readFileSync(f.file, 'utf8');
+      assert.match(task, /^current_step: requirement-analysis$/m);
+      assert.match(task, /^assigned_to: codex$/m);
+      if (log.includes('malformed')) assert.match(task, /- malformed/);
+    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test('validation-run completion replays its existing fact without activity log history', () => {
+  const f = fixture('requirement-analysis-review');
+  try {
+    const started = run(f.root, [f.id, 'validation-run.started', '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'validation-run.md'), '# Validation run\n\nEvidence.\n');
+    const args = [f.id, 'validation-run.completed', '--agent', 'codex', '--artifact', 'validation-run.md'];
+    const first = run(f.root, args);
+    assert.equal(first.status, 0, first.stdout || first.stderr);
+    const task = fs.readFileSync(f.file, 'utf8').replace(/## Activity Log\n[\s\S]*$/, '');
+    fs.writeFileSync(f.file, task);
+    const replay = run(f.root, args);
+    assert.equal(replay.status, 0, replay.stdout || replay.stderr);
+    assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+    assert.equal(JSON.parse(replay.stdout).warnings[0].code, 'ACTIVITY_LOG_UNAVAILABLE');
+    fs.appendFileSync(path.join(f.dir, 'validation-run.md'), 'Additional evidence.\n');
+    const changed = run(f.root, [...args, '--initiator', 'model', '--request-id', 'validation-run-retry', '--reason-code', 'user-request']);
+    assert.equal(changed.status, 0, changed.stdout || changed.stderr);
+    assert.equal(JSON.parse(changed.stdout).status, 'applied');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

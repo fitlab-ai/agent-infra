@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 
-import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
+import { activityWarnings, appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { CONFIRMATION_COLUMNS, CONFIRMATION_HEADINGS, constraintDigest, parseQualificationConfirmations, parseTaskQualification } from './qualification-audit.ts';
 import type { QualificationConfirmation } from './qualification-audit.ts';
 import { findSectionHeading } from './sections.ts';
@@ -25,6 +25,7 @@ type QualificationConfirmationResult = {
   requestId: string | null;
   operations: readonly TaskOperationSummary[];
   error: { code: string; message: string } | null;
+  warnings?: readonly { code: string; message: string }[];
 };
 
 function failed(code: string, message: string, taskId: string | null = null): QualificationConfirmationResult {
@@ -73,13 +74,13 @@ function applyQualificationConfirmation(request: QualificationConfirmationReques
   const previous = existing.confirmations.find((row) => row.qcrId === constraint.approvalEvidence);
   if (operation === 'confirm' && constraint.status === 'confirmed') {
     if (previous?.constraintId === constraint.constraintId && previous.approvedDigest === constraint.digest && previous.rationale === request.rationale.trim()) {
-      return { status: 'no-op', changed: false, taskId: resolved.taskId, qcrId: previous.qcrId, requestId: previous.requestId, operations: [], error: null };
+      return { status: 'no-op', changed: false, taskId: resolved.taskId, qcrId: previous.qcrId, requestId: previous.requestId, operations: [], error: null, warnings: activityWarnings(content) };
     }
     return failed('QUALIFICATION_CONFIRMATION_CONFLICT', `constraint '${request.constraintId}' is already confirmed with different evidence`, resolved.taskId);
   }
   const transitionStatus = operation === 'supersede' ? 'superseded' : 'open';
   if (operation !== 'confirm' && constraint.status === transitionStatus && !constraint.approvalEvidence) {
-    return { status: 'no-op', changed: false, taskId: resolved.taskId, qcrId: null, requestId: null, operations: [], error: null };
+    return { status: 'no-op', changed: false, taskId: resolved.taskId, qcrId: null, requestId: null, operations: [], error: null, warnings: activityWarnings(content) };
   }
   if (operation !== 'confirm' && constraint.status !== 'confirmed') return failed('QUALIFICATION_CONFIRMATION_REQUIRED', `constraint '${request.constraintId}' is not confirmed`, resolved.taskId);
   if (parsed.qualification.constraintDigest !== request.expectedDigest) return failed('QUALIFICATION_DIGEST_CONFLICT', 'constraint digest changed before human confirmation', resolved.taskId);
@@ -99,18 +100,17 @@ function applyQualificationConfirmation(request: QualificationConfirmationReques
   } : null;
   const confirmations = confirmation ? [...existing.confirmations, confirmation] : existing.confirmations;
   const activity = locateActivityLog(content);
-  if (!activity) return failed('QUALIFICATION_ACTIVITY_MISSING', 'task has no unique Activity Log section', resolved.taskId);
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
     {
       kind: 'table-row', action: 'upsert', sectionAliases: ['约束', 'Constraints'], columns: ['constraint_id', 'statement', 'status', 'authority', 'source', 'evidence', 'derived_from', 'approval_evidence'], keyColumn: 'constraint_id', key: constraint.constraintId,
       values: { statement: constraint.statement, status: operation === 'confirm' ? 'confirmed' : transitionStatus, authority: operation === 'confirm' ? 'human-declared' : constraint.authority, source: constraint.source, evidence: constraint.evidence, derived_from: constraint.derivedFrom.join(','), approval_evidence: qcrId ?? '' }
     },
     ...(operation === 'confirm' ? [{ kind: 'section' as const, aliases: CONFIRMATION_HEADINGS, heading: findSectionHeading(content, [...CONFIRMATION_HEADINGS]), body: renderConfirmations(confirmations) }] : []),
-    { kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: activity.heading, body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Qualification Confirmation', agent: 'human', note: operation === 'confirm' ? `${request.constraintId} confirmed → ${qcrId}` : `${request.constraintId} ${operation}d` }) }
+    ...(activity ? [{ kind: 'section' as const, aliases: ['活动日志', 'Activity Log'], heading: activity.heading, body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Qualification Confirmation', agent: 'human', note: operation === 'confirm' ? `${request.constraintId} confirmed → ${qcrId}` : `${request.constraintId} ${operation}d` }) }] : [])
   ];
   const result = writeTask({ taskRef: resolved.taskId, expectedState: 'active', mutations, dryRun: request.dryRun }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state }, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(result.error.code, result.error.message, result.taskId);
-  return { status: result.status, changed: result.changed, taskId: result.taskId, qcrId, requestId, operations: result.operations, error: null };
+  return { status: result.status, changed: result.changed, taskId: result.taskId, qcrId, requestId, operations: result.operations, error: null, warnings: activityWarnings(content) };
 }
 
 export { applyQualificationConfirmation };

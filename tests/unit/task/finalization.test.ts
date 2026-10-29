@@ -718,7 +718,7 @@ test('host finalization uses the canonical root and makes a successful replay a 
     assert.equal(second.verification, null);
     assert.equal(second.taskComment, null);
     assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md')), true);
-    assert.equal((fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+    assert.equal((fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'completed', TASK_ID, 'task.md'), 'utf8').match(/\*\*Complete Task(?: \[started\])?\*\*/g) ?? []).length, 2);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

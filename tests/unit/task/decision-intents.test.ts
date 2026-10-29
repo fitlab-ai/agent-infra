@@ -132,3 +132,14 @@ test('human decision leaves task bytes unchanged when the atomic rename fails', 
     assert.equal(fs.existsSync(path.join(path.dirname(f.taskMd), `.task.md.${process.pid}.decision-failure.tmp`)), false);
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
+
+test('human decision persists and reports a missing activity log', () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(f.taskMd, fs.readFileSync(f.taskMd, 'utf8').replace(/## Activity Log[\s\S]*$/, ''));
+    const result = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use A', needsImplementation: true }, { repoRoot: f.repoRoot });
+    assert.equal(result.status, 'applied');
+    assert.equal(result.warnings?.[0]?.code, 'ACTIVITY_LOG_UNAVAILABLE');
+    assert.match(fs.readFileSync(f.taskMd, 'utf8'), /\| CD-1 \| code \| 1 \| major \| human-decided \|/);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});

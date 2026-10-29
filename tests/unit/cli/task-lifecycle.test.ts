@@ -53,7 +53,7 @@ test('block moves the task, updates one metadata pair, logs a pair, and releases
   assert.match(content, /status: blocked/);
   assert.match(content, /blocked_at: 2026-07-18 12:00:00\+00:00/);
   assert.match(content, /agent_infra_version: v9\.9\.9/);
-  assert.equal((content.match(/Block Task/g) ?? []).length, 2);
+  assert.equal((content.match(/\*\*Block Task(?: \[started\])?\*\*/g) ?? []).length, 2);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', '.short-ids.json'), 'utf8')).ids, {});
   assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.repoRoot),  'active', TASK_ID)), false);
 });
@@ -217,7 +217,7 @@ test('same completed intent replays as no-op without duplicate log entries', () 
   const replay = applyTaskLifecycle(request, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
   assert.equal(replay.status, 'no-op');
   assert.deepEqual(fs.readFileSync(target), before);
-  assert.equal((fs.readFileSync(target, 'utf8').match(/Complete Task/g) ?? []).length, 2);
+  assert.equal((fs.readFileSync(target, 'utf8').match(/\*\*Complete Task(?: \[started\])?\*\*/g) ?? []).length, 2);
 });
 
 test('activate clears terminal fields, moves to active, and allocates a short id', () => {
@@ -454,4 +454,29 @@ test('complete rejects conflicting completed task content without overwriting ei
   assert.deepEqual(fs.readFileSync(path.join(f.taskDir, 'task.md')), sourceTask);
   assert.deepEqual(fs.readFileSync(path.join(f.taskDir, 'payload.bin')), sourcePayload);
   assert.equal(fs.readFileSync(path.join(target, 'other.txt'), 'utf8'), 'existing completed data');
+});
+
+test('block preserves business transition without an activity log', () => {
+  const f = fixture();
+  const file = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('## Activity Log\n\n', ''));
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'block', agent: 'codex', reason: 'Waiting', unblockCondition: 'Resolved' },
+    { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+  );
+  assert.equal(result.status, 'applied', JSON.stringify(result));
+  const content = fs.readFileSync(path.join(taskWorkspaceRoot(f.repoRoot), 'blocked', TASK_ID, 'task.md'), 'utf8');
+  assert.match(content, /^status: blocked$/m);
+});
+
+test('lifecycle replays an earlier block after a later block', () => {
+  const f = fixture();
+  const options = { repoRoot: f.repoRoot, metadataProvider: () => METADATA };
+  const a = { taskRef: TASK_ID, intent: 'block' as const, agent: 'codex', reason: 'A', unblockCondition: 'ready' };
+  const b = { ...a, reason: 'B' };
+  assert.equal(applyTaskLifecycle(a, options).status, 'applied');
+  assert.equal(applyTaskLifecycle({ taskRef: TASK_ID, intent: 'activate', agent: 'codex', note: 'ready' }, options).status, 'applied');
+  assert.equal(applyTaskLifecycle(b, options).status, 'applied');
+  assert.equal(applyTaskLifecycle(a, options).status, 'no-op');
+  assert.equal(applyTaskLifecycle({ ...a, reason: 'C' }, options).error?.code, 'LIFECYCLE_INTENT_CONFLICT');
 });

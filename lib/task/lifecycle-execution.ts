@@ -37,6 +37,19 @@ export function lifecycleExecutions(content: string, taskDir: string): Lifecycle
     });
 }
 
-export function serializeLifecycleExecution(open: readonly LifecycleExecution[]): string {
-  return JSON.stringify({ version: 1, open });
+export type PrReviewExecution = { open: { artifact: string; head: string; agent: string; startedAt: string } | null; terminals: Array<{ artifact: string; head: string; agent: string; note: string }> };
+export function prReviewExecution(content: string): PrReviewExecution {
+  const value = parseTypedTaskFrontmatter(content).lifecycle_execution;
+  if (value === undefined) return { open: null, terminals: [] };
+  if (typeof value !== 'string') throw new Error('invalid lifecycle execution state');
+  const state = JSON.parse(value);
+  if (state.version !== 1 || !Array.isArray(state.open)) throw new Error('invalid lifecycle execution state');
+  const pr = state.prReview ?? { open: null, terminals: [] };
+  const valid = (item: any) => item && typeof item.artifact === 'string' && typeof item.head === 'string' && typeof item.agent === 'string';
+  if (!Array.isArray(pr.terminals) || (pr.open !== null && (!valid(pr.open) || typeof pr.open.startedAt !== 'string')) || !pr.terminals.every((item: any) => valid(item) && typeof item.note === 'string')) throw new Error('invalid PR review execution state');
+  return pr;
+}
+export function serializeLifecycleExecution(open: readonly LifecycleExecution[], content?: string, prReview?: PrReviewExecution): string {
+  const pr = prReview ?? (content ? prReviewExecution(content) : { open: null, terminals: [] });
+  return JSON.stringify({ version: 1, open, prReview: pr });
 }

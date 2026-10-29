@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
+import { activityWarnings, appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { isDecisionItem, listDecisionItems, selectDecisionItem } from './decision-items.ts';
 import {
   createImplementationInput,
@@ -31,6 +31,7 @@ type HumanDecisionResult = {
   taskId: string | null; ledgerId: string | null; recordId: string | null;
   implementationInputId: string | null; operations: readonly TaskOperationSummary[];
   error: { code: string; message: string } | null;
+  warnings?: readonly { code: string; message: string }[];
 };
 
 const DECISION_ALIASES = ['人工裁决', 'Human Rulings', 'Human Decisions', 'Human Decision'] as const;
@@ -102,7 +103,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     try {
       const replay = existingDecision(content, direct[0]!, request.decision.trim(), request.needsImplementation);
       if ('conflict' in replay) return failed('DECISION_CONFLICT', replay.conflict, resolved.taskId, direct[0]!.id);
-      return { status: 'no-op', changed: false, taskId: resolved.taskId, ledgerId: direct[0]!.id, recordId: replay.recordId, implementationInputId: replay.implementationInputId, operations: [], error: null };
+      return { status: 'no-op', changed: false, taskId: resolved.taskId, ledgerId: direct[0]!.id, recordId: replay.recordId, implementationInputId: replay.implementationInputId, operations: [], error: null, warnings: activityWarnings(content) };
     } catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, direct[0]!.id); }
   }
 
@@ -144,7 +145,6 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   const decision = request.decision.trim();
   const record = `### ${recordId}\n\n- **原账本 ID**：${row.id}\n- **裁决时间**：${metadata.timestamp}\n- **裁决结果**：${decision}`;
   const activity = locateActivityLog(content);
-  if (!activity) return failed('DECISION_ACTIVITY_MISSING', 'activity log section is missing or ambiguous', resolved.taskId, row.id);
   const mutations: TaskMutation[] = [
     {
       kind: 'table-row', action: 'upsert', sectionAliases: LEDGER_HEADINGS, columns: LEDGER_COLUMNS,
@@ -172,7 +172,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
       body: renderImplementationInputs(nextInputs)
     });
   }
-  mutations.push({
+  if (activity) mutations.push({
     kind: 'section', aliases: ACTIVITY_ALIASES, heading: activity.heading,
     body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Human Decision', agent: 'human', note: `${row.id} decided → ${recordId}` })
   });
@@ -190,7 +190,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     metadataProvider: () => metadata
   });
   if (writeResult.status === 'failed') return failed(writeResult.error.code, writeResult.error.message, writeResult.taskId, row.id);
-  return { status: writeResult.status, changed: writeResult.changed, taskId: writeResult.taskId, ledgerId: row.id, recordId, implementationInputId, operations: writeResult.operations, error: null };
+  return { status: writeResult.status, changed: writeResult.changed, taskId: writeResult.taskId, ledgerId: row.id, recordId, implementationInputId, operations: writeResult.operations, error: null, warnings: activityWarnings(content) };
 }
 
 export { applyHumanDecision };

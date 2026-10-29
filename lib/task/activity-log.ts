@@ -36,6 +36,13 @@ function inspectActivityLog(content: string): { section: ActivityLogSection | nu
   return { section: { heading: heading.text, body, entries }, invalidEntries };
 }
 
+function activityWarnings(content: string): { code: string; message: string }[] {
+  const inspected = inspectActivityLog(content);
+  if (!inspected.section) return [{ code: 'ACTIVITY_LOG_UNAVAILABLE', message: 'Activity Log is missing or ambiguous; repair the section to resume logging' }];
+  if (inspected.invalidEntries.length) return [{ code: 'ACTIVITY_LOG_INVALID_ENTRIES', message: 'Activity Log contains malformed entries; repair the entries' }];
+  return [];
+}
+
 function locateActivityLog(content: string): ActivityLogSection | null {
   const { section } = inspectActivityLog(content);
   if (!section) return null;
@@ -119,6 +126,7 @@ function openLifecycleRows(content: string, taskDir: string, rows: StepRow[]): S
 
 export {
   activityAttempt,
+  activityWarnings,
   appendActivityEntry,
   openLifecycleRows,
   inspectActivityLog,

@@ -211,3 +211,16 @@ test('internal qualification supersedes and revokes confirmed constraints', () =
     }
   }
 });
+
+test('qualification confirmation persists with ambiguous activity log and returns a warning', () => {
+  const { repoRoot, taskMd } = fixture();
+  try {
+    fs.appendFileSync(taskMd, '\n## Activity Log\n');
+    const parsed = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
+    assert.ok(parsed.ok);
+    const result = applyQualificationConfirmation({ taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: parsed.qualification.constraintDigest, rationale: 'Confirmed' }, { repoRoot, metadataProvider: metadata });
+    assert.equal(result.status, 'applied');
+    assert.equal(result.warnings?.[0]?.code, 'ACTIVITY_LOG_UNAVAILABLE');
+    assert.match(fs.readFileSync(taskMd, 'utf8'), /\| C-1 \| Keep the public writer \| confirmed \|/);
+  } finally { fs.rmSync(repoRoot, { recursive: true, force: true }); }
+});

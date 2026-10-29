@@ -135,7 +135,7 @@ After closure, re-run step 1 for the next canonical round; never start the new r
 
 ### 6. Write back the publication result and task state
 
-- **Task-anchored path**: write the actual publication status in the `pr-review-rN.md` "Publication Result" section. Record the Review ID/URL for `applied` / `no-op`; for a failed write with a durable journal entry, record `blocked` / `failed`, the error code, and recovery action. Then close the local Activity Log with the verdict/counts frozen in step 3:
+- **Task-anchored path**: write the actual publication status in the `pr-review-rN.md` "Publication Result" section. Record the Review ID/URL for `applied` / `no-op`; for a failed write with a durable journal entry, record `blocked` / `failed`, the error code, and recovery action. Then close the local review state with the verdict/counts frozen in step 3:
 
   ```bash
   agent-infra-internal task-activity {task-id} pr-review-complete --agent {agent} \
@@ -143,13 +143,13 @@ After closure, re-run step 1 for the next canonical round; never start the new r
     --blockers {blockers} --major {major} --minor {minor}
   ```
 
-  `task-activity` generates `Verdict: <result>, blockers: N, major: N, minor: N → {pr-review-artifact}` from the typed payload and atomically writes the Activity Log, `## Review Feedback` link, and version stamp through `writeTask`. It never changes `current_step` or puts receipt/head/Review URL into the NOTE.
+  `task-activity` generates `Verdict: <result>, blockers: N, major: N, minor: N → {pr-review-artifact}` from the typed payload and atomically writes the structured review state, `## Review Feedback` link, and version stamp through `writeTask`. It appends the log when safe and otherwise returns a diagnostic. It never changes `current_step` or puts receipt/head/Review URL into the NOTE.
 
 - **One-shot path (no task)**: record the actual publication status in the `pr-review-rN.md` "Publication Result" section. Record the Review ID/URL on success, or the error and lack of automatic recovery on failure. Do not call `task-activity`.
 
 ### 7. Re-sync after write-back (task-anchored path)
 
-Step 6 rewrote the local `pr-review-rN.md` "Publication Result" section and task.md (Activity Log), while step 4 synced the older snapshot. Attempt the syncs again in order; record failures as warnings for `complete-task` to restore before archiving:
+Step 6 rewrote the local `pr-review-rN.md` "Publication Result" section and task.md (review state and available log), while step 4 synced the older snapshot. Attempt the syncs again in order; record failures as warnings for `complete-task` to restore before archiving:
 
 ```bash
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
@@ -186,7 +186,7 @@ Pick the single exit branch per `reference/output-guidance.md` (local review com
 - [ ] Published the formal Review, durably recorded its pending publication, or accurately recorded a one-shot publication failure
 - [ ] Synced the Issue artifact/task comments or recorded their pending recovery on the task-anchored path
 - [ ] Ran the completion verification (`task-verify` or `verify-artifact`)
-- [ ] Updated task.md and appended the Activity Log entry (task-anchored path)
+- [ ] Updated task.md review state and recorded log diagnostics when applicable
 
 ## Stop
 
