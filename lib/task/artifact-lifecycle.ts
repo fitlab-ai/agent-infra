@@ -4,7 +4,7 @@ import path from 'node:path';
 import { ARTIFACT_FAMILY_CATALOG, artifactName, parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
-import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { lifecycleExecutions } from './lifecycle-execution.ts';
 import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseVerdict } from './review-artifacts.ts';
@@ -21,35 +21,21 @@ import type { ArtifactSelection } from './artifact-selection.ts';
 import { executionInputsMatchLatest } from './execution-inputs.ts';
 
 const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
-const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
-  analysis: 'Analyze Task', 'review-analysis': 'Review Analysis',
-  plan: 'Plan Task', 'review-plan': 'Review Plan',
-  code: 'Code Task', 'review-code': 'Review Code'
-};
-
 /** Init, repair and finalization share the same authoritative round identity. */
 export function hasOpenArtifactRound(taskDir: string, content: string, family: ArtifactFamily, round: number): boolean {
   return openArtifactRounds(taskDir, content, family).includes(round);
 }
 
 function openArtifactRounds(taskDir: string, content: string, family: ArtifactFamily): number[] {
-  const activity = locateActivityLog(content);
-  const step = ARTIFACT_STEPS[family];
-  if (!activity || !step) return [];
-  const qualifier = family === 'code'
-    ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d*))?'
-    : '';
-  const expected = new RegExp(`^${step} \\(Round ([1-9]\\d*)${qualifier}\\)$`);
+  const executionFamily = family === 'analysis' ? 'analyze' : family;
   const event = completionEvent(family);
-  return [...new Set(startedBackedRows(pairEntries(activity.entries))
-    .filter((row) => expected.test(row.step) && !row.done)
-    .flatMap((row) => {
-      const round = Number(expected.exec(row.step)?.[1]);
+  return [...new Set(lifecycleExecutions(content, taskDir)
+    .filter((item) => item.family === executionFamily && item.round !== undefined)
+    .flatMap((item) => {
+      const round = item.round!;
       const name = artifactName(family, round);
       if (!event || !hasArtifactCompletionRecord(content, name, event)) return [round];
-      if (!hasValidArtifactCompletion(content, taskDir, name, event)) {
-        throw new Error(`completion evidence for started ${family} Round ${round} is invalid`);
-      }
+      if (!hasValidArtifactCompletion(content, taskDir, name, event)) throw new Error(`completion evidence for started ${family} Round ${round} is invalid`);
       return [];
     }))].sort((left, right) => left - right);
 }
@@ -586,12 +572,10 @@ function resolveCodeContext(
         const review = reviewCode.latest;
         const openInputs = review ? [...inputs, review] : inputs;
         const openVerdict = review ? parseVerdict(review.path) : null;
-        const openRow = locateActivityLog(taskContent)
-          ? startedBackedRows(pairEntries(locateActivityLog(taskContent)!.entries))
-            .find((row) => row.step.startsWith(`Code Task (Round ${openRound}`))
-          : null;
-        const decisionInput = /, decision (II-[1-9]\d*)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
-        const fixInput = /, fix for (review-code(?:-r\d+)?\.md)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
+        const openRow = lifecycleExecutions(taskContent, inventory.taskDir!)
+          .find((row) => row.family === 'code' && row.round === openRound);
+        const decisionInput = openRow?.implementationInput ?? null;
+        const fixInput = openRow?.fixFor ?? null;
         const mode = decisionInput ? 'decision'
           : fixInput || (openVerdict?.ok && openVerdict.verdict === 'Changes Requested') ? 'fix'
             : 'init';

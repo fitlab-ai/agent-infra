@@ -9,7 +9,7 @@ import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.
 import { parseReworkIntentDocument } from './rework-intent.ts';
 import type { ReworkIntent, ReworkTarget } from './rework-intent.ts';
 import { sha256File } from './artifact-receipts.ts';
-import { hasOpenLifecycleExecution } from './activity-log.ts';
+import { lifecycleExecutions } from './lifecycle-execution.ts';
 import { parseQualificationAudit, parseTaskQualification } from './qualification-audit.ts';
 import type { QualificationAudit, TaskQualification } from './qualification-audit.ts';
 import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
@@ -454,7 +454,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       reviewedInputs, executionInputs, artifactHashes,
       reworkIntents: rework.intents,
       unresolvedLedger,
-      executionBusy: hasOpenLifecycleExecution(content, taskDir) || executionBusy,
+      executionBusy: lifecycleExecutions(content, taskDir).some((item) => item.family !== 'other') || executionBusy,
       recommendedAction: null,
       qualificationStale: qualificationStaleArtifacts.length > 0,
       qualificationStaleArtifacts

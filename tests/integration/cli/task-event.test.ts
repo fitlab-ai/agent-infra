@@ -27,6 +27,7 @@ import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts'
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
 import { hasValidArtifactCompletion } from '../../../lib/task/completion-facts.ts';
 import { inspectArtifactDirectory } from '../../../lib/task/artifact-lifecycle.ts';
+import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 
 const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
 
@@ -886,6 +887,48 @@ test('started replay keeps the open identity after its artifact lands', () => {
   assert.equal(result.round, 1);
   assert.equal(result.artifact, 'plan.md');
   assert.equal((fs.readFileSync(f.file, 'utf8').match(/Plan Task \(Round 1\) \[started\]/g) ?? []).length, 1);
+});
+
+test('started replay retains its identity when the activity row is damaged', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  const content = fs.readFileSync(f.file, 'utf8');
+  const state = JSON.parse(parseTypedTaskFrontmatter(content).lifecycle_execution as string);
+  assert.equal(state.open[0].family, 'plan');
+  assert.equal(state.open[0].round, 1);
+  fs.writeFileSync(f.file, content.split('\n').filter((line) => !line.includes('**Plan Task (Round 1) [started]**')).join('\n'));
+  const repeated = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
+});
+
+test('manual validation replay retains its structured round when completed history changes', () => {
+  const f = fixture('code-review');
+  const args = [f.id, 'manual-validation.started', '--agent', 'codex', '--transaction-id', 'mv-probe', '--round', '1'];
+  const started = run(f.root, args);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  const content = fs.readFileSync(f.file, 'utf8');
+  const history = '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation [started]** by codex — started; transaction=prior\n'
+    + '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by codex — prior completed\n';
+  fs.writeFileSync(f.file, content.replace('## Activity Log\n', `## Activity Log\n${history}`));
+  const repeated = run(f.root, args);
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  const result = JSON.parse(repeated.stdout);
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.round, 1);
+});
+
+test('legacy manual validation open round is derived during handoff', () => {
+  const f = fixture('code-review');
+  const history = '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation [started]** by codex — started; transaction=prior\n'
+    + '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by codex — prior completed\n'
+    + '- 2026-01-01 00:00:02+00:00 — **Complete Manual Validation [started]** by codex — started; transaction=current\n';
+  const content = fs.readFileSync(f.file, 'utf8');
+  fs.writeFileSync(f.file, content.replace('## Activity Log\n', `## Activity Log\n${history}`));
+  const repeated = run(f.root, [f.id, 'manual-validation.started', '--agent', 'codex', '--transaction-id', 'current', '--round', '2']);
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  assert.equal(JSON.parse(repeated.stdout).round, 2);
 });
 
 test('valid completion facts close a started row for event mutual exclusion', () => {
