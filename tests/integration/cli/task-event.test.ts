@@ -903,6 +903,34 @@ test('started replay retains its identity when the activity row is damaged', () 
   assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
 });
 
+test('manual validation replay retains its structured round when completed history changes', () => {
+  const f = fixture('code-review');
+  const args = [f.id, 'manual-validation.started', '--agent', 'codex', '--transaction-id', 'mv-probe', '--round', '1'];
+  const started = run(f.root, args);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  const content = fs.readFileSync(f.file, 'utf8');
+  const history = '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation [started]** by codex — started; transaction=prior\n'
+    + '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by codex — prior completed\n';
+  fs.writeFileSync(f.file, content.replace('## Activity Log\n', `## Activity Log\n${history}`));
+  const repeated = run(f.root, args);
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  const result = JSON.parse(repeated.stdout);
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.round, 1);
+});
+
+test('legacy manual validation open round is derived during handoff', () => {
+  const f = fixture('code-review');
+  const history = '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation [started]** by codex — started; transaction=prior\n'
+    + '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by codex — prior completed\n'
+    + '- 2026-01-01 00:00:02+00:00 — **Complete Manual Validation [started]** by codex — started; transaction=current\n';
+  const content = fs.readFileSync(f.file, 'utf8');
+  fs.writeFileSync(f.file, content.replace('## Activity Log\n', `## Activity Log\n${history}`));
+  const repeated = run(f.root, [f.id, 'manual-validation.started', '--agent', 'codex', '--transaction-id', 'current', '--round', '2']);
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  assert.equal(JSON.parse(repeated.stdout).round, 2);
+});
+
 test('valid completion facts close a started row for event mutual exclusion', () => {
   const f = fixture('requirement-analysis');
   recordFixtureCompletion(f.dir, 'analysis.md');

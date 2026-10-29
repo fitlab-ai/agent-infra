@@ -363,11 +363,11 @@ function validateManualValidationCompletion(
   return null;
 }
 
-function openStartedIdentity(rows: LifecycleExecution[], family: EventFamily, completedManualCount: number) {
+function openStartedIdentity(rows: LifecycleExecution[], family: EventFamily) {
   const matches = rows.filter((item) => item.family === family);
   if (family === 'manual-validation') {
     const row = matches.at(-1);
-    return row ? { row, round: completedManualCount + 1, fixFor: undefined, implementationInput: undefined } : null;
+    return row ? { row, round: row.round!, fixFor: undefined, implementationInput: undefined } : null;
   }
   return matches.length === 1 ? { row: matches[0]!, round: matches[0]!.round!, fixFor: matches[0]!.fixFor, implementationInput: matches[0]!.implementationInput } : matches.length > 1 ? { conflict: true as const } : null;
 }
@@ -633,7 +633,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   let artifactContext: ArtifactContextResult | null = null;
   let supersededOpenStart: { action: string; family: string; round?: number } | null = null;
   if (initialParts.phase === 'started') {
-    const openIdentity = openStartedIdentity(rows, initialParts.family, startedRows.filter((item) => item.step === FAMILY['manual-validation'].label && item.done).length);
+    const openIdentity = openStartedIdentity(rows, initialParts.family);
     if (openIdentity && 'conflict' in openIdentity) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'artifact family has more than one open started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     if (openIdentity) {
       const resolvedStart = resolveOpenStartedEvent(request, initialParts.family, openIdentity, resolved.repoRoot);

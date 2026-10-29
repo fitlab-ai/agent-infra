@@ -26,9 +26,11 @@ export function lifecycleExecutions(content: string, taskDir: string): Lifecycle
   // TODO(compat): Remove legacy open-start handoff once all pre-upgrade active tasks have been converted or closed.
   const log = locateActivityLog(content);
   if (!log) return [];
-  return startedBackedRows(openLifecycleRows(content, taskDir, pairEntries(log.entries)))
+  const paired = pairEntries(log.entries);
+  const manualRound = startedBackedRows(paired).filter((row) => row.step === 'Complete Manual Validation' && row.done).length + 1;
+  return startedBackedRows(openLifecycleRows(content, taskDir, paired))
     .filter((row) => row.started && !row.done).map((row) => {
-      if (row.step === 'Complete Manual Validation') return { family: 'manual-validation' as const, agent: row.agent, startedAt: row.started, transactionId: /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(row.note)?.[1] };
+      if (row.step === 'Complete Manual Validation') return { family: 'manual-validation' as const, agent: row.agent, startedAt: row.started, round: manualRound, transactionId: /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(row.note)?.[1] };
       const match = /^(Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code|Run Manual Validation) \(Round ([1-9]\d*)(?:(?:, fix for (review-code(?:-r\d+)?\.md))|(?:, decision (II-[1-9]\d*)))?\)$/u.exec(row.step);
       if (!match) return { family: 'other' as const, agent: row.agent, startedAt: row.started, legacyAction: row.step };
       return { family: labels[match[1] as keyof typeof labels], agent: row.agent, startedAt: row.started, round: Number(match[2]), fixFor: match[3], implementationInput: match[4] };
