@@ -28,7 +28,7 @@ import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { parseImplementationInputs, type ImplementationInput } from "./implementation-inputs.ts";
 import { scanVisibleMarkdown } from "./markdown.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
-import { inspectActivityLog, pairEntries } from "./activity-log.ts";
+import { inspectActivityLog } from "./activity-log.ts";
 import { parseWorkflowWarnings } from "./workflow-warnings.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
@@ -38,7 +38,7 @@ import type { VerificationShared } from "./verification-types.ts";
 import { normalizeVerificationRecord } from './gate-policy.ts';
 import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
-import { parseArtifactReceipts, sha256File } from "./artifact-receipts.ts";
+import { parseArtifactReceipts, receiptForOutput, sha256File } from "./artifact-receipts.ts";
 import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
 import { parseArtifactName } from "./artifact-name.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
@@ -720,8 +720,7 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
       `${parsed.summary.manualValidation} manual validation item(s) pending: run /complete-manual-validation`
     );
   }
-  // 5. The Activity Log must record the matching completion entry; the file name
-  //    is derived with path.basename (resolveArtifactPath does not return fileName).
+  // 5. Validate the committed receipt, transaction, and artifact.
   const artifactName = path.basename(resolved.path);
   const task = loadTask(taskDir);
   if (!task.ok) return failResult("manual-validation", task.message);
@@ -743,29 +742,21 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   if (sha256File(resolved.path) !== receipt.artifactSha256) {
     return failResult("manual-validation", `Manual validation artifact digest does not match the receipt for ${artifactName}`);
   }
-  // 6. Timing correlation (PL-3 fix, PL-4 corrected): the completion entry must
-  //    sit AFTER the latest review-code round's completion entry in the
-  //    append-only Activity Log. indexOf is a literal search, so the artifactName
-  //    must NOT be passed through escapeRegExp here (that escapes '.' to '\.',
-  //    which indexOf never matches). Not reusing completed.exec().index: exec
-  //    anchors to the first '**Complete Manual Validation**' heading, which can
-  //    belong to an earlier round's entry and misorder the standard path.
-  const inspectedLog = inspectActivityLog(task.content);
-  if (!inspectedLog.section) return failResult("manual-validation", "Activity Log is missing or invalid");
-  const reviewRow = pairEntries(inspectedLog.section.entries).find((row) =>
-    row.step === `Review Code (Round ${review.round})` && row.started !== '' && row.done !== ''
-  );
-  const reviewDoneIndex = reviewRow
-    ? inspectedLog.section.entries.findIndex((entry) => entry.step === reviewRow.step && entry.time === reviewRow.done)
-    : -1;
-  const completedIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === "Complete Manual Validation"
-    && entry.note.includes(`Manual validation passed → ${artifactName};`)
-        && entry.note.includes(`transaction=${receipt.transactionId};`)
-        && entry.note.includes(`receipt=${receipt.receiptDigest};`)
-        && entry.note.includes(`head=${receipt.prHeadSha}`));
-  if (reviewDoneIndex === -1) return failResult("manual-validation", `Latest review-code (round ${review.round}) completion entry is missing from the Activity Log`);
-  if (completedIndex === -1) return failResult("manual-validation", `Committed manual validation completion is not recorded for ${artifactName}`);
-  if (completedIndex < reviewDoneIndex) return failResult("manual-validation", `Latest review-code (round ${review.round}) came after the manual validation completion recorded for ${artifactName}`);
+  // 6. Compare the review completion and committed manual-validation times.
+  let reviewReceipt;
+  try {
+    reviewReceipt = receiptForOutput(task.content, review.fileName!);
+  } catch (error) {
+    return failResult("manual-validation", `Review-code receipt is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!reviewReceipt || reviewReceipt.event !== "review-code.completed") {
+    return failResult("manual-validation", `Review-code completion time is unavailable for ${review.fileName}`);
+  }
+  const reviewTime = Date.parse(reviewReceipt.completedAt.replace(' ', 'T'));
+  const validationTime = Date.parse(receipt.committedAt);
+  if (!Number.isFinite(reviewTime) || !Number.isFinite(validationTime) || validationTime <= reviewTime) {
+    return failResult("manual-validation", `Manual validation must be completed after review-code ${review.fileName}`);
+  }
 
   const fact = readPrDeliveryFact(task.metadata);
   if (fact.status === "invalid") return failResult("manual-validation", fact.error.message);
