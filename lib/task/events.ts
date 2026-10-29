@@ -4,7 +4,9 @@ import { execFileSync } from 'node:child_process';
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 
-import { appendActivityEntry, locateActivityLog, openLifecycleRows, pairEntries, startedBackedRows } from './activity-log.ts';
+import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { lifecycleExecutions, serializeLifecycleExecution } from './lifecycle-execution.ts';
+import type { LifecycleExecution } from './lifecycle-execution.ts';
 import {
   buildArtifactLinkSection,
   inspectArtifactDirectory,
@@ -361,27 +363,19 @@ function validateManualValidationCompletion(
   return null;
 }
 
-function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: EventFamily) {
-  const spec = FAMILY[family];
+function openStartedIdentity(rows: LifecycleExecution[], family: EventFamily, completedManualCount: number) {
+  const matches = rows.filter((item) => item.family === family);
   if (family === 'manual-validation') {
-    const row = rows.filter((item) => item.step === spec.label && item.started && !item.done).at(-1);
-    const completed = rows.filter((item) => item.step === spec.label && item.done).length;
-    return row ? { row, round: completed + 1, fixFor: undefined, implementationInput: undefined } : null;
+    const row = matches.at(-1);
+    return row ? { row, round: completedManualCount + 1, fixFor: undefined, implementationInput: undefined } : null;
   }
-  const escaped = spec.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^${escaped} \\(Round (\\d+)(?:(?:, fix for (review-code(?:-r\\d+)?\\.md))|(?:, decision (II-[1-9]\\d*)))?\\)$`);
-  const matches = rows.flatMap((row) => {
-    if (!row.started || row.done) return [];
-    const match = pattern.exec(row.step);
-    return match ? [{ row, round: Number(match[1]), fixFor: match[2], implementationInput: match[3] }] : [];
-  });
-  return matches.length === 1 ? matches[0] : matches.length > 1 ? { conflict: true as const } : null;
+  return matches.length === 1 ? { row: matches[0]!, round: matches[0]!.round!, fixFor: matches[0]!.fixFor, implementationInput: matches[0]!.implementationInput } : matches.length > 1 ? { conflict: true as const } : null;
 }
 
 function repairMissingCodeFixQualifier(
   request: TaskEventRequest,
   family: EventFamily,
-  open: { row: { step: string }; round: number; fixFor?: string; implementationInput?: string },
+  open: { row: LifecycleExecution; round: number; fixFor?: string; implementationInput?: string },
   repoRoot: string
 ) {
   if (family !== 'code' || open.fixFor !== undefined || !request.fixFor || request.implementationInput !== undefined) {
@@ -404,12 +398,12 @@ function repairMissingCodeFixQualifier(
 function resolveOpenStartedEvent(
   request: TaskEventRequest,
   family: EventFamily,
-  open: { row: { step: string; agent: string; started: string; note: string }; round: number; fixFor?: string; implementationInput?: string },
+  open: { row: LifecycleExecution; round: number; fixFor?: string; implementationInput?: string },
   repoRoot: string
 ) {
   if (open.row.agent !== request.agent) return { status: 'error' as const, error: { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' } as TaskEventError };
   if (family === 'manual-validation' && request.transactionId !== undefined) {
-    const existingTransactionId = /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(open.row.note)?.[1];
+    const existingTransactionId = open.row.transactionId;
     if (existingTransactionId !== undefined && existingTransactionId !== request.transactionId) {
       return { status: 'error' as const, error: { code: 'EVENT_LOG_CONFLICT', message: 'open manual-validation started event has a different transactionId' } as TaskEventError };
     }
@@ -421,7 +415,7 @@ function resolveOpenStartedEvent(
     const repair = repairMissingCodeFixQualifier(request, family, open, repoRoot);
     if (!repair) return { status: 'error' as const, error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` } as TaskEventError };
     if ('error' in repair) return { status: 'error' as const, error: repair.error, context: repair.context };
-    return { status: 'repair' as const, repair: repair.request, context: repair.context, superseded: { action: open.row.step } };
+    return { status: 'repair' as const, repair: repair.request, context: repair.context, superseded: { action: `${FAMILY[family].label} (Round ${open.round})`, family: open.row.family, round: open.row.round } };
   }
   if (request.implementationInput !== open.implementationInput) {
     return { status: 'error' as const, error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` } as TaskEventError };
@@ -435,19 +429,12 @@ function resolveOpenStartedEvent(
       fixFor: open.fixFor,
       implementationInput: open.implementationInput
     },
-    startedAt: open.row.started
+    startedAt: open.row.startedAt
   };
 }
 
-function hasOtherOpenStarted(rows: ReturnType<typeof pairEntries>, allowedAction: string): boolean {
-  return rows.some((row) => row.started && !row.done && row.step !== allowedAction);
-}
-
-function hasConflictingOpenStarted(
-  rows: ReturnType<typeof pairEntries>,
-  recovery: { action: string } | null
-): boolean {
-  return recovery ? hasOtherOpenStarted(rows, recovery.action) : rows.some((row) => row.started && !row.done);
+function hasConflictingOpenStarted(rows: LifecycleExecution[], recovery: { family: string; round?: number } | null): boolean {
+  return rows.some((row) => !recovery || row.family !== recovery.family || row.round !== recovery.round);
 }
 
 function reviewInputFamily(family: EventFamily): ArtifactFamily {
@@ -634,19 +621,19 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   const section = locateActivityLog(content);
   if (!section) return failed(request, { code: 'EVENT_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  let rows: ReturnType<typeof pairEntries>;
+  let rows: LifecycleExecution[];
   let startedRows: ReturnType<typeof pairEntries>;
   try {
     startedRows = startedBackedRows(pairEntries(section.entries));
-    rows = startedBackedRows(openLifecycleRows(content, resolved.taskDir, startedRows));
+    rows = lifecycleExecutions(content, resolved.taskDir);
   } catch (error) {
     return failed(request, { code: 'EVENT_TRANSITION_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
   }
   let normalized = request;
   let artifactContext: ArtifactContextResult | null = null;
-  let supersededOpenStart: { action: string } | null = null;
+  let supersededOpenStart: { action: string; family: string; round?: number } | null = null;
   if (initialParts.phase === 'started') {
-    const openIdentity = openStartedIdentity(rows, initialParts.family);
+    const openIdentity = openStartedIdentity(rows, initialParts.family, startedRows.filter((item) => item.step === FAMILY['manual-validation'].label && item.done).length);
     if (openIdentity && 'conflict' in openIdentity) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'artifact family has more than one open started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     if (openIdentity) {
       const resolvedStart = resolveOpenStartedEvent(request, initialParts.family, openIdentity, resolved.repoRoot);
@@ -674,12 +661,10 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   }
   const eventIdentity = identity(normalized);
   const currentStep = typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '';
-  const eventRows = eventIdentity.phase === 'completed' ? startedRows : rows;
-  const matchingRows = eventRows.filter((item) => item.step === eventIdentity.action);
   const manual = eventIdentity.family === 'manual-validation';
-  const openRows = rows.filter((item) => item.step === eventIdentity.action && item.started && !item.done);
-  const completedRows = matchingRows.filter((item) => item.done);
-  const hasStartedIdentity = matchingRows.some((item) => item.started);
+  const openRows = rows.filter((item) => item.family === eventIdentity.family && (manual || (item.round === normalized.round && item.fixFor === normalized.fixFor && item.implementationInput === normalized.implementationInput)));
+  const completedRows = (manual || eventIdentity.family === 'validation-run') ? startedRows.filter((item) => item.step === eventIdentity.action && item.done) : [];
+  const hasStartedIdentity = openRows.length > 0;
   if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const row = openRows.at(-1);
   let completedArtifact: ArtifactIdentity | null = null;
@@ -687,12 +672,12 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   if (eventIdentity.phase === 'started' && row) {
     if (row.agent !== normalized.agent) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     if (manual && normalized.transactionId !== undefined) {
-      const existingTransactionId = /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(row.note)?.[1];
+      const existingTransactionId = row.transactionId;
       if (existingTransactionId !== undefined && existingTransactionId !== normalized.transactionId) {
         return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open manual-validation started event has a different transactionId' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       }
     }
-    return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
+    return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.startedAt, frontmatter, artifactContext);
   }
   const replayFact = eventIdentity.phase === 'completed' && normalized.artifact && normalized.requestId
     ? parseCompletionFacts(frontmatter.completion_facts).find((fact) => fact.event === normalized.event
@@ -841,6 +826,11 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
     { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note }
   );
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
+  if (eventIdentity.phase === 'started' || eventIdentity.phase === 'completed') {
+    const open = rows.filter((item) => !openRows.includes(item) && (!supersededOpenStart || item.family !== supersededOpenStart.family || item.round !== supersededOpenStart.round));
+    if (eventIdentity.phase === 'started') open.push({ family: eventIdentity.family, agent: normalized.agent, startedAt: metadata.timestamp, round: normalized.round, fixFor: normalized.fixFor, implementationInput: normalized.implementationInput, transactionId: normalized.transactionId });
+    frontmatterSet.lifecycle_execution = serializeLifecycleExecution(open);
+  }
   if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(parseCompletionFacts(frontmatter.completion_facts), currentFact));
   if (completedArtifact && ['analyze', 'plan', 'code'].includes(eventIdentity.family)) {
     const task = parseTaskQualification(content);

@@ -5,7 +5,6 @@ const ENTRY_RE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;
 const ATTEMPT_RE = /(?:^|;\s*)attempt=([A-Za-z0-9-]{8,64})(?:;|$)/;
-const LIFECYCLE_STEP_RE = /^(?:Complete Manual Validation|(?:Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code|Run Manual Validation) \(Round [1-9]\d*(?:(?:, fix for review-code(?:-r[2-9]|-r[1-9]\d+)?\.md)|(?:, decision II-[1-9]\d*))?\))$/;
 
 type LogEntry = { time: string; step: string; agent: string; note: string };
 type StepRow = { step: string; agent: string; started: string; done: string; note: string; attempt?: string };
@@ -117,18 +116,10 @@ function openLifecycleRows(content: string, taskDir: string, rows: StepRow[]): S
   });
 }
 
-function hasOpenLifecycleExecution(content: string, taskDir: string): boolean {
-  const section = locateActivityLog(content);
-  if (!section) return false;
-  const rows = pairEntries(section.entries);
-  const open = openLifecycleRows(content, taskDir, rows);
-  return open.some((row) => row.started && !row.done && LIFECYCLE_STEP_RE.test(row.step));
-}
 
 export {
   activityAttempt,
   appendActivityEntry,
-  hasOpenLifecycleExecution,
   openLifecycleRows,
   inspectActivityLog,
   locateActivityLog,

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { locateActivityLog, pairEntries } from '../task/activity-log.ts';
+import { lifecycleExecutions } from '../task/lifecycle-execution.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { prepareAndRenderPrSummaryContent } from '../platform/pr-summary.ts';
 import { applyTaskEvent } from '../task/events.ts';
@@ -58,15 +58,13 @@ function openManualValidationStarted(taskMdPath: string): { present: boolean; tr
   let content: string;
   try { content = fs.readFileSync(taskMdPath, 'utf8'); }
   catch { return { present: false, transactionId: null }; }
-  const section = locateActivityLog(content);
-  if (!section) return { present: false, transactionId: null };
-  const row = pairEntries(section.entries)
-    .filter((item) => item.step === 'Complete Manual Validation' && item.started && !item.done)
+  const row = lifecycleExecutions(content, path.dirname(taskMdPath))
+    .filter((item) => item.family === 'manual-validation')
     .at(-1);
   if (!row) return { present: false, transactionId: null };
   return {
     present: true,
-    transactionId: /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(row.note)?.[1] ?? null
+    transactionId: row.transactionId ?? null
   };
 }
 
