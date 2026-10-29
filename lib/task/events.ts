@@ -882,7 +882,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   }
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
-    { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }
+    { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove, ...(frontmatterSet.lifecycle_execution ? { lifecycleExecutionDomain: 'ordinary' as const } : {}) }
   ];
   if (completedArtifact) {
     const link = buildArtifactLinkSection(content, completedArtifact);

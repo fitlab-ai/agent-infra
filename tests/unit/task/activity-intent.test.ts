@@ -8,6 +8,10 @@ import {
   applyPrReviewActivityIntent,
   inspectPrReviewActivity
 } from '../../../lib/task/activity-intent.ts';
+import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
+import { renderTaskComment } from '../../../lib/platform/issue-comments.ts';
+import { recoverTaskFromComments } from '../../../lib/platform/task-recovery.ts';
 import { VERSION } from '../../../lib/version.ts';
 import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
@@ -345,5 +349,78 @@ test('PR review lifecycle survives a missing Activity Log and preserves normal e
     assert.equal(applyPrReviewActivityIntent(complete, { repoRoot: f.root }).status, 'applied');
     assert.equal(applyPrReviewActivityIntent(complete, { repoRoot: f.root }).status, 'no-op');
     assert.equal(inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root }).snapshot?.open, null);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+
+test('interleaved ordinary and PR starts preserve both open identities', () => {
+  const f = fixtureTask();
+  try {
+    const file = path.join(f.taskDir, 'task.md');
+    fs.writeFileSync(file, updateTaskFrontmatter(fs.readFileSync(file, 'utf8'), { lifecycle_execution: JSON.stringify({ version: 1, open: [] }) }));
+    writeArtifact(f.taskDir);
+    const observed: { status?: string } = {};
+    const pr = applyPrReviewActivityIntent({ kind: 'pr-review-start', taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD }, { repoRoot: f.root, metadataProvider: () => {
+      observed.status = applyTaskEvent({ taskRef: f.taskId, event: 'analyze.started', agent: 'codex', initiator: 'model', requestId: 'interleaved-analysis', reasonCode: 'user-request' }, { repoRoot: f.root }).status;
+      return { timestamp: '2026-01-01 01:00:00+00:00', agentInfraVersion: VERSION };
+    } });
+    assert.equal(observed.status, 'applied');
+    assert.equal(pr.status, 'applied');
+    const state = JSON.parse(parseTypedTaskFrontmatter(fs.readFileSync(file, 'utf8')).lifecycle_execution as string);
+    assert.equal(state.open[0].family, 'analyze');
+    assert.equal(state.prReview.open.artifact, 'pr-review.md');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('current task comment restores PR open and lifecycle replay identities', () => {
+  const f = fixtureTask();
+  try {
+    const file = path.join(f.taskDir, 'task.md');
+    const transition = JSON.stringify({ completedKeys: [{ action: 'Block Task', agent: 'codex', note: 'blocked' }] });
+    fs.writeFileSync(file, updateTaskFrontmatter(fs.readFileSync(file, 'utf8'), { lifecycle_transition: transition }));
+    writeArtifact(f.taskDir);
+    assert.equal(applyPrReviewActivityIntent({ kind: 'pr-review-start', taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD }, { repoRoot: f.root }).status, 'applied');
+    const before = inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root });
+    const body = renderTaskComment(fs.readFileSync(file, 'utf8'), f.taskId, 'codex');
+    fs.writeFileSync(file, recoverTaskFromComments({ taskId: f.taskId, comments: [{ body, user: { login: 'codex' } }] }));
+    const after = inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root });
+    assert.deepEqual(after.snapshot?.open, before.snapshot?.open);
+    assert.equal(parseTypedTaskFrontmatter(fs.readFileSync(file, 'utf8')).lifecycle_transition, transition);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+
+test('ordinary start preserves PR identity written after its snapshot', () => {
+  const f = fixtureTask();
+  try {
+    writeArtifact(f.taskDir);
+    const observed: { status?: string } = {};
+    const ordinary = applyTaskEvent({ taskRef: f.taskId, event: 'analyze.started', agent: 'codex', initiator: 'model', requestId: 'ordinary-interleave', reasonCode: 'user-request' }, { repoRoot: f.root, metadataProvider: () => {
+      observed.status = applyPrReviewActivityIntent({ kind: 'pr-review-start', taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD }, { repoRoot: f.root }).status;
+      return { timestamp: '2026-01-01 01:00:00+00:00', agentInfraVersion: VERSION };
+    } });
+    assert.equal(ordinary.status, 'applied');
+    assert.equal(observed.status, 'applied');
+    const state = JSON.parse(parseTypedTaskFrontmatter(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8')).lifecycle_execution as string);
+    assert.equal(state.open[0].family, 'analyze');
+    assert.equal(state.prReview.open.artifact, 'pr-review.md');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('current task comment restores committed PR terminal for replay', () => {
+  const f = fixtureTask();
+  try {
+    writeArtifact(f.taskDir);
+    assert.equal(applyPrReviewActivityIntent({ kind: 'pr-review-start', taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD }, { repoRoot: f.root }).status, 'applied');
+    setArtifactStatus(f.taskDir, 'pr-review.md', 'no-op');
+    const intent = { kind: 'pr-review-complete' as const, taskRef: f.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD, verdict: 'approved' as const, blockers: 0, major: 0, minor: 0 };
+    assert.equal(applyPrReviewActivityIntent(intent, { repoRoot: f.root }).status, 'applied');
+    const file = path.join(f.taskDir, 'task.md');
+    const before = inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root });
+    const body = renderTaskComment(fs.readFileSync(file, 'utf8'), f.taskId, 'codex');
+    fs.writeFileSync(file, recoverTaskFromComments({ taskId: f.taskId, comments: [{ body, user: { login: 'codex' } }] }));
+    const after = inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: f.taskId }, { repoRoot: f.root });
+    assert.deepEqual(after.snapshot?.latestTerminal, before.snapshot?.latestTerminal);
+    assert.equal(applyPrReviewActivityIntent(intent, { repoRoot: f.root }).status, 'no-op');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });

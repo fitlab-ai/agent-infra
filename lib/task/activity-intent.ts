@@ -341,7 +341,7 @@ function applyActivityIntent(intent: PrReviewActivityIntent, normalizedAgent: st
     pr.open = null;
     pr.terminals.push({ artifact: intent.artifact, head: intent.head, agent: normalizedAgent, note });
   }
-  const mutations: TaskMutation[] = [{ kind: 'frontmatter', set: { lifecycle_execution: serializeLifecycleExecution(lifecycleExecutions(state.content, state.taskDir), state.content, pr) } }];
+  const mutations: TaskMutation[] = [{ kind: 'frontmatter', lifecycleExecutionDomain: 'pr-review', set: { lifecycle_execution: serializeLifecycleExecution(lifecycleExecutions(state.content, state.taskDir), state.content, pr) } }];
   if (section) mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body: appendActivityEntry(section, { time: metadata.timestamp, step, agent: normalizedAgent, note }) });
   if (linkArtifact) {
     const link = buildArtifactLinkSection(state.content, roundState.identity);

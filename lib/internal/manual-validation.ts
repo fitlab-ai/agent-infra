@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { activityWarnings } from '../task/activity-log.ts';
 import { lifecycleExecutions } from '../task/lifecycle-execution.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { prepareAndRenderPrSummaryContent } from '../platform/pr-summary.ts';
@@ -118,7 +119,7 @@ async function executeManualValidationTransactionAtResolvedTask(
     transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'previous failed transaction was archived for a new pull-request head' } };
   }
   if (!transactionResult.ok && transactionResult.error.code !== 'MANUAL_VALIDATION_TRANSACTION_MISSING') return result('failed', transactionResult.error);
-  if (transactionResult.ok && transactionResult.value.phase === 'committed') return result('applied', null, { transaction: transactionResult.value, receipt: transactionResult.value.committedReceipt, idempotent: true });
+  if (transactionResult.ok && transactionResult.value.phase === 'committed') return result('applied', null, { transaction: transactionResult.value, receipt: transactionResult.value.committedReceipt, idempotent: true, warnings: activityWarnings(taskContent) });
   const openStarted = transactionResult.ok ? { present: false, transactionId: null } : openManualValidationStarted(resolved.taskMdPath);
   if (openStarted.present && !openStarted.transactionId) {
     return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'open manual-validation started event has no recoverable transactionId' });
@@ -146,11 +147,14 @@ async function executeManualValidationTransactionAtResolvedTask(
   });
   let transaction: ManualValidationTransaction;
   const idempotent = transactionResult.ok;
+  const warnings: { code: string; message: string }[] = [];
+  const currentWarnings = () => warnings.length ? warnings : activityWarnings(taskContent);
   let startedEventApplied = false;
   if (!transactionResult.ok) {
     transaction = createTransaction();
     const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transactionId, reasonCode: 'user-request', transactionId }, { repoRoot: cwd });
     if (started.status === 'failed') return result('failed', started.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation started event failed' });
+    warnings.push(...(started.warnings ?? []));
     startedEventApplied = true;
     if (previousTransaction) {
       try { archiveGeneration(resolved.taskDir, previousTransaction, previousTransaction.phase === 'committed'); }
@@ -169,8 +173,9 @@ async function executeManualValidationTransactionAtResolvedTask(
   if (transaction.phase === 'prepared' && !startedEventApplied) {
     const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', transactionId: transaction.transactionId }, { repoRoot: cwd });
     if (started.status === 'failed') return result('failed', started.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation started event failed' });
+    warnings.push(...(started.warnings ?? []));
   }
-  if (prepareOnly) return result('applied', null, { transaction, prepared: true, idempotent });
+  if (prepareOnly) return result('applied', null, { transaction, prepared: true, idempotent, warnings: currentWarnings() });
   const transactionFailure = (failure: { code: string; message: string }): never => {
     throw new Error(`${failure.code}: ${failure.message}`);
   };
@@ -225,6 +230,7 @@ async function executeManualValidationTransactionAtResolvedTask(
     if (transaction.phase === 'receipt-committed' && !transaction.eventAppended) {
       const completed = applyTaskEvent({ taskRef, event: 'manual-validation.completed', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', artifact: values.artifact, summaryResult: 'human-confirmed validation and committed receipt', transactionId: transaction.transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: receipt.prHeadSha }, { repoRoot: cwd });
       if (completed.status === 'failed') transactionFailure(completed.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation completion event failed' });
+      warnings.push(...(completed.warnings ?? []));
       transitionAndPersist('receipt-committed', { eventAppended: true });
     }
     if (transaction.phase === 'receipt-committed') {
@@ -238,7 +244,7 @@ async function executeManualValidationTransactionAtResolvedTask(
     const postWrite = await summaryCommentState(taskRef, { cwd, client: options.client });
     if (!/^###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)\s*$/mu.test(postWrite.comment?.body ?? '') || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || !manualValidationFinalSummaryProjectionMatches(postWrite.comment?.body ?? '', receipt)) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary post-write verification failed' });
     transitionAndPersist('committed', { postWriteVerified: true });
-    return result('applied', null, { transaction, receipt, idempotent: false });
+    return result('applied', null, { transaction, receipt, idempotent: false, warnings: currentWarnings() });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (transaction.phase === 'final-promotion-in-progress') {
@@ -290,6 +296,7 @@ async function manualValidation(args: string[] = []): Promise<void> {
   const format = values.format === 'text' ? 'text' : 'json';
   const output = await executeManualValidationTransaction(taskRef, values, path.resolve(values.cwd ?? process.cwd()));
   process.stdout.write(format === 'json' ? `${JSON.stringify(output)}\n` : `${output.status === 'applied' ? 'Manual validation transaction committed.' : `${output.error?.code}: ${output.error?.message}`}\n`);
+  if (format === 'text' && Array.isArray(output.warnings)) for (const warning of output.warnings) process.stderr.write(`${warning.code}: ${warning.message}\n`);
   if (output.status === 'failed') process.exitCode = 1;
 }
 

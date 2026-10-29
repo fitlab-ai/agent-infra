@@ -1436,3 +1436,33 @@ test('broker commit fails closed on the short-id registry after sandbox preparat
     }
   }
 });
+
+
+test('finalization exposes missing activity log warnings on completion and replay', async () => {
+  const f = fixture();
+  try {
+    const file = path.join(f.taskDir, 'task.md');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/## Activity Log\n[\s\S]*?(?=\n## |$)/u, ''));
+    const o = options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass'));
+    const done = await applyTaskFinalization(request, o);
+    assert.equal(done.status, 'completed');
+    assert.ok(done.warnings.some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'));
+    const replay = await applyTaskFinalization(request, o);
+    assert.equal(replay.status, 'completed');
+    assert.ok(replay.warnings.some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'));
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+
+test('finalization forwards diagnostics from successful verification', async () => {
+  const f = fixture();
+  try {
+    const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+      const result = verification('pass');
+      return { ...result, invocations: [{ ...result.invocations[0]!, payload: { checks: [{ checkId: 'activity-log', status: 'pass', warnings: ['Activity Log contains malformed entries'] }] } }] };
+    };
+    const result = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
+    assert.equal(result.status, 'completed');
+    assert.ok(result.warnings.some((warning) => warning.step === 'verification' && warning.target === 'activity-log' && warning.message === 'Activity Log contains malformed entries'));
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});

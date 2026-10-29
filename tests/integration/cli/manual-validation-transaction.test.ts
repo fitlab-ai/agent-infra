@@ -524,3 +524,15 @@ test('coordinator replaces the Chinese manual-validation section and preserves c
   assert.ok(statusIndex >= 0 && stateIndex >= 0 && detailIndex >= 0 && receiptIndex >= 0 && decisionsIndex >= 0 && reportIndex >= 0);
   assert.ok(statusIndex < stateIndex && stateIndex < detailIndex && detailIndex < receiptIndex && receiptIndex < decisionsIndex && decisionsIndex < reportIndex);
 });
+
+
+test('manual validation preparation exposes missing log warning on first call and replay', async () => {
+  const f = createFixture();
+  try {
+    fs.writeFileSync(f.taskPath, fs.readFileSync(f.taskPath, 'utf8').replace(/## Activity Log\n[\s\S]*?(?=\n## |$)/u, ''));
+    for (const response of [await prepare(f), await prepare(f)]) {
+      assert.equal(response.status, 'applied');
+      assert.ok((response.warnings as { code: string }[]).some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'));
+    }
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

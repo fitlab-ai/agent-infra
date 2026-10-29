@@ -10,6 +10,7 @@ import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
 import type { IssueResult, SyncOptions as IssueSyncOptions } from '../platform/issues.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
+import { activityWarnings } from './activity-log.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { recoverPlatformOperations } from './platform-operation-recovery.ts';
 import {
@@ -105,6 +106,7 @@ type TaskFinalizationStep = Readonly<{
   error: FinalizationError | null;
   completedSteps?: readonly string[];
   pendingSteps?: readonly string[];
+  warnings?: readonly OperationWarning[];
 }>;
 
 type TaskCommentSyncOutcome = Readonly<{
@@ -331,7 +333,8 @@ function lifecycleStep(result: TaskLifecycleResult): TaskFinalizationStep {
     changed: result.changed,
     error: result.error ? errorOf(result.error, 'LIFECYCLE_FAILED') : null,
     completedSteps: result.completedSteps ?? [],
-    pendingSteps: result.pendingSteps ?? []
+    pendingSteps: result.pendingSteps ?? [],
+    warnings: (result.warnings ?? []).map((warning) => ({ ...warning, step: 'lifecycle', target: 'activity-log', severity: 'IMPORTANT' as const, retryable: true }))
   };
 }
 
@@ -347,7 +350,17 @@ function verificationStep(result: TaskVerificationResult): TaskFinalizationStep 
   return {
     status: result.status,
     changed: false,
-    error: result.status === 'pass' ? null : verificationFailure(result)
+    error: result.status === 'pass' ? null : verificationFailure(result),
+    warnings: result.invocations.flatMap(({ payload }) => {
+      const checks = Array.isArray(payload.checks) ? payload.checks : [payload];
+      return checks.flatMap((check) => {
+        if (!check || typeof check !== 'object' || !Array.isArray(check.warnings)) return [];
+        return check.warnings.filter((message: unknown): message is string => typeof message === 'string').map((message: string) => ({
+          code: 'VERIFICATION_DIAGNOSTIC', message, retryable: true, step: 'verification',
+          target: typeof check.checkId === 'string' ? check.checkId : String(check.type ?? 'check'), severity: 'IMPORTANT' as const
+        }));
+      });
+    })
   };
 }
 
@@ -814,7 +827,7 @@ function terminalResult(
 ): TaskFinalizationResult {
   const pending = pendingSteps(receipt);
   const blocked = [steps.backfill, steps.lifecycle, steps.taskComment, steps.verification, steps.summary].some((step) => step?.status === 'blocked');
-  const warnings = openWarnings(receipt);
+  const warnings = mergeOperationWarnings(openWarnings(receipt), steps.lifecycle?.warnings ?? [], steps.verification?.warnings ?? []);
   const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
   const terminalVerificationPending = receipt.lifecycle === 'done' && receipt.verification === 'pending';
   const resultError = error ?? (terminalVerificationPending ? steps.verification?.error : null) ?? null;
@@ -859,7 +872,7 @@ function preparedResult(
     verification: steps.verification ?? null,
     summary: steps.summary ?? null,
     completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt),
-    result: 'prepared', warnings: openWarnings(receipt), error: null
+    result: 'prepared', warnings: mergeOperationWarnings(openWarnings(receipt), steps.lifecycle?.warnings ?? []), error: null
   };
 }
 
@@ -1134,7 +1147,7 @@ async function prepareTaskFinalizationCore(
   return preparedResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed);
 }
 
-async function prepareTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
+async function prepareTaskFinalizationInner(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   if (request.intent !== 'complete' || !request.taskRef || !request.agent) {
     return failed(null, { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'complete finalization requires taskRef and agent', retryable: false });
   }
@@ -1310,6 +1323,25 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   }
 }
 
+function withActivityWarnings(result: TaskFinalizationResult, request: TaskFinalizationRequest, options: TaskFinalizationOptions): TaskFinalizationResult {
+  if (result.status === 'failed' || result.status === 'blocked') return result;
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return result;
+  let diagnostics: ReturnType<typeof activityWarnings>;
+  try { diagnostics = activityWarnings(fs.readFileSync(resolved.taskMdPath, 'utf8')); }
+  catch { return result; }
+  const warnings = diagnostics.map((warning) => ({ ...warning, step: 'lifecycle', target: 'activity-log', severity: 'IMPORTANT' as const, retryable: true }));
+  return { ...result, warnings: mergeOperationWarnings(result.warnings, warnings) };
+}
+
+async function prepareTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
+  return withActivityWarnings(await prepareTaskFinalizationInner(request, options), request, options);
+}
+
+async function commitPreparedTaskFinalizationWithWarnings(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
+  return withActivityWarnings(await commitPreparedTaskFinalization(request, options), request, options);
+}
+
 async function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   const prepared = await prepareTaskFinalization(request, options);
   if (prepared.status !== 'prepared') return prepared;
@@ -1326,12 +1358,13 @@ async function applyTaskFinalization(request: TaskFinalizationRequest, options: 
       });
     }
   }
-  return commitPreparedTaskFinalization(request, options);
+  const committed = await commitPreparedTaskFinalizationWithWarnings(request, options);
+  return { ...committed, warnings: mergeOperationWarnings(prepared.warnings, committed.warnings) };
 }
 
 export {
   applyFinalizationReceiptMutation,
-  commitPreparedTaskFinalization,
+  commitPreparedTaskFinalizationWithWarnings as commitPreparedTaskFinalization,
   applyTaskFinalization,
   prepareTaskFinalization,
   issueCapability as createFinalizationCapability,
