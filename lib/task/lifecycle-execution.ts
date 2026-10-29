@@ -9,7 +9,7 @@ const labels = {
 export type ExecutionFamily = typeof labels[keyof typeof labels] | 'manual-validation' | 'other';
 export type LifecycleExecution = {
   family: ExecutionFamily; agent: string; startedAt: string; round?: number;
-  fixFor?: string; implementationInput?: string; transactionId?: string; legacyAction?: string;
+  fixFor?: string; implementationInput?: string; transactionId?: string;
 };
 
 export function lifecycleExecutions(content: string, taskDir: string): LifecycleExecution[] {
@@ -32,7 +32,7 @@ export function lifecycleExecutions(content: string, taskDir: string): Lifecycle
     .filter((row) => row.started && !row.done).map((row) => {
       if (row.step === 'Complete Manual Validation') return { family: 'manual-validation' as const, agent: row.agent, startedAt: row.started, round: manualRound, transactionId: /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(row.note)?.[1] };
       const match = /^(Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code|Run Manual Validation) \(Round ([1-9]\d*)(?:(?:, fix for (review-code(?:-r\d+)?\.md))|(?:, decision (II-[1-9]\d*)))?\)$/u.exec(row.step);
-      if (!match) return { family: 'other' as const, agent: row.agent, startedAt: row.started, legacyAction: row.step };
+      if (!match) return { family: 'other' as const, agent: row.agent, startedAt: row.started };
       return { family: labels[match[1] as keyof typeof labels], agent: row.agent, startedAt: row.started, round: Number(match[2]), fixFor: match[3], implementationInput: match[4] };
     });
 }
