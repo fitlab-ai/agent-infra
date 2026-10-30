@@ -2,6 +2,8 @@
 
 本规则约束 analyze、plan、code 及三类 review 工作流中新建的所有 `[needs-human-decision]` 详情块。历史详情无需迁移。
 
+已有裁决需按新的明确用户决定替代时，使用 `ai decide --item <账本ID> --supersede HDR-N --needs-implementation true|false <新裁决>`，其中 HDR-N 必须是当前裁决；code 阶段必须明确新的实现意图。旧裁决和实现输入保留，未消费输入标记为 superseded，只有绑定该输入的在途 code 操作被终止。若旧裁决未记录原审查来源，附加 `--review-source <review文件#finding>`，并以原审查和 SHA 进行返工分类；不得改写旧报告。
+
 ## 自足性要求
 
 详情必须让维护者不需要了解内部流程，也不需要再问模型，就能看懂并做选择。按固定顺序先用大白话说明要决定什么、为什么现在需要决定、会影响什么以及选错或暂不处理会怎样；再分别说明方案 A/B/...，最后给出建议选哪个及原因。

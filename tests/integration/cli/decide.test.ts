@@ -35,6 +35,11 @@ test('real CLI decides a declared code item without an implementation flag', () 
     const content = fs.readFileSync(data.taskMd, 'utf8');
     assert.match(content, /\| II-1 \| CD-1 \| task\.md#HDR-1 \| code \| true \| .+ \| pending \|/);
     assert.equal((content.match(/\| II-1 \|/g) ?? []).length, 1);
+    const replaced = run(data.repoRoot, ['decide', '--task', data.taskId, '--item', 'CD-1', '--supersede', 'HDR-1', '--needs-implementation', 'false', 'use new choice']);
+    assert.equal(replaced.status, 0, replaced.stderr);
+    const updated = fs.readFileSync(data.taskMd, 'utf8');
+    assert.match(updated, /\| II-1 \| CD-1 \| task\.md#HDR-1 \| code \| true \| .+ \| superseded \|/);
+    assert.match(updated, /\| II-2 \| CD-1 \| task\.md#HDR-2 \| code \| false \| .+ \| not-required \|/);
   } finally { fs.rmSync(data.repoRoot, { recursive: true, force: true }); }
 });
 

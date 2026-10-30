@@ -23,7 +23,7 @@ test('commandHelp renders Feishu-card-friendly command lines', () => {
     '/sandbox create {ref}',
     '/sandbox start {ref}',
     'Exec:',
-    '/decide [--task {ref} | -t {ref}] (--item {ordinal|ledger-id} | -i {ordinal|ledger-id}) [--needs-implementation true|false] {decision}',
+    '/decide [--task {ref} | -t {ref}] (--item {ordinal|ledger-id} | -i {ordinal|ledger-id}) [--needs-implementation true|false] [--supersede HDR-N] [--review-source {artifact#finding}] {decision}',
     '/run create-task {description}',
     '/run {skill} {task-ref}'
   ]);

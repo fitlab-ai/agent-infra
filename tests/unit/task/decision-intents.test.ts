@@ -2,9 +2,14 @@ import { taskWorkspaceRoot } from '../../helpers.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
+import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
+import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
+import { parseImplementationInputs } from '../../../lib/task/implementation-inputs.ts';
+import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { createTempDir } from '../../helpers.ts';
 
 function fixture(declaration = '') {
@@ -141,5 +146,67 @@ test('human decision persists and reports a missing activity log', () => {
     assert.equal(result.status, 'applied');
     assert.equal(result.warnings?.[0]?.code, 'ACTIVITY_LOG_UNAVAILABLE');
     assert.match(fs.readFileSync(f.taskMd, 'utf8'), /\| CD-1 \| code \| 1 \| major \| human-decided \|/);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+
+test('explicit replacement retains old ruling and input while closing only the matching open operation', () => {
+  const f = fixture();
+  try {
+    const options = { repoRoot: f.repoRoot, metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' }) };
+    const initial = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use A', needsImplementation: true }, options);
+    assert.equal(initial.status, 'applied');
+    const content = updateTaskFrontmatter(fs.readFileSync(f.taskMd, 'utf8'), { lifecycle_execution: JSON.stringify({ version: 1, open: [{ family: 'code', agent: 'codex', startedAt: '2026-07-19 12:00:00+00:00', round: 2, implementationInput: 'II-1' }, { family: 'manual-validation', agent: 'codex', startedAt: '2026-07-19 12:00:00+00:00' }], prReview: { open: null, terminals: [] } }) });
+    fs.writeFileSync(f.taskMd, content);
+    const replacement = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use B', needsImplementation: true, supersede: 'HDR-1' }, options);
+    assert.equal(replacement.status, 'applied');
+    assert.equal(replacement.recordId, 'HDR-2');
+    const after = fs.readFileSync(f.taskMd, 'utf8');
+    assert.match(after, /### HDR-1[\s\S]*Use A/);
+    assert.match(after, /### HDR-2[\s\S]*Use B/);
+    const inputs = parseImplementationInputs(after).rows;
+    assert.equal(inputs.find((row) => row.id === 'II-1')?.status, 'superseded');
+    assert.equal(inputs.find((row) => row.id === 'II-1')?.consumedBy, '');
+    assert.equal(inputs.find((row) => row.id === 'II-2')?.status, 'pending');
+    const state = JSON.parse(parseTypedTaskFrontmatter(after).lifecycle_execution as string);
+    assert.deepEqual(state.open.map((row: { family: string }) => row.family), ['manual-validation']);
+    assert.equal(applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use B', needsImplementation: true, supersede: 'HDR-1' }, options).status, 'no-op');
+    assert.equal(applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use', needsImplementation: true, supersede: 'HDR-1' }, options).error?.code, 'DECISION_CONFLICT');
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+
+test('replacement of a historical ruling binds the original review to rework and keeps the new decision distinct', () => {
+  const f = fixture();
+  try {
+    const options = { repoRoot: f.repoRoot, metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' }) };
+    const review = '# Review\n\n### CD-1: Finding\n\nThe original evidence.\n';
+    fs.writeFileSync(path.join(path.dirname(f.taskMd), 'review-code.md'), review);
+    const hash = createHash('sha256').update(review).digest('hex');
+    const classify = (id: string) => applyLedgerIntent({ kind: 'rework-intent-upsert', taskRef: f.taskId, intentId: id, findingId: 'CD-1', sourceArtifact: 'review-code.md', sourceSha256: hash, classification: 'implementation' }, options);
+    assert.equal(classify('RI-1').status, 'applied');
+    assert.equal(applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use A', needsImplementation: true }, options).status, 'applied');
+    fs.writeFileSync(f.taskMd, fs.readFileSync(f.taskMd, 'utf8').replace('- **审查来源**：review-code.md#CD-1\n', ''));
+    const replacement = { taskRef: f.taskId, selector: 'CD-1', decision: 'Use B', needsImplementation: true, supersede: 'HDR-1' };
+    const before = fs.readFileSync(f.taskMd);
+    assert.equal(applyHumanDecision(replacement, options).status, 'failed');
+    assert.deepEqual(fs.readFileSync(f.taskMd), before);
+    assert.equal(applyHumanDecision({ ...replacement, reviewSource: 'review-code.md#CD-1' }, options).status, 'applied');
+    assert.equal(classify('RI-2').status, 'applied');
+    const parsed = parseReworkIntentDocument(fs.readFileSync(f.taskMd, 'utf8'));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.equal(parsed.intents.at(-1)?.classification, 'implementation');
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+
+test('standalone code decisions can be replaced without inventing a review finding', () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(f.taskMd, fs.readFileSync(f.taskMd, 'utf8').replace('| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |', '| HD-1 | code | - | decision | needs-human-decision | code.md#HD-1 |'));
+    const options = { repoRoot: f.repoRoot };
+    assert.equal(applyHumanDecision({ taskRef: f.taskId, selector: 'HD-1', decision: 'First', needsImplementation: false }, options).status, 'applied');
+    assert.equal(applyHumanDecision({ taskRef: f.taskId, selector: 'HD-1', decision: 'Next', needsImplementation: true, supersede: 'HDR-1' }, options).status, 'applied');
+    assert.deepEqual(parseImplementationInputs(fs.readFileSync(f.taskMd, 'utf8')).rows.map((row) => row.status), ['superseded', 'pending']);
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });

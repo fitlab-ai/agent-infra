@@ -8,7 +8,7 @@ const COLUMNS = [
 ] as const;
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
 
-type ImplementationInputStatus = 'declared' | 'pending' | 'not-required' | 'consumed';
+type ImplementationInputStatus = 'declared' | 'pending' | 'not-required' | 'consumed' | 'superseded';
 type ImplementationInput = {
   id: string;
   ledgerId: string;
@@ -36,6 +36,7 @@ function validateInput(row: ImplementationInput): void {
     (row.status === 'declared' && row.decidedAt === '' && row.consumedBy === '') ||
     (hasValidTimestamp && row.needsImplementation && row.status === 'pending' && row.consumedBy === '') ||
     (hasValidTimestamp && !row.needsImplementation && row.status === 'not-required' && row.consumedBy === '') ||
+    (hasValidTimestamp && row.status === 'superseded' && row.consumedBy === '') ||
     (hasValidTimestamp && row.needsImplementation && row.status === 'consumed' && parseArtifactName(row.consumedBy)?.family === 'code');
   if (!valid) throw new Error(`implementation input ${row.id} has an invalid state combination`);
 }

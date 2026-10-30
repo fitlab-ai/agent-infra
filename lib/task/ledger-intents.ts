@@ -16,7 +16,7 @@ import { writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
 import { parseLegacyReworkIntentDocument, parseReworkIntentDocument, reworkIntentMutation, upsertReworkIntent } from './rework-intent.ts';
 import type { ReworkClassification, ReworkIntent, ReworkTarget } from './rework-intent.ts';
-import { extractSection } from './sections.ts';
+import { extractSection, extractSubSection } from './sections.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
 import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
@@ -103,13 +103,14 @@ function findingEvidence(reviewContent: string, evidence: string): string | null
   return semanticFindingEvidence(reviewContent, heading, next?.start ?? reviewContent.length);
 }
 
-function taskFactDigest(taskDir: string, content: string): string {
+function taskFactDigest(taskDir: string, content: string, ruling?: string): string {
   const latest = inspectArtifactDirectory(taskDir, 'analysis').latest;
   const flow = latest ? parseLifecyclePathDecision(fs.readFileSync(latest.path, 'utf8'), latest.name) : null;
   return semanticDigest(JSON.stringify({
     taskInput: normalizedTaskFact(extractSection(content, ['任务输入', 'Task Input'])),
     requirements: normalizedTaskFact(extractSection(content, ['需求', 'Requirements'])),
-    flow: flow?.status === 'valid' ? flow.decision.semanticDigest : flow?.status ?? 'missing'
+    flow: flow?.status === 'valid' ? flow.decision.semanticDigest : flow?.status ?? 'missing',
+    ...(ruling ? { ruling: normalizedTaskFact(ruling) } : {})
   }));
 }
 
@@ -175,7 +176,10 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     if (intent.classification === 'human-decision' && finding.status !== 'needs-human-decision') {
       return failed(intent, 'LEDGER_TRANSITION_INVALID', 'human-decision classification requires a needs-human-decision finding', resolved.taskId, intent.findingId);
     }
-    const sourceFromEvidence = finding.evidence.split('#')[0];
+    const rulingId = /^task\.md#(HDR-[1-9]\d*)$/.exec(finding.evidence)?.[1];
+    const ruling = rulingId ? extractSubSection(content, rulingId) : '';
+    const evidence = rulingId ? /^- \*\*审查来源\*\*：(.+)$/mu.exec(ruling)?.[1] ?? '' : finding.evidence;
+    const sourceFromEvidence = evidence.split('#')[0];
     if (sourceFromEvidence !== intent.sourceArtifact || parseArtifactName(intent.sourceArtifact)?.family !== `review-${finding.stage}`) {
       return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact does not match finding evidence', resolved.taskId, intent.intentId);
     }
@@ -185,10 +189,11 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
       const parsed = parseReworkIntentDocument(content);
       if (!parsed.ok) return failed(intent, parsed.code, parsed.message, resolved.taskId, intent.intentId);
       const reviewContent = fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact), 'utf8');
-      const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
-      if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId, intent.intentId);
+      const evidenceBlock = findingEvidence(reviewContent, evidence);
+      if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${evidence}' was not found`, resolved.taskId, intent.intentId);
       const evidenceDigest = semanticDigest(evidenceBlock);
-      const factsDigest = taskFactDigest(resolved.taskDir, content);
+      const decision = /^- \*\*裁决结果\*\*：(.+)$/mu.exec(ruling)?.[1];
+      const factsDigest = taskFactDigest(resolved.taskDir, content, decision);
       const requestedIntent: ReworkIntent = {
         intentId: intent.intentId, findingId: intent.findingId, sourceArtifact: intent.sourceArtifact,
         sourceSha256: intent.sourceSha256, target: CLASSIFICATION_TARGET[intent.classification], classification: intent.classification,
