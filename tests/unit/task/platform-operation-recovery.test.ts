@@ -271,6 +271,7 @@ test('PR creation recovery uses delivered head when provider omits verifyHead', 
     fs.writeFileSync(f.taskFile, `${header}delivery_remote_head: ${'a'.repeat(40)}\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n` );
     const recovered = await recoverCreatedPullRequest(TASK_ID, { agent: 'codex', cwd: f.repoRoot, base: 'main', head: 'feature' });
     assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.warnings?.some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'), true);
     assert.match(fs.readFileSync(f.taskFile, 'utf8'), /state.*bound/);
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
