@@ -10,17 +10,9 @@ type DecideOptions = {
   version?: string;
 };
 
-function replacementOption(part: string, value: string | undefined, current: string | undefined): string {
-  if (current !== undefined) throw new Error(`duplicate option '${part}'`);
-  if (!value || value.startsWith('--')) throw new Error(`${part} requires a value`);
-  return value;
-}
-
-function parseDecisionParts(parts: string[]): { decision: string; needsImplementation: boolean | undefined; supersede?: string; reviewSource?: string } {
+function parseDecisionParts(parts: string[]): { decision: string; needsImplementation: boolean | undefined } {
   const decision: string[] = [];
   let needsImplementation: boolean | undefined;
-  let supersede: string | undefined;
-  let reviewSource: string | undefined;
   for (let index = 0; index < parts.length; index += 1) {
     const part = parts[index];
     if (part === '--needs-implementation') {
@@ -30,9 +22,6 @@ function parseDecisionParts(parts: string[]): { decision: string; needsImplement
         throw new Error("--needs-implementation must be 'true' or 'false'");
       }
       needsImplementation = value === 'true';
-    } else if (part === '--supersede' || part === '--review-source') {
-      if (part === '--supersede') supersede = replacementOption(part, parts[++index], supersede);
-      else reviewSource = replacementOption(part, parts[++index], reviewSource);
     } else if (part?.startsWith('--')) {
       throw new Error(`unknown option '${part}'`);
     } else {
@@ -40,7 +29,7 @@ function parseDecisionParts(parts: string[]): { decision: string; needsImplement
     }
   }
   if (decision.length === 0) throw new Error('decision content is required');
-  return { decision: decision.join(' '), needsImplementation, supersede, reviewSource };
+  return { decision: decision.join(' '), needsImplementation };
 }
 
 export async function decide(args: string[], options: DecideOptions = {}): Promise<number> {
@@ -64,7 +53,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
   const selector = item;
   const decisionParts = operands;
   if (!selector || decisionParts.length === 0) {
-    process.stderr.write('Usage: ai decide [--task <ref> | -t <ref>] (--item <ordinal|ledger-id> | -i <ordinal|ledger-id>) [--needs-implementation true|false] [--supersede HDR-N] [--review-source <artifact#finding>] <decision>\n');
+    process.stderr.write('Usage: ai decide [--task <ref> | -t <ref>] (--item <ordinal|ledger-id> | -i <ordinal|ledger-id>) [--needs-implementation true|false] <decision>\n');
     return 1;
   }
   try {
@@ -74,7 +63,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
     if (!resolved.ok) throw new Error(resolved.message);
     const request = {
       taskRef: resolved.taskId, selector, decision: parsedDecision.decision,
-      needsImplementation: parsedDecision.needsImplementation, supersede: parsedDecision.supersede, reviewSource: parsedDecision.reviewSource
+      needsImplementation: parsedDecision.needsImplementation
     };
     const writeOptions = {
       repoRoot: resolved.repoRoot,

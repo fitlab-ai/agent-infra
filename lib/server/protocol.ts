@@ -61,7 +61,7 @@ export function commandHelp(): string {
     '/sandbox create {ref}',
     '/sandbox start {ref}',
     'Exec:',
-    '/decide [--task {ref} | -t {ref}] (--item {ordinal|ledger-id} | -i {ordinal|ledger-id}) [--needs-implementation true|false] [--supersede HDR-N] [--review-source {artifact#finding}] {decision}',
+    '/decide [--task {ref} | -t {ref}] (--item {ordinal|ledger-id} | -i {ordinal|ledger-id}) [--needs-implementation true|false] {decision}',
     '/run create-task {description}',
     '/run {skill} {task-ref}'
   ].join('\n');

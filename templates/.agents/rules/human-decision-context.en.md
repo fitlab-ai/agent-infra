@@ -2,8 +2,6 @@
 
 This rule governs every new `[needs-human-decision]` detail block produced by analyze, plan, code, and their three review workflows. Historical details do not need migration.
 
-To replace a ruling after an explicit new user decision, use `ai decide --item <ledger-id> --supersede HDR-N --needs-implementation true|false <new decision>`, naming the current ruling and explicitly stating the new implementation intent for code. The old ruling and input remain; an unconsumed input becomes superseded and only the code operation bound to it is stopped. If the old ruling lacks its review source, provide `--review-source <review-file#finding>` and use the original review and SHA for rework classification; do not rewrite sealed reports.
-
 ## Self-contained Context
 
 A maintainer must be able to understand the issue and choose without knowing the internal workflow or asking a model to reconstruct context. In a fixed order, explain in plain language what must be chosen, why a decision is needed now, what it affects, and what could go wrong if it is wrong or postponed. Then explain each option, followed by the recommendation and its reason.

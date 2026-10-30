@@ -1,9 +1,6 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 import { activityWarnings, appendActivityEntry, locateActivityLog } from './activity-log.ts';
-import { parseArtifactName } from './artifact-name.ts';
-import { lifecycleExecutions, serializeLifecycleExecution } from './lifecycle-execution.ts';
 import { isDecisionItem, listDecisionItems, selectDecisionItem } from './decision-items.ts';
 import {
   createImplementationInput,
@@ -26,8 +23,6 @@ type HumanDecisionRequest = {
   selector: string;
   decision: string;
   needsImplementation?: boolean;
-  supersede?: string;
-  reviewSource?: string;
   dryRun?: boolean;
 };
 
@@ -65,11 +60,6 @@ function prependBlock(body: string, block: string): string {
   return body ? `${block}\n\n${body}` : block;
 }
 
-function rulingDecision(block: string): string | undefined {
-  const body = /^- \*\*裁决结果\*\*：([\s\S]*)/mu.exec(block.replace(/\r\n/g, '\n'))?.[1];
-  return body?.replace(/\n\n<!-- (?:使用|Use) ai decide [\s\S]*? -->\s*$/u, '').trim();
-}
-
 function existingDecision(
   content: string,
   row: LedgerRow,
@@ -80,7 +70,7 @@ function existingDecision(
   if (!match) return { conflict: `decided row '${row.id}' has invalid decision evidence` };
   const recordId = match[1]!;
   const block = extractSubSection(content, recordId);
-  if (!block || !block.includes(`**原账本 ID**：${row.id}`) || rulingDecision(block) !== decision.replace(/\r\n/g, '\n')) {
+  if (!block || !block.includes(`**原账本 ID**：${row.id}`) || !block.includes(`**裁决结果**：${decision}`)) {
     return { conflict: `decision for '${row.id}' conflicts with ${recordId}` };
   }
   if (row.stage !== 'code') return needsImplementation === undefined
@@ -109,7 +99,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId); }
 
   const direct = rows.filter((row) => row.id.toUpperCase() === request.selector.toUpperCase());
-  if (!request.supersede && !/^-?\d+$/.test(request.selector) && direct.length === 1 && direct[0]!.status === 'human-decided' && isDecisionItem(direct[0]!)) {
+  if (!/^-?\d+$/.test(request.selector) && direct.length === 1 && direct[0]!.status === 'human-decided' && isDecisionItem(direct[0]!)) {
     try {
       const replay = existingDecision(content, direct[0]!, request.decision.trim(), request.needsImplementation);
       if ('conflict' in replay) return failed('DECISION_CONFLICT', replay.conflict, resolved.taskId, direct[0]!.id);
@@ -117,7 +107,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     } catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, direct[0]!.id); }
   }
 
-  const candidates = request.supersede ? listDecisionItems(rows, { includeDecided: true }) : listDecisionItems(rows);
+  const candidates = listDecisionItems(rows);
   const selected = selectDecisionItem(candidates, request.selector);
   if (!selected.ok) {
     const message = selected.code === 'not-found' && !/^-?\d+$/.test(request.selector)
@@ -125,36 +115,6 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     return failed('DECISION_TARGET_INVALID', message, resolved.taskId);
   }
   const row = selected.row;
-  if (request.supersede && row.status === 'human-decided' && row.evidence !== `task.md#${request.supersede}`) {
-    try {
-      const current = extractSubSection(content, row.evidence.split('#')[1] ?? '');
-      const fields = current.replace(/\r\n/g, '\n').split('\n- **裁决结果**：', 1)[0]!.split('\n');
-      if (fields.includes(`- **替代裁决**：task.md#${request.supersede}`)) {
-        if (request.reviewSource && !fields.includes(`- **审查来源**：${request.reviewSource}`)) return failed('DECISION_CONFLICT', 'replacement review source conflicts with prior ruling', resolved.taskId, row.id);
-        const replay = existingDecision(content, row, request.decision.trim(), request.needsImplementation);
-        if ('conflict' in replay) return failed('DECISION_CONFLICT', replay.conflict, resolved.taskId, row.id);
-        return { status: 'no-op', changed: false, taskId: resolved.taskId, ledgerId: row.id, ...replay, operations: [], error: null, warnings: activityWarnings(content) };
-      }
-    } catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id); }
-  }
-  if (request.supersede && (row.status !== 'human-decided' || row.evidence !== `task.md#${request.supersede}`)) {
-    return failed('DECISION_CONFLICT', 'replacement does not match the current ruling', resolved.taskId, row.id);
-  }
-  if (!request.supersede && request.reviewSource) return failed('DECISION_PAYLOAD_INVALID', 'review source requires replacement', resolved.taskId, row.id);
-  const previous = request.supersede ? extractSubSection(content, request.supersede) : '';
-  const recordedSource = /^- \*\*审查来源\*\*：(.+)$/mu.exec(previous.replace(/\r\n/g, '\n').split('\n- **裁决结果**：', 1)[0]!)?.[1];
-  const source = row.status === 'human-decided' ? recordedSource ?? request.reviewSource : row.evidence;
-  if (request.supersede && request.reviewSource && recordedSource && request.reviewSource !== recordedSource) return failed('DECISION_CONFLICT', 'replacement review source conflicts with prior ruling', resolved.taskId, row.id);
-  const isFinding = /^(AN|PL|CD)-[1-9]\d*$/.test(row.id);
-  if (request.supersede && isFinding && (!source || parseArtifactName(source.split('#')[0]!)?.family !== `review-${row.stage}` || !source.split('#')[1])) return failed('DECISION_PAYLOAD_INVALID', 'replacement requires its original review source', resolved.taskId, row.id);
-  if (request.supersede && isFinding && !recordedSource && source !== `${source?.split('#')[0]}#${row.id}`) return failed('DECISION_PAYLOAD_INVALID', 'historical review source must identify the original finding', resolved.taskId, row.id);
-  if (request.supersede && isFinding && !recordedSource) {
-    try {
-      const [artifact] = source!.split('#');
-      const review = fs.readFileSync(path.join(resolved.taskDir, artifact!), 'utf8');
-      if (!new RegExp(`(?:^|\\n)###?\\s+${row.id}(?:[：: .]|\\s)`, 'u').test(review)) throw new Error('review finding anchor is missing');
-    } catch (error) { return failed('DECISION_CONFLICT', error instanceof Error ? error.message : String(error), resolved.taskId, row.id); }
-  }
   if (row.stage !== 'code' && request.needsImplementation !== undefined) return failed('DECISION_PAYLOAD_INVALID', '--needs-implementation is only valid for code-stage decisions', resolved.taskId, row.id);
 
   let parsedInputs: ReturnType<typeof parseImplementationInputs> | null = null;
@@ -183,7 +143,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   const recordId = nextRecordId(content);
   const evidence = `task.md#${recordId}`;
   const decision = request.decision.trim();
-  const record = `### ${recordId}\n\n- **原账本 ID**：${row.id}${source ? `\n- **审查来源**：${source}` : ''}${request.supersede ? `\n- **替代裁决**：task.md#${request.supersede}` : ''}\n- **裁决时间**：${metadata.timestamp}\n- **裁决结果**：${decision}`;
+  const record = `### ${recordId}\n\n- **原账本 ID**：${row.id}\n- **裁决时间**：${metadata.timestamp}\n- **裁决结果**：${decision}`;
   const activity = locateActivityLog(content);
   const mutations: TaskMutation[] = [
     {
@@ -199,22 +159,12 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   ];
   let implementationInputId: string | null = null;
   if (row.stage === 'code') {
-    let nextInputs = declaredInput
+    const nextInputs = declaredInput
       ? finalizeImplementationInput(parsedInputs!.rows, declaredInput.id, evidence, metadata.timestamp)
       : [...parsedInputs!.rows, createImplementationInput(parsedInputs!.rows, {
           ledgerId: row.id, decisionEvidence: evidence,
           needsImplementation: effectiveNeedsImplementation!, decidedAt: metadata.timestamp
         })];
-    if (request.supersede) {
-      const oldInputs = parsedInputs!.rows.filter((item) => item.ledgerId === row.id && item.decisionEvidence === row.evidence);
-      if (oldInputs.length !== 1) return failed('DECISION_CONFLICT', 'prior implementation input identity is ambiguous', resolved.taskId, row.id);
-      const old = oldInputs[0]!;
-      nextInputs = nextInputs.map((item) => item.id === old.id && (item.status === 'pending' || item.status === 'not-required') ? { ...item, status: 'superseded' as const } : item);
-      const open = lifecycleExecutions(content);
-      const matches = open.filter((item) => item.family === 'code' && item.implementationInput === old.id);
-      if (matches.length > 1) return failed('DECISION_CONFLICT', 'prior open execution identity is ambiguous', resolved.taskId, row.id);
-      if (matches.length === 1) mutations.push({ kind: 'frontmatter', lifecycleExecutionDomain: 'ordinary', set: { lifecycle_execution: serializeLifecycleExecution(open.filter((item) => item !== matches[0]), content) } });
-    }
     implementationInputId = declaredInput?.id ?? nextInputs[nextInputs.length - 1]!.id;
     mutations.push({
       kind: 'section', aliases: IMPLEMENTATION_INPUT_ALIASES,
@@ -243,5 +193,5 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   return { status: writeResult.status, changed: writeResult.changed, taskId: writeResult.taskId, ledgerId: row.id, recordId, implementationInputId, operations: writeResult.operations, error: null, warnings: activityWarnings(content) };
 }
 
-export { applyHumanDecision, rulingDecision };
+export { applyHumanDecision };
 export type { HumanDecisionRequest, HumanDecisionResult };
