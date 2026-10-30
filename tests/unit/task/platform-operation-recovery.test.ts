@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { coordinatePlatformWrite } from '../../../lib/platform/operation-coordinator.ts';
+import { platformResult } from '../../../lib/platform/types.ts';
+import { recoverCreatedPullRequest } from '../../../lib/platform/pull-requests.ts';
 import { inspectPlatformCommentOperation } from '../../../lib/platform/issue-comments.ts';
 import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations } from '../../../lib/task/platform-operation-recovery.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
@@ -43,7 +46,7 @@ function fixture() {
 function writePlatformConfig(repoRoot: string, platform: Record<string, unknown>): void {
   const configPath = path.join(repoRoot, '.agents', '.airc.json');
   const current = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-  fs.writeFileSync(configPath, JSON.stringify({ ...current, platform }));
+  fs.writeFileSync(configPath, JSON.stringify({ ...current, delivery: { remote: 'origin', baseRef: 'main' }, platform }));
 }
 
 test('recovery supersedes an old comment digest when its task projection changed', async () => {
@@ -212,4 +215,62 @@ test('PR recovery preserves its typed intent when a replay does not succeed', as
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
+});
+
+
+test('capability-skipped metadata before a PR converges without replaying later writes', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.writeFileSync(f.taskFile, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":7}'\nstatus: active\n---\n`);
+    writePlatformConfig(f.repoRoot, { type: 'trae', providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, push: false } } } });
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":7}', expectedDigest: 'a'.repeat(64), dependency: 'deferred', state: 'unknown', lastCode: 'PUSH_REQUIRED', issueMetadata: { requirements: false, issueType: false, fields: true } });
+    const boundary = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'pr:1', expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'queued', pullRequest: { action: 'bind', prToken: '1' } });
+    const later = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'later.md', expectedDigest: 'c'.repeat(64), dependency: 'deferred', state: 'queued' });
+    const result = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot, beforeId: boundary.id });
+    const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+    assert.equal(result.status, 'applied');
+    assert.deepEqual(result.pending, []);
+    assert.deepEqual(result.degraded, [{ id: journal.operations[0]?.id, reasonCode: 'PUSH_REQUIRED' }]);
+    assert.equal(journal.operations[0]?.state, 'succeeded');
+    assert.equal(journal.operations[0]?.lastCode, 'PUSH_REQUIRED');
+    assert.equal(journal.operations.find((op) => op.id === later.id)?.state, 'queued');
+    assert.equal(fs.readFileSync(callsPath, 'utf8').includes('issues.update'), false);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+
+test('required PR retry drains its prefix but leaves a later deferred failure untouched', async () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(f.taskFile, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":7}'\nstatus: active\n---\n`);
+    writePlatformConfig(f.repoRoot, { type: 'trae', providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { push: false } } } });
+    recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":7}', expectedDigest: 'a'.repeat(64), dependency: 'deferred', state: 'unknown', issueMetadata: { requirements: false, issueType: false, fields: true } });
+    const operation = { taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request' as const, target: 'pr:1', expectedDigest: 'b'.repeat(64), dependency: 'required' as const, pullRequest: { action: 'bind' as const, prToken: '1' } };
+    recordPlatformOperation({ ...operation, state: 'queued' });
+    const later = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'missing.md', expectedDigest: 'c'.repeat(64), dependency: 'deferred', state: 'failed', lastCode: 'NETWORK_TIMEOUT' });
+    let executions = 0;
+    const result = await coordinatePlatformWrite({ operation, agent: 'codex', execute: async () => { executions++; return platformResult('applied'); }, block: (error) => platformResult('blocked', { error }), persistenceFailure: (error) => platformResult('failed', { error }) });
+    assert.equal(result.status, 'applied');
+    assert.equal(executions, 1);
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((op) => op.id === later.id)?.state, 'failed');
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+test('PR creation recovery uses delivered head when provider omits verifyHead', async () => {
+  const f = fixture();
+  try {
+    const header = `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":7}'\nstatus: active\nagent_infra_version: v0.12.1\nbranch: feature\ndelivery_remote: origin\ndelivery_base_ref: main\npr_delivery_fact: '{"version":2,"state":"unbound","reason":"initial"}'\n`;
+    fs.writeFileSync(f.taskFile, `${header}---\n`);
+    writePlatformConfig(f.repoRoot, { type: 'trae', providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { closingMatch: true } } } });
+    const missing = await recoverCreatedPullRequest(TASK_ID, { agent: 'codex', cwd: f.repoRoot, base: 'main', head: 'feature' });
+    assert.equal(missing.error?.code, 'PR_HEAD_UNVERIFIED');
+    fs.writeFileSync(f.taskFile, `${header}delivery_remote_head: ${'c'.repeat(40)}\n---\n`);
+    const mismatch = await recoverCreatedPullRequest(TASK_ID, { agent: 'codex', cwd: f.repoRoot, base: 'main', head: 'feature' });
+    assert.equal(mismatch.error?.code, 'PLATFORM_OPERATION_PR_NOT_CONFIRMED');
+    fs.writeFileSync(f.taskFile, `${header}delivery_remote_head: ${'a'.repeat(40)}\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n` );
+    const recovered = await recoverCreatedPullRequest(TASK_ID, { agent: 'codex', cwd: f.repoRoot, base: 'main', head: 'feature' });
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.match(fs.readFileSync(f.taskFile, 'utf8'), /state.*bound/);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });

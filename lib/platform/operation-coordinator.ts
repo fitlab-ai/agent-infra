@@ -37,7 +37,8 @@ async function coordinatePlatformWrite<T extends OperationResult>(input: Coordin
     });
   }
 
-  const selection = input.operation.kind === 'issue-metadata' && input.operation.issueMetadata?.state === 'closed'
+  const boundedPr = input.operation.kind === 'pull-request' && input.operation.dependency === 'required';
+  const selection = boundedPr || input.operation.kind === 'issue-metadata' && input.operation.issueMetadata?.state === 'closed'
     ? 'all' : input.operation.dependency;
   const drained = input.drain
     ? await input.drain(input.operation.taskRef, operationId, input.agent, input.operation.cwd)
@@ -45,7 +46,8 @@ async function coordinatePlatformWrite<T extends OperationResult>(input: Coordin
       agent: input.agent,
       client: input.client,
       cwd: input.operation.cwd,
-      excludeId: operationId
+      excludeId: operationId,
+      ...(boundedPr ? { beforeId: operationId } : {})
     });
   if (drained.status !== 'applied' && drained.status !== 'no-op') {
     return input.block(drained.error ? { ...drained.error, retryable: true } : {

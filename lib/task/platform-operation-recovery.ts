@@ -25,7 +25,7 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from './platform-operation-journal.ts';
 import '../platform/provider-validation.ts';
 
-type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; attempts?: number; excludeId?: string }>;
+type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; attempts?: number; excludeId?: string; beforeId?: string }>;
 const DEFAULT_RECOVERY_ATTEMPTS = 3;
 type RecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'blocked' | 'failed';
@@ -33,6 +33,7 @@ type RecoveryResult = Readonly<{
   recovered: readonly string[];
   pending: readonly string[];
   error: { code: string; message: string } | null;
+  degraded?: readonly { id: string; reasonCode: string }[];
 }>;
 type RecoveryError = { code: string; message: string; retryable?: boolean };
 
@@ -164,7 +165,8 @@ async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof 
   }
   const issue = after.issue;
   const metadata = operation.issueMetadata;
-  const failedOperation = sync.operations.find((item) => item.status === 'failed' || item.status === 'skipped');
+  const failedOperation = sync.operations.find((item) => item.status === 'failed' || (item.status === 'skipped'
+    && !(sync.capabilities.push === false && ['fields', 'issue-type'].includes(item.name) && item.reasonCode === 'PUSH_REQUIRED')));
   if (failedOperation) return platformResult('blocked', { error: {
     code: failedOperation.reasonCode || 'PLATFORM_OPERATION_METADATA_UNCONFIRMED',
     message: `Issue metadata recovery did not confirm operation '${failedOperation.name}'`, retryable: true
@@ -189,7 +191,7 @@ async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof 
     code: 'PLATFORM_OPERATION_METADATA_UNCONFIRMED',
     message: 'Issue metadata differs from the requested recovery target after reread', retryable: true
   } });
-  return platformResult('no-op', { changed: sync.changed || after.changed });
+  return platformResult('no-op', { changed: sync.changed || after.changed, operations: sync.operations });
 }
 
 async function verifyIssueCreate(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], cwd: string, client?: PlatformClient): Promise<PlatformResult> {
@@ -265,6 +267,12 @@ function isRecoveryEligible(operation: ReturnType<typeof readPlatformOperationJo
 ;
 }
 
+function recoveryCandidates(journal: ReturnType<typeof readPlatformOperationJournal>, options: RecoveryOptions) {
+  const boundary = options.beforeId ? journal.operations.findIndex((item) => item.id === options.beforeId) : journal.operations.length;
+  if (boundary < 0) throw Object.assign(new Error('Current platform operation boundary is unavailable'), { code: 'PLATFORM_OPERATION_BOUNDARY_MISSING' });
+  return journal.operations.slice(0, boundary).filter((item) => isRecoveryEligible(item, options.excludeId));
+}
+
 async function recoverPlatformOperationsOnce(
   taskRef: string,
   selection: 'required' | 'deferred' | 'all',
@@ -278,7 +286,9 @@ async function recoverPlatformOperationsOnce(
     const value = error as { code?: string; message?: string };
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const candidates = journal.operations.filter((operation) => isRecoveryEligible(operation, options.excludeId));
+  let candidates;
+  try { candidates = recoveryCandidates(journal, options); }
+  catch (error) { const value = error as { code: string; message: string }; return result('blocked', [], [], value); }
   if (!candidates.length) return result('no-op', [], []);
   const head = candidates[0]!;
   if (selection !== 'all' && head.dependency !== selection) {
@@ -402,7 +412,7 @@ async function recoverPlatformOperationsOnce(
         ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : 'unknown',
-        lastCode: remote.error?.code ?? latestOperation?.lastCode ?? null
+        lastCode: remote.error?.code ?? remote.operations.find((item) => item.status === 'skipped' && item.reasonCode === 'PUSH_REQUIRED')?.reasonCode ?? (succeeded ? null : latestOperation?.lastCode) ?? null
       });
     } catch (error) {
       const value = error as { code?: string; message?: string };
@@ -432,8 +442,9 @@ async function recoverPlatformOperations(
     const value = error as { code?: string; message?: string };
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const eligible = (operation: typeof initial.operations[number]) => isRecoveryEligible(operation, options.excludeId);
-  const first = initial.operations.filter(eligible);
+  let first;
+  try { first = recoveryCandidates(initial, options); }
+  catch (error) { const value = error as { code: string; message: string }; return result('blocked', [], [], value); }
   if (!first.length) return result('no-op', [], []);
   const operationLimit = options.limit === undefined ? first.length : Math.max(1, options.limit);
   const attemptLimit = options.attempts ?? DEFAULT_RECOVERY_ATTEMPTS;
@@ -449,10 +460,13 @@ async function recoverPlatformOperations(
       const value = error as { code?: string; message?: string };
       return result('failed', recovered, [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
     }
-    const head = latest.operations.find(eligible);
+    let candidates;
+    try { candidates = recoveryCandidates(latest, options); }
+    catch (error) { const value = error as { code: string; message: string }; return result('blocked', recovered, [], value); }
+    const head = candidates[0];
     if (!head) break;
     if (selection !== 'all' && head.dependency !== selection) {
-      const pending = latest.operations.filter(eligible).map((operation) => operation.id);
+      const pending = candidates.map((operation) => operation.id);
       return result('blocked', recovered, pending, {
         code: 'PLATFORM_OPERATION_RECOVERY_PENDING',
         message: 'The first unresolved platform operation belongs to another recovery selection',
@@ -469,7 +483,9 @@ async function recoverPlatformOperations(
       let current;
       try { current = readPlatformOperationJournal(resolved.taskId, resolved.repoRoot); }
       catch { return result('blocked', recovered, [head.id], last?.error ?? null); }
-      const pending = current.operations.filter(eligible).map((operation) => operation.id);
+      let pending: string[];
+      try { pending = recoveryCandidates(current, options).map((operation) => operation.id); }
+      catch (error) { const value = error as { code: string; message: string }; return result('blocked', recovered, [], value); }
       return result(last?.status === 'failed' ? 'failed' : 'blocked', recovered, pending, last?.error ?? {
         code: 'PLATFORM_OPERATION_RECOVERY_PENDING',
         message: 'The first queued platform operation remains unresolved after this recovery run',
@@ -478,10 +494,12 @@ async function recoverPlatformOperations(
     }
   }
   let remaining: string[];
-  try { remaining = readPlatformOperationJournal(resolved.taskId, resolved.repoRoot).operations.filter(eligible).map((operation) => operation.id); }
-  catch { remaining = []; }
-  return result(remaining.length ? 'blocked' : recovered.length ? 'applied' : 'no-op', recovered, remaining,
+  try { remaining = recoveryCandidates(readPlatformOperationJournal(resolved.taskId, resolved.repoRoot), options).map((operation) => operation.id); }
+  catch (error) { const value = error as { code?: string; message?: string }; return result('blocked', recovered, [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || 'Unable to read platform operations' }); }
+  const output = result(remaining.length ? 'blocked' : recovered.length ? 'applied' : 'no-op', recovered, remaining,
     remaining.length ? { code: 'PLATFORM_OPERATION_RECOVERY_PENDING', message: 'Platform operations remain queued after this recovery run', retryable: true } : null);
+  const degraded = readPlatformOperationJournal(resolved.taskId, resolved.repoRoot).operations.filter((item) => recovered.includes(item.id) && item.lastCode === 'PUSH_REQUIRED').map((item) => ({ id: item.id, reasonCode: item.lastCode! }));
+  return degraded.length ? { ...output, degraded } : output;
 }
 
 export { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations };

@@ -65,7 +65,7 @@ export default async function createPlatformProvider(input) {
     type: input.providerType,
     scope: { id: 'external/project', label: 'external/project' },
     currentUser: { id: 'external-user' },
-    capabilities: { authenticated: true, comment: true, triage: true, push: true, admin: false },
+    capabilities: { authenticated: true, comment: true, triage: true, push: config.push !== false, admin: false },
     authenticated: true
   };
   const issueIdentity = configuredIdentity(config, 'issue', 7);
@@ -144,7 +144,7 @@ export default async function createPlatformProvider(input) {
       },
       async listClosing() {
         recordCall(config, 'changeRequests.listClosing');
-        return { ok: true, value: [] };
+        return { ok: true, value: config.closingMatch ? [changeRequest(config, pullRequestLabels)] : [] };
       },
       async create() {
         recordCall(config, 'changeRequests.create');
