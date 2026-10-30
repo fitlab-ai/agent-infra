@@ -623,7 +623,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   const section = inspectActivityLog(content).section;
   let rows: LifecycleExecution[];
   try {
-    rows = lifecycleExecutions(content, resolved.taskDir);
+    rows = lifecycleExecutions(content);
   } catch (error) {
     return failed(request, { code: 'EVENT_TRANSITION_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
   }

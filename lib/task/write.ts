@@ -294,8 +294,8 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
         if (mutation.lifecycleExecutionDomain) {
           const proposed = updateTaskFrontmatter(candidate, mutation.set);
           const open = mutation.lifecycleExecutionDomain === 'ordinary'
-            ? lifecycleExecutions(proposed, path.dirname(resolved.taskMdPath))
-            : lifecycleExecutions(candidate, path.dirname(resolved.taskMdPath));
+            ? lifecycleExecutions(proposed)
+            : lifecycleExecutions(candidate);
           const pr = prReviewExecution(mutation.lifecycleExecutionDomain === 'pr-review' ? proposed : candidate);
           set = { ...mutation.set, lifecycle_execution: serializeLifecycleExecution(open, undefined, pr) };
         }

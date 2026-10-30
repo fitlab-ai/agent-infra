@@ -59,7 +59,7 @@ function openManualValidationStarted(taskMdPath: string): { present: boolean; tr
   let content: string;
   try { content = fs.readFileSync(taskMdPath, 'utf8'); }
   catch { return { present: false, transactionId: null }; }
-  const row = lifecycleExecutions(content, path.dirname(taskMdPath))
+  const row = lifecycleExecutions(content)
     .filter((item) => item.family === 'manual-validation')
     .at(-1);
   if (!row) return { present: false, transactionId: null };

@@ -210,7 +210,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
       if (oldInputs.length !== 1) return failed('DECISION_CONFLICT', 'prior implementation input identity is ambiguous', resolved.taskId, row.id);
       const old = oldInputs[0]!;
       nextInputs = nextInputs.map((item) => item.id === old.id && (item.status === 'pending' || item.status === 'not-required') ? { ...item, status: 'superseded' as const } : item);
-      const open = lifecycleExecutions(content, resolved.taskDir);
+      const open = lifecycleExecutions(content);
       const matches = open.filter((item) => item.family === 'code' && item.implementationInput === old.id);
       if (matches.length > 1) return failed('DECISION_CONFLICT', 'prior open execution identity is ambiguous', resolved.taskId, row.id);
       if (matches.length === 1) mutations.push({ kind: 'frontmatter', lifecycleExecutionDomain: 'ordinary', set: { lifecycle_execution: serializeLifecycleExecution(open.filter((item) => item !== matches[0]), content) } });

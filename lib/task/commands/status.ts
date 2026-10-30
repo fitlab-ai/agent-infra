@@ -181,9 +181,9 @@ function parseActivityTime(value: string): number {
   return Number.isFinite(epoch) ? epoch : Number.NaN;
 }
 
-function collectStructuredWorkflow(content: string, taskDir: string, now: Date): WorkflowInfo {
+function collectStructuredWorkflow(content: string, now: Date): WorkflowInfo {
     try {
-      const current = lifecycleExecutions(content, taskDir).filter((row) => row.family !== 'other').at(-1);
+      const current = lifecycleExecutions(content).filter((row) => row.family !== 'other').at(-1);
       if (!current) return { state: 'idle', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH };
       const started = parseActivityTime(current.startedAt);
       return { state: 'in-progress', step: current.family, agent: current.agent, startedAt: current.startedAt, doneAt: DASH, stale: Number.isFinite(started) ? (now.getTime() - started > STALE_MS ? 'yes' : 'no') : 'unknown' };
@@ -460,7 +460,7 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
   const run = input.run ?? makeRunner(input.repoRoot);
   const artifacts = enumerateArtifacts(input.taskDir);
   const workflow = parseTypedTaskFrontmatter(content).lifecycle_execution !== undefined
-    ? collectStructuredWorkflow(content, input.taskDir, input.now ?? new Date()) : collectWorkflow(content, input.now);
+    ? collectStructuredWorkflow(content, input.now ?? new Date()) : collectWorkflow(content, input.now);
   const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active', false, input.repoRoot);
   const next = facts.ok ? recommendNext(facts.facts) : null;
   const recommendation = next?.action ?? DASH;

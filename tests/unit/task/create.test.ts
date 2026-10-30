@@ -141,9 +141,8 @@ test('local task creation is idempotent and rejects key reuse with changed conte
     assert.equal(first.task.shortId, '01');
     const taskMd = fs.readFileSync(path.join(taskRoot(root), 'active', first.task.id, 'task.md'), 'utf8');
     assert.match(taskMd, /^assigned_to: codex$/m);
-    const taskDir = path.join(taskRoot(root), 'active', first.task.id);
     const withStarted = taskMd.replace('## 活动日志', '## 活动日志\n\n- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started');
-    assert.deepEqual(lifecycleExecutions(withStarted, taskDir), []);
+    assert.deepEqual(lifecycleExecutions(withStarted), []);
     const project = (JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')) as { project: string }).project;
     assert.match(taskMd, new RegExp(`^branch: ${project}-feature-persist-sandbox-created-tasks$`, 'm'));
 
