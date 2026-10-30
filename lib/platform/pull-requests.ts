@@ -76,7 +76,7 @@ type CreateOptions = SharedOptions & {
   dryRun?: boolean;
   phase?: { value: CreatePhase };
 };
-type BindOptions = SharedOptions & { agent: string; pr: string | number; dryRun?: boolean };
+type BindOptions = SharedOptions & { agent: string; pr: string | number; dryRun?: boolean; expectedHeadSha?: string };
 type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
 type SyncOptions = SharedOptions & { agent: string; metadata?: boolean; closingIssue?: boolean; dryRun?: boolean; primaryResult: PullRequestPrimaryResult };
 type ResolveExternalOptions = SharedOptions & { agent: string; pr?: string | number; dryRun?: boolean };
@@ -903,12 +903,13 @@ async function bindPlatformPullRequestImpl(taskRef: string, options: BindOptions
   if (inspected.status === 'failed' || inspected.status === 'blocked' || !inspected.pullRequest) return inspected;
   const initialIdentity = validateWriterIdentity(base, inspected.pullRequest, {
     expectedHead: String(base.frontmatter.branch || ''),
+    expectedHeadSha: options.expectedHeadSha,
     errorCode: 'PR_BIND_IDENTITY_MISMATCH'
   });
   if (!initialIdentity.ok) return result('failed', base.resolved.taskId, base.issueNumber, requestedNumber, {
     pullRequest: inspected.pullRequest, error: initialIdentity.error
   });
-  const written = bindIdentity(base, inspected.pullRequest, options.agent, 'explicit-bind', options.dryRun);
+  const written = bindIdentity(base, inspected.pullRequest, options.agent, 'explicit-bind', options.dryRun, undefined, options.expectedHeadSha);
   if (written.status === 'failed') return result('failed', base.resolved.taskId, base.issueNumber, requestedNumber, {
     pullRequest: inspected.pullRequest, error: { code: written.error.code, message: written.error.message, retryable: false }
   });
@@ -1153,16 +1154,23 @@ async function recoverCreatedPullRequest(
   if (!base.issueIdentity) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PLATFORM_OPERATION_ISSUE_REQUIRED', message: 'Pull-request recovery requires a bound Issue identity', retryable: false }
   });
-  const head = base.provider.changeRequests?.verifyHead
-    ? await base.provider.changeRequests.verifyHead({ context: providerOperationContext(base.loadedContext), head: options.head })
-    : unsupportedProviderOperation(base.provider, 'changeRequests.verifyHead');
-  if (!head.ok) return providerPullRequestError(base, head.error, base.prNumber);
+  let headSha: string;
+  if (base.provider.changeRequests?.verifyHead) {
+    const head = await base.provider.changeRequests.verifyHead({ context: providerOperationContext(base.loadedContext), head: options.head });
+    if (!head.ok) return providerPullRequestError(base, head.error, base.prNumber);
+    headSha = head.value.sha;
+  } else {
+    headSha = typeof base.frontmatter.delivery_remote_head === 'string' ? base.frontmatter.delivery_remote_head.trim() : '';
+    if (!headSha) return result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      error: { code: 'PR_HEAD_UNVERIFIED', message: 'Verify and record the delivered remote head before retrying pull-request recovery', retryable: true }
+    });
+  }
   if (base.prIdentity) {
     const inspected = await inspectExternalPullRequest(base, base.prIdentity);
     if (!inspected.pullRequest || inspected.status === 'failed' || inspected.status === 'blocked'
       || inspected.pullRequest.base.repository !== base.context.platform.repository
       || inspected.pullRequest.base.ref !== options.base || inspected.pullRequest.head.ref !== options.head
-      || inspected.pullRequest.head.sha !== head.value.sha) {
+      || inspected.pullRequest.head.sha !== headSha) {
       return result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
         error: inspected.error ?? { code: 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request does not match the pending create intent', retryable: true }
       });
@@ -1178,16 +1186,16 @@ async function recoverCreatedPullRequest(
       && candidate.base.ref === options.base
       && candidate.head.repository === base.context.platform.repository
       && candidate.head.ref === options.head
-      && candidate.head.sha === head.value.sha);
+      && candidate.head.sha === headSha);
   if (matches.length !== 1 || !matches[0]?.number) return result('blocked', base.resolved.taskId, base.issueNumber, null, {
     error: { code: matches.length > 1 ? 'PLATFORM_OPERATION_PR_AMBIGUOUS' : 'PLATFORM_OPERATION_PR_NOT_CONFIRMED',
       message: 'Pending pull-request creation does not resolve to one exact repository/base/head identity', retryable: true }
   });
-  const bound = await bindPlatformPullRequest(base.resolved.taskId, { agent: options.agent, cwd: base.resolved.repoRoot, pr: matches[0].number });
+  const bound = await bindPlatformPullRequest(base.resolved.taskId, { agent: options.agent, cwd: base.resolved.repoRoot, client: options.client, pr: matches[0].number, skipQueue: true, expectedHeadSha: headSha });
   if (!bound.pullRequest || (bound.status !== 'applied' && bound.status !== 'no-op') || bound.error) return bound;
   if (bound.pullRequest.base.repository !== base.context.platform.repository || bound.pullRequest.base.ref !== options.base
     || bound.pullRequest.head.repository !== base.context.platform.repository || bound.pullRequest.head.ref !== options.head
-    || bound.pullRequest.head.sha !== head.value.sha) return result('blocked', base.resolved.taskId, base.issueNumber, bound.task.prNumber, {
+    || bound.pullRequest.head.sha !== headSha) return result('blocked', base.resolved.taskId, base.issueNumber, bound.task.prNumber, {
     error: { code: 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request changed while recovering the create intent', retryable: true }
   });
   return bound;

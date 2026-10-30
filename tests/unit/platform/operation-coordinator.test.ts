@@ -109,7 +109,7 @@ test('a required write waits behind an earlier deferred failure', async () => {
 
     assert.equal(result.status, 'blocked');
     assert.equal(executed, false);
-    assert.equal(readPlatformOperationJournal(taskId, repoRoot).operations.find((item) => item.id === deferred.id)?.state, 'failed');
+    assert.equal(readPlatformOperationJournal(taskId, repoRoot).operations.find((item) => item.id === deferred.id)?.state, 'pending');
     assert.equal(readPlatformOperationJournal(taskId, repoRoot).operations[1]?.state, 'queued');
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
