@@ -3,8 +3,7 @@ import { createHash } from 'node:crypto';
 const SNAPSHOT_FRONTMATTER = new Set([
   'id', 'type', 'branch', 'workflow', 'status', 'created_at', 'updated_at',
   'priority', 'effort', 'start_date', 'target_date', 'current_step', 'assigned_to',
-  'platform_issue_identity', 'delivery_remote', 'delivery_base_ref', 'pr_delivery_fact',
-  'lifecycle_execution', 'lifecycle_transition'
+  'platform_issue_identity', 'delivery_remote', 'delivery_base_ref', 'pr_delivery_fact'
 ]);
 
 type TaskCommentProjection = {
