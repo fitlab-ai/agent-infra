@@ -273,5 +273,12 @@ test('PR creation recovery uses delivered head when provider omits verifyHead', 
     assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
     assert.equal(recovered.warnings?.some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'), true);
     assert.match(fs.readFileSync(f.taskFile, 'utf8'), /state.*bound/);
+    fs.writeFileSync(f.taskFile, `${header}delivery_remote_head: ${'a'.repeat(40)}\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+    const operation = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'unknown', pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' } });
+    const queued = await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
+    assert.equal(queued.status, 'applied', JSON.stringify(queued));
+    assert.equal(queued.warnings?.some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'), true);
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id)?.state, 'succeeded');
+    assert.match(fs.readFileSync(f.taskFile, 'utf8'), /state.*bound/);
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
