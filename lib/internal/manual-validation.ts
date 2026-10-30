@@ -148,7 +148,9 @@ async function executeManualValidationTransactionAtResolvedTask(
   let transaction: ManualValidationTransaction;
   const idempotent = transactionResult.ok;
   const warnings: { code: string; message: string }[] = [];
-  const currentWarnings = () => warnings.length ? warnings : activityWarnings(taskContent);
+  const currentWarnings = () => warnings.length
+    ? warnings.filter((warning, index) => warnings.findIndex((item) => item.code === warning.code && item.message === warning.message) === index)
+    : activityWarnings(taskContent);
   let startedEventApplied = false;
   if (!transactionResult.ok) {
     transaction = createTransaction();

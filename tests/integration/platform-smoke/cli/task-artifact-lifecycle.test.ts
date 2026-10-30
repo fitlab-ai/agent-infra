@@ -21,7 +21,7 @@ import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.ts';
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
-import { parseTypedTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
+import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
 import { createTempDir, recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -315,6 +315,7 @@ test('valid completion facts close started rounds when done rows are deleted, da
     const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# Plan 1\n', 'plan-r2.md': '# Plan 2\n' });
     const taskPath = path.join(f.taskDir, 'task.md');
     fs.appendFileSync(taskPath, '- 2026-01-01 00:02:00+00:00 — **Plan Task (Round 3) [started]** by codex — started\n');
+    fs.writeFileSync(taskPath, updateTaskFrontmatter(fs.readFileSync(taskPath, 'utf8'), { lifecycle_execution: JSON.stringify({ version: 1, open: [{ family: 'plan', agent: 'codex', startedAt: '2026-01-01 00:02:00+00:00', round: 3 }] }) }));
     const before = inspectTaskArtifacts(TASK_ID, 'plan', { repoRoot: f.repoRoot });
     const task = fs.readFileSync(taskPath, 'utf8');
     fs.writeFileSync(taskPath, mutate(task));
@@ -327,7 +328,6 @@ test('valid completion facts close started rounds when done rows are deleted, da
     const context = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
     assert.equal(context.selection?.disposition, 'resume');
     assert.equal(context.selection?.artifact.name, 'plan-r3.md');
-    assert.notEqual(context.selection?.artifact.name, 'plan-r2.md');
   }
 });
 

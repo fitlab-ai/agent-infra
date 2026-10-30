@@ -9,6 +9,7 @@ import { readDeliveryDefaults, validateBaseRef, validateRemote } from './deliver
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
 import { enumerateAllTaskDirs } from './resolve-ref.ts';
+import { serializeLifecycleExecution } from './lifecycle-execution.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { AGENT_TOKEN_VALUES, type AgentToken } from '../agent-clients/tokens.ts';
 import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
@@ -284,6 +285,7 @@ function renderTask(params: Readonly<{
     'target_date:',
     'current_step: requirement-analysis',
     `assigned_to: ${candidate.agent}`,
+    `lifecycle_execution: ${JSON.stringify(serializeLifecycleExecution([]))}`,
     `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildUnboundFact()))}`,
     `delivery_remote: ${candidate.deliveryRemote ?? params.delivery.remote}`,
     `delivery_base_ref: ${candidate.deliveryBaseRef ?? params.delivery.baseRef}`,

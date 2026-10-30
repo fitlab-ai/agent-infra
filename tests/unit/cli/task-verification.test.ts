@@ -403,12 +403,13 @@ test('text output summarizes passing checks and keeps soft warnings', () => {
         skill: 'code-task', type: 'platform-sync', status: 'pass', checks: [{
           type: 'platform-sync', checkId: 'platform.comment-content', status: 'fail', effectiveStatus: 'pass',
           classification: 'soft', reason: 'check_failed', message: 'Comment content mismatch for code', action: 'Synchronize the comment'
-        }], action: 'All declared checks passed'
+        }, { type: 'activity-log', checkId: 'activity-log', status: 'pass', effectiveStatus: 'pass', warnings: ['Activity Log is missing or ambiguous'] }], action: 'All declared checks passed'
       }
     }]
   });
   assert.match(text, /Verification: pass \| Target: code\.completed \(code\.md\) \| Skill: code-task/);
-  assert.match(text, /Result: 1 passed, 0 failed/);
+  assert.match(text, /Result: 2 passed, 0 failed/);
+  assert.match(text, /Warning: activity-log - Activity Log is missing or ambiguous/);
   assert.match(text, /Warning: platform\.comment-content \(check_failed\) - Comment content mismatch for code; Synchronize the comment/);
   assert.doesNotMatch(text, /\[pass\] platform\.comment-content/);
 });

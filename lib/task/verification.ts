@@ -158,6 +158,9 @@ function renderTaskVerification(result: TaskVerificationResult): string {
       && typeof message === 'string'
       && /\bhuman-decided (?:post-review )?exemption\b/i.test(message)
       && /\bPRC-\d+\s*:/.test(message);
+    if (Array.isArray(check.warnings)) {
+      for (const warning of check.warnings) if (typeof warning === 'string') lines.push(`Warning: ${id} - ${warning}`);
+    }
     if (effectiveStatus === 'pass' && !isSoftWarning && !isHumanExemptionNotice) continue;
     lines.push(isSoftWarning
       ? `Warning: ${id} (${rawStatus === 'blocked' ? `raw BLOCKED; ` : ''}${reason}) - ${message}; ${action}`

@@ -224,7 +224,6 @@ function syncTaskCommit(
       checkpoint_commit: committedHead
     };
     mutations.push({ kind: 'frontmatter', set: frontmatter });
-    if (mutations.length === 0) return null;
     const written = writeTask({
       taskRef: task.taskId,
       expectedState: 'active',
