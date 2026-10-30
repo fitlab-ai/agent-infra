@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { updateTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { hasArtifactCompletionRecord, hasValidArtifactCompletion } from '../../../lib/task/completion-facts.ts';
 import { hasOpenArtifactRound, validateArtifactPublication } from '../../../lib/task/artifact-lifecycle.ts';
 import { createTempDir, recordArtifactCompletions } from '../../helpers.ts';
@@ -36,10 +37,7 @@ test('identity-bearing malformed completion facts remain present and invalid', (
   const damaged = task.replace(/^completion_facts:.*$/mu, `completion_facts: '${JSON.stringify(facts)}'`);
   assert.equal(hasArtifactCompletionRecord(damaged, 'analysis-r2.md', 'analyze.completed'), true);
   assert.equal(hasValidArtifactCompletion(damaged, taskDir, 'analysis-r2.md', 'analyze.completed'), false);
-  const openStarted = damaged.replace(
-    /- 2026-01-01 00:00:01\+00:00 — \*\*Analyze Task \(Round 2\)\*\* by codex — completed → analysis-r2\.md\n/u,
-    ''
-  );
+  const openStarted = updateTaskFrontmatter(damaged, { lifecycle_execution: JSON.stringify({ version: 1, open: [{ family: 'analyze', agent: 'codex', startedAt: '2026-01-01 00:00:00+00:00', round: 2 }] }) });
   fs.writeFileSync(taskPath, openStarted);
   assert.throws(() => hasOpenArtifactRound(taskDir, openStarted, 'analysis', 2), /completion evidence.*invalid/u);
   assert.notEqual(validateArtifactPublication(taskDir, 'analysis', 'analysis-r2.md'), null);
@@ -49,7 +47,7 @@ test('missing and empty completion facts remain resumable while a present scalar
   const taskDir = createTempDir('completion-facts-empty-');
   const taskPath = path.join(taskDir, 'task.md');
   fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n');
-  const task = '---\nid: TASK-20260101-000001\n---\n\n# Task\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n';
+  const task = updateTaskFrontmatter('---\nid: TASK-20260101-000001\n---\n\n# Task\n', { lifecycle_execution: JSON.stringify({ version: 1, open: [{ family: 'analyze', agent: 'codex', startedAt: '2026-01-01 00:00:00+00:00', round: 1 }] }) });
   fs.writeFileSync(taskPath, task);
   const withoutFacts = task;
   const emptyFacts = task.replace('\n---\n', "\ncompletion_facts: '[]'\n---\n");

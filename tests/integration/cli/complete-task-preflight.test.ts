@@ -148,7 +148,7 @@ test('host finalization CLI completes the terminal sequence and makes replay ide
     const secondPayload = JSON.parse(second.stdout);
     assert.equal(secondPayload.status, 'completed');
     assert.equal(secondPayload.changed, false);
-    assert.equal((fs.readFileSync(path.join(taskRoot(f.root), 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+    assert.equal((fs.readFileSync(path.join(taskRoot(f.root), 'completed', TASK_ID, 'task.md'), 'utf8').match(/\*\*Complete Task(?: \[started\])?\*\*/g) ?? []).length, 2);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

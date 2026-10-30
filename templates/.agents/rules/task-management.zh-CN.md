@@ -71,7 +71,7 @@
 
 `analyze-task`、`review-analysis`、`plan-task`、`review-plan`、`code-task`、`review-code` 必须通过 `agent-infra-internal task-event` 声明业务事件；事件核心统一生成 `current_step`、`assigned_to`、`updated_at`、`agent_infra_version` 和下述日志文本。其余尚未迁移的生命周期 SKILL 继续遵循本节文本协议。
 
-> 本节是 started/done 双标记的唯一权威定义。各 SKILL、渲染器与 typed verification check 都以本节为准。
+> 本节定义日志行的格式。业务状态以结构化事实为准；日志不可安全追加时保留业务结果并报告诊断。
 
 **行语法不变**：started 与 done 都沿用既有条目语法
 `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **{action}** by {agent} — {note}`，因此解析正则

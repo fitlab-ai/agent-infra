@@ -135,7 +135,7 @@ agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent}
 
 ### 6. 回写发布结果与任务状态
 
-- **任务锚定路径**：把 publish 的实际状态写入 `pr-review-rN.md`「发布结果」段。`applied` / `no-op` 时记录 Review ID/URL；写入失败且已有任务账本记录时写 `blocked` / `failed`、错误码和恢复动作。随后以步骤 3 冻结的同一组 verdict/counts 闭合本地活动日志：
+- **任务锚定路径**：把 publish 的实际状态写入 `pr-review-rN.md`「发布结果」段。`applied` / `no-op` 时记录 Review ID/URL；写入失败且已有任务账本记录时写 `blocked` / `failed`、错误码和恢复动作。随后以步骤 3 冻结的同一组 verdict/counts 闭合本地审查状态：
 
   ```bash
   agent-infra-internal task-activity {task-id} pr-review-complete --agent {agent} \
@@ -143,13 +143,13 @@ agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent}
     --blockers {blockers} --major {major} --minor {minor}
   ```
 
-  `task-activity` 由 typed payload 生成 `Verdict: <结论>, blockers: N, major: N, minor: N → {pr-review-artifact}`，并经 `writeTask` 原子完成 Activity Log、`## 审查反馈` 链接与版本戳刷新；不改 `current_step`，也不把 receipt/head/Review URL 写入 NOTE。
+  `task-activity` 由 typed payload 生成 `Verdict: <结论>, blockers: N, major: N, minor: N → {pr-review-artifact}`，并经 `writeTask` 原子完成结构化审查状态、`## 审查反馈` 链接与版本戳刷新；日志可安全追加时一并写入，否则返回诊断；不改 `current_step`，也不把 receipt/head/Review URL 写入 NOTE。
 
 - **一次性路径（无任务）**：把实际发布状态写入 `pr-review-rN.md`「发布结果」段；成功时记录 Review ID/URL，失败时记录错误与不可自动恢复的限制。不调用 `task-activity`。
 
 ### 7. 发布后回写再同步（任务锚定路径）
 
-步骤 6 已改写本地 `pr-review-rN.md`「发布结果」段与 task.md（活动日志），而步骤 4 同步的是旧快照。依次尝试再同步；失败记录 warning，由 `complete-task` 在归档前补齐：
+步骤 6 已改写本地 `pr-review-rN.md`「发布结果」段与 task.md（审查状态及可用日志），而步骤 4 同步的是旧快照。依次尝试再同步；失败记录 warning，由 `complete-task` 在归档前补齐：
 
 ```bash
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
@@ -186,7 +186,7 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
 - [ ] 正式 Review 已发布、任务账本已记录待恢复操作，或一次性路径已如实记录发布失败
 - [ ] 任务锚定路径的 Issue artifact/task 评论已同步，或失败已记录待恢复
 - [ ] 已完成校验（`task-verify` 或 `verify-artifact`）
-- [ ] 已更新 task.md 并追加 Activity Log（任务锚定路径）
+- [ ] 已更新 task.md 中的审查状态并记录日志诊断（如适用）
 
 ## 停止
 

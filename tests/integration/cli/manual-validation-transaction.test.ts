@@ -450,19 +450,25 @@ test('coordinator recovers a receipt-first archive interruption on the same retr
 });
 
 test('actual coordinator execution converges on replay without repeated remote writes', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  const state: FakeGitHubState = { comments: [], writes: 0 };
-  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
-  assert.equal(first.status, 'applied', JSON.stringify({ first, state }));
-  assert.equal(first.transaction?.phase, 'committed');
-  const writesAfterFirst = state.writes;
-  assert.ok(writesAfterFirst > 0);
-  const second = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
-  assert.equal(second.status, 'applied');
-  assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
-  assert.equal(state.writes, writesAfterFirst);
-  assert.equal(countStarted(fixture.taskPath), 1);
+  for (const missingLog of [false, true]) {
+    const fixture = createFixture();
+    t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+    if (missingLog) fs.writeFileSync(fixture.taskPath, fs.readFileSync(fixture.taskPath, 'utf8').replace(/## Activity Log\n[\s\S]*?(?=\n## |$)/u, ''));
+    const state: FakeGitHubState = { comments: [], writes: 0 };
+    const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
+    assert.equal(first.status, 'applied', JSON.stringify({ first, state }));
+    assert.equal(first.transaction?.phase, 'committed');
+    const writesAfterFirst = state.writes;
+    assert.ok(writesAfterFirst > 0);
+    const second = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
+    assert.equal(second.status, 'applied');
+    assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
+    assert.equal(state.writes, writesAfterFirst);
+    if (missingLog) {
+      assert.equal((first.warnings as { code: string }[]).filter((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE').length, 1);
+      assert.equal((second.warnings as { code: string }[]).filter((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE').length, 1);
+    } else assert.equal(countStarted(fixture.taskPath), 1);
+  }
 });
 
 test('opaque PR identity completes the manual-validation transaction lifecycle', async (t) => {
@@ -523,4 +529,16 @@ test('coordinator replaces the Chinese manual-validation section and preserves c
   const reportIndex = body.indexOf('### PR 代码增减');
   assert.ok(statusIndex >= 0 && stateIndex >= 0 && detailIndex >= 0 && receiptIndex >= 0 && decisionsIndex >= 0 && reportIndex >= 0);
   assert.ok(statusIndex < stateIndex && stateIndex < detailIndex && detailIndex < receiptIndex && receiptIndex < decisionsIndex && decisionsIndex < reportIndex);
+});
+
+
+test('manual validation preparation exposes missing log warning on first call and replay', async () => {
+  const f = createFixture();
+  try {
+    fs.writeFileSync(f.taskPath, fs.readFileSync(f.taskPath, 'utf8').replace(/## Activity Log\n[\s\S]*?(?=\n## |$)/u, ''));
+    for (const response of [await prepare(f), await prepare(f)]) {
+      assert.equal(response.status, 'applied');
+      assert.ok((response.warnings as { code: string }[]).some((warning) => warning.code === 'ACTIVITY_LOG_UNAVAILABLE'));
+    }
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });

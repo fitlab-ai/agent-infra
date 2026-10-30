@@ -9,6 +9,8 @@ import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontma
 import { loadShortIdByTaskId } from '../short-id.ts';
 import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWarning } from '../workflow-warnings.ts';
 import { parseActivityLog, pairEntries, startedBackedRows } from '../activity-log.ts';
+import { lifecycleExecutions } from '../lifecycle-execution.ts';
+import { parseTypedTaskFrontmatter } from '../frontmatter.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 import { buildLifecycleFacts, recommendNext } from '../capabilities.ts';
 
@@ -177,6 +179,15 @@ const STALE_MS = 60 * 60 * 1000;
 function parseActivityTime(value: string): number {
   const epoch = Date.parse(value.replace(' ', 'T'));
   return Number.isFinite(epoch) ? epoch : Number.NaN;
+}
+
+function collectStructuredWorkflow(content: string, now: Date): WorkflowInfo {
+    try {
+      const current = lifecycleExecutions(content).filter((row) => row.family !== 'other').at(-1);
+      if (!current) return { state: 'idle', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH };
+      const started = parseActivityTime(current.startedAt);
+      return { state: 'in-progress', step: current.family, agent: current.agent, startedAt: current.startedAt, doneAt: DASH, stale: Number.isFinite(started) ? (now.getTime() - started > STALE_MS ? 'yes' : 'no') : 'unknown' };
+    } catch { return { state: 'unknown', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH }; }
 }
 
 function collectWorkflow(content: string, now: Date = new Date()): WorkflowInfo {
@@ -448,7 +459,8 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
   const fm = parseTaskFrontmatter(content);
   const run = input.run ?? makeRunner(input.repoRoot);
   const artifacts = enumerateArtifacts(input.taskDir);
-  const workflow = collectWorkflow(content, input.now);
+  const workflow = parseTypedTaskFrontmatter(content).lifecycle_execution !== undefined
+    ? collectStructuredWorkflow(content, input.now ?? new Date()) : collectWorkflow(content, input.now);
   const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active', false, input.repoRoot);
   const next = facts.ok ? recommendNext(facts.facts) : null;
   const recommendation = next?.action ?? DASH;

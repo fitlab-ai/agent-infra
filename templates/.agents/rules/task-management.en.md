@@ -71,7 +71,7 @@ Other skills continue past deferrable writes according to their local delivery g
 
 `analyze-task`, `review-analysis`, `plan-task`, `review-plan`, `code-task`, and `review-code` must declare business events through `agent-infra-internal task-event`. The event core generates `current_step`, `assigned_to`, `updated_at`, `agent_infra_version`, and the log text below. Other lifecycle skills not yet migrated continue to follow this textual protocol.
 
-> This section is authoritative for skills, the renderer, and typed verification checks.
+> This section defines log formatting. Structured facts govern business state; when the log cannot be appended safely, preserve the business result and report a diagnostic.
 
 **Line grammar is unchanged** and shared by the log renderer and verification activity parser.
 

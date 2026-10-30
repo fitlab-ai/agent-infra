@@ -44,11 +44,13 @@ test('ledger gate preserves stage scope and separate post-review exemption polic
 });
 
 const entry = (time: string, step = 'Code Task (Round 1)') => `- ${time} — **${step}** by codex — done`;
-test('activity gate rejects timestamps not recognized by the shared reader', async () => {
+test('activity gate warns on timestamps not recognized by the shared reader', async () => {
   for (const time of ['2026-09-09T16:00:00', '2026-09-09 16:00:00']) {
     const content = `## Activity Log\n\n${entry(time)}\n`;
     assert.equal(locateActivityLog(content)?.entries.length, 0);
-    assert.equal((await verify(content, 'activity-log')).status, 'fail');
+    const result = await verify(content, 'activity-log');
+    assert.equal(result.status, 'pass');
+    assert.ok(result.warnings?.length);
   }
 });
 
@@ -59,21 +61,27 @@ test('activity reader and gate use only one visible section and ignore fenced ex
   assert.equal((await verify(content, 'activity-log')).status, 'pass');
   const ambiguous = `## Activity Log\n${real}\n## 活动日志\n${real}\n`;
   assert.equal(locateActivityLog(ambiguous), null);
-  assert.equal((await verify(ambiguous, 'activity-log')).status, 'fail');
+  const result = await verify(ambiguous, 'activity-log');
+  assert.equal(result.status, 'pass');
+  assert.ok(result.warnings?.length);
 });
 
-test('activity reader sorts entries and the gate rejects malformed lines', async () => {
+test('activity reader sorts entries and the gate warns on malformed lines', async () => {
   const content = `## Activity Log\n${entry('2026-09-09 17:00:00+00:00', 'Later')}\n${entry('2026-09-09 16:00:00+00:00', 'Earlier')}\n`;
   assert.deepEqual(locateActivityLog(content)?.entries.map((item) => item.step), ['Earlier', 'Later']);
   const malformed = `## Activity Log\n${entry('2026-09-09 16:00:00+00:00')}\n- malformed\n`;
   assert.equal(locateActivityLog(malformed)?.entries.length, 1);
-  assert.equal((await verify(malformed, 'activity-log')).status, 'fail');
+  const result = await verify(malformed, 'activity-log');
+  assert.equal(result.status, 'pass');
+  assert.ok(result.warnings?.length);
 });
 
-test('activity gate rejects empty notes while the reader retains the entry', async () => {
+test('activity gate warns on empty notes while the reader retains the entry', async () => {
   for (const note of ['', '   ']) {
     const content = `## Activity Log\n- 2026-09-09 16:00:00+00:00 — **Code Task (Round 1)** by codex — ${note}\n`;
     assert.equal(locateActivityLog(content)?.entries.length, 1);
-    assert.equal((await verify(content, 'activity-log')).status, 'fail');
+    const result = await verify(content, 'activity-log');
+    assert.equal(result.status, 'pass');
+    assert.ok(result.warnings?.length);
   }
 });

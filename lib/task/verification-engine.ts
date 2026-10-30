@@ -585,19 +585,18 @@ function checkActivityLog({ taskDir, skillName, artifactFile }: any): any {
   }
 
   const artifactLifecycleResult = checkArtifactLifecycleActivityLog(taskDir, artifactFile, skillName, task);
-  if (artifactLifecycleResult) return artifactLifecycleResult;
+  if (artifactLifecycleResult && artifactLifecycleResult.status !== "pass") return artifactLifecycleResult;
 
   const { section, invalidEntries } = inspectActivityLog(task.content);
-  if (!section) return failResult("activity-log", "Activity Log section not found or ambiguous");
-  if (invalidEntries.length) return failResult("activity-log", `Invalid Activity Log entry format: ${invalidEntries[0]}`);
-  const entries = section.entries;
-  if (entries.length === 0) return failResult("activity-log", "Activity Log has no entries");
-
-  for (const entry of entries) {
-    if (!entry.note.trim()) return failResult("activity-log", "Activity Log entry note is required");
+  const warnings: string[] = [];
+  if (!section) warnings.push('Activity Log section is missing or ambiguous');
+  else {
+    if (invalidEntries.length) warnings.push('Activity Log contains malformed entries');
+    if (!section.entries.length) warnings.push('Activity Log has no entries');
+    if (section.entries.some((entry) => !entry.note.trim())) warnings.push('Activity Log entry note is empty');
   }
+  return passResult("activity-log", artifactLifecycleResult?.message ?? "Business checks are valid", warnings);
 
-  return passResult("activity-log", "Activity Log is valid");
 }
 
 function checkCompletionChecklist({ taskDir, config }: any): any {

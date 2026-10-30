@@ -14,6 +14,7 @@ import type {
   TaskWorkspaceState
 } from './resolve-ref.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
+import { lifecycleExecutions, prReviewExecution, serializeLifecycleExecution } from './lifecycle-execution.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
 import type {
   TableRowDeleteMutation,
@@ -24,6 +25,7 @@ type FrontmatterMutation = {
   kind: 'frontmatter';
   set: Readonly<Record<string, FrontmatterScalar>>;
   remove?: readonly string[];
+  lifecycleExecutionDomain?: 'ordinary' | 'pr-review';
 };
 
 type SectionMutation = {
@@ -288,7 +290,16 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
       }
       const before = candidate;
       if (mutation.kind === 'frontmatter') {
-        candidate = updateTaskFrontmatter(candidate, mutation.set, mutation.remove);
+        let set = mutation.set;
+        if (mutation.lifecycleExecutionDomain) {
+          const proposed = updateTaskFrontmatter(candidate, mutation.set);
+          const open = mutation.lifecycleExecutionDomain === 'ordinary'
+            ? lifecycleExecutions(proposed)
+            : lifecycleExecutions(candidate);
+          const pr = prReviewExecution(mutation.lifecycleExecutionDomain === 'pr-review' ? proposed : candidate);
+          set = { ...mutation.set, lifecycle_execution: serializeLifecycleExecution(open, undefined, pr) };
+        }
+        candidate = updateTaskFrontmatter(candidate, set, mutation.remove);
         operations.push({
           index,
           kind: 'frontmatter',

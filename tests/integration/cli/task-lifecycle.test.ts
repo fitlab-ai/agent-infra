@@ -114,14 +114,16 @@ test('task-lifecycle CLI restore fails closed with REPO_ROOT_NOT_FOUND outside a
   assert.equal(JSON.parse(result.stdout).error.code, 'REPO_ROOT_NOT_FOUND');
 });
 
-test('task-lifecycle preserves a missing activity-log failure before moving the task', () => {
+test('task-lifecycle reports missing activity log without blocking the task move', () => {
   const f = fixture();
   const taskFile = path.join(f.dir, 'task.md');
   fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\ntarget_date:\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const result = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'normal cancel blocked by missing log']);
-  assert.equal(result.status, 1, result.stderr || result.stdout);
-  assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_LOG_MISSING');
-  assert.equal(fs.existsSync(path.join(taskWorkspaceRoot(f.root),  'completed', TASK_ID, 'task.md')), false);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).warnings[0].code, 'ACTIVITY_LOG_UNAVAILABLE');
+  const completed = fs.readFileSync(path.join(taskWorkspaceRoot(f.root), 'completed', TASK_ID, 'task.md'), 'utf8');
+  assert.match(completed, /^status: completed$/m);
+  assert.match(completed, /^cancel_reason:/m);
 });
 
 test('task-lifecycle rejects an invalid source state before moving the task', () => {

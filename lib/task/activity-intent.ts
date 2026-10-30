@@ -2,7 +2,8 @@ import fs from 'node:fs';
 
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { locateActivityLog, appendActivityEntry } from './activity-log.ts';
+import { locateActivityLog, appendActivityEntry, inspectActivityLog } from './activity-log.ts';
+import { lifecycleExecutions, prReviewExecution, serializeLifecycleExecution } from './lifecycle-execution.ts';
 import {
   assertWritableInventory,
   buildArtifactLinkSection,
@@ -82,6 +83,7 @@ export type PrReviewActivityResult = {
   artifact: string | null;
   operations: readonly TaskOperationSummary[];
   error: { code: string; message: string } | null;
+  warnings?: readonly { code: string; message: string }[];
 };
 
 export type PrReviewInspectionResult = {
@@ -102,7 +104,6 @@ type RoundState = ArtifactRecord & {
 };
 
 const HEAD_RE = /^[0-9a-f]{40}$/;
-const REVIEW_ACTION_RE = /^Review PR \(Round ([1-9]\d*)\)( \[started\])?$/;
 const VERDICTS: ReadonlySet<string> = new Set(['approved', 'changes-requested', 'commented']);
 const OUTCOMES: ReadonlySet<string> = new Set(['aborted', 'superseded']);
 const SUCCESS_STATUSES: ReadonlySet<PrReviewArtifactStatus> = new Set(['applied', 'no-op']);
@@ -181,48 +182,28 @@ function readSnapshot(taskRef: string, repoRoot?: string):
   } catch (error) {
     return { ok: false, code: 'TASK_READ_FAILED', message: error instanceof Error ? error.message : String(error), taskId: resolved.taskId };
   }
-  const activity = locateActivityLog(content);
-  if (!activity) return { ok: false, code: 'ACTIVITY_SECTION_MISSING', message: 'task has no unique Activity Log section', taskId: resolved.taskId };
-
-  const knownRounds = new Set(inventory.artifacts.map((artifact) => artifact.round));
-  for (const entry of activity.entries) {
-    const match = REVIEW_ACTION_RE.exec(entry.step);
-    if (match && !knownRounds.has(Number(match[1]))) {
-      return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `Activity Log round ${match[1]} has no canonical pr-review artifact`, taskId: resolved.taskId };
-    }
-  }
-
+  let pr;
+  try { pr = prReviewExecution(content); }
+  catch (error) { return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: String(error), taskId: resolved.taskId }; }
   const states: RoundState[] = [];
   for (const identity of inventory.artifacts) {
     const parsed = parseArtifactRecord(identity);
     if ('code' in parsed) return { ok: false, ...parsed, taskId: resolved.taskId };
-    const base = `Review PR (Round ${identity.round})`;
-    const started = activity.entries.filter((entry) => entry.step === `${base} [started]`);
-    const terminal = activity.entries.filter((entry) => entry.step === base);
-    if (started.length > 1 || terminal.length > 1) {
-      return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `${base} has duplicate started or terminal rows`, taskId: resolved.taskId };
+    const started = pr.open?.artifact === identity.name ? pr.open : null;
+    const terminals = pr.terminals.filter((entry) => entry.artifact === identity.name);
+    if (terminals.length > 1) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `duplicate PR review terminal for ${identity.name}`, taskId: resolved.taskId };
+    const terminal = terminals[0];
+    if (terminal) {
+      const matches = (terminal.note.startsWith('Verdict: ') && LOCAL_COMPLETION_STATUSES.has(parsed.status))
+        || (terminal.note.startsWith('Outcome: Aborted, ') && parsed.status === 'aborted')
+        || (terminal.note.startsWith('Outcome: Superseded, ') && parsed.status === 'superseded')
+        || (terminal.note.startsWith('receipt ') && SUCCESS_STATUSES.has(parsed.status));
+      if (!matches) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `terminal note conflicts with artifact status ${parsed.status}`, taskId: resolved.taskId };
     }
-    if (terminal.length === 1 && started.length === 0 && !terminal[0]!.note.startsWith('receipt ')) {
-      return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `${base} has a terminal row without a matching started row`, taskId: resolved.taskId };
-    }
-    if (terminal.length === 1) {
-      const note = terminal[0]!.note;
-      const terminalMatchesStatus =
-        (note.startsWith('Verdict: ') && LOCAL_COMPLETION_STATUSES.has(parsed.status))
-        || (note.startsWith('Outcome: Aborted, ') && parsed.status === 'aborted')
-        || (note.startsWith('Outcome: Superseded, ') && parsed.status === 'superseded')
-        || (note.startsWith('receipt ') && SUCCESS_STATUSES.has(parsed.status));
-      if (!terminalMatchesStatus) {
-        return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `${base} terminal note conflicts with artifact status ${parsed.status}`, taskId: resolved.taskId };
-      }
-    }
-    states.push({
-      ...parsed,
-      startedAgent: started[0]?.agent ?? null,
-      terminalAgent: terminal[0]?.agent ?? null,
-      terminalNote: terminal[0]?.note ?? null
-    });
+    if ((started && started.head !== parsed.head) || (terminal && terminal.head !== parsed.head)) return { ok: false, code: 'ACTIVITY_IDENTITY_MISMATCH', message: `head does not match ${identity.name}`, taskId: resolved.taskId };
+    states.push({ ...parsed, startedAgent: started?.agent ?? null, terminalAgent: terminal?.agent ?? null, terminalNote: terminal?.note ?? null });
   }
+  if ((pr.open && !states.some((state) => state.identity.name === pr.open!.artifact)) || pr.terminals.some((entry) => !states.some((state) => state.identity.name === entry.artifact))) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: 'PR review execution references a missing artifact', taskId: resolved.taskId };
 
   const openStates = states.filter((state) => state.startedAgent !== null && state.terminalNote === null);
   const preparedStates = states.filter((state) => state.status === 'pending' && state.startedAgent === null && state.terminalNote === null);
@@ -353,11 +334,15 @@ function applyActivityIntent(intent: PrReviewActivityIntent, normalizedAgent: st
   } catch (error) {
     return failed(intent, 'METADATA_CAPTURE_FAILED', error instanceof Error ? error.message : String(error), state.taskId);
   }
-  const section = locateActivityLog(state.content)!;
-  const mutations: TaskMutation[] = [{
-    kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading,
-    body: appendActivityEntry(section, { time: metadata.timestamp, step, agent: normalizedAgent, note })
-  }];
+  const section = locateActivityLog(state.content);
+  const pr = prReviewExecution(state.content);
+  if (intent.kind === 'pr-review-start') pr.open = { artifact: intent.artifact, head: intent.head, agent: normalizedAgent, startedAt: metadata.timestamp };
+  else {
+    pr.open = null;
+    pr.terminals.push({ artifact: intent.artifact, head: intent.head, agent: normalizedAgent, note });
+  }
+  const mutations: TaskMutation[] = [{ kind: 'frontmatter', lifecycleExecutionDomain: 'pr-review', set: { lifecycle_execution: serializeLifecycleExecution(lifecycleExecutions(state.content), state.content, pr) } }];
+  if (section) mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body: appendActivityEntry(section, { time: metadata.timestamp, step, agent: normalizedAgent, note }) });
   if (linkArtifact) {
     const link = buildArtifactLinkSection(state.content, roundState.identity);
     mutations.push({ kind: 'section', aliases: link.aliases, heading: link.heading, body: link.body });
@@ -399,7 +384,14 @@ export function applyPrReviewActivityIntent(intent: PrReviewActivityIntent, opti
   if (resolved.state !== 'active') {
     return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   }
-  return applyActivityIntent(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
+  let warnings: { code: string; message: string }[] = [];
+  try {
+    const inspected = inspectActivityLog(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+    warnings = !inspected.section ? [{ code: 'ACTIVITY_LOG_UNAVAILABLE', message: 'Activity Log is missing or ambiguous' }] : inspected.invalidEntries.length ? [{ code: 'ACTIVITY_LOG_INVALID_ENTRIES', message: 'Activity Log contains malformed entries' }] : [];
+  } catch { /* The operation reports read errors. */ }
+  const result = applyActivityIntent(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
+  if (result.status === 'failed') return result;
+  return warnings.length ? { ...result, warnings } : result;
 }
 
 export type { ActivityIntentOptions };

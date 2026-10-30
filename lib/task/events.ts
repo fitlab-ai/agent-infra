@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 
-import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { appendActivityEntry, inspectActivityLog } from './activity-log.ts';
 import { lifecycleExecutions, serializeLifecycleExecution } from './lifecycle-execution.ts';
 import type { LifecycleExecution } from './lifecycle-execution.ts';
 import {
@@ -90,6 +90,7 @@ type TaskEventResult = {
   artifactContext: ArtifactContextResult | null;
   timestamp: string | null; agentInfraVersion: string | null;
   operations: readonly TaskOperationSummary[]; error: TaskEventError | null;
+  warnings?: readonly { code: string; message: string }[];
 };
 
 function branchWorktree(repoRoot: string, branch: string): string | null {
@@ -619,13 +620,10 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   let frontmatter;
   try { frontmatter = parseTypedTaskFrontmatter(content); }
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
-  const section = locateActivityLog(content);
-  if (!section) return failed(request, { code: 'EVENT_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+  const section = inspectActivityLog(content).section;
   let rows: LifecycleExecution[];
-  let startedRows: ReturnType<typeof pairEntries>;
   try {
-    startedRows = startedBackedRows(pairEntries(section.entries));
-    rows = lifecycleExecutions(content, resolved.taskDir);
+    rows = lifecycleExecutions(content);
   } catch (error) {
     return failed(request, { code: 'EVENT_TRANSITION_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
   }
@@ -663,7 +661,8 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   const currentStep = typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '';
   const manual = eventIdentity.family === 'manual-validation';
   const openRows = rows.filter((item) => item.family === eventIdentity.family && (manual || (item.round === normalized.round && item.fixFor === normalized.fixFor && item.implementationInput === normalized.implementationInput)));
-  const completedRows = (manual || eventIdentity.family === 'validation-run') ? startedRows.filter((item) => item.step === eventIdentity.action && item.done) : [];
+  const completionRecorded = normalized.artifact !== undefined && parseCompletionFacts(frontmatter.completion_facts)
+    .some((fact) => fact.event === normalized.event && fact.output === normalized.artifact);
   const hasStartedIdentity = openRows.length > 0;
   if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const row = openRows.at(-1);
@@ -686,7 +685,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   const validReplayFact = Boolean(replayFact && normalized.artifact
     && hasValidArtifactCompletion(content, resolved.taskDir, normalized.artifact, normalized.event));
   const completedByHistory = manual || eventIdentity.family === 'validation-run';
-  const completedHistoryReplay = completedByHistory && completedRows.length > 0;
+  const completedHistoryReplay = completedByHistory && completionRecorded;
   if (eventIdentity.phase === 'completed' && !hasStartedIdentity && !completedHistoryReplay && !validReplayFact) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires a started event or an earlier completed attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   if (eventIdentity.phase === 'completed') {
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
@@ -744,10 +743,6 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
     }
-  }
-  if (eventIdentity.phase === 'waiting' && section.entries.some((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)) {
-    const existing = section.entries.find((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)!;
-    return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, existing.time, frontmatter, artifactContext);
   }
   if (eventIdentity.phase === 'started') {
     const trigger = eventTrigger(normalized, eventIdentity.family);
@@ -813,23 +808,21 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   }
   const step = eventIdentity.phase === 'started' || eventIdentity.target === null ? currentStep : eventIdentity.target;
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
-  const supersededBody = supersededOpenStart
-    ? appendActivityEntry(section, {
-      time: metadata.timestamp,
-      step: `${supersededOpenStart.action} [aborted]`,
-      agent: normalized.agent,
-      note: `superseded by ${eventIdentity.action}`
-    })
-    : section.body;
-  const body = appendActivityEntry(
-    supersededOpenStart ? { ...section, body: supersededBody } : section,
-    { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note }
-  );
+  let body: string | null = null;
+  if (section) {
+    const supersededBody = supersededOpenStart
+      ? appendActivityEntry(section, {
+        time: metadata.timestamp, step: `${supersededOpenStart.action} [aborted]`,
+        agent: normalized.agent, note: `superseded by ${eventIdentity.action}`
+      }) : section.body;
+    body = appendActivityEntry({ ...section, body: supersededBody },
+      { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
+  }
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
   if (eventIdentity.phase === 'started' || eventIdentity.phase === 'completed') {
     const open = rows.filter((item) => !openRows.includes(item) && (!supersededOpenStart || item.family !== supersededOpenStart.family || item.round !== supersededOpenStart.round));
     if (eventIdentity.phase === 'started') open.push({ family: eventIdentity.family, agent: normalized.agent, startedAt: metadata.timestamp, round: normalized.round, fixFor: normalized.fixFor, implementationInput: normalized.implementationInput, transactionId: normalized.transactionId });
-    frontmatterSet.lifecycle_execution = serializeLifecycleExecution(open);
+    frontmatterSet.lifecycle_execution = serializeLifecycleExecution(open, content);
   }
   if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(parseCompletionFacts(frontmatter.completion_facts), currentFact));
   if (completedArtifact && ['analyze', 'plan', 'code'].includes(eventIdentity.family)) {
@@ -889,7 +882,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   }
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
-    { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }
+    { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove, ...(frontmatterSet.lifecycle_execution ? { lifecycleExecutionDomain: 'ordinary' as const } : {}) }
   ];
   if (completedArtifact) {
     const link = buildArtifactLinkSection(content, completedArtifact);
@@ -922,7 +915,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
       body: renderImplementationInputs(implementationRows)
     });
   }
-  mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
+  if (section && body !== null) mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
   return {
@@ -950,5 +943,19 @@ function successNoOp(
   };
 }
 
-export { eventCatalog, validateTaskEventRequest, applyTaskEvent };
+function applyTaskEventWithWarnings(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  let warnings: { code: string; message: string }[] = [];
+  if (resolved.ok) {
+    try {
+      const inspected = inspectActivityLog(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+      if (!inspected.section) warnings = [{ code: 'ACTIVITY_LOG_UNAVAILABLE', message: 'Activity Log is missing or ambiguous; no entry was appended' }];
+      else if (inspected.invalidEntries.length) warnings = [{ code: 'ACTIVITY_LOG_INVALID_ENTRIES', message: 'Activity Log contains malformed entries' }];
+    } catch { /* The core reports task read errors. */ }
+  }
+  const result = applyTaskEvent(request, options);
+  return result.status === 'failed' || warnings.length === 0 ? result : { ...result, warnings };
+}
+
+export { eventCatalog, validateTaskEventRequest, applyTaskEventWithWarnings as applyTaskEvent };
 export type { TaskEventName, TaskEventRequest, TaskEventResult, TaskEventError, TaskEventErrorCode, TaskEventOptions, Verdict };

@@ -5,7 +5,8 @@ import { execFileSync } from 'node:child_process';
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { extractSection } from '../task/sections.ts';
+import { activityWarnings, locateActivityLog } from '../task/activity-log.ts';
+import type { TaskMutation } from '../task/write.ts';
 import { captureTaskWriteMetadata, writeTask } from '../task/write.ts';
 import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import { resolvePlatformProviderContext } from './context.ts';
@@ -795,9 +796,11 @@ async function syncPlatformPullRequestInLabels(prToken: string | number, options
   });
 }
 
-function appendActivity(content: string, line: string): string {
-  const body = extractSection(content, ['活动日志', 'Activity Log']);
-  return `${body.replace(/\s+$/, '')}${body.trim() ? '\n' : ''}${line}`;
+function activityMutation(content: string, line: string): TaskMutation[] {
+  const section = locateActivityLog(content);
+  if (!section) return [];
+  return [{ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading,
+    body: `${section.body}${section.body ? '\n' : ''}${line}` }];
 }
 
 function deliveryIdentity(pullRequest: PullRequestSnapshot) {
@@ -832,16 +835,11 @@ function boundFactFor(
 }
 
 function writeCreateStarted(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }, agent: string) {
-  const starts = (base.content.match(/\*\*Create PR \[started\]\*\*/g) || []).length;
-  const dones = (base.content.match(/\*\*Create PR\*\*/g) || []).length;
-  if (starts > dones) return { status: 'no-op' as const };
   const metadata = captureTaskWriteMetadata();
   return writeTask({
     taskRef: base.resolved.taskId,
     expectedState: 'active',
-    mutations: [{ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: '活动日志', body: appendActivity(
-      base.content, `- ${metadata.timestamp} — **Create PR [started]** by ${agent} — started`
-    ) }]
+    mutations: activityMutation(base.content, `- ${metadata.timestamp} — **Create PR [started]** by ${agent} — started`)
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
 
@@ -879,9 +877,7 @@ function bindIdentity(
     dryRun,
     mutations: [
       { kind: 'frontmatter', set: { ...factMutation.set, assigned_to: agent } },
-      { kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: '活动日志', body: appendActivity(
-        current, `- ${metadata.timestamp} — **Create PR** by ${agent} — PR #${pullRequest.number} created → ${pullRequest.url}`
-      ) }
+      ...activityMutation(current, `- ${metadata.timestamp} — **Create PR** by ${agent} — PR #${pullRequest.number} created → ${pullRequest.url}`)
     ]
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
@@ -920,7 +916,7 @@ async function bindPlatformPullRequestImpl(taskRef: string, options: BindOptions
   });
 }
 
-async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+async function bindPlatformPullRequestWithProjection(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
   const intent: PlatformPullRequestIntent = { action: 'bind', prToken: String(options.pr) };
   return journalPullRequestOperation(taskRef, options, intent, `pr:${options.pr}`, { pr: String(options.pr) },
     () => bindPlatformPullRequestImpl(taskRef, options));
@@ -1066,30 +1062,15 @@ async function resolveExternalPullRequest(taskRef: string, options: ResolveExter
   }), { candidates: selected.candidates, eligible: selected.eligible, selected: rechecked.value });
   const selectedPullRequest = rechecked.value;
   const note = externalEvidenceNote(base.issueIdentity, selected.source, selectedPullRequest);
-  const identityNote = externalIdentityEvidenceNote(base.issueIdentity, selectedPullRequest);
   const activityEntry = `**Bind External PR** by ${options.agent} — ${note}`;
-  const auditLines = base.content.split(/\r?\n/).filter((line) => line.includes('**Bind External PR**'));
-  const alreadyAudited = auditLines.some((line) => line.endsWith(identityNote));
-  if (auditLines.length > 0 && !alreadyAudited) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    platform: base.context.platform,
-    capabilities: base.context.capabilities,
-    pullRequest: selectedPullRequest,
-    error: { code: 'PR_BIND_CONFLICT', message: 'Existing external PR audit evidence conflicts with the selected identity', retryable: false }
+  if (base.prIdentity && !resourceIdentityEquals(base.prIdentity, pullRequestIdentity(selectedPullRequest))) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: selectedPullRequest,
+    error: { code: 'PR_BIND_CONFLICT', message: 'Selected identity does not match the task binding', retryable: false }
   }), { candidates: selected.candidates, eligible: selected.eligible, selected: selectedPullRequest });
-  if (alreadyAudited && base.prIdentity && !resourceIdentityEquals(base.prIdentity, pullRequestIdentity(selectedPullRequest))) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    platform: base.context.platform,
-    capabilities: base.context.capabilities,
-    pullRequest: selectedPullRequest,
-    error: { code: 'PR_BIND_CONFLICT', message: 'External PR audit evidence does not match the task binding', retryable: false }
-  }), { candidates: selected.candidates, eligible: selected.eligible, selected: selectedPullRequest });
-  if (base.prIdentity && resourceIdentityEquals(base.prIdentity, pullRequestIdentity(selectedPullRequest)) && alreadyAudited) {
+  if (base.prIdentity && resourceIdentityEquals(base.prIdentity, pullRequestIdentity(selectedPullRequest)) && base.fact?.state === 'bound') {
     return externalResult(result('no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
-      platform: base.context.platform,
-      capabilities: base.context.capabilities,
-      resource: { kind: 'pull-request', number: selectedPullRequest.number },
-      pullRequest: selectedPullRequest,
-      operations: [{ name: 'task:bind-external-pr', status: 'no-op', reasonCode: 'EVIDENCE_ALREADY_RECORDED' }],
-      error: null
+      platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: selectedPullRequest,
+      operations: [{ name: 'task:bind-external-pr', status: 'no-op', reasonCode: 'EVIDENCE_ALREADY_RECORDED' }], error: null
     }), { mode: 'external', authorization: selected.source, candidates: selected.candidates, eligible: selected.eligible, selected: selectedPullRequest });
   }
   const metadata = captureTaskWriteMetadata();
@@ -1099,9 +1080,7 @@ async function resolveExternalPullRequest(taskRef: string, options: ResolveExter
     dryRun: options.dryRun,
     mutations: [
       { kind: 'frontmatter', set: { ...factFrontmatterMutation(boundFactFor(selectedPullRequest, selected.source === 'unique' ? 'external-unique' : 'external-explicit', base.issueNumber, metadata.timestamp)).set, assigned_to: options.agent } },
-      { kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: '活动日志', body: appendActivity(
-        base.content, `- ${metadata.timestamp} — ${activityEntry}`
-      ) }
+      ...activityMutation(base.content, `- ${metadata.timestamp} — ${activityEntry}`)
     ]
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
   if (write.status === 'failed') return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
@@ -1201,7 +1180,7 @@ async function recoverCreatedPullRequest(
   return bound;
 }
 
-async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
+async function createPlatformPullRequestWithProjection(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
   const intent: PlatformPullRequestIntent = { action: 'create', baseRef: options.base, headRef: options.head };
   const identityInput = {
     title: createHash('sha256').update(options.title).digest('hex'),
@@ -1600,9 +1579,7 @@ function applySkippedPullRequestFact(
     dryRun: options.dryRun,
     mutations: [
       { kind: 'frontmatter', set: { ...factFrontmatterMutation(fact).set, assigned_to: options.agent } },
-      { kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: '活动日志', body: appendActivity(
-        content, `- ${metadata.timestamp} — **Skip PR** by ${options.agent} — PR delivery explicitly skipped`
-      ) }
+      ...activityMutation(content, `- ${metadata.timestamp} — **Skip PR** by ${options.agent} — PR delivery explicitly skipped`)
     ]
   }, { repoRoot: resolved.repoRoot, metadataProvider: () => metadata });
   if (write.status === 'failed') return result('failed', resolved.taskId, issueNumber, null, {
@@ -1616,7 +1593,7 @@ function applySkippedPullRequestFact(
   });
 }
 
-async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOptions): Promise<PullRequestResult> {
+async function skipPlatformPullRequestFactWithProjection(taskRef: string, options: SkipFactOptions): Promise<PullRequestResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return result('failed', resolved.taskId, null, null, {
     error: { code: resolved.code, message: resolved.message, retryable: false }
@@ -1633,6 +1610,30 @@ async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOpt
   }
 }
 
-export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, recoverCreatedPullRequest, resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
+function withActivityWarnings<T extends PullRequestResult>(taskRef: string, cwd: string | undefined, output: T): T {
+  if (output.status === 'failed' || output.status === 'blocked') return output;
+  const resolved = resolveTaskRef(taskRef, cwd ? { repoRoot: cwd } : {});
+  if (!resolved.ok) return output;
+  let logWarnings: ReturnType<typeof activityWarnings>;
+  try { logWarnings = activityWarnings(fs.readFileSync(resolved.taskMdPath, 'utf8')); }
+  catch { return output; }
+  if (!logWarnings.length) return output;
+  const warnings: OperationWarning[] = logWarnings.map((item) => ({ ...item, retryable: true, step: 'pr', target: resolved.taskId, severity: 'IMPORTANT' }));
+  return { ...output, warnings: mergeOperationWarnings(output.warnings, warnings) };
+}
+async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+  return withActivityWarnings(taskRef, options.cwd, await bindPlatformPullRequestWithProjection(taskRef, options));
+}
+async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
+  return withActivityWarnings(taskRef, options.cwd, await createPlatformPullRequestWithProjection(taskRef, options));
+}
+async function resolveExternalPullRequestWithWarnings(taskRef: string, options: ResolveExternalOptions): Promise<ExternalPullRequestResult> {
+  return withActivityWarnings(taskRef, options.cwd, await resolveExternalPullRequest(taskRef, options));
+}
+async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOptions): Promise<PullRequestResult> {
+  return withActivityWarnings(taskRef, options.cwd, await skipPlatformPullRequestFactWithProjection(taskRef, options));
+}
+
+export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, recoverCreatedPullRequest, resolveExternalPullRequestWithWarnings as resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
 export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SkipFactOptions, SyncOptions };
 export { warningResultForPrimary };

@@ -71,6 +71,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
     };
     const result = await applyHumanDecision(request, writeOptions);
     if (result.error) throw new Error(result.error.message);
+    for (const warning of result.warnings ?? []) process.stderr.write(`Warning: ${warning.code}: ${warning.message}\n`);
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

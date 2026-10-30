@@ -10,6 +10,7 @@ import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { parseLifecyclePathDecision } from '../../../lib/task/lifecycle-path.ts';
 import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { updateTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { parseArtifactName } from '../../../lib/task/artifact-name.ts';
 import { buildStatusModel } from '../../../lib/task/commands/status.ts';
 import { createTaskWorkspaceFixture } from '../../helpers.ts';
@@ -280,21 +281,22 @@ test('lifecycle facts derive execution busy from an open lifecycle activity', ()
       '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started',
       ''
     ].join('\n');
-    fs.writeFileSync(path.join(taskDir, 'task.md'), open);
+    const openState = updateTaskFrontmatter(open, { lifecycle_execution: JSON.stringify({ version: 1, open: [{ family: 'plan', agent: 'codex', startedAt: '2026-01-01 00:00:00+00:00', round: 1 }] }) });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), openState);
 
-    const busy = buildLifecycleFacts(taskDir, open, 'active');
+    const busy = buildLifecycleFacts(taskDir, openState, 'active');
     assert.equal(busy.ok, true);
     if (!busy.ok) return;
     assert.equal(busy.facts.executionBusy, true);
 
-    const manualOpen = open.replace('Plan Task (Round 1)', 'Complete Manual Validation');
+    const manualOpen = updateTaskFrontmatter(openState, { lifecycle_execution: JSON.stringify({ version: 1, open: [{ family: 'manual-validation', agent: 'codex', startedAt: '2026-01-01 00:00:00+00:00', round: 1 }] }) });
     fs.writeFileSync(path.join(taskDir, 'task.md'), manualOpen);
     const manualBusy = buildLifecycleFacts(taskDir, manualOpen, 'active');
     assert.equal(manualBusy.ok, true);
     if (!manualBusy.ok) return;
     assert.equal(manualBusy.facts.executionBusy, true);
 
-    const completed = `${open}- 2026-01-01 00:01:00+00:00 — **Plan Task (Round 1)** by codex — Plan completed → plan.md\n`;
+    const completed = updateTaskFrontmatter(openState, { lifecycle_execution: JSON.stringify({ version: 1, open: [] }) });
     fs.writeFileSync(path.join(taskDir, 'task.md'), completed);
     const idle = buildLifecycleFacts(taskDir, completed, 'active');
     assert.equal(idle.ok, true);

@@ -36,6 +36,7 @@ export function parseCompletionFacts(value: unknown): CompletionFact[] {
 }
 
 function completionEvent(family: string): string | null {
+  if (family === 'validation-run') return 'validation-run.completed';
   if (family === 'analysis') return 'analyze.completed';
   if (family === 'review-analysis') return 'review-analysis.completed';
   if (family === 'plan') return 'plan.completed';

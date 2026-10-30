@@ -13,6 +13,8 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+const failedTaskWrite = { fileSystem: { renameSync: () => { throw new Error('injected task rename failure'); } } };
+
 function fixture(branch = 'feature') {
   const root = createTempDir('commit-operation-');
   git(root, ['init', '-q', '-b', branch]);
@@ -398,7 +400,7 @@ test('task-bound local retry accepts the original multiline commit message after
       delivery: { mode: 'local' }, push: undefined
     });
 
-    const first = executeCommitOperation(request);
+    const first = executeCommitOperation(request, failedTaskWrite);
     assert.equal(first.result, 'committed_with_warnings');
     assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
     assert.equal(readCheckpointIntent(taskDir, taskId)?.state, 'committed');
@@ -434,7 +436,7 @@ test('task-bound local retry preserves Git-significant whitespace in commit mess
         delivery: { mode: 'local' }, push: undefined
       });
 
-      const first = executeCommitOperation(request);
+      const first = executeCommitOperation(request, failedTaskWrite);
       assert.equal(first.result, 'committed_with_warnings');
       assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
       assert.equal(readCheckpointIntent(taskDir, taskId)?.state, 'committed');
@@ -472,7 +474,7 @@ test('task-bound local retry accepts directory pathspecs after a sync warning', 
       delivery: { mode: 'local' }, push: undefined
     });
 
-    const first = executeCommitOperation(request);
+    const first = executeCommitOperation(request, failedTaskWrite);
     assert.equal(first.result, 'committed_with_warnings');
     assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
     assert.equal(readCheckpointIntent(taskDir, taskId)?.state, 'committed');
@@ -606,7 +608,7 @@ test('no-op task retry repairs a task sync warning and records the commit activi
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
 
-    const first = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }));
+    const first = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }), failedTaskWrite);
     assert.equal(first.result, 'committed_with_warnings');
     assert.equal(first.warnings[0]?.code, 'TASK_STATUS_SYNC_FAILED');
     assert.equal(first.warnings[0]?.retryable, true);
@@ -669,4 +671,20 @@ test('no-op task retry records a fresh Commit activity after a later code review
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('local checkpoint commits and records its identity despite a missing activity log', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000021';
+  const taskDir = path.join(taskWorkspaceRoot(root), 'active', taskId);
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+    fs.writeFileSync(path.join(root, 'change.txt'), 'changed\n');
+    const result = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex', delivery: { mode: 'local' }, push: undefined }));
+    assert.equal(result.result, 'committed_with_warnings');
+    assert.equal(result.warnings[0]?.code, 'ACTIVITY_LOG_UNAVAILABLE');
+    assert.equal(readCheckpointIntent(taskDir, taskId), null);
+    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), new RegExp(`checkpoint_commit: ${git(root, ['rev-parse', 'HEAD'])}`));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

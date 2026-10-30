@@ -1,6 +1,4 @@
 import { scanVisibleMarkdown } from './markdown.ts';
-import { artifactName, type ArtifactFamily } from './artifact-name.ts';
-import { hasArtifactCompletionRecord, hasValidArtifactCompletion } from './completion-facts.ts';
 const ENTRY_RE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.*)$/;
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;
@@ -34,6 +32,13 @@ function inspectActivityLog(content: string): { section: ActivityLogSection | nu
   }
   const body = content.slice(heading.end + 1, end).replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
   return { section: { heading: heading.text, body, entries }, invalidEntries };
+}
+
+function activityWarnings(content: string): { code: string; message: string }[] {
+  const inspected = inspectActivityLog(content);
+  if (!inspected.section) return [{ code: 'ACTIVITY_LOG_UNAVAILABLE', message: 'Activity Log is missing or ambiguous; repair the section to resume logging' }];
+  if (inspected.invalidEntries.length) return [{ code: 'ACTIVITY_LOG_INVALID_ENTRIES', message: 'Activity Log contains malformed entries; repair the entries' }];
+  return [];
 }
 
 function locateActivityLog(content: string): ActivityLogSection | null {
@@ -91,36 +96,10 @@ function startedBackedRows(rows: StepRow[]): StepRow[] {
   return rows.filter((row) => row.started !== '');
 }
 
-function artifactRoundForStep(step: string): { family: ArtifactFamily; round: number } | null {
-  const labels: Readonly<Record<string, ArtifactFamily>> = {
-    'Analyze Task': 'analysis', 'Review Analysis': 'review-analysis', 'Plan Task': 'plan',
-    'Review Plan': 'review-plan', 'Code Task': 'code', 'Review Code': 'review-code'
-  };
-  const match = /^(Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code) \(Round ([1-9]\d*)(?:, .*)?\)$/u.exec(step);
-  const family = match && labels[match[1]!];
-  return family && match ? { family, round: Number(match[2]) } : null;
-}
-
-function openLifecycleRows(content: string, taskDir: string, rows: StepRow[]): StepRow[] {
-  return rows.filter((row) => {
-    if (!row.started || row.done) return true;
-    const identity = artifactRoundForStep(row.step);
-    if (!identity) return true;
-    const name = artifactName(identity.family, identity.round);
-    const event = identity.family === 'analysis' ? 'analyze.completed' : `${identity.family}.completed`;
-    if (!hasArtifactCompletionRecord(content, name, event)) return true;
-    if (!hasValidArtifactCompletion(content, taskDir, name, event)) {
-      throw new Error(`completion evidence for started ${identity.family} Round ${identity.round} is invalid`);
-    }
-    return false;
-  });
-}
-
-
 export {
   activityAttempt,
+  activityWarnings,
   appendActivityEntry,
-  openLifecycleRows,
   inspectActivityLog,
   locateActivityLog,
   pairEntries,

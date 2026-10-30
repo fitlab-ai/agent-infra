@@ -29,7 +29,7 @@ export function hasOpenArtifactRound(taskDir: string, content: string, family: A
 function openArtifactRounds(taskDir: string, content: string, family: ArtifactFamily): number[] {
   const executionFamily = family === 'analysis' ? 'analyze' : family;
   const event = completionEvent(family);
-  return [...new Set(lifecycleExecutions(content, taskDir)
+  return [...new Set(lifecycleExecutions(content)
     .filter((item) => item.family === executionFamily && item.round !== undefined)
     .flatMap((item) => {
       const round = item.round!;
@@ -572,7 +572,7 @@ function resolveCodeContext(
         const review = reviewCode.latest;
         const openInputs = review ? [...inputs, review] : inputs;
         const openVerdict = review ? parseVerdict(review.path) : null;
-        const openRow = lifecycleExecutions(taskContent, inventory.taskDir!)
+        const openRow = lifecycleExecutions(taskContent)
           .find((row) => row.family === 'code' && row.round === openRound);
         const decisionInput = openRow?.implementationInput ?? null;
         const fixInput = openRow?.fixFor ?? null;
