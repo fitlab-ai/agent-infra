@@ -17,6 +17,7 @@ import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './wri
 import { parseLegacyReworkIntentDocument, parseReworkIntentDocument, reworkIntentMutation, upsertReworkIntent } from './rework-intent.ts';
 import type { ReworkClassification, ReworkIntent, ReworkTarget } from './rework-intent.ts';
 import { extractSection, extractSubSection } from './sections.ts';
+import { rulingDecision } from './decision-intents.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
 import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
@@ -103,14 +104,14 @@ function findingEvidence(reviewContent: string, evidence: string): string | null
   return semanticFindingEvidence(reviewContent, heading, next?.start ?? reviewContent.length);
 }
 
-function taskFactDigest(taskDir: string, content: string, ruling?: string): string {
+function taskFactDigest(taskDir: string, content: string, ruling?: { decision: string; needsImplementation?: boolean }): string {
   const latest = inspectArtifactDirectory(taskDir, 'analysis').latest;
   const flow = latest ? parseLifecyclePathDecision(fs.readFileSync(latest.path, 'utf8'), latest.name) : null;
   return semanticDigest(JSON.stringify({
     taskInput: normalizedTaskFact(extractSection(content, ['任务输入', 'Task Input'])),
     requirements: normalizedTaskFact(extractSection(content, ['需求', 'Requirements'])),
     flow: flow?.status === 'valid' ? flow.decision.semanticDigest : flow?.status ?? 'missing',
-    ...(ruling ? { ruling: normalizedTaskFact(ruling) } : {})
+    ...(ruling ? { ruling: { ...ruling, decision: normalizedTaskFact(ruling.decision) } } : {})
   }));
 }
 
@@ -178,7 +179,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     }
     const rulingId = /^task\.md#(HDR-[1-9]\d*)$/.exec(finding.evidence)?.[1];
     const ruling = rulingId ? extractSubSection(content, rulingId) : '';
-    const evidence = rulingId ? /^- \*\*审查来源\*\*：(.+)$/mu.exec(ruling)?.[1] ?? '' : finding.evidence;
+    const evidence = rulingId ? /^- \*\*审查来源\*\*：(.+)$/mu.exec(ruling.replace(/\r\n/g, '\n').split('\n- **裁决结果**：', 1)[0]!)?.[1] ?? '' : finding.evidence;
     const sourceFromEvidence = evidence.split('#')[0];
     if (sourceFromEvidence !== intent.sourceArtifact || parseArtifactName(intent.sourceArtifact)?.family !== `review-${finding.stage}`) {
       return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact does not match finding evidence', resolved.taskId, intent.intentId);
@@ -192,8 +193,11 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
       const evidenceBlock = findingEvidence(reviewContent, evidence);
       if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${evidence}' was not found`, resolved.taskId, intent.intentId);
       const evidenceDigest = semanticDigest(evidenceBlock);
-      const decision = /^- \*\*裁决结果\*\*：(.+)$/mu.exec(ruling)?.[1];
-      const factsDigest = taskFactDigest(resolved.taskDir, content, decision);
+      const decision = rulingDecision(ruling);
+      const input = finding.stage === 'code' && decision
+        ? parseImplementationInputs(content).rows.find((item) => item.ledgerId === finding.id && item.decisionEvidence === finding.evidence)
+        : undefined;
+      const factsDigest = taskFactDigest(resolved.taskDir, content, decision ? { decision, needsImplementation: input?.needsImplementation } : undefined);
       const requestedIntent: ReworkIntent = {
         intentId: intent.intentId, findingId: intent.findingId, sourceArtifact: intent.sourceArtifact,
         sourceSha256: intent.sourceSha256, target: CLASSIFICATION_TARGET[intent.classification], classification: intent.classification,

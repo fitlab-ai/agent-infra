@@ -65,6 +65,11 @@ function prependBlock(body: string, block: string): string {
   return body ? `${block}\n\n${body}` : block;
 }
 
+function rulingDecision(block: string): string | undefined {
+  const body = /^- \*\*裁决结果\*\*：([\s\S]*)/mu.exec(block.replace(/\r\n/g, '\n'))?.[1];
+  return body?.replace(/\n\n<!-- (?:使用|Use) ai decide [\s\S]*? -->\s*$/u, '').trim();
+}
+
 function existingDecision(
   content: string,
   row: LedgerRow,
@@ -75,7 +80,7 @@ function existingDecision(
   if (!match) return { conflict: `decided row '${row.id}' has invalid decision evidence` };
   const recordId = match[1]!;
   const block = extractSubSection(content, recordId);
-  if (!block || !block.includes(`**原账本 ID**：${row.id}`) || !block.split('\n').includes(`- **裁决结果**：${decision}`)) {
+  if (!block || !block.includes(`**原账本 ID**：${row.id}`) || rulingDecision(block) !== decision.replace(/\r\n/g, '\n')) {
     return { conflict: `decision for '${row.id}' conflicts with ${recordId}` };
   }
   if (row.stage !== 'code') return needsImplementation === undefined
@@ -123,8 +128,9 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   if (request.supersede && row.status === 'human-decided' && row.evidence !== `task.md#${request.supersede}`) {
     try {
       const current = extractSubSection(content, row.evidence.split('#')[1] ?? '');
-      if (current.includes(`**替代裁决**：task.md#${request.supersede}`)) {
-        if (request.reviewSource && !current.includes(`**审查来源**：${request.reviewSource}`)) return failed('DECISION_CONFLICT', 'replacement review source conflicts with prior ruling', resolved.taskId, row.id);
+      const fields = current.replace(/\r\n/g, '\n').split('\n- **裁决结果**：', 1)[0]!.split('\n');
+      if (fields.includes(`- **替代裁决**：task.md#${request.supersede}`)) {
+        if (request.reviewSource && !fields.includes(`- **审查来源**：${request.reviewSource}`)) return failed('DECISION_CONFLICT', 'replacement review source conflicts with prior ruling', resolved.taskId, row.id);
         const replay = existingDecision(content, row, request.decision.trim(), request.needsImplementation);
         if ('conflict' in replay) return failed('DECISION_CONFLICT', replay.conflict, resolved.taskId, row.id);
         return { status: 'no-op', changed: false, taskId: resolved.taskId, ledgerId: row.id, ...replay, operations: [], error: null, warnings: activityWarnings(content) };
@@ -136,7 +142,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   }
   if (!request.supersede && request.reviewSource) return failed('DECISION_PAYLOAD_INVALID', 'review source requires replacement', resolved.taskId, row.id);
   const previous = request.supersede ? extractSubSection(content, request.supersede) : '';
-  const recordedSource = /^- \*\*审查来源\*\*：(.+)$/mu.exec(previous)?.[1];
+  const recordedSource = /^- \*\*审查来源\*\*：(.+)$/mu.exec(previous.replace(/\r\n/g, '\n').split('\n- **裁决结果**：', 1)[0]!)?.[1];
   const source = row.status === 'human-decided' ? recordedSource ?? request.reviewSource : row.evidence;
   if (request.supersede && request.reviewSource && recordedSource && request.reviewSource !== recordedSource) return failed('DECISION_CONFLICT', 'replacement review source conflicts with prior ruling', resolved.taskId, row.id);
   const isFinding = /^(AN|PL|CD)-[1-9]\d*$/.test(row.id);
@@ -237,5 +243,5 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   return { status: writeResult.status, changed: writeResult.changed, taskId: writeResult.taskId, ledgerId: row.id, recordId, implementationInputId, operations: writeResult.operations, error: null, warnings: activityWarnings(content) };
 }
 
-export { applyHumanDecision };
+export { applyHumanDecision, rulingDecision };
 export type { HumanDecisionRequest, HumanDecisionResult };
