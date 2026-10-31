@@ -212,6 +212,36 @@ test('adapter definitions validate their closed contract without mutating input'
   }
 });
 
+test('adapter preserves validation order, copied nested data, and lazy tool creation', () => {
+  const invalid = adapterInput({ displayName: '', invocation: '' });
+  assert.throws(() => defineAgentClientAdapter(invalid), {
+    name: 'Error', message: "Agent Client 'codex' requires a display name"
+  });
+
+  const exclusions = ['.config/codex'];
+  const input = adapterInput();
+  let calls = 0;
+  const adapter = defineAgentClientAdapter({
+    ...input,
+    sandbox: {
+      ...input.sandbox,
+      image: { dotfilesExclusions: exclusions },
+      createTool: (context) => {
+        calls += 1;
+        return { ...input.sandbox.createTool(context), id: 'other' };
+      }
+    }
+  });
+  exclusions.push('.cache/codex');
+  assert.deepEqual(adapter.sandbox.image?.dotfilesExclusions, ['.config/codex']);
+  assert.ok(Object.isFrozen(adapter.sandbox.image?.dotfilesExclusions));
+  assert.equal(calls, 0);
+  assert.throws(() => adapter.sandbox.createTool({ home: '/tmp', project: 'demo' }), {
+    name: 'Error', message: "Agent Client 'codex' sandbox tool id must match the adapter id"
+  });
+  assert.equal(calls, 1);
+});
+
 test('adapter custom commands validate paths, placeholders, metadata, and immutability', () => {
   const adapter = defineAgentClientAdapter(adapterInput({
     project: {

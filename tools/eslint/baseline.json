@@ -657,24 +657,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/adapter.ts",
-      "ruleId": "complexity",
-      "stableId": "ac5cc332e149becb174b63ffc2e77c2e9777e409a6c9f8f3d160789a6ee65fa6",
-      "displayName": "defineAgentClientAdapter",
-      "metric": 76,
-      "normalizedMessage": "complexity=76",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapter.ts",
-      "ruleId": "complexity",
-      "stableId": "8832fca8ca13ebe400b6a428166f677d4f53a8461394271864274e042cc4519e",
-      "displayName": "defineAgentClientAdapter.LogicalExpression:125d14fae716.map callback[0]#1",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
       "file": "lib/task/delivery.ts",
       "ruleId": "complexity",
       "stableId": "a4d17bb7dcc6099c4579e0e52b14a5ac0d7527b038646f4ec0b1084a58d703ea",
@@ -852,24 +834,6 @@
       "displayName": "formatCredentialSyncStatus",
       "metric": 17,
       "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapter.ts",
-      "ruleId": "complexity",
-      "stableId": "16b75778c7cc829e3081eccbd4fe7eea28ba7c6b05e76ff74a162f84cfa70f67",
-      "displayName": "freezeSandboxImageDescriptor",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/adapter.ts",
-      "ruleId": "complexity",
-      "stableId": "77e721e3435f54a0b0ccd5ce3ef2240051f696daf06962a8471089dd0a000e1d",
-      "displayName": "freezeTool",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
       "count": 1
     },
     {
