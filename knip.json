@@ -1,0 +1,47 @@
+{
+  "ignoreExportsUsedInFile": true,
+  "ignoreBinaries": ["agent-infra", "mkfifo"],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "bin/**/*.ts",
+        "scripts/**/*.js",
+        "src/**/*.js",
+        "tests/**/*.test.ts",
+        "tests/**/*.js",
+        ".agents/scripts/**/*.js",
+        ".agents/skills/**/*.js",
+        ".agents/skills/**/*.mjs",
+        ".github/**/*.{js,mjs}",
+        ".git-hooks/**/*.cjs",
+        "lib/agent-client.ts",
+        "lib/cp.ts",
+        "lib/process-data/index.ts",
+        "lib/decide.ts",
+        "lib/init.ts",
+        "lib/merge.ts",
+        "lib/run/index.ts",
+        "lib/sandbox/index.ts",
+        "lib/server/index.ts",
+        "lib/task/index.ts",
+        "lib/self-update.ts",
+        "lib/update.ts"
+      ],
+      "project": [
+        "bin/**/*.ts",
+        "lib/**/*.ts",
+        "scripts/**/*.js",
+        "src/**/*.js",
+        "tests/**/*.ts",
+        ".agents/**/*.js",
+        ".agents/**/*.mjs",
+        ".github/**/*.{js,mjs}",
+        ".git-hooks/**/*.cjs"
+      ]
+    },
+    "tools/eslint": {
+      "entry": ["*.mjs", "tests/*.mjs"],
+      "project": ["**/*.mjs"]
+    }
+  }
+}

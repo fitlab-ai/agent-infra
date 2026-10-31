@@ -31,8 +31,14 @@ jobs:
       - name: Install isolated lint dependencies
         run: npm ci --prefix tools/eslint
 
+      - name: Install project dependencies
+        run: npm ci
+
       - name: Check lint baseline
         run: npm run lint --prefix tools/eslint
+
+      - name: Check unused code
+        run: npm run lint:unused --prefix tools/eslint
 
       - name: Test lint baseline comparator
         run: npm test --prefix tools/eslint

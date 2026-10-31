@@ -6,7 +6,9 @@
     "checkJs": true,
     "strict": false,
     "noImplicitAny": false,
-    "erasableSyntaxOnly": false
+    "erasableSyntaxOnly": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": ["scripts/**/*.js", "src/**/*.js"],
   "exclude": ["node_modules"]
