@@ -618,7 +618,7 @@ export function prepareClaudeCredentials(
     }
   };
 
-  let blob: string | null = null;
+  let blob: string | null;
   const hasCustomInspectFn = inspectFn !== inspectClaudeKeychainStatus;
   const hasCustomExtractFn = extractFn !== extractClaudeCredentialsBlob;
   if (hasCustomInspectFn || !hasCustomExtractFn) {

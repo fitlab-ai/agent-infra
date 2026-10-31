@@ -1006,7 +1006,7 @@ async function prepareTaskFinalizationCore(
   }
 
   let changed = false;
-  let backfillResult: TaskFinalizationStep | null = null;
+  let backfillResult: TaskFinalizationStep | null;
   let runBackfill = shouldRunBackfill(receipt);
   if (!runBackfill && receipt.lifecycle === 'done') {
     const eligibility = inspectCompletionBackfillEligibility(taskId, { cwd: repoRoot });

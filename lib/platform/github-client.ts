@@ -80,7 +80,7 @@ function requestDiagnostics(args: string[], request: RequestOptions, attempt: nu
 
 function defaultRunner(args: string[], options: RunOptions): RunResult {
   const command = process.env.AGENT_INFRA_GH_BIN || 'gh';
-  let prefix: string[] = [];
+  let prefix: string[];
   try {
     prefix = JSON.parse(process.env.AGENT_INFRA_GH_ARGS_JSON || '[]') as string[];
   } catch {

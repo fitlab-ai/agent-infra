@@ -180,7 +180,7 @@ type ActiveTaskIdentity = {
 };
 
 function resolveActiveTaskIdentity(taskRef: string, repoRoot: string): ActiveTaskIdentity | null {
-  let taskId: string | null = null;
+  let taskId: string | null;
   let resolvedTaskRef = taskRef;
 
   if (TASK_ID_RE.test(taskRef)) {

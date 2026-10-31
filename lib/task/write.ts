@@ -425,7 +425,7 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
     `.task.md.${process.pid}.${suffix}.tmp`
   );
   let primary: TaskWriteError | null = null;
-  let shouldCleanupTemp = false;
+  let shouldCleanupTemp: boolean;
   try {
     io.writeFileSync(tempPath, candidate, mode);
     shouldCleanupTemp = true;

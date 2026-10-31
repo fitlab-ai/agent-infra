@@ -296,7 +296,7 @@ function identity(request: TaskEventRequest) {
     : request.implementationInput ? `, decision ${request.implementationInput}` : '';
   const action = `${spec.label} (Round ${request.round}${qualifier})`;
   if (phase === 'started') return { family, phase, action, note: 'started', target: null } as const;
-  let note = '';
+  let note: string;
   if (family === 'analyze') note = `Analysis completed → ${request.artifact}`;
   else if (family === 'plan') note = `Plan completed, awaiting human review → ${request.artifact}`;
   else if (family === 'code' && request.fixFor) note = `Fixed ${request.blockers} blockers, ${request.major} major, ${request.minor} minor issues${request.manualValidation ? `, skipped ${request.manualValidation} manual-validation` : ''} → ${request.artifact}`;

@@ -81,7 +81,6 @@ function grep(args: string[] = []): void {
     }
     if (!optsEnded && a.startsWith('--task=')) {
       process.stderr.write('ai task grep: --task=... is not supported; use --task <ref> or -t <ref>\n'); process.exitCode = 1; return;
-      continue;
     }
     if (!optsEnded && a.startsWith('-') && a !== '-') {
       process.stderr.write(`ai task grep: unknown flag: ${a}\n`);

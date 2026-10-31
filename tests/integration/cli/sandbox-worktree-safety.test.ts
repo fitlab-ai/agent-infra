@@ -986,7 +986,7 @@ test("sandbox rm preserves task short id after inaccessible tool cleanup and ret
   const previousUserProfile = process.env.USERPROFILE;
   let denyCandidateLookup = false;
   let rmAttempts = 0;
-  let registryPath = "";
+  let registryPath: string;
   try {
     process.env.HOME = tmpDir;
     process.env.USERPROFILE = tmpDir;

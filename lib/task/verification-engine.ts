@@ -857,7 +857,7 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
     return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
   }
 
-  let localHead = "";
+  let localHead: string;
   try {
     localHead = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   } catch {

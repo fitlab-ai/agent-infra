@@ -279,7 +279,7 @@ if (args[0] === "api" && args.some((arg) => /\/issues\/\d+\/comments\?per_page=1
   const issueNumber = match ? match[1] : "";
   const issueCommentsNumber = process.env.GH_FAKE_ISSUE_NUMBER || "";
   const prCommentsNumber = process.env.GH_FAKE_PR_NUMBER || "";
-  let comments = null;
+  let comments;
 
   if (issueNumber && issueNumber === issueCommentsNumber) {
     comments = readJson("GH_FAKE_COMMENTS_PATH");

@@ -643,7 +643,6 @@ export function syncGpgKeys(
 
   if (!cached && !resolvedSigningKey) {
     signingKey = getGitSigningKey({ repoPath, home, execFn });
-    resolvedSigningKey = true;
   }
 
   if (!cached) {

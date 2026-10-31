@@ -13,7 +13,7 @@ function normalizeResources(objects: CapturedObject[]): NormalizedRecord[] {
   for (const object of objects) {
     if (object.role !== 'resource') continue;
     const identity = object.resourceIdentity ?? object.sourceIdentity;
-    let data: JsonValue = { availability: 'unknown' };
+    let data: JsonValue;
     try { data = JSON.parse(object.content ?? '{}') as JsonValue; } catch { data = { availability: 'unavailable', reason: 'invalid resource JSON' }; }
     const binding = typeof data === 'object' && data !== null && !Array.isArray(data) && typeof data.body === 'string'
       ? data.body.match(TASK_ID_RE)?.[0]

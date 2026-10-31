@@ -427,7 +427,7 @@ function publishExecutionResult(
     stdout: normalized.stdout, stderr: normalized.stderr, error: null
   };
   if (sandboxControlEncodedJsonBytes(terminal) > SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
-    let payload: ReturnType<typeof createSandboxControlPayload> | null = null;
+    let payload: ReturnType<typeof createSandboxControlPayload> | null;
     try {
       payload = createSandboxControlPayload(manifest, request.id, normalized);
       const usage = sandboxControlGenerationUsage(manifest);
@@ -647,7 +647,6 @@ async function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: (
         if (!resultEvidence || !request || payloadInvalid) continue;
         if (request.family === 'task-create' && resultEvidence.exitCode === 0 && payload === null) {
           writeSandboxControlResponse(manifest, genericRecoveryResponse(request, resultEvidence.exitCode, null));
-          terminalReconciled = true;
           terminal = true;
         } else {
           writeSandboxControlResponse(manifest, unknown(entry.name));

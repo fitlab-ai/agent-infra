@@ -621,7 +621,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   if (hot.length > 1 && !transferInProgress) return failed(request, { code: 'LIFECYCLE_IDENTITY_CONFLICT', message: `task ${taskId} exists in multiple hot states` }, { taskId });
   let sourceState: SourceState;
   let sourcePath: string;
-  let restoredFiles = 0;
+  let restoredFiles: number;
   if (request.intent === 'restore' && hot.length === 0) {
     const validation = validateRestoreStaging(request, repoRoot, taskId);
     if ('code' in validation) return failed(request, validation, { taskId });

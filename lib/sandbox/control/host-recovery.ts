@@ -191,9 +191,8 @@ function verifiedResponse(manifest: SandboxControlManifest, requestId: string, r
   const evidencePath = path.join(manifest.processingDir, requestId, 'result.json');
   const published = publishedEvidence(records, manifest);
   if (!published) return unknown(requestId);
-  let evidence = null;
   if (fs.existsSync(evidencePath)) {
-    evidence = readSandboxControlResultEvidence(evidencePath);
+    const evidence = readSandboxControlResultEvidence(evidencePath);
     if (evidence.id !== requestId || evidence.generation !== manifest.generation
       || evidence.exitCode !== published.exitCode || evidence.stdoutBytes !== published.outputBytes
       || evidence.stderrBytes !== published.errorBytes || evidence.stdoutSha256 !== published.outputDigest
@@ -246,9 +245,8 @@ export function recoverSandboxControlFromHost(requestId: string, params: Readonl
 }>): SandboxControlResponse {
   if (!REQUEST_ID.test(requestId)) throw new Error('SANDBOX_CONTROL_REQUEST_INVALID');
   const deadline = Date.now() + (params.timeoutMs ?? 30_000);
-  let candidates: Array<{ manifest: SandboxControlManifest; records: AuditRecord[] }> = [];
   while (Date.now() < deadline) {
-    candidates = [];
+    const candidates: Array<{ manifest: SandboxControlManifest; records: AuditRecord[] }> = [];
     for (const manifest of managedManifestCandidates(params)) {
       if (manifest.project !== (params.project ?? path.basename(path.resolve(params.managedRoot))) || !manifest.generation) {
         throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');

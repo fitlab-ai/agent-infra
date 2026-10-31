@@ -1283,7 +1283,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const startFn = deps?.start ?? startSandboxContainer;
   const warnings: string[] = [];
   const container = params.row?.name ?? containerName(params.config, params.branch);
-  let failure: Error | null = null;
+  let failure: Error | null;
   try {
     if (deps?.ensureControlBroker) {
       await deps.ensureControlBroker();

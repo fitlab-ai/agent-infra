@@ -115,10 +115,7 @@ async function resolveMaterializedReviewedHeadRelation(input: {
 
   let evidenceRoot: string | null = null;
   let phase: "prepare" | "fetch" | "resolve" = "prepare";
-  let result: ReviewedHeadRelation = blocked(
-    "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE",
-    "Unable to prepare isolated PR Git evidence"
-  );
+  let result: ReviewedHeadRelation;
   try {
     evidenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-pr-evidence-"));
     execFileSync("git", ["init", "--bare", "-q", evidenceRoot], {

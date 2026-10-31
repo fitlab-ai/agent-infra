@@ -287,7 +287,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     };
   }
 
-  let before: LedgerRow | null = null;
+  let before: LedgerRow | null;
   let after: LedgerRow;
   if (intent.kind === 'finding-upsert') {
     const identity = parseArtifactName(intent.reviewArtifact);
