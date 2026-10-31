@@ -61,15 +61,6 @@ function normalizeVerdict(raw: unknown): ReviewVerdict | '' {
   return '';
 }
 
-function extractSection(content: string, names: string[]): string {
-  const nameSet = new Set(names);
-  const scanned = scanVisibleMarkdown(content);
-  const heading = scanned.headings.find((item) => item.level === 2 && nameSet.has(item.text));
-  if (!heading) return '';
-  const next = scanned.headings.find((item) => item.start > heading.start && item.level <= 2);
-  return content.slice(heading.end, next?.start ?? content.length);
-}
-
 function summaryBounds(content: string): { start: number; end: number } | null {
   const scanned = scanVisibleMarkdown(content);
   const summaries = scanned.headings.filter((heading) => heading.level === 2 && SUMMARY_HEADINGS.has(heading.text));
@@ -251,7 +242,6 @@ function parseVerdict(reviewPath: string): PathVerdictResult {
 export {
   equalCounts,
   escapeRegExp,
-  extractSection,
   finalizeReviewSummaryContent,
   normalizeVerdict,
   parseReviewSummary,

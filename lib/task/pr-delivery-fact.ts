@@ -1,5 +1,5 @@
 import type { ResourceIdentity } from '../platform/resource-identity.ts';
-import { parseResourceIdentity, serializeResourceIdentity } from '../platform/resource-identity.ts';
+import { parseResourceIdentity } from '../platform/resource-identity.ts';
 
 const PR_DELIVERY_FACT_KEY = 'pr_delivery_fact';
 
@@ -18,7 +18,6 @@ type CurrentPrDeliveryIdentityInput = {
   head: { repository: string; ref: string; sha: string };
   base: { repository: string; ref: string; sha: string };
 };
-type PrDeliveryIdentityInput = CurrentPrDeliveryIdentityInput;
 
 type PrDeliveryBindingSource = 'created' | 'reused' | 'explicit-bind' | 'external-unique' | 'external-explicit';
 type PrDeliveryProvenance = 'create-post' | 'reuse' | 'explicit-bind' | 'external-unique' | 'external-explicit';
@@ -177,5 +176,5 @@ function buildBoundFact(input: {
   }, provenance: { establishedBy: provenanceForSource(input.source) } });
 }
 function factFrontmatterMutation(fact: PrDeliveryFact): { set: { [PR_DELIVERY_FACT_KEY]: string } } { return { set: { [PR_DELIVERY_FACT_KEY]: encodePrDeliveryFact(fact) } }; }
-export { PR_DELIVERY_FACT_KEY, buildBoundFact, buildSkippedFact, buildUnboundFact, decodePrDeliveryFact, encodePrDeliveryFact, factFrontmatterMutation, readPrDeliveryFact, serializeResourceIdentity };
-export type { CreationOutcome, PrDeliveryBindingSource, PrDeliveryFact, PrDeliveryFactError, PrDeliveryFactReadResult, PrDeliveryIdentity, PrDeliveryIdentityInput, PrDeliveryProvenance };
+export { PR_DELIVERY_FACT_KEY, buildBoundFact, buildSkippedFact, buildUnboundFact, decodePrDeliveryFact, encodePrDeliveryFact, factFrontmatterMutation, readPrDeliveryFact };
+export type { CreationOutcome, PrDeliveryBindingSource, PrDeliveryFact, PrDeliveryFactError, PrDeliveryFactReadResult, PrDeliveryIdentity, PrDeliveryProvenance };

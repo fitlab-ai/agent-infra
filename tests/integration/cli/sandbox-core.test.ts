@@ -161,26 +161,6 @@ async function quiesceSandboxControlRootForCleanup(root: string): Promise<void> 
   }
 }
 
-function withInternalCliOnPath<T>(binDir: string, action: () => T): T {
-  writeNodeCommandShim(path.join(binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
-  const previousEnv = process.env;
-  const hostDirectEnv = { ...process.env };
-  delete hostDirectEnv.AGENT_INFRA_TASK_ID;
-  for (const key of Object.keys(hostDirectEnv)) {
-    if (key.startsWith("AGENT_INFRA_CONTROL_") || key === "AGENT_INFRA_RUNTIME_DIR") delete hostDirectEnv[key];
-  }
-  process.env = hostDirectEnv;
-  const originalPath = process.env.PATH;
-  process.env.PATH = envWithPrependedPath(process.env, binDir).PATH;
-  try {
-    return action();
-  } finally {
-    if (originalPath === undefined) delete process.env.PATH;
-    else process.env.PATH = originalPath;
-    process.env = previousEnv;
-  }
-}
-
 test("agent-infra sandbox help is wired into the main CLI", () => {
   const output = execFileSync(process.execPath, cliArgs("sandbox", "--help"), {
     encoding: "utf8"
@@ -1253,7 +1233,7 @@ test("shell config helpers compose branch dirs under shellConfigBase", async () 
 });
 
 test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
-  const { containerListFormat } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
+  const { containerListFormat } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
 
   assert.equal(
     containerListFormat(),
@@ -1378,104 +1358,6 @@ test("sandbox list-running sortAndIndexSandboxRows assigns 1-based index to runn
   for (const r of nonRunning) {
     assert.equal(r.index, null);
   }
-});
-
-test("sandbox list-running isTaskShortRef matches bare numeric only", async () => {
-  const { isTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-
-  assert.equal(isTaskShortRef("#0"), false);
-  assert.equal(isTaskShortRef("#1"), false);
-  assert.equal(isTaskShortRef("#10"), false);
-  assert.equal(isTaskShortRef("0"), true);
-  assert.equal(isTaskShortRef("1"), true);
-  assert.equal(isTaskShortRef("11"), true);
-  assert.equal(isTaskShortRef("#abc"), false);
-  assert.equal(isTaskShortRef("#1a"), false);
-  assert.equal(isTaskShortRef("#1.5"), false);
-  assert.equal(isTaskShortRef("#-1"), false);
-  assert.equal(isTaskShortRef("#"), false);
-  assert.equal(isTaskShortRef("1.5"), false);
-  assert.equal(isTaskShortRef("main"), false);
-  assert.equal(isTaskShortRef("TASK-20260609-084122"), false);
-  assert.equal(isTaskShortRef(""), false);
-});
-
-test("sandbox list-running resolveTaskShortRef hits registry and returns task.md branch", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const tmp = createTempDir("rtsr-hit-");
-  execFileSync("git", ["init", "-q"], { cwd: tmp });
-  fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
-  fs.copyFileSync(
-    path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
-    path.join(tmp, ".agents", "scripts", "task-short-id.js")
-  );
-  fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
-  const taskId = "TASK-20250301-000001";
-  const active = path.join(taskWorkspaceRoot(tmp),  "active");
-  fs.mkdirSync(path.join(active, taskId), { recursive: true });
-  fs.writeFileSync(
-    path.join(active, taskId, "task.md"),
-    `---\nid: ${taskId}\nbranch: registry-branch\n---\n`
-  );
-  // Seed registry so resolve('#1') hits.
-  fs.writeFileSync(
-    path.join(active, ".short-ids.json"),
-    JSON.stringify({ version: 1, ids: { "1": taskId } })
-  );
-  // Both '#1' and bare '1' resolve to the registry-mapped branch (Round 4).
-  withInternalCliOnPath(path.join(tmp, "bin"), () => {
-    assert.equal(resolveTaskShortRef("1", { repoRoot: tmp }), "registry-branch");
-  });
-});
-
-test("sandbox list-running resolveTaskShortRef throws when registry hits but branch metadata missing (M-1)", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const tmp = createTempDir("rtsr-corrupt-");
-  execFileSync("git", ["init", "-q"], { cwd: tmp });
-  fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
-  fs.copyFileSync(
-    path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
-    path.join(tmp, ".agents", "scripts", "task-short-id.js")
-  );
-  fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
-  const taskId = "TASK-20250301-000002";
-  const active = path.join(taskWorkspaceRoot(tmp),  "active");
-  fs.mkdirSync(path.join(active, taskId), { recursive: true });
-  // task.md exists but has no branch field
-  fs.writeFileSync(
-    path.join(active, taskId, "task.md"),
-    `---\nid: ${taskId}\n---\n# no branch field\n`
-  );
-  fs.writeFileSync(
-    path.join(active, ".short-ids.json"),
-    JSON.stringify({ version: 1, ids: { "1": taskId } })
-  );
-  // Registry hit but corrupt → MUST throw.
-  withInternalCliOnPath(path.join(tmp, "bin"), () => {
-    assert.throws(
-      () => resolveTaskShortRef("1", { repoRoot: tmp }),
-      /no branch field/
-    );
-  });
-});
-
-test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4: no ls-index fallback)", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const tmp = createTempDir("rtsr-miss-");
-  execFileSync("git", ["init", "-q"], { cwd: tmp });
-  fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
-  fs.copyFileSync(
-    path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
-    path.join(tmp, ".agents", "scripts", "task-short-id.js")
-  );
-  fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
-  // Empty registry; no active tasks → resolve('#1') misses.
-  fs.mkdirSync(path.join(taskWorkspaceRoot(tmp),  "active"), { recursive: true });
-  // The legacy ls-index fallback has been removed. miss → throw, not run[0].branch.
-  assert.throws(
-    () => resolveTaskShortRef("1", { repoRoot: tmp }),
-    /not in the active task registry/
-  );
 });
 
 test("sandbox ls parseLabels parses docker label CSV", async () => {

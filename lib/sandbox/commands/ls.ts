@@ -13,7 +13,7 @@ import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { fetchSandboxRows } from './list-running.ts';
 import { readSandboxControlStatusForRow } from './control-status.ts';
 
-export { containerListFormat, parseLabels } from './list-running.ts';
+export { parseLabels } from './list-running.ts';
 
 const USAGE = `Usage: ai sandbox ls
 

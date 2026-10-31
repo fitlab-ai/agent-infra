@@ -23,35 +23,6 @@ import { resolveProjectTaskWorkspaceRoot } from './workspace-root.ts';
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
 ] as const;
-const lifecycleFailureCatalog = [
-  'LIFECYCLE_DIRECTORY_TRANSFER_FAILED',
-  'LIFECYCLE_DIRECTORY_RENAME_FAILED',
-  'LIFECYCLE_DOCUMENT_INVALID',
-  'LIFECYCLE_FINAL_STATE_INVALID',
-  'LIFECYCLE_IDENTITY_CONFLICT',
-  'LIFECYCLE_IDENTITY_INVALID',
-  'LIFECYCLE_INTENT_CONFLICT',
-  'LIFECYCLE_JOURNAL_CLEANUP_FAILED',
-  'LIFECYCLE_JOURNAL_INVALID',
-  'LIFECYCLE_JOURNAL_WRITE_FAILED',
-  'LIFECYCLE_LOG_MISSING',
-  'LIFECYCLE_METADATA_FAILED',
-  'LIFECYCLE_PAYLOAD_INVALID',
-  'LIFECYCLE_SHORT_ID_FAILED',
-  'LIFECYCLE_SHORT_ID_PRECONDITION',
-  'LIFECYCLE_RUNTIME_MOVE_UNSAFE',
-  'LIFECYCLE_SOURCE_INVALID',
-  'LIFECYCLE_STAGING_IDENTITY_INVALID',
-  'LIFECYCLE_STAGING_INVALID',
-  'LIFECYCLE_TARGET_CONFLICT',
-  'LIFECYCLE_TASK_NOT_FOUND',
-  'SHORT_ID_CAPACITY_EXCEEDED'
-] as const;
-const lifecycleProducerCatalog = lifecycleFailureCatalog.map((code) => ({
-  producerId: 'lifecycle.apply' as const,
-  guardId: 'G-03' as const,
-  code
-}));
 type TaskLifecycleIntent = (typeof lifecycleIntentCatalog)[number];
 type TaskLifecycleRequest =
   | { taskRef: string; intent: 'block'; agent: string; reason: string; unblockCondition: string; dryRun?: boolean }
@@ -930,7 +901,7 @@ function applyTaskLifecycleWithWarnings(request: TaskLifecycleRequest, options: 
 }
 
 export {
-  lifecycleIntentCatalog, lifecycleFailureCatalog, lifecycleProducerCatalog,
+  lifecycleIntentCatalog,
   applyTaskLifecycleWithWarnings as applyTaskLifecycle, previewTaskCompletion
 };
 export type {

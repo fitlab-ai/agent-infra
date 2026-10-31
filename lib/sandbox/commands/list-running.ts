@@ -1,9 +1,5 @@
-import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import { runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { parseSandboxWorkspaceIdentity } from '../workspace-identity.ts';
-import { resolveProjectTaskWorkspaceRoot } from '../../task/workspace-root.ts';
 
 export type SandboxRow = {
   name: string;
@@ -103,90 +99,6 @@ export function fetchSandboxRows(
     containerListFormat()
   ]);
   return sortAndIndexSandboxRows(parseSandboxRows(raw, branchKey, workspaceKeys));
-}
-
-/**
- * Returns true iff `arg` is a syntactically valid task short reference.
- * Accepts bare numeric ('11') task short ids.
- * Zero IO. Callers MUST use this as the gate before constructing any context
- * for resolveTaskShortRef — that way non-matching arguments (e.g. '#abc',
- * '#1.5', '#') never trigger sandbox list IO.
- */
-export function isTaskShortRef(arg: string): boolean {
-  return /^\d+$/.test(arg);
-}
-
-type RegistryLookup =
-  | { status: 'miss' }
-  | { status: 'hit'; branch: string };
-
-/**
- * Try to resolve a short ref against the global task-short-id registry.
- *
- * Tri-state semantics (review-code Round 1 M-1 fix):
- *   - 'miss'     → script reports no entry (or registry script missing). Caller may fall back.
- *   - 'hit'      → registry resolved to a task id and branch is found in task.md.
- *   - throws     → registry hit but task.md is missing or branch metadata is unparseable;
- *                   surfacing this error is critical — never silently fall back to running index.
- */
-function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
-  const scriptPath = path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js');
-  if (!fs.existsSync(scriptPath)) return { status: 'miss' };
-  // Forward the bare-numeric short ref to the registry script for ID resolution.
-  const result = spawnSync('node', [scriptPath, 'resolve', arg], { encoding: 'utf8', cwd: repoRoot });
-  if (result.status !== 0) return { status: 'miss' };
-  const taskId = (result.stdout || '').trim();
-  if (!/^TASK-\d{8}-\d{6}$/.test(taskId)) {
-    throw new Error(
-      `Registry returned malformed task id for '${arg}': ${JSON.stringify(taskId)}`
-    );
-  }
-  for (const sub of ['active', 'completed', 'blocked', 'archive']) {
-    const taskMdPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), sub, taskId, 'task.md');
-    if (!fs.existsSync(taskMdPath)) continue;
-    const content = fs.readFileSync(taskMdPath, 'utf8');
-    const fm = content.match(/^branch:\s*(.+)$/m);
-    if (fm?.[1]?.trim()) {
-      return { status: 'hit', branch: fm[1].trim().replace(/^(["'])(.*)\1$/, '$2') };
-    }
-    const ctx = content.match(/^- \*\*(?:分支|Branch)\*\*：[ \t]*`?([^`\n]+)`?$/m);
-    if (ctx?.[1]?.trim()) {
-      return { status: 'hit', branch: ctx[1].trim().replace(/^(["'])(.*)\1$/, '$2') };
-    }
-    throw new Error(
-      `Short ref '${arg}' resolved to task ${taskId} but task.md has no branch field`
-    );
-  }
-  throw new Error(
-    `Short ref '${arg}' resolved to task ${taskId} but task.md was not found under any workspace dir`
-  );
-}
-
-/**
-/**
- * Resolve a bare task short reference to a branch name for the
- * sandbox entrypoint.
- *
- * Resolution: registry-only. Look up the short id in the global task-short-id
- * registry under repoRoot; if hit, read the branch from the matching task.md.
- * On miss (registry empty or short id absent), throw with an actionable
- * message instead of falling back to a container's row position in
- * 'ai sandbox ls' output — that fallback would make the same syntax mean
- * different things depending on `docker ps` state.
- *
- * Precondition: callers MUST gate on isTaskShortRef(arg) === true.
- */
-export function resolveTaskShortRef(
-  arg: string,
-  ctx: { repoRoot: string }
-): string {
-  const lookup = tryResolveFromRegistry(arg, ctx.repoRoot);
-  if (lookup.status === 'hit') return lookup.branch;
-  throw new Error(
-    `short ref '${arg}' is not in the active task registry. ` +
-      `bare N resolves only via the registry (not by row position in 'ai sandbox ls'); ` +
-      `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
-  );
 }
 
 /**

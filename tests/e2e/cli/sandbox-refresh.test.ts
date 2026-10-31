@@ -98,7 +98,7 @@ function validBlob(expiresAt: number = Date.now() + 3_600_000) {
 }
 
 test("probeClaudeStatus maps claude status process results", async () => {
-  const { probeClaudeStatus } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const { probeClaudeStatus } = await loadFreshEsm<RefreshModule>("lib/agent-clients/adapters/claude-code-refresh.js");
 
   assert.deepEqual(probeClaudeStatus((cmd, args, options = {}) => {
     assert.equal(cmd, "claude");

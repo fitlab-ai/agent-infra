@@ -527,8 +527,7 @@ function mutationKeys(value: FinalizationMutation): string[] {
 function validateCapabilityMutation(
   current: TaskFinalizationReceipt,
   capability: FinalizationCapability,
-  mutation: FinalizationMutation,
-  consumed: Set<string>
+  mutation: FinalizationMutation
 ): void {
   if (capability.receiptId !== current.receiptId) throw capabilityError(
     'FINALIZATION_SCOPE_INVALID',
@@ -601,8 +600,7 @@ function mutateFinalizationReceipt(
   repoRoot: string,
   receipt: TaskFinalizationReceipt,
   capability: FinalizationCapability,
-  mutation: FinalizationMutation,
-  consumed: Set<string>
+  mutation: FinalizationMutation
 ): TaskFinalizationReceipt {
   if (!hasFinalizationTaskDocument(repoRoot, receipt.taskId)) {
     throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active task or a completed task');
@@ -611,10 +609,8 @@ function mutateFinalizationReceipt(
   if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
     throw capabilityError('FINALIZATION_CAPABILITY_STALE', 'finalization receipt revision is stale');
   }
-  validateCapabilityMutation(current, capability, mutation, consumed);
-  const next = updateReceipt(repoRoot, current, mutationPatch(current, mutation));
-  consumed.add(capability.nonce);
-  return next;
+  validateCapabilityMutation(current, capability, mutation);
+  return updateReceipt(repoRoot, current, mutationPatch(current, mutation));
 }
 
 function applyFinalizationReceiptMutation(
@@ -626,14 +622,14 @@ function applyFinalizationReceiptMutation(
   if (!hasFinalizationTaskDocument(repoRoot, receipt.taskId)) {
     throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active task or a completed task');
   }
-  return mutateFinalizationReceipt(repoRoot, receipt, capability, mutation, new Set<string>());
+  return mutateFinalizationReceipt(repoRoot, receipt, capability, mutation);
 }
 
 function warningKey(warning: Pick<FinalizationWarning, 'step' | 'code' | 'target'>): string {
   return `${warning.step}\0${warning.code}\0${warning.target}`;
 }
 
-function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: TaskFinalizationReceipt, consumed: Set<string>): TaskFinalizationReceipt {
+function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: TaskFinalizationReceipt): TaskFinalizationReceipt {
   if (receipt.warningProjection === 'done') return receipt;
   const warnings = [...new Map(receipt.warnings.map((warning) => [warningKey(warning), warning])).values()];
   for (const warning of warnings) {
@@ -649,20 +645,20 @@ function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: T
           retryable: true
         };
         const capability = issueCapability(receipt, 'warning-projection');
-        return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
+        return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail });
       }
     } catch (error) {
       const detail = errorOf(error, 'FINALIZATION_WARNING_PROJECTION_FAILED', true);
       try {
         const capability = issueCapability(receipt, 'warning-projection');
-        return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
+        return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail });
       }
       catch { return receipt; }
     }
   }
   try {
     const capability = issueCapability(receipt, 'warning-projection');
-    return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'succeeded' }, consumed);
+    return mutateFinalizationReceipt(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'succeeded' });
   }
   catch { return receipt; }
 }
@@ -675,9 +671,8 @@ async function syncPendingTaskComment(input: {
   projection?: TaskCompletionProjection;
   refreshProjection?: () => TaskCompletionProjection | undefined;
   commentSync: typeof syncPlatformComment;
-  consumedCapabilities: Set<string>;
 }): Promise<TaskCommentSyncOutcome> {
-  const { repoRoot, taskId, agent, commentSync, consumedCapabilities } = input;
+  const { repoRoot, taskId, agent, commentSync } = input;
   let receipt = input.receipt;
   if (receipt.taskComment !== 'pending') {
     return {
@@ -703,8 +698,8 @@ async function syncPendingTaskComment(input: {
       const capability = issueCapability(receipt, 'task-comment');
       receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
         scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
-      }, consumedCapabilities);
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      });
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
       if (!skipped && receipt.taskComment === 'pending') {
         const retry = await syncPendingTaskComment({
           ...input,
@@ -719,8 +714,8 @@ async function syncPendingTaskComment(input: {
     const capability = issueCapability(receipt, 'task-comment');
     receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
       scope: 'task-comment', operation: 'failed', error: detail
-    }, consumedCapabilities);
-    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    });
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
     return { receipt, step, changed: result.changed, error: detail };
   } catch (error) {
     const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
@@ -728,8 +723,8 @@ async function syncPendingTaskComment(input: {
       const capability = issueCapability(receipt, 'task-comment');
       receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
         scope: 'task-comment', operation: 'failed', error: detail
-      }, consumedCapabilities);
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      });
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
     } catch { /* preserve the primary error */ }
     return { receipt, step: { status: 'blocked', changed: false, error: detail }, changed: false, error: detail };
   }
@@ -889,7 +884,6 @@ async function prepareTaskFinalizationCore(
   const commentSync = options.commentSync ?? syncPlatformComment;
   const issueSync = options.issueSync ?? syncPlatformIssue;
   const issueInspect = options.issueInspect ?? inspectPlatformIssue;
-  const consumedCapabilities = new Set<string>();
   let receipt: TaskFinalizationReceipt;
   try {
     const file = receiptPath(repoRoot, taskId);
@@ -1039,7 +1033,7 @@ async function prepareTaskFinalizationCore(
       });
       const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
       receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
       if (!detail.retryable) return failed(taskId, detail, {
         changed, backfill: backfillResult, completedSteps: completedSteps(receipt),
         pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
@@ -1061,7 +1055,7 @@ async function prepareTaskFinalizationCore(
     if (receipt.lifecycle === 'done') {
       const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
       receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
       return terminalResult(taskId, receipt, {
         backfill: { status: 'blocked', changed: false, error: detail }
       }, changed, detail);
@@ -1111,7 +1105,7 @@ async function prepareTaskFinalizationCore(
   }
 
   let taskComment: TaskFinalizationStep | null = null;
-  receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+  receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
   const currentProjection = (): TaskCompletionProjection | undefined => projection
     ? previewTaskCompletion(taskId, request.agent, {
       repoRoot,
@@ -1129,13 +1123,13 @@ async function prepareTaskFinalizationCore(
   receipt = summary.receipt;
   changed = changed || summary.changed;
   if (summary.error) {
-    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
     return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed, summary.error);
   }
-  receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+  receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
   if (receipt.taskComment === 'pending') {
     const finalComment = await syncPendingTaskComment({
-      repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities
+      repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync
     });
     receipt = finalComment.receipt;
     taskComment = finalComment.step;

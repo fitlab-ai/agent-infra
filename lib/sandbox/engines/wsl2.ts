@@ -70,5 +70,3 @@ export const wsl2Adapter: SandboxAdapter = {
     );
   }
 };
-
-export default wsl2Adapter;

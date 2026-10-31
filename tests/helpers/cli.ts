@@ -9,10 +9,6 @@ function cliArgs(...args: string[]): string[] {
   return [CLI_PATH, ...args];
 }
 
-function internalCliArgs(...args: string[]): string[] {
-  return [INTERNAL_CLI_PATH, ...args];
-}
-
 function pathWithPrependedBin(binDir: string, envPath: string = process.env.PATH || ""): string {
   return [binDir, envPath].filter(Boolean).join(path.delimiter);
 }
@@ -44,7 +40,6 @@ export {
   CLI_PATH,
   INTERNAL_CLI_PATH,
   cliArgs,
-  internalCliArgs,
   envWithPrependedPath,
   pathWithPrependedBin,
   sandboxControlSafeEnv

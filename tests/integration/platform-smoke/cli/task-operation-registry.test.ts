@@ -17,7 +17,6 @@ import {
 import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../../lib/sandbox/environment.ts';
 import {
   INTERNAL_HANDLER_ROUTE_SELECTORS,
-  INTERNAL_CLI_ROUTE_SELECTORS,
   isInternalHandlerRoute,
   PUBLIC_CLI_ROUTE_SELECTORS
 } from '../../../../lib/internal/cli-route-inventory.ts';
@@ -127,11 +126,11 @@ test('public descriptor selectors match the actual command dispatchers', () => {
 
 test('internal descriptor selectors match the shared dispatcher inventory', () => {
   assert.deepEqual(
-    Object.fromEntries(Object.keys(INTERNAL_CLI_ROUTE_SELECTORS).map((route) => [
+    Object.fromEntries(Object.keys(INTERNAL_HANDLER_ROUTE_SELECTORS).map((route) => [
       route,
       commands(INTERNAL_OPERATION_DESCRIPTORS, route).map((item) => item.selector).sort()
     ])),
-    Object.fromEntries(Object.entries(INTERNAL_CLI_ROUTE_SELECTORS).map(([route, selectors]) => [route, [...selectors].sort()]))
+    Object.fromEntries(Object.entries(INTERNAL_HANDLER_ROUTE_SELECTORS).map(([route, selectors]) => [route, [...selectors].sort()]))
   );
 });
 
@@ -141,7 +140,6 @@ test('actual handler branches and registry descriptors have bidirectional covera
   const descriptors = routeKeysFromDescriptors();
   assert.deepEqual([...actual].sort(), [...inventory].sort());
   assert.deepEqual([...actual].sort(), [...descriptors].sort());
-  assert.strictEqual(INTERNAL_CLI_ROUTE_SELECTORS, INTERNAL_HANDLER_ROUTE_SELECTORS);
   assert.equal(isInternalHandlerRoute('git-workflow', ['unregistered']), false);
 
   const removed = [...actual][0]!;

@@ -19,13 +19,11 @@ import {
   unsupportedProviderOperation
 } from './provider-bridge.ts';
 
-type CheckBucket = 'pass' | 'fail' | 'pending' | 'cancel';
 type CheckState = 'passed' | 'failed' | 'pending' | 'timed-out' | 'cancelled' | 'no-required';
 type CheckSnapshot = PlatformCheckSnapshot;
 type ChecksSnapshot = { state: Exclude<CheckState, 'timed-out'>; required: CheckSnapshot[] };
 type ReadinessState = 'ready' | 'conflicting' | 'checks-failed' | 'pending' | 'timed-out' | 'cancelled';
 type ReadinessSnapshot = { state: ReadinessState; headSha: string };
-type RunCandidate = { id: number; name: string; headSha: string; jobId?: number | null };
 type ChecksResult = PlatformResult & {
   pullRequest: PullRequestSnapshot | null;
   checks: { state: CheckState; required: CheckSnapshot[] };
@@ -248,4 +246,4 @@ async function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & 
 }
 
 export { classifyPullRequestReadiness, classifyRequiredChecks, fetchPlatformCheckLogs, inspectRequiredChecks, inspectPullRequestReadiness, resolvePlatformCheckRun, watchPullRequestReadiness };
-export type { CheckBucket, CheckSnapshot, ChecksResult, ChecksSnapshot, CheckState, ReadinessSnapshot, ReadinessState, RunCandidate };
+export type { CheckSnapshot, ChecksResult, ChecksSnapshot, CheckState, ReadinessSnapshot, ReadinessState };

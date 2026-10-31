@@ -32,5 +32,3 @@ export const dockerDesktopAdapter: SandboxAdapter = {
     );
   }
 };
-
-export default dockerDesktopAdapter;

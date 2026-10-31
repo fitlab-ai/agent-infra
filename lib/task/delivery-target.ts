@@ -16,10 +16,6 @@ export type DeliveryTargetResult =
   | { ok: true; value: DeliveryTarget }
   | { ok: false; code: string; message: string };
 
-export type DiffBaseResult =
-  | { ok: true; diffBase: string }
-  | { ok: false; code: string; message: string };
-
 const REMOTE_RE = /^(?!-)(?!.*\.\.)(?!.*[~^:?*\\\s])[A-Za-z0-9._/-]+$/;
 const REF_RE = /^(?!-)(?!.*\.\.)(?!.*(?:^|\/)\.)(?!.*[~^:?*\\\s])[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
 

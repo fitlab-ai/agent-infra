@@ -11,12 +11,6 @@ type InLabelPlan = {
   error: InLabelValidationError | null;
 };
 
-type InLabelResource = {
-  kind: 'issue' | 'pull-request';
-  number: number;
-  labels: string[];
-};
-
 type InLabelValidationError = {
   code: string;
   message: string;
@@ -37,7 +31,7 @@ type LabelDeltaResult = {
 };
 
 type LabelSyncClient = {
-  json<T = unknown>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
+  json(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
 };
 
 function inLabels(labels: readonly string[]): string[] {
@@ -161,14 +155,14 @@ function syncLabelDelta(
     return { status: 'failed', changed: false, error };
   };
   for (const label of delta.remove) {
-    const removed = client.json<unknown>([
+    const removed = client.json([
       'api', `repos/${repository}/issues/${number}/labels/${encodeURIComponent(label)}`, '-X', 'DELETE'
     ], { cwd, method: 'DELETE' });
     if (!removed.ok) return failure(removed.error);
     changed = true;
   }
   for (const label of delta.add) {
-    const added = client.json<unknown>([
+    const added = client.json([
       'api', `repos/${repository}/issues/${number}/labels`, '-X', 'POST', '--input', '-'
     ], { cwd, method: 'POST', input: JSON.stringify({ labels: [label] }) });
     if (!added.ok) return failure(added.error);
@@ -202,4 +196,4 @@ export {
   validateInLabelMapping,
   validateRepositoryLabelPayload
 };
-export type { InLabelPlan, InLabelResource, InLabelValidationError, LabelDelta, LabelDeltaResult, LabelPrefix };
+export type { InLabelPlan, InLabelValidationError, LabelDelta, LabelDeltaResult, LabelPrefix };

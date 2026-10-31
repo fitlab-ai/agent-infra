@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { loadPlatformProvider } from './provider-loader.ts';
-import { defaultGitRemote, parseGitHubRemote } from './github-provider.ts';
+import { parseGitHubRemote } from './github-provider.ts';
 import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
@@ -9,13 +9,10 @@ import type { PlatformContextSnapshot } from './provider-contract.ts';
 import type { PlatformError } from './types.ts';
 import type { LoadedRuntimeProvider } from './provider-validation.ts';
 
-type PlatformClientResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; retryable: boolean } };
 type PlatformClient = {
   version(options?: { cwd?: string }): unknown;
-  json<T = unknown>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
-  text?<T = string>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
+  json<_T = unknown>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
+  text?<_T = string>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
 };
 
 type ContextOptions = {
@@ -130,5 +127,5 @@ async function resolvePlatformContext(options: ContextOptions = {}): Promise<Pla
   return resolved.ok ? resolved.value.context : resolved.context;
 }
 
-export { defaultGitRemote, parseGitHubRemote, resolvePlatformContext, resolvePlatformProviderContext };
-export type { ContextOptions, LoadedContext, PlatformClient, PlatformClientResult };
+export { parseGitHubRemote, resolvePlatformContext, resolvePlatformProviderContext };
+export type { ContextOptions, LoadedContext, PlatformClient };

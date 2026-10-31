@@ -11,12 +11,6 @@ import { validateQualificationAudit } from './qualification-audit.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
-const LOCAL_ARTIFACT_REQUIRED_SECTIONS: Readonly<Record<LocalArtifactFamily, readonly string[]>> = {
-  analysis: getArtifactSchema('analysis')!.sections.map((section) => section.headings.zh),
-  plan: getArtifactSchema('plan')!.sections.map((section) => section.headings.zh),
-  code: getArtifactSchema('code')!.sections.map((section) => section.headings.zh)
-};
-
 type LocalArtifactDiagnosticCode =
   | 'LOCAL_ARTIFACT_EMPTY'
   | 'LOCAL_ARTIFACT_MISSING_SECTION'
@@ -198,7 +192,6 @@ function preflightLocalArtifact(
 }
 
 export {
-  LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   finalizeLocalArtifact,
   preflightLocalArtifact,
   prepareLocalArtifact,

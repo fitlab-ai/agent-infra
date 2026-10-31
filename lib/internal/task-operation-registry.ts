@@ -196,11 +196,6 @@ function publicTaskRoutes(): TaskOperationDescriptor[] {
 
 export const INTERNAL_OPERATION_DESCRIPTORS = Object.freeze(internalTaskRoutes());
 export const PUBLIC_OPERATION_DESCRIPTORS = Object.freeze(publicTaskRoutes());
-export const TASK_OPERATION_DESCRIPTORS = Object.freeze([
-  ...INTERNAL_OPERATION_DESCRIPTORS,
-  ...PUBLIC_OPERATION_DESCRIPTORS
-]);
-
 export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
   'task-create', 'task-qualification', 'sandbox-control', 'agent-client',
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',

@@ -681,7 +681,7 @@ function isBinary(fp) {
   return false;
 }
 
-function langSelect(rels, lang, allSet, project) {
+function langSelect(rels, lang, project) {
   const sel = new Map();
 
   for (const r of rels) {
@@ -738,7 +738,7 @@ function entryVariantRels(entry, allSet, platform) {
   return rels;
 }
 
-function ensureRuntimeWorkspace(projectRoot, project) {
+function ensureRuntimeWorkspace(project) {
   if (typeof project !== 'string' || !project || project === '.' || project === '..' || /[\\/\u0000-\u001f\u007f]/u.test(project)) {
     throw new Error('Runtime task workspace requires a valid project key in .agents/.airc.json');
   }
@@ -775,7 +775,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const originalConfigText = fs.readFileSync(cfgPath, 'utf8');
   const cfg = JSON.parse(originalConfigText);
-  ensureRuntimeWorkspace(projectRoot, cfg.project);
+  ensureRuntimeWorkspace(cfg.project);
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
   let templateRoot = templateRootOverride;
   if (!templateRoot) {
@@ -1016,7 +1016,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   function renderedTemplate(entry) {
     const target = norm(renderPathname(entry, project));
     const selected = platformSelect(
-      langSelect(entryVariantRels(entry, allSet, platformType), lang, allSet, project),
+      langSelect(entryVariantRels(entry, allSet, platformType), lang, project),
       platformType,
       project
     );
@@ -1045,7 +1045,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       entryRels = entryVariantRels(entry, allSet, platformType);
     }
     return platformSelect(
-      langSelect(entryRels, lang, allSet, project),
+      langSelect(entryRels, lang, project),
       platformType,
       project
     );
@@ -1267,7 +1267,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       if (!entryRels.length) continue;
     }
 
-    const selected = platformSelect(langSelect(entryRels, lang, allSet, project), platformType, project);
+    const selected = platformSelect(langSelect(entryRels, lang, project), platformType, project);
 
     for (const [tgt, src] of selected) {
       if (expectedTargets) expectedTargets.add(tgt);
@@ -1394,7 +1394,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     );
     if (disabledEjected) continue;
 
-    const selected = platformSelect(langSelect(entryVariantRels(entry, allSet, platformType), lang, allSet, project), platformType, project);
+    const selected = platformSelect(langSelect(entryVariantRels(entry, allSet, platformType), lang, project), platformType, project);
     const target = norm(renderPathname(entry, project));
     const src = selected.get(target);
     if (!src) continue;
@@ -1427,12 +1427,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
         const t = norm(renderPathname(stripLangVariant(r), project));
         return globMatch(entry, t);
       });
-      for (const [t, s] of platformSelect(langSelect(hits, lang, allSet, project), platformType, project)) {
+      for (const [t, s] of platformSelect(langSelect(hits, lang, project), platformType, project)) {
         addMergedTarget(t, s);
       }
     } else {
       const rels = entryVariantRels(entry, allSet, platformType);
-      const selected = platformSelect(langSelect(rels, lang, allSet, project), platformType, project);
+      const selected = platformSelect(langSelect(rels, lang, project), platformType, project);
       for (const [t, s] of selected) {
         addMergedTarget(t, s);
       }

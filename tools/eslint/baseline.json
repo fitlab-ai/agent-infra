@@ -981,15 +981,6 @@
       "count": 1
     },
     {
-      "file": "lib/owned-path.ts",
-      "ruleId": "complexity",
-      "stableId": "c9777411540f2117bdabd4314965686e1a56abc2f77e1072dfa680c9dff037ed",
-      "displayName": "inspectOwnedPath",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pull-requests.ts",
       "ruleId": "complexity",
       "stableId": "6849b6ac383f6e2d6b0f9bdb42caeb55164b10902ea3e880f2481b030d509cc3",
@@ -2346,15 +2337,6 @@
       "displayName": "taskWarning",
       "metric": 25,
       "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/task-cleanup.ts",
-      "ruleId": "complexity",
-      "stableId": "7644255f2c45abdd1149516df423bb65fab3a47723dc0ce9700295a441f42123",
-      "displayName": "terminalControlBindingEvidence",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
       "count": 1
     },
     {

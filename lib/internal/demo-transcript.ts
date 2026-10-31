@@ -27,7 +27,6 @@ const DEMO_VISIBLE_COMMANDS = Object.freeze({
 type TranscriptSuccess = { status: 'ok'; transcript: string; sha256: string };
 type TranscriptFailure = { status: 'failed'; reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE' | 'DEMO_TRANSCRIPT_FAILED'; message: string };
 type TranscriptResult = TranscriptSuccess | TranscriptFailure;
-type TranscriptCollector = (cwd: string) => Promise<TranscriptResult>;
 
 type Cell = string;
 
@@ -416,4 +415,4 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
 }
 
 export { buildDemoPrepareCommand, DEMO_COLUMNS, DEMO_PROJECT_PATH, DEMO_ROWS, DEMO_VISIBLE_COMMANDS, collectDemoTranscript, normalizeVisibleTranscript, sha256Transcript };
-export type { TranscriptCollector, TranscriptFailure, TranscriptResult, TranscriptSuccess };
+export type { TranscriptFailure, TranscriptResult, TranscriptSuccess };

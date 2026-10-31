@@ -2,5 +2,4 @@ import { runClaudeCodeRefresh } from '../../agent-clients/adapters/claude-code-r
 
 const refresh = runClaudeCodeRefresh;
 
-export { probeClaudeStatus, runClaudeCodeRefresh } from '../../agent-clients/adapters/claude-code-refresh.ts';
 export { refresh };

@@ -200,14 +200,6 @@ type GitHubCheckpoint = {
   committedAt: string;
 };
 
-type DeltaOperation = {
-  operation: 'upsert' | 'supersede' | 'tombstone' | 'unavailable';
-  resourceIdentity: string;
-  previousSha256?: string;
-  resourceSha256?: string;
-  reason?: string;
-};
-
 type RecoveryReport = {
   recovered: boolean;
   quarantined: string[];
@@ -238,7 +230,6 @@ export type {
   CaptureObjectRole,
   CheckpointOwner,
   CoverageEvidence,
-  DeltaOperation,
   EndpointQueryMode,
   GitHubCheckpoint,
   ObservationEvidence,

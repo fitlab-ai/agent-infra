@@ -126,7 +126,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
 }
 
-export const redactSecurityOutput = redactCommandError;
 export { redactCommandError };
 
 function extractStderrSafely(error: unknown): string {

@@ -28,24 +28,7 @@ type VerificationCheckResult = {
   dependsOn?: string;
   subchecks?: VerificationCheckResult[];
 };
-type VerificationContext = {
-  skillName: string;
-  taskDir: string;
-  artifactFile?: string;
-  config: Record<string, unknown>;
-};
-type VerificationEngineRequest = {
-  mode: 'gate' | 'checks';
-  skillName: string;
-  taskDir: string;
-  artifactFile?: string;
-  checks: readonly string[];
-  repositoryRoot?: string;
-};
-
 export type {
   VerificationCheckResult,
-  VerificationContext,
-  VerificationEngineRequest,
   VerificationStatus
 };

@@ -374,18 +374,6 @@ function defaultRemovalTarget(manifest: Pick<SandboxControlManifest, 'project' |
   };
 }
 
-export function isDefaultSandboxRemovalJournal(journal: SandboxRemovalJournal): boolean {
-  if (journal.phase !== 'carrier-removed' && journal.phase !== 'completed') return false;
-  const { target } = journal;
-  const expected = defaultRemovalTarget({
-    project: target.project, branch: target.branch,
-    container: path.basename(path.dirname(target.controlRoot)),
-    channelDir: path.join(target.controlRoot, 'channel')
-  });
-  return Object.entries(expected).every(([key, value]) =>
-    JSON.stringify(target[key as keyof SandboxRemovalTargetCommit]) === JSON.stringify(value));
-}
-
 function sameRemovalTarget(left: SandboxRemovalTargetCommit, right: SandboxRemovalTargetCommit): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }

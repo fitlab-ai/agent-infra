@@ -1,5 +1,5 @@
 export { createTempDir, createTaskWorkspaceFixture, isolatedTestHome, taskWorkspaceProject, taskWorkspaceRepoRoot, taskWorkspaceRoot, filePath, exists, read, listFilesRecursive, listSkillNames } from "./helpers/paths.ts";
-export { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, internalCliArgs, pathWithPrependedBin, envWithPrependedPath, sandboxControlSafeEnv } from "./helpers/cli.ts";
+export { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, pathWithPrependedBin, envWithPrependedPath, sandboxControlSafeEnv } from "./helpers/cli.ts";
 export { gitSafeEnv, withGitSafeProcessEnv, initIsolatedGitRepo, listTrackedFiles } from "./helpers/git.ts";
 export { onPlatforms, supportsPosixModeBits, assertModeBits } from "./helpers/platform.ts";
 export { writeSandboxEngineFixture, writeNodeCommandShim, sandboxRow } from "./helpers/sandbox.ts";
@@ -7,4 +7,4 @@ export { langTemplate, renderPlaceholders, buildCommandSyncFiles, escapeRegExp, 
 export { commandSpecs } from "./helpers/command-specs.ts";
 export { loadFreshEsm } from "./helpers/esm.ts";
 export { recordArtifactCompletions } from "./helpers/lifecycle-evidence.ts";
-export type { PlatformSyncModule, SyncTemplatesModule, SyncTemplatesReport } from "./helpers/esm.ts";
+export type { SyncTemplatesModule } from "./helpers/esm.ts";

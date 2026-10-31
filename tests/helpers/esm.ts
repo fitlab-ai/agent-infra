@@ -53,26 +53,6 @@ type SyncTemplatesModule = {
   syncTemplates(projectRoot: string, templateRootOverride?: string): SyncTemplatesReport;
   normalizeAgentClientConfig(input: Record<string, unknown>): Record<string, unknown>;
 };
-type PlatformSyncModule = {
-  getDefaults(): {
-    statusLabels: {
-      inProgress: string;
-      pendingDesignWork: string;
-      waitingForTriage: string;
-    };
-    markers: Record<string, string>;
-    labels: {
-      status: string[];
-      type: string[];
-      priority: string[];
-      area: string[];
-      special: string[];
-    };
-    milestones: Array<Record<string, unknown>>;
-  };
-  check(context: unknown, shared: unknown): unknown;
-};
-
 async function loadFreshEsm<T = Record<string, unknown>>(relativePath: string): Promise<T> {
   const moduleUrl = pathToFileURL(filePath(relativePath));
   moduleUrl.searchParams.set("v", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -84,7 +64,5 @@ export {
 };
 
 export type {
-  PlatformSyncModule,
-  SyncTemplatesModule,
-  SyncTemplatesReport
+  SyncTemplatesModule
 };

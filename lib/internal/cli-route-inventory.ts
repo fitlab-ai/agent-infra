@@ -68,8 +68,6 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'manual-validation': ['transaction']
 } as const);
 
-export const INTERNAL_CLI_ROUTE_SELECTORS = INTERNAL_HANDLER_ROUTE_SELECTORS;
-
 function first(args: readonly string[]): string {
   return args[0] ?? '';
 }

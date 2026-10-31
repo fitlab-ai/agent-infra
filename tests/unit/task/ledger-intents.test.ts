@@ -24,7 +24,6 @@ function completeReview(taskDir: string, name: string, family: 'review-analysis'
   const source = family === 'review-analysis' ? 'analysis.md' : family === 'review-plan' ? 'plan.md' : 'code.md';
   const sourcePath = path.join(taskDir, source);
   if (!fs.existsSync(sourcePath)) fs.writeFileSync(sourcePath, `# ${source}\n`);
-  const file = path.join(taskDir, name);
   recordArtifactCompletions(taskDir, [
     { name: source, lifecycleInputs: [] },
     { name, lifecycleInputs: [source] }

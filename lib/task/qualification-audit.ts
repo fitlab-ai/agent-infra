@@ -102,7 +102,6 @@ type QualificationConfirmation = {
   confirmedAt: string;
   rationale: string;
 };
-type QualificationValidationError = { code: string; message: string };
 type QualificationValidationResult =
   | { ok: true; qualification: TaskQualification; audit: QualificationAudit }
   | { ok: false; code: string; message: string };
@@ -488,7 +487,6 @@ export type {
   QualificationClassification,
   QualificationClassificationRow,
   QualificationRole,
-  QualificationValidationError,
   QualificationValidationResult,
   TaskQualification,
   ArtifactFamily

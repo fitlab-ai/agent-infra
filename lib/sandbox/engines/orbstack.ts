@@ -74,5 +74,3 @@ export const orbstackAdapter: SandboxAdapter = {
     }
   }
 };
-
-export default orbstackAdapter;

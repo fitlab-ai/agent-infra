@@ -6,7 +6,6 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
 import { lifecycleExecutions } from './lifecycle-execution.ts';
 import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
-import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, receiptsForOutput, sha256File } from './artifact-receipts.ts';
@@ -767,7 +766,7 @@ export {
   assertWritableInventory, validateCompletedArtifact, buildArtifactLinkSection
 };
 export type {
-  ArtifactFamily, ArtifactFamilySpec, ArtifactIdentity, ArtifactDiagnostic,
+  ArtifactFamily, ArtifactIdentity, ArtifactDiagnostic,
   ArtifactDiagnosticCode, ArtifactError, ArtifactErrorCode,
   ArtifactInventoryResult, ArtifactContextResult, CodeArtifactMode, InspectOptions
 };

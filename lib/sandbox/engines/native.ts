@@ -127,5 +127,3 @@ export const nativeAdapter: SandboxAdapter = {
     );
   }
 };
-
-export default nativeAdapter;

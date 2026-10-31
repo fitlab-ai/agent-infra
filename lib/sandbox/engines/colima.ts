@@ -77,5 +77,3 @@ export const colimaAdapter: SandboxAdapter = {
     );
   }
 };
-
-export default colimaAdapter;

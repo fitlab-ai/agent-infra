@@ -32,7 +32,6 @@ import type { SandboxTool } from './tools.ts';
 import '../server/process-state.ts';
 import { releaseStaleShortIdRegistry } from '../task/short-id.ts';
 import { fetchSandboxRows } from './commands/list-running.ts';
-import './task-cleanup.ts';
 import {
   createCleanPermit,
   createDiscardPermit,
@@ -122,18 +121,6 @@ type RmTarget = {
   controlRoots: string[];
   workspaceViewRoots: string[];
 };
-
-type RemovalResourceKind = 'control-root' | 'workspace-view' | 'worktree' | 'branch' | 'tool' | 'shell' | 'share' | 'artifact' | 'intent';
-
-export type SandboxRemovalResource = Readonly<{
-  kind: RemovalResourceKind;
-  path: string;
-}>;
-
-export type SandboxRemovalResourceDisclosure = Readonly<{
-  remove: readonly SandboxRemovalResource[];
-  preserve: readonly SandboxRemovalResource[];
-}>;
 
 type RmOneOptions = {
   assumeYes?: boolean;

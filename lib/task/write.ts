@@ -603,10 +603,3 @@ export type {
   TaskFileSystem,
   TaskWriteOptions
 };
-export type { FrontmatterScalar } from './frontmatter.ts';
-export type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
-export type {
-  TableRowBase,
-  TableRowUpsertMutation,
-  TableRowDeleteMutation
-} from './sections.ts';
