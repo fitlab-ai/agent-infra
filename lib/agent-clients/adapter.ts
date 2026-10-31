@@ -92,6 +92,44 @@ const PROJECT_ASSET_CATEGORIES = ['managed', 'merged', 'ejected'] as const;
 const MAX_SANDBOX_HOOK_TIMEOUT_MS = 300_000;
 const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
+function validImageExclusion(entry: unknown): entry is string {
+  if (
+    typeof entry !== 'string'
+    || entry === ''
+    || entry.startsWith('/')
+    || entry.endsWith('/')
+    || entry.includes('\\')
+    || /[*?[\]]/.test(entry)
+  ) {
+    return false;
+  }
+  return entry.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+function hasInvalidImageExclusions(exclusions: AgentClientSandboxImageDescriptor['dotfilesExclusions']): boolean {
+  return exclusions !== undefined && (
+    !Array.isArray(exclusions)
+    || exclusions.some((entry) => !validImageExclusion(entry))
+    || new Set(exclusions).size !== exclusions.length
+  );
+}
+
+function hasInvalidImageFragment(fragment: AgentClientSandboxImageDescriptor['dockerfileFragment']): boolean {
+  return fragment !== undefined && (typeof fragment !== 'string' || !TOOL_ID_PATTERN.test(fragment));
+}
+
+function freezeImageOutput(
+  fragment: AgentClientSandboxImageDescriptor['dockerfileFragment'],
+  exclusions: AgentClientSandboxImageDescriptor['dotfilesExclusions']
+): AgentClientSandboxImageDescriptor {
+  return Object.freeze({
+    ...(fragment === undefined ? {} : { dockerfileFragment: fragment }),
+    ...(exclusions === undefined
+      ? {}
+      : { dotfilesExclusions: Object.freeze([...exclusions]) })
+  });
+}
+
 function freezeSandboxImageDescriptor(
   id: AgentClientId,
   value: AgentClientSandboxImageDescriptor | undefined
@@ -102,40 +140,18 @@ function freezeSandboxImageDescriptor(
     : [];
   const fragment = value?.dockerfileFragment;
   const exclusions = value?.dotfilesExclusions;
-  const validExclusion = (entry: unknown): entry is string => {
-    if (
-      typeof entry !== 'string'
-      || entry === ''
-      || entry.startsWith('/')
-      || entry.endsWith('/')
-      || entry.includes('\\')
-      || /[*?[\]]/.test(entry)
-    ) {
-      return false;
-    }
-    return entry.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
-  };
   if (
     !value
     || typeof value !== 'object'
     || Array.isArray(value)
     || keys.length === 0
     || keys.some((key) => !['dockerfileFragment', 'dotfilesExclusions'].includes(key))
-    || (fragment !== undefined && (typeof fragment !== 'string' || !TOOL_ID_PATTERN.test(fragment)))
-    || (exclusions !== undefined && (
-      !Array.isArray(exclusions)
-      || exclusions.some((entry) => !validExclusion(entry))
-      || new Set(exclusions).size !== exclusions.length
-    ))
+    || hasInvalidImageFragment(fragment)
+    || hasInvalidImageExclusions(exclusions)
   ) {
     throw new Error(`Agent Client '${id}' has an invalid sandbox image descriptor`);
   }
-  return Object.freeze({
-    ...(fragment === undefined ? {} : { dockerfileFragment: fragment }),
-    ...(exclusions === undefined
-      ? {}
-      : { dotfilesExclusions: Object.freeze([...exclusions]) })
-  });
+  return freezeImageOutput(fragment, exclusions);
 }
 
 function freezeRecoveryProbe(
@@ -160,16 +176,7 @@ function freezeRecoveryProbe(
   });
 }
 
-function freezeTool(tool: SandboxTool): SandboxTool {
-  if (typeof tool.id !== 'string' || !TOOL_ID_PATTERN.test(tool.id)) {
-    throw new Error(`Invalid sandbox tool id: ${String(tool.id)}`);
-  }
-  if (!tool.install?.cmd || !['npm', 'shell'].includes(tool.install.type)) {
-    throw new Error(`Sandbox tool '${tool.id}' has invalid install`);
-  }
-  if (!tool.containerMount.startsWith('/')) {
-    throw new Error(`Sandbox tool '${tool.id}' containerMount must be absolute`);
-  }
+function freezeHostStateMounts(tool: SandboxTool): SandboxTool['hostStateMounts'] {
   if (tool.hostStateMounts !== undefined && !Array.isArray(tool.hostStateMounts)) {
     throw new Error(`Agent Client '${tool.id}' hostStateMounts must be an array`);
   }
@@ -190,9 +197,10 @@ function freezeTool(tool: SandboxTool): SandboxTool {
     }
     return Object.freeze({ ...entry });
   });
-  if (!tool.versionCmd) {
-    throw new Error(`Sandbox tool '${tool.id}' requires versionCmd`);
-  }
+  return hostStateMounts;
+}
+
+function freezeToolOutput(tool: SandboxTool, hostStateMounts: SandboxTool['hostStateMounts']): SandboxTool {
   return Object.freeze({
     ...tool,
     install: Object.freeze({ ...tool.install }),
@@ -216,6 +224,23 @@ function freezeTool(tool: SandboxTool): SandboxTool {
       })
     } : {})
   }) as SandboxTool;
+}
+
+function freezeTool(tool: SandboxTool): SandboxTool {
+  if (typeof tool.id !== 'string' || !TOOL_ID_PATTERN.test(tool.id)) {
+    throw new Error(`Invalid sandbox tool id: ${String(tool.id)}`);
+  }
+  if (!tool.install?.cmd || !['npm', 'shell'].includes(tool.install.type)) {
+    throw new Error(`Sandbox tool '${tool.id}' has invalid install`);
+  }
+  if (!tool.containerMount.startsWith('/')) {
+    throw new Error(`Sandbox tool '${tool.id}' containerMount must be absolute`);
+  }
+  const hostStateMounts = freezeHostStateMounts(tool);
+  if (!tool.versionCmd) {
+    throw new Error(`Sandbox tool '${tool.id}' requires versionCmd`);
+  }
+  return freezeToolOutput(tool, hostStateMounts);
 }
 
 function freezeAliases(id: AgentClientId, aliases: readonly SandboxAlias[]): readonly SandboxAlias[] {
@@ -242,9 +267,7 @@ function isProjectRelativeLiteral(value: string): boolean {
   return !value.split('/').some((segment) => segment === '..');
 }
 
-function defineAgentClientAdapter(
-  candidate: AgentClientAdapter
-): AgentClientAdapter {
+function validateIdentity(candidate: AgentClientAdapter): void {
   if (!isAgentClientId(candidate.id)) {
     throw new Error(`Unknown Agent Client ID '${String(candidate.id)}'`);
   }
@@ -274,6 +297,10 @@ function defineAgentClientAdapter(
     throw new Error(`Agent Client '${candidate.id}' has an invalid invocation`);
   }
 
+
+}
+
+function freezeCapabilities(candidate: AgentClientAdapter): AgentClientCapabilities {
   if (
     typeof candidate.capabilities !== 'object'
     || candidate.capabilities === null
@@ -307,6 +334,10 @@ function defineAgentClientAdapter(
     })
   ) as AgentClientCapabilities;
 
+  return capabilities;
+}
+
+function freezeModelSelection(candidate: AgentClientAdapter): AgentClientModelSelectionContext {
   const modelSelection = candidate.modelSelection;
   if (!modelSelection || typeof modelSelection !== 'object') {
     throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
@@ -343,6 +374,10 @@ function defineAgentClientAdapter(
     throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
   }
 
+  return frozenModelSelection;
+}
+
+function freezeOwnedPaths(candidate: AgentClientAdapter): string[] {
   if (
     typeof candidate.project !== 'object'
     || candidate.project === null
@@ -371,6 +406,10 @@ function defineAgentClientAdapter(
     throw new Error(`Agent Client '${candidate.id}' has duplicate owned path prefixes`);
   }
 
+  return paths;
+}
+
+function freezeProjectAssets(candidate: AgentClientAdapter, paths: string[]): Pick<AgentClientProjectDescriptor, 'managed' | 'merged' | 'ejected'> {
   const projectAssets = Object.fromEntries(
     PROJECT_ASSET_CATEGORIES.map((category) => {
       const values = candidate.project[category];
@@ -416,6 +455,10 @@ function defineAgentClientAdapter(
     seenAssets.set(asset, category);
   }
 
+  return projectAssets;
+}
+
+function freezeSeedCommands(candidate: AgentClientAdapter, paths: string[]): readonly AgentClientSeedCommand[] {
   if (!Array.isArray(candidate.project.seedCommands)) {
     throw new Error(`Agent Client '${candidate.id}' has invalid seed commands`);
   }
@@ -457,6 +500,53 @@ function defineAgentClientAdapter(
     });
   });
 
+  return seedCommands;
+}
+
+function hasInvalidCustomCommandOptions(descriptor: AgentClientCustomCommandDescriptor): boolean {
+  return (
+    descriptor.argumentsToken !== undefined
+    && (
+      typeof descriptor.argumentsToken !== 'string'
+      || descriptor.argumentsToken === ''
+      || /[\r\n]/.test(descriptor.argumentsToken)
+    )
+  )
+    || (
+      descriptor.includeUsage !== undefined
+      && typeof descriptor.includeUsage !== 'boolean'
+    )
+    || (
+      descriptor.inheritDisableModelInvocation !== undefined
+      && typeof descriptor.inheritDisableModelInvocation !== 'boolean'
+    );
+}
+
+function hasInvalidCustomCommandTarget(placeholders: (string | undefined)[], targetProbe: string, paths: string[]): boolean {
+  return placeholders.length !== 1
+    || placeholders[0] !== 'skillName'
+    || targetProbe.includes('${')
+    || !isProjectRelativeLiteral(targetProbe)
+    || !paths.some((prefix) => targetProbe.startsWith(prefix));
+}
+
+function freezeCustomCommandOutput(descriptor: AgentClientCustomCommandDescriptor, frontmatter: AgentClientCustomCommandDescriptor['frontmatter']): AgentClientCustomCommandDescriptor {
+  return Object.freeze({
+    target: descriptor.target,
+    frontmatter: Object.freeze({ ...frontmatter }),
+    ...(descriptor.argumentsToken === undefined
+      ? {}
+      : { argumentsToken: descriptor.argumentsToken }),
+    ...(descriptor.includeUsage === undefined
+      ? {}
+      : { includeUsage: descriptor.includeUsage }),
+    ...(descriptor.inheritDisableModelInvocation === undefined
+      ? {}
+      : { inheritDisableModelInvocation: descriptor.inheritDisableModelInvocation })
+  });
+}
+
+function freezeCustomCommand(candidate: AgentClientAdapter, paths: string[]): AgentClientCustomCommandDescriptor | undefined {
   let customCommand: AgentClientCustomCommandDescriptor | undefined;
   if (candidate.project.customCommand !== undefined) {
     const descriptor = candidate.project.customCommand;
@@ -470,55 +560,24 @@ function defineAgentClientAdapter(
     if (
       !descriptor
       || typeof descriptor !== 'object'
-      || placeholders.length !== 1
-      || placeholders[0] !== 'skillName'
-      || targetProbe.includes('${')
-      || !isProjectRelativeLiteral(targetProbe)
-      || !paths.some((prefix) => targetProbe.startsWith(prefix))
+      || hasInvalidCustomCommandTarget(placeholders, targetProbe, paths)
       || !frontmatter
       || typeof frontmatter !== 'object'
       || Array.isArray(frontmatter)
       || Object.values(frontmatter).some((value) =>
         typeof value !== 'string' && typeof value !== 'boolean'
       )
-      || (
-        descriptor.argumentsToken !== undefined
-        && (
-          typeof descriptor.argumentsToken !== 'string'
-          || descriptor.argumentsToken === ''
-          || /[\r\n]/.test(descriptor.argumentsToken)
-        )
-      )
-      || (
-        descriptor.includeUsage !== undefined
-        && typeof descriptor.includeUsage !== 'boolean'
-      )
-      || (
-        descriptor.inheritDisableModelInvocation !== undefined
-        && typeof descriptor.inheritDisableModelInvocation !== 'boolean'
-      )
+      || hasInvalidCustomCommandOptions(descriptor)
     ) {
       throw new Error(`Agent Client '${candidate.id}' has an invalid custom command`);
     }
-    customCommand = Object.freeze({
-      target: descriptor.target,
-      frontmatter: Object.freeze({ ...frontmatter }),
-      ...(descriptor.argumentsToken === undefined
-        ? {}
-        : { argumentsToken: descriptor.argumentsToken }),
-      ...(descriptor.includeUsage === undefined
-        ? {}
-        : { includeUsage: descriptor.includeUsage }),
-      ...(descriptor.inheritDisableModelInvocation === undefined
-        ? {}
-        : { inheritDisableModelInvocation: descriptor.inheritDisableModelInvocation })
-    });
+    customCommand = freezeCustomCommandOutput(descriptor, frontmatter);
   }
 
-  if (!candidate.sandbox || typeof candidate.sandbox.createTool !== 'function') {
-    throw new Error(`Agent Client '${candidate.id}' requires a sandbox descriptor`);
-  }
-  const image = freezeSandboxImageDescriptor(candidate.id, candidate.sandbox.image);
+  return customCommand;
+}
+
+function freezeHooks(candidate: AgentClientAdapter): AgentClientSandboxDescriptor['hooks'] {
   const hookIds = new Set<string>();
   const hooks = Object.freeze(candidate.sandbox.hooks.map((hook) => {
     if (
@@ -542,6 +601,55 @@ function defineAgentClientAdapter(
     hookIds.add(hook.id);
     return Object.freeze({ ...hook });
   }));
+  return hooks;
+}
+
+function validateRecoveryFinding(candidate: AgentClientAdapter, check: AgentClientSandboxRecoveryCheck): void {
+  if (
+    !check.finding
+    || !['permissions', 'builtin-link', 'hard-failure'].includes(check.finding.repairKind)
+    || typeof check.finding.message !== 'string'
+    || check.finding.message.trim() === ''
+    || (
+      check.finding.path !== undefined
+      && (typeof check.finding.path !== 'string' || !check.finding.path.startsWith('/'))
+    )
+    || (
+      check.finding.repairKind === 'permissions'
+      && check.finding.path === undefined
+    )
+  ) {
+    throw new Error(
+      `Agent Client '${candidate.id}' recovery check '${check.id}' has an invalid finding`
+    );
+  }
+}
+
+function freezeRecoveryRepair(candidate: AgentClientAdapter, check: AgentClientSandboxRecoveryCheck): AgentClientSandboxRecoveryCheck['repair'] {
+  let repair: AgentClientSandboxRecoveryCheck['repair'];
+  if (check.repair !== undefined) {
+    if (
+      typeof check.repair.user !== 'string'
+      || check.repair.user === ''
+      || typeof check.repair.command !== 'string'
+      || check.repair.command === ''
+      || !Array.isArray(check.repair.args)
+      || check.repair.args.some((arg: unknown) => typeof arg !== 'string')
+    ) {
+      throw new Error(
+        `Agent Client '${candidate.id}' recovery check '${check.id}' has an invalid repair`
+      );
+    }
+    repair = Object.freeze({
+      user: check.repair.user,
+      command: check.repair.command,
+      args: Object.freeze([...check.repair.args])
+    });
+  }
+  return repair;
+}
+
+function freezeRecoveryChecks(candidate: AgentClientAdapter): NonNullable<AgentClientSandboxDescriptor['recoveryChecks']> {
   const recoveryCheckIds = new Set<string>();
   if (
     candidate.sandbox.recoveryChecks !== undefined
@@ -563,44 +671,8 @@ function defineAgentClientAdapter(
       const when = check.when === undefined
         ? undefined
         : freezeRecoveryProbe(candidate.id, check.id, check.when);
-      if (
-        !check.finding
-        || !['permissions', 'builtin-link', 'hard-failure'].includes(check.finding.repairKind)
-        || typeof check.finding.message !== 'string'
-        || check.finding.message.trim() === ''
-        || (
-          check.finding.path !== undefined
-          && (typeof check.finding.path !== 'string' || !check.finding.path.startsWith('/'))
-        )
-        || (
-          check.finding.repairKind === 'permissions'
-          && check.finding.path === undefined
-        )
-      ) {
-        throw new Error(
-          `Agent Client '${candidate.id}' recovery check '${check.id}' has an invalid finding`
-        );
-      }
-      let repair: AgentClientSandboxRecoveryCheck['repair'];
-      if (check.repair !== undefined) {
-        if (
-          typeof check.repair.user !== 'string'
-          || check.repair.user === ''
-          || typeof check.repair.command !== 'string'
-          || check.repair.command === ''
-          || !Array.isArray(check.repair.args)
-          || check.repair.args.some((arg: unknown) => typeof arg !== 'string')
-        ) {
-          throw new Error(
-            `Agent Client '${candidate.id}' recovery check '${check.id}' has an invalid repair`
-          );
-        }
-        repair = Object.freeze({
-          user: check.repair.user,
-          command: check.repair.command,
-          args: Object.freeze([...check.repair.args])
-        });
-      }
+      validateRecoveryFinding(candidate, check);
+      const repair = freezeRecoveryRepair(candidate, check);
       if (check.finding.repairKind === 'builtin-link' && repair === undefined) {
         throw new Error(
           `Agent Client '${candidate.id}' recovery check '${check.id}' requires a repair`
@@ -616,6 +688,32 @@ function defineAgentClientAdapter(
       });
     })
   );
+  return recoveryChecks;
+}
+
+function defineAgentClientAdapter(
+  candidate: AgentClientAdapter
+): AgentClientAdapter {
+  validateIdentity(candidate);
+
+  const capabilities = freezeCapabilities(candidate);
+
+  const frozenModelSelection = freezeModelSelection(candidate);
+
+  const paths = freezeOwnedPaths(candidate);
+
+  const projectAssets = freezeProjectAssets(candidate, paths);
+
+  const seedCommands = freezeSeedCommands(candidate, paths);
+
+  const customCommand = freezeCustomCommand(candidate, paths);
+
+  if (!candidate.sandbox || typeof candidate.sandbox.createTool !== 'function') {
+    throw new Error(`Agent Client '${candidate.id}' requires a sandbox descriptor`);
+  }
+  const image = freezeSandboxImageDescriptor(candidate.id, candidate.sandbox.image);
+  const hooks = freezeHooks(candidate);
+  const recoveryChecks = freezeRecoveryChecks(candidate);
   const aliases = freezeAliases(candidate.id, candidate.sandbox.aliases);
   const createTool = (context: SandboxToolContext): SandboxTool => {
     const tool = freezeTool(candidate.sandbox.createTool(context));
