@@ -29,6 +29,23 @@ test('visible transcript normalization applies terminal editing semantics', () =
   assert.doesNotMatch(normalized, /ignored title/);
 });
 
+test('CSI cursor defaults, bounds, and character editing preserve visible output', () => {
+  assert.equal(normalizeVisibleTranscript('abcd\u001b[0D!'), 'abc!\n');
+  assert.equal(normalizeVisibleTranscript('abcd\u001b[999D!'), '!bcd\n');
+  assert.equal(normalizeVisibleTranscript('abcd\u001b[2D\u001b[P'), 'abd\n');
+});
+
+test('CSI scrolling and alternate screen retain current display semantics', () => {
+  assert.equal(normalizeVisibleTranscript('top\u001b[40;1Hbottom\u001b[S'), 'top\n' + '\n'.repeat(38) + 'bottom\n');
+  assert.equal(normalizeVisibleTranscript('main\u001b[?1049halt\u001b[?1049l!'), 'main!\n');
+});
+
+test('CSI rejects unknown commands and invalid terminal modes', () => {
+  assert.throws(() => normalizeVisibleTranscript('\u001b[z'), { message: 'Unknown terminal CSI sequence: z' });
+  assert.throws(() => normalizeVisibleTranscript('\u001b[25h'), { message: 'Unknown terminal mode sequence: h' });
+  assert.throws(() => normalizeVisibleTranscript('\u001b[?25;999l'), { message: 'Unknown terminal mode sequence: l' });
+});
+
 test('normalization is independent of control sequence chunk boundaries and temporary paths', () => {
   const one = normalizeVisibleTranscript('cd /tmp/agent-infra-demo-project-123\r\u001b[2Kdemo /tmp/agent-infra-demo-project-123');
   const two = normalizeVisibleTranscript(['cd /tmp/agent-', 'infra-demo-project-456', '\r\u001b[2', 'Kdemo /tmp/agent-infra-demo-project-456'].join(''));
