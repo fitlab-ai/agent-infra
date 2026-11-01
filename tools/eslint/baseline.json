@@ -432,15 +432,6 @@
       "count": 1
     },
     {
-      "file": "lib/merge.ts",
-      "ruleId": "complexity",
-      "stableId": "518ad7b060bea58e8e9a0b56f3dca06c31b5c28c057954325468b2e0db971842",
-      "displayName": "collectArchiveEntries",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/sources.ts",
       "ruleId": "complexity",
       "stableId": "07926a05acba21a8cf55ff06a681a12c53938f2104e5457275a837b710972149",
@@ -2736,15 +2727,6 @@
       "count": 2
     },
     {
-      "file": "lib/merge.ts",
-      "ruleId": "max-depth",
-      "stableId": "518ad7b060bea58e8e9a0b56f3dca06c31b5c28c057954325468b2e0db971842",
-      "displayName": "collectArchiveEntries",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
-      "count": 2
-    },
-    {
       "file": "lib/run/host.ts",
       "ruleId": "max-depth",
       "stableId": "fde96ad91612c638051e7ad3e062d683d79dc8e769fd6a1ad511181d9b275977",
@@ -2758,15 +2740,6 @@
       "ruleId": "max-depth",
       "stableId": "e3cefdc6bc17605f6c093d4b2b4ced6a3873e4fc41c68e6a2b028dd5d3507ff6",
       "displayName": "rmUnbound.discovered.map callback[0]#1",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
-      "count": 2
-    },
-    {
-      "file": "lib/merge.ts",
-      "ruleId": "max-depth",
-      "stableId": "919a7d196a458731c055dbd262795258f2b03aeddb3e3a36c52d24b2858f6196",
-      "displayName": "scanSourceTasks",
       "metric": 5,
       "normalizedMessage": "depth=5",
       "count": 2

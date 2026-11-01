@@ -14,7 +14,8 @@ import {
   formatBackupTimestamp,
   getTaskTimestamp,
   rebuildManifests,
-  scanSourceTasks
+  scanSourceTasks,
+  taskExistsInArchive
 } from '../../../lib/merge.ts';
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
@@ -463,6 +464,45 @@ test('frontmatter helpers and source scanning parse current archive metadata', (
     assert.equal(tasks[0]?.taskId, 'TASK-20260309-123456');
     assert.equal(tasks[0]?.relativePath, '2026/03/09/TASK-20260309-123456/');
     assert.equal(tasks[0]?.completedAt, '2026-03-09 12:34:56');
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('archive scans preserve missing-file behavior and first matching directory', () => {
+  const repoDir = makeTempRepo();
+  const archiveRoot = path.join(makeTempWorkspace(repoDir), 'archive');
+  const taskId = 'TASK-20260309-123456';
+  try {
+    for (const day of ['10', '09']) {
+      fs.mkdirSync(path.join(archiveRoot, '2026', '03', day, taskId), { recursive: true });
+    }
+    const firstDay = fs.readdirSync(path.join(archiveRoot, '2026', '03'), { withFileTypes: true })
+      .find((entry) => entry.isDirectory() && /^\d{2}$/.test(entry.name))?.name;
+    assert.ok(firstDay);
+    assert.equal(taskExistsInArchive(archiveRoot, taskId), path.join(archiveRoot, '2026', '03', firstDay, taskId));
+    assert.deepEqual(scanSourceTasks(archiveRoot), []);
+    rebuildManifests(archiveRoot);
+    const manifest = read(path.join(archiveRoot, '2026', '03', 'manifest.md'));
+    assert.ok(manifest.includes(`| ${taskId} | ${taskId} | unknown | 2026-03-09 | 2026/03/09/${taskId}/ |`));
+    assert.ok(manifest.includes(`| ${taskId} | ${taskId} | unknown | 2026-03-10 | 2026/03/10/${taskId}/ |`));
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('archive source paths and equal-time manifest entries retain their ordering', () => {
+  const repoDir = makeTempRepo();
+  const archiveRoot = path.join(makeTempWorkspace(repoDir), 'archive');
+  try {
+    const olderId = 'TASK-20260309-000001';
+    const newerId = 'TASK-20260310-000002';
+    writeTask(archiveRoot, '2026/03/10', newerId, { title: 'second', completedAt: '2026-03-10 12:00:00' });
+    writeTask(archiveRoot, '2026/03/09', olderId, { title: 'first', completedAt: '2026-03-10 12:00:00' });
+    assert.deepEqual(scanSourceTasks(archiveRoot).map((task) => task.taskId), [olderId, newerId]);
+    rebuildManifests(archiveRoot);
+    const manifest = read(path.join(archiveRoot, '2026/03/manifest.md'));
+    assert.ok(manifest.indexOf(newerId) < manifest.indexOf(olderId));
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
