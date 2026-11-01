@@ -102,6 +102,15 @@ export function parseDarwinStartTime(output: string): number | null {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
+function parseQueriedStartTime(output: string, platform: NodeJS.Platform): number | null {
+  if (output.length === 0) return null;
+  if (platform === 'win32') {
+    const timestamp = new Date(output).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+  return platform === 'darwin' ? parseDarwinStartTime(output) : null;
+}
+
 export function getProcessStartTime(
   pid: number,
   platform: NodeJS.Platform = process.platform
@@ -123,15 +132,31 @@ export function getProcessStartTime(
       encoding: 'utf8',
       env: platform === 'darwin' ? { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } : process.env
     }).trim();
-    if (output.length === 0) return null;
-    if (platform === 'win32') {
-      const timestamp = new Date(output);
-      return Number.isNaN(timestamp.getTime()) ? null : timestamp.getTime();
-    }
-    if (platform === 'darwin') return parseDarwinStartTime(output);
-    return null;
+    return parseQueriedStartTime(output, platform);
   } catch {
     return null;
+  }
+}
+
+function getLinuxIdentityState(identity: ProcessIdentity): ProcessIdentityState {
+  try {
+    const stat = parseLinuxProcessStat(fs.readFileSync(`/proc/${identity.pid}/stat`, 'utf8'));
+    if (stat === null) return 'unknown';
+    if (stat.state === 'Z') return 'dead';
+    return stat.startTime === identity.startTime ? 'alive' : 'dead';
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'dead' : 'unknown';
+  }
+}
+
+function probeIdentityPid(pid: number, probePid: (pid: number) => void): ProcessIdentityState | null {
+  try {
+    probePid(pid);
+    return null;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return 'dead';
+    return code === 'EPERM' ? null : 'unknown';
   }
 }
 
@@ -143,24 +168,10 @@ export function getProcessIdentityState(
   if (!Number.isInteger(identity.pid) || identity.pid <= 0 || !Number.isSafeInteger(identity.startTime)) {
     return 'dead';
   }
-  if (platform === 'linux') {
-    try {
-      const stat = parseLinuxProcessStat(fs.readFileSync(`/proc/${identity.pid}/stat`, 'utf8'));
-      if (stat === null) return 'unknown';
-      if (stat.state === 'Z') return 'dead';
-      return stat.startTime === identity.startTime ? 'alive' : 'dead';
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'dead' : 'unknown';
-    }
-  }
+  if (platform === 'linux') return getLinuxIdentityState(identity);
   const probePid = runtime.probePid ?? ((pid: number) => process.kill(pid, 0));
-  try {
-    probePid(identity.pid);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ESRCH') return 'dead';
-    if (code !== 'EPERM') return 'unknown';
-  }
+  const probeState = probeIdentityPid(identity.pid, probePid);
+  if (probeState !== null) return probeState;
   const query = buildProcessStartTimeQuery(identity.pid, platform);
   if (query === null) return 'unknown';
   try {
@@ -168,13 +179,8 @@ export function getProcessIdentityState(
       encoding: 'utf8',
       env: platform === 'darwin' ? { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } : process.env
     }).trim();
-    if (output.length === 0) return recheckDarwinProcessExit(identity.pid, platform, probePid);
-    const startTime = platform === 'win32'
-      ? new Date(output).getTime()
-      : platform === 'darwin'
-        ? parseDarwinStartTime(output)
-        : null;
-    if (startTime === null || Number.isNaN(startTime)) return recheckDarwinProcessExit(identity.pid, platform, probePid);
+    const startTime = parseQueriedStartTime(output, platform);
+    if (startTime === null) return recheckDarwinProcessExit(identity.pid, platform, probePid);
     return startTime === identity.startTime ? 'alive' : 'dead';
   } catch {
     return recheckDarwinProcessExit(identity.pid, platform, probePid);
@@ -195,6 +201,44 @@ function recheckDarwinProcessExit(
   }
 }
 
+function isValidRecordPid(pid: unknown): pid is number {
+  return typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0;
+}
+
+type JsonPidValue = { version?: unknown; pid?: unknown; startTime?: unknown } | null;
+
+function classifyJsonPidRecord(value: JsonPidValue, raw: string):
+  | { kind: 'legacy-json'; legacy: LegacyProcessSnapshot }
+  | { kind: 'legacy-unknown'; legacy: LegacyProcessSnapshot; reason: string }
+  | { kind: 'record'; record: PidRecord } {
+  const pidValue: unknown = value?.pid;
+  const startTimeValue: unknown = value?.startTime;
+  if (
+    value !== null &&
+    value.version === 2 &&
+    isValidRecordPid(pidValue) &&
+    typeof startTimeValue === 'number' &&
+    Number.isSafeInteger(startTimeValue) &&
+    startTimeValue >= 0
+  ) {
+    const startTime = startTimeValue as number;
+    return {
+      kind: 'record',
+      record: { version: 2, pid: pidValue, startTime }
+    };
+}
+if (
+  value !== null &&
+  value.version === 1 &&
+  isValidRecordPid(pidValue) &&
+  typeof value.startTime === 'string' &&
+  value.startTime.length > 0
+) {
+  return { kind: 'legacy-json', legacy: { pid: pidValue, raw, format: 'json-v1' } };
+}
+return { kind: 'legacy-unknown', legacy: { raw, format: 'malformed' }, reason: 'unsupported PID record schema' };
+}
+
 function parsePidRecord(
   raw: string
 ):
@@ -211,36 +255,7 @@ function parsePidRecord(
   }
   try {
     const value = JSON.parse(trimmed) as { version?: unknown; pid?: unknown; startTime?: unknown } | null;
-    const pidValue: unknown = value?.pid;
-    const startTimeValue: unknown = value?.startTime;
-    if (
-      value !== null &&
-      value.version === 2 &&
-      typeof pidValue === 'number' &&
-      Number.isSafeInteger(pidValue) &&
-      pidValue > 0 &&
-      typeof startTimeValue === 'number' &&
-      Number.isSafeInteger(startTimeValue) &&
-      startTimeValue >= 0
-    ) {
-      const startTime = startTimeValue as number;
-      return {
-        kind: 'record',
-        record: { version: 2, pid: pidValue, startTime }
-      };
-    }
-    if (
-      value !== null &&
-      value.version === 1 &&
-      typeof pidValue === 'number' &&
-      Number.isSafeInteger(pidValue) &&
-      pidValue > 0 &&
-      typeof value.startTime === 'string' &&
-      value.startTime.length > 0
-    ) {
-      return { kind: 'legacy-json', legacy: { pid: pidValue, raw, format: 'json-v1' } };
-    }
-    return { kind: 'legacy-unknown', legacy: { raw, format: 'malformed' }, reason: 'unsupported PID record schema' };
+    return classifyJsonPidRecord(value, raw);
   } catch {
     return { kind: 'legacy-unknown', legacy: { raw, format: 'malformed' }, reason: 'invalid PID record JSON' };
   }
