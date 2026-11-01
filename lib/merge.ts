@@ -131,82 +131,49 @@ function normalizeTaskRecord(taskDir: string, taskFile: string, dateParts: DateP
   };
 }
 
-function scanSourceTasks(sourceDir: string): TaskRecord[] {
-  const tasks: TaskRecord[] = [];
-  const years = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : [];
+function* archiveDayDirectories(rootDir: string): Generator<DateParts & { dayDir: string }> {
+  if (!fs.existsSync(rootDir)) return;
 
-  for (const yearEntry of years) {
-    if (!yearEntry.isDirectory() || !/^\d{4}$/.test(yearEntry.name)) {
-      continue;
-    }
-
-    const yearDir = path.join(sourceDir, yearEntry.name);
+  for (const yearEntry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    if (!yearEntry.isDirectory() || !/^\d{4}$/.test(yearEntry.name)) continue;
+    const yearDir = path.join(rootDir, yearEntry.name);
     for (const monthEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
-      if (!monthEntry.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) {
-        continue;
-      }
-
+      if (!monthEntry.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) continue;
       const monthDir = path.join(yearDir, monthEntry.name);
       for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
-        if (!dayEntry.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
-          continue;
-        }
-
-        const dayDir = path.join(monthDir, dayEntry.name);
-        for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
-          if (!taskEntry.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) {
-            continue;
-          }
-
-          const taskDir = path.join(dayDir, taskEntry.name, 'local');
-          const taskFile = path.join(taskDir, 'task.md');
-          if (!fs.existsSync(taskFile)) {
-            continue;
-          }
-
-          tasks.push(normalizeTaskRecord(taskDir, taskFile, {
-            year: yearEntry.name,
-            month: monthEntry.name,
-            day: dayEntry.name
-          }));
-        }
+        if (!dayEntry.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) continue;
+        yield {
+          dayDir: path.join(monthDir, dayEntry.name),
+          year: yearEntry.name,
+          month: monthEntry.name,
+          day: dayEntry.name
+        };
       }
     }
   }
+}
 
+function scanSourceTasks(sourceDir: string): TaskRecord[] {
+  const tasks: TaskRecord[] = [];
+  for (const { dayDir, year, month, day } of archiveDayDirectories(sourceDir)) {
+    for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
+      if (!taskEntry.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) continue;
+      const taskDir = path.join(dayDir, taskEntry.name, 'local');
+      const taskFile = path.join(taskDir, 'task.md');
+      if (!fs.existsSync(taskFile)) continue;
+      tasks.push(normalizeTaskRecord(taskDir, taskFile, { year, month, day }));
+    }
+  }
   return tasks.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
 function findTaskDirById(rootDir: string, taskId: string): string | null {
-  if (!fs.existsSync(rootDir)) {
-    return null;
-  }
-
-  for (const yearEntry of fs.readdirSync(rootDir, { withFileTypes: true })) {
-    if (!yearEntry.isDirectory() || !/^\d{4}$/.test(yearEntry.name)) {
-      continue;
-    }
-
-    const yearDir = path.join(rootDir, yearEntry.name);
-    for (const monthEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
-      if (!monthEntry.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) {
-        continue;
-      }
-
-      const monthDir = path.join(yearDir, monthEntry.name);
-      for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
-        if (!dayEntry.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
-          continue;
-        }
-
-        const candidate = path.join(monthDir, dayEntry.name, taskId);
-        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
-          return candidate;
-        }
-      }
+  for (const { dayDir } of archiveDayDirectories(rootDir)) {
+    const candidate = path.join(dayDir, taskId);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      return candidate;
     }
   }
-
   return null;
 }
 
@@ -226,62 +193,26 @@ function formatManifestHeader(generatedAt: string): string[] {
 
 function collectArchiveEntries(archiveDir: string): ArchiveManifestEntry[] {
   const entries: ArchiveManifestEntry[] = [];
-  if (!fs.existsSync(archiveDir)) {
-    return entries;
-  }
+  for (const { dayDir, year, month, day } of archiveDayDirectories(archiveDir)) {
+    for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
+      if (!taskEntry.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) continue;
 
-  for (const yearEntry of fs.readdirSync(archiveDir, { withFileTypes: true })) {
-    if (!yearEntry.isDirectory() || !/^\d{4}$/.test(yearEntry.name)) {
-      continue;
-    }
+      const taskFile = path.join(dayDir, taskEntry.name, 'local', 'task.md');
+      const relativePath = `${year}/${month}/${day}/${taskEntry.name}/`;
+      let title = taskEntry.name;
+      let type = 'unknown';
+      let completedAt = `${year}-${month}-${day}`;
 
-    const yearDir = path.join(archiveDir, yearEntry.name);
-    for (const monthEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
-      if (!monthEntry.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) {
-        continue;
+      if (fs.existsSync(taskFile)) {
+        const content = fs.readFileSync(taskFile, 'utf8');
+        title = extractTitle(content) || title;
+        type = extractField(content, 'type') || type;
+        completedAt = extractField(content, 'completed_at') || completedAt;
       }
 
-      const monthDir = path.join(yearDir, monthEntry.name);
-      for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
-        if (!dayEntry.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
-          continue;
-        }
-
-        const dayDir = path.join(monthDir, dayEntry.name);
-        for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
-          if (!taskEntry.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) {
-            continue;
-          }
-
-          const taskDir = path.join(dayDir, taskEntry.name);
-          const taskFile = path.join(taskDir, 'local', 'task.md');
-          const relativePath = `${yearEntry.name}/${monthEntry.name}/${dayEntry.name}/${taskEntry.name}/`;
-          let title = taskEntry.name;
-          let type = 'unknown';
-          let completedAt = `${yearEntry.name}-${monthEntry.name}-${dayEntry.name}`;
-
-          if (fs.existsSync(taskFile)) {
-            const content = fs.readFileSync(taskFile, 'utf8');
-            title = extractTitle(content) || title;
-            type = extractField(content, 'type') || type;
-            completedAt = extractField(content, 'completed_at') || completedAt;
-          }
-
-          entries.push({
-            year: yearEntry.name,
-            month: monthEntry.name,
-            day: dayEntry.name,
-            completedAt,
-            taskId: taskEntry.name,
-            title,
-            type,
-            relativePath
-          });
-        }
-      }
+      entries.push({ year, month, day, completedAt, taskId: taskEntry.name, title, type, relativePath });
     }
   }
-
   return entries;
 }
 
