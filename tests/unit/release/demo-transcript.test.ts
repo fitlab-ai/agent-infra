@@ -36,7 +36,7 @@ test('CSI cursor defaults, bounds, and character editing preserve visible output
 });
 
 test('CSI scrolling and alternate screen retain current display semantics', () => {
-  assert.equal(normalizeVisibleTranscript('top\u001b[40;1Hbottom\u001b[S'), 'top\n' + '\n'.repeat(38) + 'bottom\n');
+  assert.equal(normalizeVisibleTranscript('top\u001b[40;1Hbottom\u001b[S\u001b[H!'), 'top\n!\n' + '\n'.repeat(37) + 'bottom\n');
   assert.equal(normalizeVisibleTranscript('main\u001b[?1049halt\u001b[?1049l!'), 'main!\n');
 });
 
