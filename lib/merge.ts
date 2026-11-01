@@ -601,31 +601,7 @@ function validateTaskDirectory(
   }
   validateTaskTree(sourceRoot, taskDir);
   if (archived) {
-    for (const entry of fs.readdirSync(taskDir, { withFileTypes: true })) {
-      if (!['local', 'github', 'derived'].includes(entry.name) || !entry.isDirectory()) {
-        invalidSource(`${sourceRelativePath(sourceRoot, path.join(taskDir, entry.name))} is not an allowed archive source directory`);
-      }
-    }
-    validateArchiveSource(sourceRoot, contentDir);
-    const githubDir = path.join(taskDir, 'github');
-    if (fs.existsSync(githubDir)) {
-      for (const capture of fs.readdirSync(githubDir, { withFileTypes: true })) {
-        const captureDir = path.join(githubDir, capture.name);
-        if (!capture.isDirectory() || !/^capture-[A-Za-z0-9._-]+$/.test(capture.name) || !fs.existsSync(path.join(captureDir, 'capture.md'))) {
-          invalidSource(`${sourceRelativePath(sourceRoot, captureDir)} is not a valid GitHub capture`);
-        }
-        validateArchiveSource(sourceRoot, captureDir);
-      }
-    }
-    const derivedDir = path.join(taskDir, 'derived');
-    if (fs.existsSync(derivedDir)) {
-      for (const view of fs.readdirSync(derivedDir, { withFileTypes: true })) {
-        const viewDir = path.join(derivedDir, view.name);
-        if (!view.isDirectory() || !fs.existsSync(path.join(viewDir, 'inputs.md'))) {
-          invalidSource(`${sourceRelativePath(sourceRoot, viewDir)} requires inputs.md`);
-        }
-      }
-    }
+    validateArchivedTaskDirectory(sourceRoot, taskDir, contentDir);
   }
 
   const previousPath = seenTaskIds.get(taskId);
@@ -633,6 +609,36 @@ function validateTaskDirectory(
     invalidSource(`duplicate task ID ${taskId} at ${previousPath} and ${sourceRelativePath(sourceRoot, taskDir)}`);
   }
   seenTaskIds.set(taskId, sourceRelativePath(sourceRoot, taskDir));
+}
+
+function validateArchivedTaskDirectory(sourceRoot: string, taskDir: string, contentDir: string): void {
+  for (const entry of fs.readdirSync(taskDir, { withFileTypes: true })) {
+    if (!['local', 'github', 'derived'].includes(entry.name) || !entry.isDirectory()) {
+      invalidSource(`${sourceRelativePath(sourceRoot, path.join(taskDir, entry.name))} is not an allowed archive source directory`);
+    }
+  }
+  validateArchiveSource(sourceRoot, contentDir);
+
+  const githubDir = path.join(taskDir, 'github');
+  if (fs.existsSync(githubDir)) {
+    for (const capture of fs.readdirSync(githubDir, { withFileTypes: true })) {
+      const captureDir = path.join(githubDir, capture.name);
+      if (!capture.isDirectory() || !/^capture-[A-Za-z0-9._-]+$/.test(capture.name) || !fs.existsSync(path.join(captureDir, 'capture.md'))) {
+        invalidSource(`${sourceRelativePath(sourceRoot, captureDir)} is not a valid GitHub capture`);
+      }
+      validateArchiveSource(sourceRoot, captureDir);
+    }
+  }
+
+  const derivedDir = path.join(taskDir, 'derived');
+  if (fs.existsSync(derivedDir)) {
+    for (const view of fs.readdirSync(derivedDir, { withFileTypes: true })) {
+      const viewDir = path.join(derivedDir, view.name);
+      if (!view.isDirectory() || !fs.existsSync(path.join(viewDir, 'inputs.md'))) {
+        invalidSource(`${sourceRelativePath(sourceRoot, viewDir)} requires inputs.md`);
+      }
+    }
+  }
 }
 
 function validateArchiveSource(sourceRoot: string, sourceDir: string): void {
@@ -706,8 +712,13 @@ function validateArchiveSection(
     const entryStat = sourcePathStat(sourceRoot, entryPath);
     return Boolean(entryStat?.isFile() && entry.name === 'manifest.md');
   };
-  const years = fs.readdirSync(archiveDir, { withFileTypes: true });
-  for (const yearEntry of years) {
+  validateArchiveYears(sourceRoot, archiveDir, seenTaskIds, allowManifest);
+}
+
+type ManifestCheck = (directory: string, entry: fs.Dirent) => boolean;
+
+function validateArchiveYears(sourceRoot: string, archiveDir: string, seenTaskIds: Map<string, string>, allowManifest: ManifestCheck): void {
+  for (const yearEntry of fs.readdirSync(archiveDir, { withFileTypes: true })) {
     const yearPath = path.join(archiveDir, yearEntry.name);
     if (allowManifest(archiveDir, yearEntry)) {
       continue;
@@ -716,37 +727,43 @@ function validateArchiveSection(
     if (!yearStat?.isDirectory() || !/^\d{4}$/.test(yearEntry.name)) {
       invalidSource(`${sourceRelativePath(sourceRoot, yearPath)} is not a YYYY directory or manifest.md`);
     }
+    validateArchiveMonths(sourceRoot, yearPath, seenTaskIds, allowManifest);
+  }
+}
 
-    const yearDir = yearPath;
-    for (const monthEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
-      const monthPath = path.join(yearDir, monthEntry.name);
-      if (allowManifest(yearDir, monthEntry)) {
-        continue;
-      }
-      const monthStat = sourcePathStat(sourceRoot, monthPath);
-      if (!monthStat?.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) {
-        invalidSource(`${sourceRelativePath(sourceRoot, monthPath)} is not a MM directory or manifest.md`);
-      }
-
-      const monthDir = monthPath;
-      for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
-        const dayPath = path.join(monthDir, dayEntry.name);
-        const dayStat = sourcePathStat(sourceRoot, dayPath);
-        if (!dayStat?.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
-          invalidSource(`${sourceRelativePath(sourceRoot, dayPath)} is not a DD directory or manifest.md`);
-        }
-
-        const dayDir = dayPath;
-        for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
-          const taskPath = path.join(dayDir, taskEntry.name);
-          const taskStat = sourcePathStat(sourceRoot, taskPath);
-          if (!taskStat?.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) {
-            invalidSource(`${sourceRelativePath(sourceRoot, taskPath)} is not a TASK-YYYYMMDD-HHMMSS directory`);
-          }
-          validateTaskDirectory(sourceRoot, taskPath, seenTaskIds, true);
-        }
-      }
+function validateArchiveMonths(sourceRoot: string, yearDir: string, seenTaskIds: Map<string, string>, allowManifest: ManifestCheck): void {
+  for (const monthEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
+    const monthPath = path.join(yearDir, monthEntry.name);
+    if (allowManifest(yearDir, monthEntry)) {
+      continue;
     }
+    const monthStat = sourcePathStat(sourceRoot, monthPath);
+    if (!monthStat?.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) {
+      invalidSource(`${sourceRelativePath(sourceRoot, monthPath)} is not a MM directory or manifest.md`);
+    }
+    validateArchiveDays(sourceRoot, monthPath, seenTaskIds);
+  }
+}
+
+function validateArchiveDays(sourceRoot: string, monthDir: string, seenTaskIds: Map<string, string>): void {
+  for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
+    const dayPath = path.join(monthDir, dayEntry.name);
+    const dayStat = sourcePathStat(sourceRoot, dayPath);
+    if (!dayStat?.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
+      invalidSource(`${sourceRelativePath(sourceRoot, dayPath)} is not a DD directory or manifest.md`);
+    }
+    validateArchiveTasks(sourceRoot, dayPath, seenTaskIds);
+  }
+}
+
+function validateArchiveTasks(sourceRoot: string, dayDir: string, seenTaskIds: Map<string, string>): void {
+  for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
+    const taskPath = path.join(dayDir, taskEntry.name);
+    const taskStat = sourcePathStat(sourceRoot, taskPath);
+    if (!taskStat?.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) {
+      invalidSource(`${sourceRelativePath(sourceRoot, taskPath)} is not a TASK-YYYYMMDD-HHMMSS directory`);
+    }
+    validateTaskDirectory(sourceRoot, taskPath, seenTaskIds, true);
   }
 }
 
