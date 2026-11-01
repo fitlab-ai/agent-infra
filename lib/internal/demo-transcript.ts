@@ -145,34 +145,54 @@ class TerminalDisplay {
   }
 
   private applyCsi(final: string, parameters: number[], privateMode: boolean): void {
+    if (this.applyCsiCursor(final, parameters)) return;
+    if (this.applyCsiEdit(final, parameters)) return;
+    if (this.applyCsiMode(final, parameters, privateMode)) return;
+    throw new Error(`Unknown terminal CSI sequence: ${final}`);
+  }
+
+  private applyCsiCursor(final: string, parameters: number[]): boolean {
     const first = (fallback: number): number => parameters[0] || fallback;
     switch (final) {
-      case 'A': this.cursorY = clamp(this.cursorY - first(1), 0, DEMO_ROWS - 1); return;
-      case 'B': this.cursorY = clamp(this.cursorY + first(1), 0, DEMO_ROWS - 1); return;
-      case 'C': this.cursorX = clamp(this.cursorX + first(1), 0, DEMO_COLUMNS - 1); return;
-      case 'D': this.cursorX = clamp(this.cursorX - first(1), 0, DEMO_COLUMNS - 1); return;
-      case 'E': this.cursorY = clamp(this.cursorY + first(1), 0, DEMO_ROWS - 1); this.cursorX = 0; return;
-      case 'F': this.cursorY = clamp(this.cursorY - first(1), 0, DEMO_ROWS - 1); this.cursorX = 0; return;
-      case 'G': this.cursorX = clamp(first(1) - 1, 0, DEMO_COLUMNS - 1); return;
-      case 'd': this.cursorY = clamp(first(1) - 1, 0, DEMO_ROWS - 1); return;
+      case 'A': this.cursorY = clamp(this.cursorY - first(1), 0, DEMO_ROWS - 1); return true;
+      case 'B': this.cursorY = clamp(this.cursorY + first(1), 0, DEMO_ROWS - 1); return true;
+      case 'C': this.cursorX = clamp(this.cursorX + first(1), 0, DEMO_COLUMNS - 1); return true;
+      case 'D': this.cursorX = clamp(this.cursorX - first(1), 0, DEMO_COLUMNS - 1); return true;
+      case 'E': this.cursorY = clamp(this.cursorY + first(1), 0, DEMO_ROWS - 1); this.cursorX = 0; return true;
+      case 'F': this.cursorY = clamp(this.cursorY - first(1), 0, DEMO_ROWS - 1); this.cursorX = 0; return true;
+      case 'G': this.cursorX = clamp(first(1) - 1, 0, DEMO_COLUMNS - 1); return true;
+      case 'd': this.cursorY = clamp(first(1) - 1, 0, DEMO_ROWS - 1); return true;
       case 'H':
       case 'f':
         this.cursorY = clamp((parameters[0] || 1) - 1, 0, DEMO_ROWS - 1);
         this.cursorX = clamp((parameters[1] || 1) - 1, 0, DEMO_COLUMNS - 1);
-        return;
-      case 'J': this.eraseDisplay(first(0)); return;
-      case 'K': this.eraseLine(first(0)); return;
-      case 'P': this.deleteCharacters(first(1)); return;
-      case '@': this.insertCharacters(first(1)); return;
-      case 'X': this.eraseCharacters(first(1)); return;
-      case 'L': this.insertLines(first(1)); return;
-      case 'M': this.deleteLines(first(1)); return;
-      case 'S': for (let count = 0; count < first(1); count += 1) this.lineFeed(); return;
-      case 'T': for (let count = 0; count < first(1); count += 1) this.reverseLineFeed(); return;
-      case 's': this.saveCursor(); return;
-      case 'u': this.restoreCursor(); return;
-      case 'm': return;
-      case 'r': return;
+        return true;
+      default: return false;
+    }
+  }
+
+  private applyCsiEdit(final: string, parameters: number[]): boolean {
+    const first = (fallback: number): number => parameters[0] || fallback;
+    switch (final) {
+      case 'J': this.eraseDisplay(first(0)); return true;
+      case 'K': this.eraseLine(first(0)); return true;
+      case 'P': this.deleteCharacters(first(1)); return true;
+      case '@': this.insertCharacters(first(1)); return true;
+      case 'X': this.eraseCharacters(first(1)); return true;
+      case 'L': this.insertLines(first(1)); return true;
+      case 'M': this.deleteLines(first(1)); return true;
+      case 'S': for (let count = 0; count < first(1); count += 1) this.lineFeed(); return true;
+      case 'T': for (let count = 0; count < first(1); count += 1) this.reverseLineFeed(); return true;
+      default: return false;
+    }
+  }
+
+  private applyCsiMode(final: string, parameters: number[], privateMode: boolean): boolean {
+    switch (final) {
+      case 's': this.saveCursor(); return true;
+      case 'u': this.restoreCursor(); return true;
+      case 'm': return true;
+      case 'r': return true;
       case 'h':
       case 'l':
         if (!privateMode || parameters.some((parameter) => ![25, 1049, 2004].includes(parameter))) {
@@ -182,9 +202,8 @@ class TerminalDisplay {
           if (final === 'h') this.enterAlternateScreen();
           else this.leaveAlternateScreen();
         }
-        return;
-      default:
-        throw new Error(`Unknown terminal CSI sequence: ${final}`);
+        return true;
+      default: return false;
     }
   }
 

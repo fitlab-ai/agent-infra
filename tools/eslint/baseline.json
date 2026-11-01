@@ -9,15 +9,6 @@
   "scopeDigest": "040bd30c2a679e8fbf8bdc8aa1f1788129f6bc6c0b05e0a9d6a0ef7842774c03",
   "entries": [
     {
-      "file": "lib/internal/demo-transcript.ts",
-      "ruleId": "complexity",
-      "stableId": "d4683d2b07b64b7c4505314b3bf6fcc5c74def920159920cf95508a640099945",
-      "displayName": "TerminalDisplay.applyCsi",
-      "metric": 34,
-      "normalizedMessage": "complexity=34",
-      "count": 1
-    },
-    {
       "file": "lib/fs/file-lock.ts",
       "ruleId": "complexity",
       "stableId": "4046a6c188e5b94899d97f558d2aa1b2b3cd18c96e6493df964371ab54fbb408",
