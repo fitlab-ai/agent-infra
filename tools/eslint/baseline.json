@@ -45,15 +45,6 @@
       "count": 1
     },
     {
-      "file": "lib/agent-clients/reconcile.ts",
-      "ruleId": "complexity",
-      "stableId": "55038b94b6f4ac78fd59d78d26525929880968c64ca284edf5758c0a39ddf9f5",
-      "displayName": "applyAgentClientReconciliation",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/task/decision-intents.ts",
       "ruleId": "complexity",
       "stableId": "2cf1a4708703c11f66bcdfd993544501aca823a500eeac791e5fe6d5628d573c",
@@ -1293,15 +1284,6 @@
       "displayName": "parseWorkflowWarnings",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/agent-clients/reconcile.ts",
-      "ruleId": "complexity",
-      "stableId": "5329bcb5458a2e7183ea8a45bfd1c54c4bcfedd20e37cc86193cb9fd930e487a",
-      "displayName": "planAgentClientReconciliation",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
       "count": 1
     },
     {
