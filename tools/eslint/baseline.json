@@ -1188,15 +1188,6 @@
       "count": 1
     },
     {
-      "file": "lib/server/protocol.ts",
-      "ruleId": "complexity",
-      "stableId": "4c960612e92a6836f5f1d0c8def1297a0b209cccfb5f6007e622b553cd885fc8",
-      "displayName": "parseCommand",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "tests/unit/core/requires-pr-gating.test.ts",
       "ruleId": "complexity",
       "stableId": "bd1bf76e224ed5009116f2615a5c02769289e8e175e00a2768eca479c3d94573",

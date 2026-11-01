@@ -67,6 +67,46 @@ export function commandHelp(): string {
   ].join('\n');
 }
 
+function parseSandboxCommand(subcommand: string, rest: string[]): CommandPlan {
+  if (subcommand === 'vm') {
+    if (rest[0] !== 'status') return { kind: 'error', message: 'Only /sandbox vm status is allowed' };
+    return { kind: 'ai', role: 'read', argv: ['sandbox', 'vm', 'status'] };
+  }
+  if (SANDBOX_READ.has(subcommand)) {
+    return { kind: 'ai', role: 'read', argv: ['sandbox', taskSubcommand(subcommand), ...rest] };
+  }
+  if (SANDBOX_WRITE.has(subcommand)) {
+    return { kind: 'ai', role: 'write', argv: ['sandbox', subcommand, ...rest] };
+  }
+  if (subcommand === 'rm') {
+    return {
+      kind: 'error',
+      message: '/sandbox rm is not available from IM because it requires interactive confirmation'
+    };
+  }
+  return { kind: 'error', message: 'Unknown /sandbox command' };
+}
+
+function parseRunCommand(subcommand: string, rest: string[]): CommandPlan {
+  const spec = getSkillRunSpec(subcommand);
+  if (!spec) return { kind: 'error', message: `Unknown skill: ${subcommand}` };
+  if (spec.kind === 'create') {
+    return { kind: 'ai', role: spec.role, argv: ['run', '--skill', subcommand, ...rest] };
+  }
+  const [taskRef, ...skillArgs] = rest;
+  if (!taskRef) return { kind: 'error', message: '/run task skills require a task-ref' };
+  const { hostArgs, skillArgs: forwardedSkillArgs } = splitRunArguments(skillArgs);
+  return {
+    kind: 'ai',
+    role: spec.role,
+    argv: [
+      'run', '--skill', subcommand, '--task', taskRef,
+      ...hostArgs,
+      ...(forwardedSkillArgs.length > 0 ? ['--', ...forwardedSkillArgs] : [])
+    ]
+  };
+}
+
 export function parseCommand(text: string): CommandPlan {
   const trimmed = text.trim();
   if (!trimmed.startsWith('/')) return { kind: 'ignore' };
@@ -86,45 +126,9 @@ export function parseCommand(text: string): CommandPlan {
     return { kind: 'ai', role: 'read', argv: ['task', taskSubcommand(subcommand), ...rest] };
   }
 
-  if (command === '/sandbox') {
-    if (subcommand === 'vm') {
-      if (rest[0] !== 'status') return { kind: 'error', message: 'Only /sandbox vm status is allowed' };
-      return { kind: 'ai', role: 'read', argv: ['sandbox', 'vm', 'status'] };
-    }
-    if (SANDBOX_READ.has(subcommand)) {
-      return { kind: 'ai', role: 'read', argv: ['sandbox', taskSubcommand(subcommand), ...rest] };
-    }
-    if (SANDBOX_WRITE.has(subcommand)) {
-      return { kind: 'ai', role: 'write', argv: ['sandbox', subcommand, ...rest] };
-    }
-    if (subcommand === 'rm') {
-      return {
-        kind: 'error',
-        message: '/sandbox rm is not available from IM because it requires interactive confirmation'
-      };
-    }
-    return { kind: 'error', message: 'Unknown /sandbox command' };
-  }
+  if (command === '/sandbox') return parseSandboxCommand(subcommand, rest);
 
-  if (command === '/run') {
-    const spec = getSkillRunSpec(subcommand);
-    if (!spec) return { kind: 'error', message: `Unknown skill: ${subcommand}` };
-    if (spec.kind === 'create') {
-      return { kind: 'ai', role: spec.role, argv: ['run', '--skill', subcommand, ...rest] };
-    }
-    const [taskRef, ...skillArgs] = rest;
-    if (!taskRef) return { kind: 'error', message: '/run task skills require a task-ref' };
-    const { hostArgs, skillArgs: forwardedSkillArgs } = splitRunArguments(skillArgs);
-    return {
-      kind: 'ai',
-      role: spec.role,
-      argv: [
-        'run', '--skill', subcommand, '--task', taskRef,
-        ...hostArgs,
-        ...(forwardedSkillArgs.length > 0 ? ['--', ...forwardedSkillArgs] : [])
-      ]
-    };
-  }
+  if (command === '/run') return parseRunCommand(subcommand, rest);
 
   return { kind: 'error', message: `Unknown command: ${command}` };
 }
