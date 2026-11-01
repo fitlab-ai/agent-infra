@@ -163,20 +163,21 @@ function updateConfig(plan: AgentClientWorkflowPlan, files: Readonly<{
   renameSync: typeof fs.renameSync;
   unlinkSync: typeof fs.unlinkSync;
 }>): boolean {
+  const { mkdirSync, writeFileSync, renameSync, unlinkSync } = files;
   const serialized = `${JSON.stringify(plan.nextConfig, null, 2)}\n`;
   const previous = fs.existsSync(plan.configPath)
     ? fs.readFileSync(plan.configPath, 'utf8')
     : null;
   const configUpdated = previous !== serialized;
   if (configUpdated) {
-    files.mkdirSync(path.dirname(plan.configPath), { recursive: true });
+    mkdirSync(path.dirname(plan.configPath), { recursive: true });
     const temporary = `${plan.configPath}.tmp-${process.pid}-${Date.now()}`;
     try {
-      files.writeFileSync(temporary, serialized, 'utf8');
-      files.renameSync(temporary, plan.configPath);
+      writeFileSync(temporary, serialized, 'utf8');
+      renameSync(temporary, plan.configPath);
     } catch (error) {
       try {
-        if (fs.existsSync(temporary)) files.unlinkSync(temporary);
+        if (fs.existsSync(temporary)) unlinkSync(temporary);
       } catch {
         // Preserve the original error; a later idempotent rerun can clean stale state.
       }
