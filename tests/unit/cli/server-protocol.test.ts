@@ -95,3 +95,27 @@ test('parseCommand rejects unknown commands without execution argv', () => {
   assert.equal(parseCommand('hello').kind, 'ignore');
   assert.deepEqual(parseCommand('/unknown'), { kind: 'error', message: 'Unknown command: /unknown' });
 });
+
+test('parseCommand preserves sandbox aliases and command boundaries', () => {
+  assert.deepEqual(parseCommand('/sandbox list extra'), {
+    kind: 'ai', role: 'read', argv: ['sandbox', 'ls', 'extra']
+  });
+  assert.deepEqual(parseCommand('/sandbox vm status extra'), {
+    kind: 'ai', role: 'read', argv: ['sandbox', 'vm', 'status']
+  });
+  assert.deepEqual(parseCommand('/sandbox vm start'), {
+    kind: 'error', message: 'Only /sandbox vm status is allowed'
+  });
+  assert.deepEqual(parseCommand('/sandbox unknown'), {
+    kind: 'error', message: 'Unknown /sandbox command'
+  });
+});
+
+test('parseCommand rejects unknown skills and task skills without a task reference', () => {
+  assert.deepEqual(parseCommand('/run unknown-skill 7'), {
+    kind: 'error', message: 'Unknown skill: unknown-skill'
+  });
+  assert.deepEqual(parseCommand('/run code-task'), {
+    kind: 'error', message: '/run task skills require a task-ref'
+  });
+});
