@@ -819,24 +819,6 @@
       "count": 1
     },
     {
-      "file": "lib/server/process-state.ts",
-      "ruleId": "complexity",
-      "stableId": "278a5557b855ad087c75b7eb2ba2fac44b636bad6a97b3e08308b4513afde96b",
-      "displayName": "getProcessIdentityState",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/server/process-state.ts",
-      "ruleId": "complexity",
-      "stableId": "b88fed7e07a7b53f3a63cadddbd4f86a887382cbaa1baec4dfda2fb626723ddc",
-      "displayName": "getProcessStartTime",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/internal/git-workflow.ts",
       "ruleId": "complexity",
       "stableId": "ac05c17318a3b5510fc813b45d611ba5fd89606eb0a7ab3688505d57911433b1",
@@ -1203,15 +1185,6 @@
       "displayName": "parseJournal",
       "metric": 111,
       "normalizedMessage": "complexity=111",
-      "count": 1
-    },
-    {
-      "file": "lib/server/process-state.ts",
-      "ruleId": "complexity",
-      "stableId": "e0904684f1f32ab7b4fade1a248861f4fca36d5894620c3f3ba2316e169544ae",
-      "displayName": "parsePidRecord",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
       "count": 1
     },
     {

@@ -160,6 +160,18 @@ test('Linux identity state does not invoke injected macOS observers', () => {
   assert.equal(queryCalls, 0);
 });
 
+test('Windows identity observes creation time after a permission-denied probe', () => {
+  const startTime = Date.UTC(2026, 8, 1, 0, 25, 12);
+  const calls: string[] = [];
+  const runtime = {
+    probePid() { calls.push('probe'); throw errno('EPERM'); },
+    execFileSync() { calls.push('query'); return '2026-09-01T00:25:12.000Z'; }
+  };
+  assert.equal(getProcessIdentityStateWithRuntime({ pid: 4321, startTime }, 'win32', runtime), 'alive');
+  assert.equal(getProcessIdentityStateWithRuntime({ pid: 4321, startTime: startTime + 1 }, 'win32', runtime), 'dead');
+  assert.deepEqual(calls, ['probe', 'query', 'probe', 'query']);
+});
+
 test('readProcessState classifies missing, invalid, legacy, mismatch, and matching records', () => {
   const dir = createTempDir('server-process-state-');
   const pidFile = path.join(dir, 'server.pid');
@@ -169,8 +181,14 @@ test('readProcessState classifies missing, invalid, legacy, mismatch, and matchi
     fs.writeFileSync(pidFile, 'not-a-pid\n');
     const invalid = readProcessState(pidFile);
     assert.equal(invalid.kind, 'legacy-unknown');
+    assert.equal(invalid.reason, 'invalid PID record JSON');
     assert.equal(removePidFileIfMatches(pidFile, invalid.snapshot), true);
     assert.equal(fs.existsSync(pidFile), false);
+
+    fs.writeFileSync(pidFile, '{"version":3,"pid":123}');
+    const unsupported = readProcessState(pidFile);
+    assert.equal(unsupported.kind, 'legacy-unknown');
+    assert.equal(unsupported.reason, 'unsupported PID record schema');
 
     fs.writeFileSync(pidFile, `${process.pid}\n`);
     const legacy = readProcessState(pidFile);
