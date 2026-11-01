@@ -2052,15 +2052,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/frontmatter.ts",
-      "ruleId": "complexity",
-      "stableId": "020522d24558ac0258b8ddde7129ba6c46f4d7dad718a8c47869bb695b3d2a41",
-      "displayName": "stripInlineComment",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pr-summary.ts",
       "ruleId": "complexity",
       "stableId": "79ca129f21fd4426fca825e74d9487439813b537dc8dd03adec957ee7cf39a39",
@@ -2319,15 +2310,6 @@
       "displayName": "test callback[1]#6.anonymous-object-1.method:json",
       "metric": 22,
       "normalizedMessage": "complexity=22",
-      "count": 1
-    },
-    {
-      "file": "lib/task/frontmatter.ts",
-      "ruleId": "complexity",
-      "stableId": "6a0f4c5d26affaad1e7ef5a2460d792c9d790e717fffdf490187e5086adf45c8",
-      "displayName": "updateTaskFrontmatter",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
       "count": 1
     },
     {

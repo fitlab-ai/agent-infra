@@ -73,7 +73,7 @@ function serializeScalar(value: FrontmatterScalar): string {
 
 function stripInlineComment(value: string): string {
   const first = value.search(/\S/u);
-  let activeQuote = first >= 0 && (value[first] === '"' || value[first] === "'") ? value[first] : null;
+  let activeQuote = value[first] === '"' || value[first] === "'" ? value[first] : null;
   for (let index = activeQuote ? first + 1 : Math.max(first, 0); index < value.length; index += 1) {
     const character = value[index]!;
     if (activeQuote === '"' && character === '\\') {
@@ -159,6 +159,60 @@ function parseTypedTaskFrontmatter(content: string): TypedFrontmatter {
   return result;
 }
 
+function validateSetEntries(entries: [string, FrontmatterScalar][]): void {
+  for (const [key, value] of entries) {
+    if (!key || /[\r\n:]/.test(key)) {
+      throw new FrontmatterError('MUTATION_INVALID', `invalid frontmatter key '${key}'`);
+    }
+    if (
+      value !== null &&
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      throw new FrontmatterError('MUTATION_INVALID', `invalid scalar for '${key}'`);
+    }
+  }
+}
+
+function validateRemoveKeys(remove: readonly string[], set: Readonly<Record<string, FrontmatterScalar>>): void {
+  for (const key of remove) {
+    if (!key || /[\r\n:]/.test(key)) {
+      throw new FrontmatterError('MUTATION_INVALID', `invalid frontmatter key '${key}'`);
+    }
+    if (Object.hasOwn(set, key)) {
+      throw new FrontmatterError(
+        'MUTATION_INVALID',
+        `frontmatter key '${key}' cannot be set and removed together`
+      );
+    }
+  }
+}
+
+function assertUniqueTargets(keys: string[], indexes: Map<string, number[]>): void {
+  for (const key of keys) {
+    if ((indexes.get(key)?.length ?? 0) > 1) {
+      throw new FrontmatterError('TASK_DOCUMENT_INVALID', `duplicate frontmatter key '${key}'`);
+    }
+  }
+}
+
+function applySetEntries(
+  entries: [string, FrontmatterScalar][],
+  indexes: Map<string, number[]>,
+  nextLines: string[]
+): string[] {
+  const additions: string[] = [];
+  for (const [key, value] of entries) {
+    const serialized = serializeScalar(value);
+    const replacement = serialized === '' ? `${key}:` : `${key}: ${serialized}`;
+    const index = indexes.get(key)?.[0];
+    if (index === undefined) additions.push(replacement);
+    else nextLines[index] = replacement;
+  }
+  return additions;
+}
+
 function updateTaskFrontmatter(
   content: string,
   set: Readonly<Record<string, FrontmatterScalar>>,
@@ -175,30 +229,8 @@ function updateTaskFrontmatter(
   if (removeSet.size !== remove.length) {
     throw new FrontmatterError('MUTATION_INVALID', 'frontmatter remove keys must be unique');
   }
-  for (const [key, value] of entries) {
-    if (!key || /[\r\n:]/.test(key)) {
-      throw new FrontmatterError('MUTATION_INVALID', `invalid frontmatter key '${key}'`);
-    }
-    if (
-      value !== null &&
-      typeof value !== 'string' &&
-      typeof value !== 'number' &&
-      typeof value !== 'boolean'
-    ) {
-      throw new FrontmatterError('MUTATION_INVALID', `invalid scalar for '${key}'`);
-    }
-  }
-  for (const key of remove) {
-    if (!key || /[\r\n:]/.test(key)) {
-      throw new FrontmatterError('MUTATION_INVALID', `invalid frontmatter key '${key}'`);
-    }
-    if (Object.hasOwn(set, key)) {
-      throw new FrontmatterError(
-        'MUTATION_INVALID',
-        `frontmatter key '${key}' cannot be set and removed together`
-      );
-    }
-  }
+  validateSetEntries(entries);
+  validateRemoveKeys(remove, set);
 
   const block = locateFrontmatter(content);
   const lines = parseFrontmatterLines(content, block);
@@ -210,21 +242,10 @@ function updateTaskFrontmatter(
     indexes.set(line.key, positions);
   }
 
-  for (const key of [...entries.map(([entryKey]) => entryKey), ...remove]) {
-    if ((indexes.get(key)?.length ?? 0) > 1) {
-      throw new FrontmatterError('TASK_DOCUMENT_INVALID', `duplicate frontmatter key '${key}'`);
-    }
-  }
+  assertUniqueTargets([...entries.map(([entryKey]) => entryKey), ...remove], indexes);
 
   const nextLines = lines.map((line) => line.raw);
-  const additions: string[] = [];
-  for (const [key, value] of entries) {
-    const serialized = serializeScalar(value);
-    const replacement = serialized === '' ? `${key}:` : `${key}: ${serialized}`;
-    const index = indexes.get(key)?.[0];
-    if (index === undefined) additions.push(replacement);
-    else nextLines[index] = replacement;
-  }
+  const additions = applySetEntries(entries, indexes, nextLines);
   const retainedLines = nextLines.filter((_, index) => {
     const key = lines[index]?.key;
     return !key || !removeSet.has(key);
