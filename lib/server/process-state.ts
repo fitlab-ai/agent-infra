@@ -149,9 +149,9 @@ function getLinuxIdentityState(identity: ProcessIdentity): ProcessIdentityState 
   }
 }
 
-function probeIdentityPid(pid: number, probePid: (pid: number) => void): ProcessIdentityState | null {
+function probeIdentityPid(identity: ProcessIdentity, probePid: (pid: number) => void): ProcessIdentityState | null {
   try {
-    probePid(pid);
+    probePid(identity.pid);
     return null;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -170,7 +170,7 @@ export function getProcessIdentityState(
   }
   if (platform === 'linux') return getLinuxIdentityState(identity);
   const probePid = runtime.probePid ?? ((pid: number) => process.kill(pid, 0));
-  const probeState = probeIdentityPid(identity.pid, probePid);
+  const probeState = probeIdentityPid(identity, probePid);
   if (probeState !== null) return probeState;
   const query = buildProcessStartTimeQuery(identity.pid, platform);
   if (query === null) return 'unknown';
@@ -226,17 +226,17 @@ function classifyJsonPidRecord(value: JsonPidValue, raw: string):
       kind: 'record',
       record: { version: 2, pid: pidValue, startTime }
     };
-}
-if (
-  value !== null &&
-  value.version === 1 &&
-  isValidRecordPid(pidValue) &&
-  typeof value.startTime === 'string' &&
-  value.startTime.length > 0
-) {
-  return { kind: 'legacy-json', legacy: { pid: pidValue, raw, format: 'json-v1' } };
-}
-return { kind: 'legacy-unknown', legacy: { raw, format: 'malformed' }, reason: 'unsupported PID record schema' };
+  }
+  if (
+    value !== null &&
+    value.version === 1 &&
+    isValidRecordPid(pidValue) &&
+    typeof value.startTime === 'string' &&
+    value.startTime.length > 0
+  ) {
+    return { kind: 'legacy-json', legacy: { pid: pidValue, raw, format: 'json-v1' } };
+  }
+  return { kind: 'legacy-unknown', legacy: { raw, format: 'malformed' }, reason: 'unsupported PID record schema' };
 }
 
 function parsePidRecord(
