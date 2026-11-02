@@ -31,11 +31,25 @@ type CurrentField = { id: string; name: string; kind: IssueFieldSchema['kind']; 
 
 const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id issueType{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{id name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{id name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{id name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{id name}}}}}}}}`;
 
-function normalizeIssue(remote: RemoteIssue, repository: string, fallbackNumber?: number): IssueSnapshot | null {
+function normalizeLabels(labels: RemoteIssue['labels'] | RemotePullRequest['labels']) {
+  return (labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort();
+}
+
+function normalizeAssignees(assignees: RemoteIssue['assignees'] | RemotePullRequest['assignees']) {
+  return (assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort();
+}
+
+function normalizeIssueIdentity(remote: RemoteIssue, fallbackNumber?: number): number | null {
   const number = Number.isInteger(remote.number) && Number(remote.number) > 0
     ? Number(remote.number)
     : fallbackNumber;
   if (!number || !Number.isSafeInteger(number) || remote.pull_request) return null;
+  return number;
+}
+
+function normalizeIssue(remote: RemoteIssue, repository: string, fallbackNumber?: number): IssueSnapshot | null {
+  const number = normalizeIssueIdentity(remote, fallbackNumber);
+  if (number === null) return null;
   return {
     repository,
     number,
@@ -45,8 +59,8 @@ function normalizeIssue(remote: RemoteIssue, repository: string, fallbackNumber?
     state: String(remote.state || '').toLowerCase() === 'closed' ? 'closed' : 'open',
     title: remote.title || '',
     body: remote.body || '',
-    labels: (remote.labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
-    assignees: (remote.assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort(),
+    labels: normalizeLabels(remote.labels),
+    assignees: normalizeAssignees(remote.assignees),
     milestone: remote.milestone?.title || null,
     issueType: remote.type?.name || null,
     fields: {}
@@ -140,6 +154,31 @@ type RemotePullRequest = {
   mergeable_state?: string | null;
 };
 
+function hasCompletePullRequestIdentity(
+  remote: RemotePullRequest,
+  number: number,
+  headRepository: string | undefined,
+  baseRepository: string | undefined
+): remote is RemotePullRequest & {
+  node_id: string;
+  html_url: string;
+  head: NonNullable<RemotePullRequest['head']> & { ref: string; sha: string };
+  base: NonNullable<RemotePullRequest['base']> & { ref: string };
+} {
+  if (!Number.isInteger(number) || number <= 0 || !remote.node_id || !remote.html_url ||
+      !remote.head?.ref || !remote.head.sha || !headRepository || !remote.base?.ref || !baseRepository) return false;
+  return true;
+}
+
+function normalizePullRequestMergeability(remote: RemotePullRequest) {
+  const mergeabilityDetail = remote.mergeable_state?.trim().toLowerCase() || null;
+  return remote.mergeable === false
+    ? { state: 'conflicting' as const, detail: mergeabilityDetail }
+    : remote.mergeable === true && mergeabilityDetail !== 'dirty'
+      ? { state: 'mergeable' as const, detail: mergeabilityDetail }
+      : { state: 'unknown' as const, detail: mergeabilityDetail };
+}
+
 type ClosingPullRequestNode = {
   number?: number;
   id?: string;
@@ -174,14 +213,8 @@ function normalizePullRequest(remote: RemotePullRequest, repository: string): Pu
   const number = Number(remote.number);
   const headRepository = remote.head?.repo?.full_name;
   const baseRepository = remote.base?.repo?.full_name;
-  if (!Number.isInteger(number) || number <= 0 || !remote.node_id || !remote.html_url ||
-      !remote.head?.ref || !remote.head.sha || !headRepository || !remote.base?.ref || !baseRepository) return null;
-  const mergeabilityDetail = remote.mergeable_state?.trim().toLowerCase() || null;
-  const mergeability = remote.mergeable === false
-    ? { state: 'conflicting' as const, detail: mergeabilityDetail }
-    : remote.mergeable === true && mergeabilityDetail !== 'dirty'
-      ? { state: 'mergeable' as const, detail: mergeabilityDetail }
-      : { state: 'unknown' as const, detail: mergeabilityDetail };
+  if (!hasCompletePullRequestIdentity(remote, number, headRepository, baseRepository)) return null;
+  const mergeability = normalizePullRequestMergeability(remote);
   return {
     repository,
     number,
@@ -191,12 +224,12 @@ function normalizePullRequest(remote: RemotePullRequest, repository: string): Pu
     title: remote.title || '',
     body: remote.body || '',
     draft: Boolean(remote.draft),
-    head: { repository: headRepository, ref: remote.head.ref, sha: remote.head.sha },
-    base: { repository: baseRepository, ref: remote.base.ref, sha: remote.base.sha || '' },
+    head: { repository: headRepository!, ref: remote.head.ref, sha: remote.head.sha },
+    base: { repository: baseRepository!, ref: remote.base.ref, sha: remote.base.sha || '' },
     mergedAt: remote.merged_at || null,
     mergeCommitSha: remote.merge_commit_sha || null,
-    labels: (remote.labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
-    assignees: (remote.assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort(),
+    labels: normalizeLabels(remote.labels),
+    assignees: normalizeAssignees(remote.assignees),
     milestone: remote.milestone?.title || null,
     mergeability
   };

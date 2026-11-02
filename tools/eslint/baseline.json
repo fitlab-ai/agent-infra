@@ -1071,30 +1071,12 @@
       "count": 1
     },
     {
-      "file": "lib/platform/github-data.ts",
-      "ruleId": "complexity",
-      "stableId": "b414409143dffb197d9a125d454d89eca965201b3ba9d99bf8b010d372d2be4d",
-      "displayName": "normalizeIssue",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pull-requests.ts",
       "ruleId": "complexity",
       "stableId": "cc85dee9088ceac512966030d3cf60f7331f8022dead46196f678ac7b6a1230b",
       "displayName": "normalizeProviderPullRequest",
       "metric": 42,
       "normalizedMessage": "complexity=42",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/github-data.ts",
-      "ruleId": "complexity",
-      "stableId": "dd16f1ba73f740fbb47130ee0c0dfca93c3e0500e6dd35af972f2830b7a650bd",
-      "displayName": "normalizePullRequest",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
       "count": 1
     },
     {
