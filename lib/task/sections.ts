@@ -49,6 +49,11 @@ type ParsedTable = {
   rows: readonly ParsedTableRow[];
 };
 
+type ParsedMutationRow = {
+  line: Line;
+  parsed: NonNullable<ReturnType<typeof splitTableCells>>;
+};
+
 type DocumentMutationErrorCode =
   | 'TASK_DOCUMENT_INVALID'
   | 'MUTATION_INVALID'
@@ -94,41 +99,43 @@ function parseTable(
     throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table section is ambiguous');
   }
   const section = sections[0]!;
-  const visibleStarts = new Set(scanVisibleMarkdown(content).lines.map((line) => line.start));
-  const sectionLines = linesOf(content).filter(
-    (line) => line.start >= section.bodyStart && line.start < section.end
-  );
+  const { sectionLines, indexes } = findMatchingTables(content, section, input.columns);
   const firstContent = sectionLines.findIndex((line) => line.text.trim() !== '');
-  const tables: number[] = [];
-  for (let index = 0; index + 1 < sectionLines.length; index += 1) {
-    if (!visibleStarts.has(sectionLines[index]!.start) || !visibleStarts.has(sectionLines[index + 1]!.start)) continue;
-    const header = splitTableCells(sectionLines[index]!.text);
-    const separator = splitTableCells(sectionLines[index + 1]!.text);
-    if (!header || !separator || header.cells.length !== input.columns.length) continue;
-    const names = header.cells.map((cell) => decodeCell(cell).trim());
-    if (!names.every((name, column) => name === input.columns[column])) continue;
-    if (
-      separator.cells.length === input.columns.length &&
-      separator.cells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
-    ) tables.push(index);
-  }
-  if (tables.length === 0) {
+  if (indexes.length === 0) {
     throw new DocumentMutationError('TABLE_NOT_FOUND', 'matching table not found');
   }
-  if (tables.length > 1) {
+  if (indexes.length > 1) {
     throw new DocumentMutationError('TABLE_AMBIGUOUS', 'matching table appears more than once');
   }
+  return { heading: section.heading, rows: parseTableRows(sectionLines, indexes[0]!, firstContent, input.columns, keyColumn) };
+}
+
+type Line = {
+  start: number;
+  contentEnd: number;
+  end: number;
+  text: string;
+  eol: string;
+};
+
+function parseTableRows(
+  sectionLines: readonly Line[],
+  tableIndex: number,
+  firstContent: number,
+  columns: readonly string[],
+  keyColumn: string | null
+): ParsedTableRow[] {
   const rows: ParsedTableRow[] = [];
   const seen = new Set<string>();
-  for (let index = tables[0]! + 2; index < sectionLines.length; index += 1) {
+  for (let index = tableIndex + 2; index < sectionLines.length; index += 1) {
     const line = sectionLines[index]!;
     if (!line.text.trim()) break;
     const parsed = splitTableCells(line.text);
     if (!parsed) break;
-    if (parsed.cells.length !== input.columns.length) {
+    if (parsed.cells.length !== columns.length) {
       throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table row has the wrong column count');
     }
-    const values = Object.fromEntries(input.columns.map((column, columnIndex) => [
+    const values = Object.fromEntries(columns.map((column, columnIndex) => [
       column,
       decodeCell(parsed.cells[columnIndex]!).trim()
     ]));
@@ -139,16 +146,8 @@ function parseTable(
     if (key !== null) seen.add(key);
     rows.push({ values, sourceLine: index - Math.max(firstContent, 0) });
   }
-  return { heading: section.heading, rows };
+  return rows;
 }
-
-type Line = {
-  start: number;
-  contentEnd: number;
-  end: number;
-  text: string;
-  eol: string;
-};
 
 function linesOf(content: string): Line[] {
   const lines: Line[] = [];
@@ -201,6 +200,31 @@ function validateAliases(aliases: readonly string[], name: string): void {
   if (new Set(aliases).size !== aliases.length) {
     throw new DocumentMutationError('MUTATION_INVALID', `${name} must be unique`);
   }
+}
+
+function findMatchingTables(
+  content: string,
+  section: ReturnType<typeof matchingSections>[number],
+  columns: readonly string[]
+): { sectionLines: Line[]; indexes: number[] } {
+  const visibleStarts = new Set(scanVisibleMarkdown(content).lines.map((line) => line.start));
+  const sectionLines = linesOf(content).filter(
+    (line) => line.start >= section.bodyStart && line.start < section.end
+  );
+  const indexes: number[] = [];
+  for (let index = 0; index + 1 < sectionLines.length; index += 1) {
+    if (!visibleStarts.has(sectionLines[index]!.start) || !visibleStarts.has(sectionLines[index + 1]!.start)) continue;
+    const header = splitTableCells(sectionLines[index]!.text);
+    const separator = splitTableCells(sectionLines[index + 1]!.text);
+    if (!header || !separator || header.cells.length !== columns.length) continue;
+    const names = header.cells.map((cell) => decodeCell(cell).trim());
+    if (!names.every((name, column) => name === columns[column])) continue;
+    if (
+      separator.cells.length === columns.length &&
+      separator.cells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
+    ) indexes.push(index);
+  }
+  return { sectionLines, indexes };
 }
 
 function upsertSection(content: string, input: SectionMutationInput): SectionMutationResult {
@@ -318,7 +342,7 @@ function replaceCellToken(raw: string, value: string): string {
   return `${raw.slice(0, firstContent)}${value}${raw.slice(lastContent + 1)}`;
 }
 
-function mutateTableRow(content: string, mutation: TableRowMutation): TableMutationResult {
+function validateTableMutationShape(mutation: TableRowMutation): string {
   validateAliases(mutation.sectionAliases, 'table section aliases');
   if (
     !Array.isArray(mutation.columns) ||
@@ -332,7 +356,10 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
   ) {
     throw new DocumentMutationError('MUTATION_INVALID', 'table mutation shape is invalid');
   }
-  const normalizedKey = mutation.key.trim();
+  return mutation.key.trim();
+}
+
+function validateTableMutationAction(mutation: TableRowMutation): void {
   if (mutation.action !== 'upsert' && mutation.action !== 'delete') {
     throw new DocumentMutationError('MUTATION_INVALID', 'table action is invalid');
   }
@@ -345,44 +372,17 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
   ) {
     throw new DocumentMutationError('MUTATION_INVALID', 'upsert values must be an object');
   }
+}
 
-  const sections = matchingSections(content, mutation.sectionAliases);
-  if (sections.length !== 1) {
-    throw new DocumentMutationError(
-      sections.length === 0 ? 'TABLE_NOT_FOUND' : 'TASK_DOCUMENT_INVALID',
-      sections.length === 0 ? 'table section not found' : 'table section is ambiguous'
-    );
-  }
-  const section = sections[0]!;
-  const visibleStarts = new Set(scanVisibleMarkdown(content).lines.map((line) => line.start));
-  const sectionLines = linesOf(content).filter(
-    (line) => line.start >= section.bodyStart && line.start < section.end
-  );
-  const tables: { headerIndex: number; cells: string[] }[] = [];
-  for (let i = 0; i + 1 < sectionLines.length; i += 1) {
-    if (!visibleStarts.has(sectionLines[i]!.start) || !visibleStarts.has(sectionLines[i + 1]!.start)) continue;
-    const header = splitTableCells(sectionLines[i]!.text);
-    const separator = splitTableCells(sectionLines[i + 1]!.text);
-    if (!header || !separator || header.cells.length !== mutation.columns.length) continue;
-    const names = header.cells.map((cell) => decodeCell(cell).trim());
-    if (!names.every((name, index) => name === mutation.columns[index])) continue;
-    if (
-      separator.cells.length !== mutation.columns.length ||
-      !separator.cells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
-    ) continue;
-    tables.push({ headerIndex: i, cells: header.cells });
-  }
-  if (tables.length === 0) {
-    throw new DocumentMutationError('TABLE_NOT_FOUND', 'matching table not found');
-  }
-  if (tables.length > 1) {
-    throw new DocumentMutationError('TABLE_AMBIGUOUS', 'matching table appears more than once');
-  }
-
-  const table = tables[0]!;
+function parseMutationRows(
+  sectionLines: readonly Line[],
+  tableIndex: number,
+  mutation: TableRowMutation,
+  normalizedKey: string
+): { rows: ParsedMutationRow[]; matches: ParsedMutationRow[] } {
   const keyIndex = mutation.columns.indexOf(mutation.keyColumn);
-  let rowIndex = table.headerIndex + 2;
-  const rows: { line: Line; parsed: NonNullable<ReturnType<typeof splitTableCells>> }[] = [];
+  let rowIndex = tableIndex + 2;
+  const rows: ParsedMutationRow[] = [];
   while (rowIndex < sectionLines.length) {
     const line = sectionLines[rowIndex]!;
     const parsed = splitTableCells(line.text);
@@ -399,19 +399,21 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
   if (matches.length > 1) {
     throw new DocumentMutationError('TABLE_DUPLICATE_KEY', `duplicate table key '${normalizedKey}'`);
   }
+  return { rows, matches };
+}
 
-  if (mutation.action === 'delete') {
-    if (matches.length === 0) return { content, section: section.heading, operation: 'delete' };
-    const line = matches[0]!.line;
-    return {
-      content: content.slice(0, line.start) + content.slice(line.end),
-      section: section.heading,
-      operation: 'delete'
-    };
-  }
+function deleteMutationRow(content: string, section: string, matches: readonly ParsedMutationRow[]): TableMutationResult {
+  if (matches.length === 0) return { content, section, operation: 'delete' };
+  const line = matches[0]!.line;
+  return {
+    content: content.slice(0, line.start) + content.slice(line.end),
+    section,
+    operation: 'delete'
+  };
+}
 
-  const values = mutation.values;
-  for (const [column, value] of Object.entries(values)) {
+function validateUpsertValues(mutation: TableRowUpsertMutation, normalizedKey: string): void {
+  for (const [column, value] of Object.entries(mutation.values)) {
     if (!mutation.columns.includes(column)) {
       throw new DocumentMutationError('TABLE_UNKNOWN_COLUMN', `unknown table column '${column}'`);
     }
@@ -426,28 +428,42 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
     }
     scalarCell(value);
   }
+}
 
-  if (matches.length === 1) {
-    const row = matches[0]!;
-    const cells = [...row.parsed.cells];
-    for (const [column, value] of Object.entries(values)) {
-      const index = mutation.columns.indexOf(column);
-      cells[index] = replaceCellToken(cells[index]!, scalarCell(value));
-    }
-    const rebuilt = `${row.parsed.prefix}|${cells.join('|')}|${row.parsed.suffix}`;
-    return {
-      content:
-        content.slice(0, row.line.start) +
-        rebuilt +
-        row.line.eol +
-        content.slice(row.line.end),
-      section: section.heading,
-      operation: 'update'
-    };
+function updateMutationRow(
+  content: string,
+  section: string,
+  mutation: TableRowUpsertMutation,
+  row: ParsedMutationRow
+): TableMutationResult {
+  const cells = [...row.parsed.cells];
+  for (const [column, value] of Object.entries(mutation.values)) {
+    const index = mutation.columns.indexOf(column);
+    cells[index] = replaceCellToken(cells[index]!, scalarCell(value));
   }
+  const rebuilt = `${row.parsed.prefix}|${cells.join('|')}|${row.parsed.suffix}`;
+  return {
+    content:
+      content.slice(0, row.line.start) +
+      rebuilt +
+      row.line.eol +
+      content.slice(row.line.end),
+    section,
+    operation: 'update'
+  };
+}
 
+function insertMutationRow(
+  content: string,
+  section: string,
+  sectionLines: readonly Line[],
+  tableIndex: number,
+  rows: readonly ParsedMutationRow[],
+  mutation: TableRowUpsertMutation,
+  normalizedKey: string
+): TableMutationResult {
   const missing = mutation.columns.filter(
-    (column) => column !== mutation.keyColumn && !Object.hasOwn(values, column)
+    (column) => column !== mutation.keyColumn && !Object.hasOwn(mutation.values, column)
   );
   if (missing.length > 0) {
     throw new DocumentMutationError(
@@ -456,10 +472,10 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
     );
   }
   const newCells = mutation.columns.map((column) =>
-    column === mutation.keyColumn ? scalarCell(normalizedKey) : scalarCell(values[column]!)
+    column === mutation.keyColumn ? scalarCell(normalizedKey) : scalarCell(mutation.values[column]!)
   );
   const newLine = `| ${newCells.join(' | ')} |`;
-  const separatorLine = sectionLines[table.headerIndex + 1]!;
+  const separatorLine = sectionLines[tableIndex + 1]!;
   const lastLine = rows.at(-1)?.line ?? separatorLine;
   const eol = lastLine.eol || documentEol(content);
   const needsLeadingEol = lastLine.eol === '';
@@ -470,9 +486,43 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
       newLine +
       eol +
       content.slice(lastLine.end),
-    section: section.heading,
+    section,
     operation: 'insert'
   };
+}
+
+function mutateTableRow(content: string, mutation: TableRowMutation): TableMutationResult {
+  const normalizedKey = validateTableMutationShape(mutation);
+  validateTableMutationAction(mutation);
+
+  const sections = matchingSections(content, mutation.sectionAliases);
+  if (sections.length !== 1) {
+    throw new DocumentMutationError(
+      sections.length === 0 ? 'TABLE_NOT_FOUND' : 'TASK_DOCUMENT_INVALID',
+      sections.length === 0 ? 'table section not found' : 'table section is ambiguous'
+    );
+  }
+  const section = sections[0]!;
+  const { sectionLines, indexes } = findMatchingTables(content, section, mutation.columns);
+  if (indexes.length === 0) {
+    throw new DocumentMutationError('TABLE_NOT_FOUND', 'matching table not found');
+  }
+  if (indexes.length > 1) {
+    throw new DocumentMutationError('TABLE_AMBIGUOUS', 'matching table appears more than once');
+  }
+
+  const tableIndex = indexes[0]!;
+  const { rows, matches } = parseMutationRows(sectionLines, tableIndex, mutation, normalizedKey);
+  if (mutation.action === 'delete') {
+    return deleteMutationRow(content, section.heading, matches);
+  }
+
+  validateUpsertValues(mutation, normalizedKey);
+  if (matches.length === 1) {
+    return updateMutationRow(content, section.heading, mutation, matches[0]!);
+  }
+
+  return insertMutationRow(content, section.heading, sectionLines, tableIndex, rows, mutation, normalizedKey);
 }
 
 /**
