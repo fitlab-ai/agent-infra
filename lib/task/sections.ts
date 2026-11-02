@@ -412,8 +412,12 @@ function deleteMutationRow(content: string, section: string, matches: readonly P
   };
 }
 
-function validateUpsertValues(mutation: TableRowUpsertMutation, normalizedKey: string): void {
-  for (const [column, value] of Object.entries(mutation.values)) {
+function validateUpsertValues(
+  mutation: TableRowUpsertMutation,
+  values: TableRowUpsertMutation['values'],
+  normalizedKey: string
+): void {
+  for (const [column, value] of Object.entries(values)) {
     if (!mutation.columns.includes(column)) {
       throw new DocumentMutationError('TABLE_UNKNOWN_COLUMN', `unknown table column '${column}'`);
     }
@@ -434,10 +438,11 @@ function updateMutationRow(
   content: string,
   section: string,
   mutation: TableRowUpsertMutation,
+  values: TableRowUpsertMutation['values'],
   row: ParsedMutationRow
 ): TableMutationResult {
   const cells = [...row.parsed.cells];
-  for (const [column, value] of Object.entries(mutation.values)) {
+  for (const [column, value] of Object.entries(values)) {
     const index = mutation.columns.indexOf(column);
     cells[index] = replaceCellToken(cells[index]!, scalarCell(value));
   }
@@ -460,10 +465,11 @@ function insertMutationRow(
   tableIndex: number,
   rows: readonly ParsedMutationRow[],
   mutation: TableRowUpsertMutation,
+  values: TableRowUpsertMutation['values'],
   normalizedKey: string
 ): TableMutationResult {
   const missing = mutation.columns.filter(
-    (column) => column !== mutation.keyColumn && !Object.hasOwn(mutation.values, column)
+    (column) => column !== mutation.keyColumn && !Object.hasOwn(values, column)
   );
   if (missing.length > 0) {
     throw new DocumentMutationError(
@@ -472,7 +478,7 @@ function insertMutationRow(
     );
   }
   const newCells = mutation.columns.map((column) =>
-    column === mutation.keyColumn ? scalarCell(normalizedKey) : scalarCell(mutation.values[column]!)
+    column === mutation.keyColumn ? scalarCell(normalizedKey) : scalarCell(values[column]!)
   );
   const newLine = `| ${newCells.join(' | ')} |`;
   const separatorLine = sectionLines[tableIndex + 1]!;
@@ -517,12 +523,13 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
     return deleteMutationRow(content, section.heading, matches);
   }
 
-  validateUpsertValues(mutation, normalizedKey);
+  const values = mutation.values;
+  validateUpsertValues(mutation, values, normalizedKey);
   if (matches.length === 1) {
-    return updateMutationRow(content, section.heading, mutation, matches[0]!);
+    return updateMutationRow(content, section.heading, mutation, values, matches[0]!);
   }
 
-  return insertMutationRow(content, section.heading, sectionLines, tableIndex, rows, mutation, normalizedKey);
+  return insertMutationRow(content, section.heading, sectionLines, tableIndex, rows, mutation, values, normalizedKey);
 }
 
 /**
