@@ -1107,15 +1107,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pr-change-report.ts",
-      "ruleId": "complexity",
-      "stableId": "f8b1997773939d137b388c8035c255c1f0ed4e5f0e39f3cef56dd154efe9b457",
-      "displayName": "parseChangeFile",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "tests/unit/core/requires-pr-gating.test.ts",
       "ruleId": "complexity",
       "stableId": "bd1bf76e224ed5009116f2615a5c02769289e8e175e00a2768eca479c3d94573",
@@ -2364,15 +2355,6 @@
       "displayName": "validatePlatformProvider",
       "metric": 21,
       "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pr-change-report.ts",
-      "ruleId": "complexity",
-      "stableId": "e1a03515e4a43aade7bdf4934fd7d11d8076cc31af122fb438ae87972387abe9",
-      "displayName": "validatePrChangeReport",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
       "count": 1
     },
     {

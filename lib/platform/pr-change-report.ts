@@ -149,6 +149,17 @@ function isIntegerOrNull(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
 
+function validateChangeFileBytes(value: Record<string, unknown>, index: number): ValidationResult<null> {
+  for (const field of ['oldBytes', 'newBytes', 'netBytes']) {
+    const number = value[field];
+    if (typeof number !== 'number' || !Number.isSafeInteger(number) || (field !== 'netBytes' && number < 0)) {
+      return invalid(`diff.files[${index}].${field} is invalid`);
+    }
+  }
+  if (value.netBytes !== (value.newBytes as number) - (value.oldBytes as number)) return invalid(`diff.files[${index}].netBytes is inconsistent`);
+  return { ok: true, value: null };
+}
+
 function parseChangeFile(value: unknown, index: number): ValidationResult<ChangeFile> {
   if (!isRecord(value)) return invalid(`diff.files[${index}] must be an object`);
   const pathValue = value.oldPath ?? value.newPath;
@@ -158,13 +169,8 @@ function parseChangeFile(value: unknown, index: number): ValidationResult<Change
   if (!(value.newPath === null || isSafeRenderedText(value.newPath))) return invalid(`diff.files[${index}].newPath is invalid`);
   if (!isIntegerOrNull(value.additions) || !isIntegerOrNull(value.deletions)) return invalid(`diff.files[${index}] line counts are invalid`);
   if ((value.additions === null) !== (value.deletions === null)) return invalid(`diff.files[${index}] line counts must both be null or integers`);
-  for (const field of ['oldBytes', 'newBytes', 'netBytes']) {
-    const number = value[field];
-    if (typeof number !== 'number' || !Number.isSafeInteger(number) || (field !== 'netBytes' && number < 0)) {
-      return invalid(`diff.files[${index}].${field} is invalid`);
-    }
-  }
-  if (value.netBytes !== (value.newBytes as number) - (value.oldBytes as number)) return invalid(`diff.files[${index}].netBytes is inconsistent`);
+  const bytes = validateChangeFileBytes(value, index);
+  if (!bytes.ok) return bytes;
   return {
     ok: true,
     value: {
@@ -395,6 +401,32 @@ function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCan
   return { ok: true, value: { taskIntentSha256, checks: parsed.value } };
 }
 
+function parseReportDiff(diff: Record<string, unknown>): ValidationResult<{ files: ChangeFile[]; totals: ChangeTotals }> {
+  if (!isSha(diff.mergeBase) || !isSha(diff.patchSha256) || !Array.isArray(diff.files)) return invalid('change report diff is invalid');
+  const files: ChangeFile[] = [];
+  for (let index = 0; index < diff.files.length; index += 1) {
+    const parsed = parseChangeFile(diff.files[index], index);
+    if (!parsed.ok) return parsed;
+    files.push(parsed.value);
+  }
+  const totals = parseTotals(diff.totals);
+  if (!totals.ok) return totals;
+  if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
+  return { ok: true, value: { files, totals: totals.value } };
+}
+
+function parseReportPrecheck(report: Record<string, unknown>, files: ChangeFile[]): ValidationResult<Precheck[]> {
+  if ((report.precheck as Record<string, unknown>).formalReview !== false ||
+      ((report.precheck as Record<string, unknown>).verdict !== 'clear' && (report.precheck as Record<string, unknown>).verdict !== 'needs-review') ||
+      ((report.precheck as Record<string, unknown>).route !== 'watch-pr' && (report.precheck as Record<string, unknown>).route !== 'review-code')) return invalid('change report precheck envelope is invalid');
+  const checks = parseChecks((report.precheck as Record<string, unknown>).checks, 'precheck.checks', files);
+  if (!checks.ok) return checks;
+  const derivedVerdict: PrecheckVerdict = checks.value.every((check) => check.verdict === 'pass') ? 'clear' : 'needs-review';
+  const derivedRoute: PrecheckRoute = derivedVerdict === 'clear' ? 'watch-pr' : 'review-code';
+  if ((report.precheck as Record<string, unknown>).verdict !== derivedVerdict || (report.precheck as Record<string, unknown>).route !== derivedRoute) return invalid('change report precheck verdict/route is not derived from checks');
+  return checks;
+}
+
 function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport> {
   if (!isRecord(value)) return invalid('change report must be an object');
   if (value.version !== REPORT_VERSION || !isRecord(value.identity) || !isRecord(value.inputs) || !isRecord(value.diff) || !isRecord(value.precheck)) {
@@ -415,23 +447,11 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
   const inputTaskIntentSha256 = value.inputs.taskIntentSha256;
   if (!isSha(inputTaskIntentSha256)) return invalid('change report taskIntentSha256 is invalid');
   const diff = value.diff;
-  if (!isSha(diff.mergeBase) || !isSha(diff.patchSha256) || !Array.isArray(diff.files)) return invalid('change report diff is invalid');
-  const files: ChangeFile[] = [];
-  for (let index = 0; index < diff.files.length; index += 1) {
-    const parsed = parseChangeFile(diff.files[index], index);
-    if (!parsed.ok) return parsed;
-    files.push(parsed.value);
-  }
-  const totals = parseTotals(diff.totals);
-  if (!totals.ok) return totals;
-  if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
-  if (value.precheck.formalReview !== false || (value.precheck.verdict !== 'clear' && value.precheck.verdict !== 'needs-review') ||
-      (value.precheck.route !== 'watch-pr' && value.precheck.route !== 'review-code')) return invalid('change report precheck envelope is invalid');
-  const checks = parseChecks(value.precheck.checks, 'precheck.checks', files);
+  const parsedDiff = parseReportDiff(diff as Record<string, unknown>);
+  if (!parsedDiff.ok) return parsedDiff;
+  const { files, totals } = parsedDiff.value;
+  const checks = parseReportPrecheck(value as Record<string, unknown>, files);
   if (!checks.ok) return checks;
-  const derivedVerdict: PrecheckVerdict = checks.value.every((check) => check.verdict === 'pass') ? 'clear' : 'needs-review';
-  const derivedRoute: PrecheckRoute = derivedVerdict === 'clear' ? 'watch-pr' : 'review-code';
-  if (value.precheck.verdict !== derivedVerdict || value.precheck.route !== derivedRoute) return invalid('change report precheck verdict/route is not derived from checks');
   return {
     ok: true,
     value: {
@@ -443,8 +463,8 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
         head: head.value
       },
       inputs: { taskIntentSha256: inputTaskIntentSha256 },
-      diff: { mergeBase: diff.mergeBase, patchSha256: diff.patchSha256, files, totals: totals.value },
-      precheck: { verdict: value.precheck.verdict, formalReview: false, route: value.precheck.route, checks: checks.value }
+      diff: { mergeBase: diff.mergeBase as string, patchSha256: diff.patchSha256 as string, files, totals },
+      precheck: { verdict: value.precheck.verdict as PrecheckVerdict, formalReview: false, route: value.precheck.route as PrecheckRoute, checks: checks.value }
     }
   };
 }
