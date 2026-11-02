@@ -1710,15 +1710,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/issue-comments.ts",
-      "ruleId": "complexity",
-      "stableId": "350daf3d33b95a3b2114cdb7027ac3f9cf29bbb1e235397ff0083d3ad6e28766",
-      "displayName": "renderOversizedFenceChunk",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/task/verification.ts",
       "ruleId": "complexity",
       "stableId": "3f3ef88ce0ce1415a12e02fc4b78d94f896cfe0b07449c411c271fce5bfe348e",
