@@ -165,17 +165,13 @@ function syncRequirementCheckboxes(
   return { status: 'synced', changed: next !== body, body: next };
 }
 
-function planIssueMetadata(input: {
-  snapshot: IssueMetadataSnapshot;
-  desired: IssueDesiredState;
-  repositoryLabels?: Set<string>;
-  milestones?: string[];
-  currentUser?: string | null;
-  requirementAnchors?: RequirementSectionAnchor[];
-  capabilities: PlatformCapabilities;
-}): { operations: PlannedOperation[] } {
-  const operations: PlannedOperation[] = [];
-  const { snapshot, desired, capabilities } = input;
+function appendStatusLabels(
+  input: { repositoryLabels?: Set<string> },
+  snapshot: IssueMetadataSnapshot,
+  desired: IssueDesiredState,
+  capabilities: PlatformCapabilities,
+  operations: PlannedOperation[]
+): void {
   if (desired.status !== undefined || desired.state === 'closed') {
     if (!capabilities.triage) operations.push({ name: 'labels:status', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' });
     else {
@@ -195,6 +191,20 @@ function planIssueMetadata(input: {
       }
     }
   }
+}
+
+function planIssueMetadata(input: {
+  snapshot: IssueMetadataSnapshot;
+  desired: IssueDesiredState;
+  repositoryLabels?: Set<string>;
+  milestones?: string[];
+  currentUser?: string | null;
+  requirementAnchors?: RequirementSectionAnchor[];
+  capabilities: PlatformCapabilities;
+}): { operations: PlannedOperation[] } {
+  const operations: PlannedOperation[] = [];
+  const { snapshot, desired, capabilities } = input;
+  appendStatusLabels(input, snapshot, desired, capabilities, operations);
   if (desired.assignees !== undefined) {
     const value = desired.assignees === 'none' ? [] : input.currentUser ? [input.currentUser] : [];
     operations.push([...snapshot.assignees].sort().join('\0') === value.join('\0')
