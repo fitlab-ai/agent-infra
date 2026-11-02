@@ -118,6 +118,75 @@ function renderSeed(content: string, config: Record<string, unknown>): string {
     .replaceAll('{{org}}', String(config.org ?? ''));
 }
 
+function planSeedOperation(input: Readonly<{
+  clientId: AgentClientId;
+  target: string;
+  content: string;
+  templateHash: string;
+  exists: boolean;
+  localHash: string | null;
+  baseline: string | null;
+  enabled: boolean;
+  baselines: Record<string, unknown>;
+}>): AgentClientSeedOperation {
+  const { clientId, target, content, templateHash, exists, localHash, baseline, enabled, baselines } = input;
+  if (enabled) {
+    if (!exists || (baseline !== null && localHash === baseline)) {
+      baselines[target] = templateHash;
+      return {
+        kind: localHash === templateHash ? 'unchanged' : 'write',
+        clientId,
+        target,
+        ...(localHash === templateHash ? {} : { content })
+      };
+    }
+    if (localHash === templateHash) {
+      baselines[target] = templateHash;
+      return { kind: 'unchanged', clientId, target };
+    }
+    return { kind: 'protect', clientId, target, reason: baseline ? 'user-modified' : 'unknown-origin' };
+  }
+  if (!exists) {
+    delete baselines[target];
+    return { kind: 'unchanged', clientId, target };
+  }
+  if ((baseline !== null && localHash === baseline) || localHash === templateHash) {
+    delete baselines[target];
+    return { kind: 'remove', clientId, target };
+  }
+  return { kind: 'protect', clientId, target, reason: baseline ? 'user-modified' : 'unknown-origin' };
+}
+
+function updateConfig(plan: AgentClientWorkflowPlan, files: Readonly<{
+  mkdirSync: typeof fs.mkdirSync;
+  writeFileSync: typeof fs.writeFileSync;
+  renameSync: typeof fs.renameSync;
+  unlinkSync: typeof fs.unlinkSync;
+}>): boolean {
+  const { mkdirSync, writeFileSync, renameSync, unlinkSync } = files;
+  const serialized = `${JSON.stringify(plan.nextConfig, null, 2)}\n`;
+  const previous = fs.existsSync(plan.configPath)
+    ? fs.readFileSync(plan.configPath, 'utf8')
+    : null;
+  const configUpdated = previous !== serialized;
+  if (configUpdated) {
+    mkdirSync(path.dirname(plan.configPath), { recursive: true });
+    const temporary = `${plan.configPath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      writeFileSync(temporary, serialized, 'utf8');
+      renameSync(temporary, plan.configPath);
+    } catch (error) {
+      try {
+        if (fs.existsSync(temporary)) unlinkSync(temporary);
+      } catch {
+        // Preserve the original error; a later idempotent rerun can clean stale state.
+      }
+      throw error;
+    }
+  }
+  return configUpdated;
+}
+
 function planAgentClientReconciliation(input: Readonly<{
   config: Record<string, unknown>;
   mutation: AgentClientWorkflowMutation;
@@ -176,40 +245,17 @@ function planAgentClientReconciliation(input: Readonly<{
       const baseline = trustedBaseline(baselines[relativeTarget]);
       const enabled = desired[adapter.id].enabled;
 
-      if (enabled) {
-        if (!exists || (baseline !== null && localHash === baseline)) {
-          baselines[relativeTarget] = templateHash;
-          seedOperations.push({
-            kind: localHash === templateHash ? 'unchanged' : 'write',
-            clientId: adapter.id,
-            target: relativeTarget,
-            ...(localHash === templateHash ? {} : { content })
-          });
-        } else if (localHash === templateHash) {
-          baselines[relativeTarget] = templateHash;
-          seedOperations.push({ kind: 'unchanged', clientId: adapter.id, target: relativeTarget });
-        } else {
-          seedOperations.push({
-            kind: 'protect',
-            clientId: adapter.id,
-            target: relativeTarget,
-            reason: baseline ? 'user-modified' : 'unknown-origin'
-          });
-        }
-      } else if (!exists) {
-        delete baselines[relativeTarget];
-        seedOperations.push({ kind: 'unchanged', clientId: adapter.id, target: relativeTarget });
-      } else if ((baseline !== null && localHash === baseline) || localHash === templateHash) {
-        delete baselines[relativeTarget];
-        seedOperations.push({ kind: 'remove', clientId: adapter.id, target: relativeTarget });
-      } else {
-        seedOperations.push({
-          kind: 'protect',
-          clientId: adapter.id,
-          target: relativeTarget,
-          reason: baseline ? 'user-modified' : 'unknown-origin'
-        });
-      }
+      seedOperations.push(planSeedOperation({
+        clientId: adapter.id,
+        target: relativeTarget,
+        content,
+        templateHash,
+        exists,
+        localHash,
+        baseline,
+        enabled,
+        baselines
+      }));
     }
   }
   if (Object.keys(baselines).length === 0) {
@@ -271,26 +317,7 @@ function applyAgentClientReconciliation(
     }
   }
 
-  const serialized = `${JSON.stringify(plan.nextConfig, null, 2)}\n`;
-  const previous = fs.existsSync(plan.configPath)
-    ? fs.readFileSync(plan.configPath, 'utf8')
-    : null;
-  const configUpdated = previous !== serialized;
-  if (configUpdated) {
-    mkdirSync(path.dirname(plan.configPath), { recursive: true });
-    const temporary = `${plan.configPath}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      writeFileSync(temporary, serialized, 'utf8');
-      renameSync(temporary, plan.configPath);
-    } catch (error) {
-      try {
-        if (fs.existsSync(temporary)) unlinkSync(temporary);
-      } catch {
-        // Preserve the original error; a later idempotent rerun can clean stale state.
-      }
-      throw error;
-    }
-  }
+  const configUpdated = updateConfig(plan, { mkdirSync, writeFileSync, renameSync, unlinkSync });
 
   return Object.freeze({
     status: configUpdated || applied.length > 0 ? 'applied' : 'unchanged',
