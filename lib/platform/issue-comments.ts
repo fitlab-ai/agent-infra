@@ -247,6 +247,33 @@ function sourceSlice(piece: SourceChunk, start: number, end: number): string {
   return piece.content.slice(Math.max(0, start - piece.start), Math.max(0, end - piece.start));
 }
 
+function renderFenceEdits(
+  piece: SourceChunk,
+  insertions: Map<number, Array<{ value: string; ensureLineStart: boolean }>>,
+  omitted: Array<{ start: number; end: number }>
+): string {
+  const boundaries = new Set<number>([piece.start, piece.end]);
+  for (const position of insertions.keys()) boundaries.add(position);
+  for (const range of omitted) {
+    boundaries.add(range.start);
+    boundaries.add(range.end);
+  }
+  const points = [...boundaries].sort((left, right) => left - right);
+  let content = '';
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]!;
+    for (const insertion of insertions.get(point) || []) {
+      if (insertion.ensureLineStart && content.length > 0 && !content.endsWith('\n')) content += '\n';
+      content += insertion.value;
+    }
+    const next = points[index + 1];
+    if (next === undefined) continue;
+    const skipped = omitted.some((range) => range.start <= point && next <= range.end);
+    if (!skipped) content += sourceSlice(piece, point, next);
+  }
+  return content;
+}
+
 function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRange[], maxBytes: number): string {
   const insertions = new Map<number, Array<{ value: string; ensureLineStart: boolean }>>();
   const omitted: Array<{ start: number; end: number }> = [];
@@ -279,26 +306,7 @@ function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRan
     if (closingStart < closingEnd) omitted.push({ start: closingStart, end: closingEnd });
   }
 
-  const boundaries = new Set<number>([piece.start, piece.end]);
-  for (const position of insertions.keys()) boundaries.add(position);
-  for (const range of omitted) {
-    boundaries.add(range.start);
-    boundaries.add(range.end);
-  }
-  const points = [...boundaries].sort((left, right) => left - right);
-  let content = '';
-  for (let index = 0; index < points.length; index += 1) {
-    const point = points[index]!;
-    for (const insertion of insertions.get(point) || []) {
-      if (insertion.ensureLineStart && content.length > 0 && !content.endsWith('\n')) content += '\n';
-      content += insertion.value;
-    }
-    const next = points[index + 1];
-    if (next === undefined) continue;
-    const skipped = omitted.some((range) => range.start <= point && next <= range.end);
-    if (!skipped) content += sourceSlice(piece, point, next);
-  }
-  return content;
+  return renderFenceEdits(piece, insertions, omitted);
 }
 
 function independentChunkContent(piece: SourceChunk, fences: readonly FenceRange[], maxBytes: number): string {
