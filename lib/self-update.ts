@@ -266,6 +266,19 @@ function brewSource(
   };
 }
 
+function collectUpdateCandidates(
+  results: readonly (UpdateSource | { error: string } | null)[]
+): { candidates: UpdateSource[]; errors: string[] } {
+  const candidates: UpdateSource[] = [];
+  const errors: string[] = [];
+  for (const result of results) {
+    if (!result) continue;
+    if ('error' in result) errors.push(result.error);
+    else candidates.push(result);
+  }
+  return { candidates, errors };
+}
+
 export function detectUpdateSource(options: SelfUpdateOptions = {}): UpdateSourceResult {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
@@ -278,21 +291,13 @@ export function detectUpdateSource(options: SelfUpdateOptions = {}): UpdateSourc
   const aliasError = visibleAliasError(packageInfo.root, platform, env);
   if (aliasError) return { source: null, error: aliasError };
 
-  const candidates: UpdateSource[] = [];
-  const errors: string[] = [];
-  for (const candidate of [
+  const { candidates, errors } = collectUpdateCandidates([
     npmSource(packageInfo, options, platform, env),
     brewSource(packageInfo, options, platform, env)
-  ]) {
-    if (!candidate) continue;
-    if ('error' in candidate) errors.push(candidate.error);
-    else candidates.push(candidate);
-  }
-  if (candidates.length === 1) {
-    const [source] = candidates;
-    if (source) return { source };
-  }
+  ]);
   if (candidates.length > 1) return { source: null, error: 'Multiple package managers claim the running CLI; refusing to choose.' };
+  const [source] = candidates;
+  if (source) return { source };
   return {
     source: null,
     error: errors.length > 0

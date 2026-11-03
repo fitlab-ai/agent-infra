@@ -630,15 +630,6 @@
       "count": 1
     },
     {
-      "file": "lib/self-update.ts",
-      "ruleId": "complexity",
-      "stableId": "9805b8b0ea7a7ed29f063840b342b07d87c3f842543dba71be4452c1ef6317eb",
-      "displayName": "detectUpdateSource",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/platform/security-alerts.ts",
       "ruleId": "complexity",
       "stableId": "82dd2ee577b3b979fcae18ca1236533db7bfaa831ccc67c466a9add74607f256",
