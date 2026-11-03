@@ -99,7 +99,7 @@ function parseTable(
     throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table section is ambiguous');
   }
   const section = sections[0]!;
-  const { sectionLines, indexes } = findMatchingTables(content, section, input.columns);
+  const { sectionLines, indexes } = findMatchingTables(content, section, input);
   const firstContent = sectionLines.findIndex((line) => line.text.trim() !== '');
   if (indexes.length === 0) {
     throw new DocumentMutationError('TABLE_NOT_FOUND', 'matching table not found');
@@ -107,7 +107,7 @@ function parseTable(
   if (indexes.length > 1) {
     throw new DocumentMutationError('TABLE_AMBIGUOUS', 'matching table appears more than once');
   }
-  return { heading: section.heading, rows: parseTableRows(sectionLines, indexes[0]!, firstContent, input.columns, keyColumn) };
+  return { heading: section.heading, rows: parseTableRows(sectionLines, indexes[0]!, firstContent, input, keyColumn) };
 }
 
 type Line = {
@@ -122,7 +122,7 @@ function parseTableRows(
   sectionLines: readonly Line[],
   tableIndex: number,
   firstContent: number,
-  columns: readonly string[],
+  input: { columns: readonly string[] },
   keyColumn: string | null
 ): ParsedTableRow[] {
   const rows: ParsedTableRow[] = [];
@@ -132,10 +132,10 @@ function parseTableRows(
     if (!line.text.trim()) break;
     const parsed = splitTableCells(line.text);
     if (!parsed) break;
-    if (parsed.cells.length !== columns.length) {
+    if (parsed.cells.length !== input.columns.length) {
       throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table row has the wrong column count');
     }
-    const values = Object.fromEntries(columns.map((column, columnIndex) => [
+    const values = Object.fromEntries(input.columns.map((column, columnIndex) => [
       column,
       decodeCell(parsed.cells[columnIndex]!).trim()
     ]));
@@ -205,7 +205,7 @@ function validateAliases(aliases: readonly string[], name: string): void {
 function findMatchingTables(
   content: string,
   section: ReturnType<typeof matchingSections>[number],
-  columns: readonly string[]
+  input: { columns: readonly string[] }
 ): { sectionLines: Line[]; indexes: number[] } {
   const visibleStarts = new Set(scanVisibleMarkdown(content).lines.map((line) => line.start));
   const sectionLines = linesOf(content).filter(
@@ -216,11 +216,11 @@ function findMatchingTables(
     if (!visibleStarts.has(sectionLines[index]!.start) || !visibleStarts.has(sectionLines[index + 1]!.start)) continue;
     const header = splitTableCells(sectionLines[index]!.text);
     const separator = splitTableCells(sectionLines[index + 1]!.text);
-    if (!header || !separator || header.cells.length !== columns.length) continue;
+    if (!header || !separator || header.cells.length !== input.columns.length) continue;
     const names = header.cells.map((cell) => decodeCell(cell).trim());
-    if (!names.every((name, column) => name === columns[column])) continue;
+    if (!names.every((name, column) => name === input.columns[column])) continue;
     if (
-      separator.cells.length === columns.length &&
+      separator.cells.length === input.columns.length &&
       separator.cells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
     ) indexes.push(index);
   }
@@ -509,7 +509,7 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
     );
   }
   const section = sections[0]!;
-  const { sectionLines, indexes } = findMatchingTables(content, section, mutation.columns);
+  const { sectionLines, indexes } = findMatchingTables(content, section, mutation);
   if (indexes.length === 0) {
     throw new DocumentMutationError('TABLE_NOT_FOUND', 'matching table not found');
   }
