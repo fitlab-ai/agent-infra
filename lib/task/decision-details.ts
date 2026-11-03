@@ -142,11 +142,11 @@ const FIELD_KEYS: Record<string, FieldKey> = {
 
 const TERMINAL_FIELD_KEYS = new Set<FieldKey>(['recommend', 'reason', 'implementation']);
 
-function normalizeDecisionDetailForDisplay(block: DecisionDetailBlock): string {
-  const body = block.content;
-  const scanned = scanVisibleMarkdown(body);
-  const heading = scanned.headings.find((candidate) => candidate.level === 3);
-  if (!heading) return body.trim();
+function collectDisplayParts(
+  body: string,
+  scanned: ReturnType<typeof scanVisibleMarkdown>,
+  heading: ReturnType<typeof scanVisibleMarkdown>['headings'][number]
+) {
   const options = scanned.headings.filter((candidate) => candidate.level === 4 && OPTION_HEADING.test(candidate.text));
   const optionRanges = options.map((option, index) => ({
     start: option.start,
@@ -169,7 +169,7 @@ function normalizeDecisionDetailForDisplay(block: DecisionDetailBlock): string {
     const key = FIELD_KEYS[match[1]!.trim().toLowerCase()];
     fields.push({ key: key ?? null, line });
   }
-  if (fields.some((field) => field.key === null)) return body.trim();
+  if (fields.some((field) => field.key === null)) return null;
   const byKey = new Map<FieldKey, string>();
   const selectedRanges: { start: number; end: number }[] = [];
   for (let index = 0; index < fields.length; index += 1) {
@@ -182,6 +182,17 @@ function normalizeDecisionDetailForDisplay(block: DecisionDetailBlock): string {
     selectedRanges.push({ start: field.line.start, end });
   }
   selectedRanges.push(...optionRanges);
+  return { options, optionRanges, byKey, selectedRanges };
+}
+
+function normalizeDecisionDetailForDisplay(block: DecisionDetailBlock): string {
+  const body = block.content;
+  const scanned = scanVisibleMarkdown(body);
+  const heading = scanned.headings.find((candidate) => candidate.level === 3);
+  if (!heading) return body.trim();
+  const displayParts = collectDisplayParts(body, scanned, heading);
+  if (!displayParts) return body.trim();
+  const { options, optionRanges, byKey, selectedRanges } = displayParts;
   const required: FieldKey[] = ['decision', 'why', 'impact', 'recommend', 'reason'];
   if (required.some((key) => !byKey.has(key)) || options.length < 2) return body.trim();
   const sortedRanges = selectedRanges.sort((left, right) => left.start - right.start);
