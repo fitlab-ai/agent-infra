@@ -816,9 +816,7 @@ function isGeneratedMarkerLine(line: any): any {
   return line.startsWith("<!--") && line.endsWith("-->");
 }
 
-function extractCommentBody(commentBody: any): any {
-  const lines = String(commentBody || "").split(/\r?\n/);
-
+function skipCommentBodyPrefix(lines: string[]): number {
   let start = 0;
   while (start < lines.length && (lines[start]!.trim() === "" || isGeneratedMarkerLine(lines[start]!.trim()))) {
     start += 1;
@@ -839,6 +837,13 @@ function extractCommentBody(commentBody: any): any {
   while (start < lines.length && lines[start]!.trim() === "") {
     start += 1;
   }
+
+  return start;
+}
+
+function extractCommentBody(commentBody: any): any {
+  const lines = String(commentBody || "").split(/\r?\n/);
+  let start = skipCommentBodyPrefix(lines);
 
   if (lines[start]?.trim() === "<details><summary>恢复元数据</summary>") {
     const metadataEnd = lines.indexOf("</details>", start + 1);
