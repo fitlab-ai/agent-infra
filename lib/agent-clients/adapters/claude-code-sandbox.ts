@@ -176,6 +176,10 @@ export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): voi
   if (changed) fs.writeFileSync(settingsPath, JSON.stringify(data, null, 4), 'utf8');
 }
 
+function formatCredentialSyncSuccess(message: string, isTTY: boolean | undefined): string {
+  return isTTY ? `\x1b[2m${message}\x1b[0m\n` : `${message}\n`;
+}
+
 export function formatCredentialSyncStatus(
   result: ReturnType<typeof reconcileClaudeCredentials>,
   isTTY = process.stderr.isTTY,
@@ -196,11 +200,11 @@ export function formatCredentialSyncStatus(
   }
   if (result.status === 'OK' && result.authoritative !== 'host') {
     const message = `Synced Claude Code credentials from sandbox refresh back to host (expires in ${formatRemaining(result.expiresAt)})`;
-    return isTTY ? `\x1b[2m${message}\x1b[0m\n` : `${message}\n`;
+    return formatCredentialSyncSuccess(message, isTTY);
   }
   if (result.status === 'OK' && result.filesWritten.length > 0) {
     const message = `Synced Claude Code credentials from host Keychain (expires in ${formatRemaining(result.expiresAt)})`;
-    return isTTY ? `\x1b[2m${message}\x1b[0m\n` : `${message}\n`;
+    return formatCredentialSyncSuccess(message, isTTY);
   }
   return null;
 }
