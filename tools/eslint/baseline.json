@@ -342,15 +342,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/github-client.ts",
-      "ruleId": "complexity",
-      "stableId": "e6f475d2bafd71bdd1bc0dd532f4bb54d0083dce4cf1185659e80c52167c65cb",
-      "displayName": "classifyGitHubFailure",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/task/control-recovery.ts",
       "ruleId": "complexity",
       "stableId": "725e57506cfe01eff9f830e229e459f69503e5a29a9a8f0a3d55b26b367f85cd",

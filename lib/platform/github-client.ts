@@ -125,19 +125,19 @@ function classifyGitHubFailure(result: RunResult): GitHubRequestFailure {
   const detail = boundedFailureDetail(result);
   const lower = detail.toLowerCase();
   if (/\b401\b|bad credentials|authentication required|not logged into/.test(lower)) {
-    return { code: 'AUTH_REQUIRED', message: detail || 'GitHub authentication is required', requestRetryable: false };
+    return { code: 'AUTH_REQUIRED', message: detail, requestRetryable: false };
   }
   if (/\b429\b|rate limit|secondary rate|\b5\d\d\b|timeout|timed out|econnreset|enotfound|dns|tls|socket|network/.test(lower)) {
-    return { code: 'NETWORK_TRANSIENT', message: detail || 'GitHub request failed temporarily', requestRetryable: true };
+    return { code: 'NETWORK_TRANSIENT', message: detail, requestRetryable: true };
   }
   if (/\b403\b|resource not accessible|permission denied/.test(lower)) {
-    return { code: 'PERMISSION_DENIED', message: detail || 'GitHub permission denied', requestRetryable: false };
+    return { code: 'PERMISSION_DENIED', message: detail, requestRetryable: false };
   }
   if (/\b404\b/.test(lower)) {
-    return { code: 'RESOURCE_NOT_FOUND', message: detail || 'GitHub resource not found', requestRetryable: false };
+    return { code: 'RESOURCE_NOT_FOUND', message: detail, requestRetryable: false };
   }
   if (/\b422\b|validation failed/.test(lower)) {
-    return { code: 'PLATFORM_REQUEST_INVALID', message: detail || 'GitHub rejected the request', requestRetryable: false };
+    return { code: 'PLATFORM_REQUEST_INVALID', message: detail, requestRetryable: false };
   }
   if (errorCode === 'ENOENT') {
     return { code: 'PLATFORM_DEPENDENCY_MISSING', message: detail || 'GitHub CLI is unavailable', requestRetryable: false };
