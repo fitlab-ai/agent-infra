@@ -66,6 +66,41 @@ export function extractClosingIssueNumbers(body: string): number[] {
  * PR number or to one of the PR's closing issues. A task is emitted at most once;
  * a verified fact identity hit takes priority over the issue-identity reverse lookup.
  */
+function hostCandidateForTask(input: {
+  prNumber?: number;
+  prIdentity?: ResourceIdentity;
+  closingIssues: number[];
+}, taskId: string, taskDir: string): HostCandidate | null {
+  const taskMdPath = path.join(taskDir, 'task.md');
+  let content: string;
+  try {
+    content = fs.readFileSync(taskMdPath, 'utf8');
+  } catch {
+    return null;
+  }
+  let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
+  try { frontmatter = parseTypedTaskFrontmatter(content); } catch { return null; }
+  const issueIdentity = taskIssueIdentity(frontmatter);
+  const issueNumber = resourceIdentityNumber(issueIdentity);
+  const fact = readPrDeliveryFact(frontmatter);
+  const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
+  const matchesPr = input.prIdentity
+    ? Boolean(prIdentity && resourceIdentityEquals(prIdentity, input.prIdentity))
+    : input.prNumber !== undefined && prNumber === input.prNumber;
+  const identityDetails = {
+    ...(issueIdentity && issueIdentity.kind !== 'number' ? { issueIdentity } : {}),
+    ...(prIdentity && prIdentity.kind !== 'number' ? { prIdentity } : {})
+  };
+  if (matchesPr) {
+    return { taskId, taskDir, issueNumber, prNumber, ...identityDetails };
+  }
+  if (issueNumber !== null && input.closingIssues.includes(issueNumber)) {
+    return { taskId, taskDir, issueNumber, prNumber, ...identityDetails };
+  }
+  return null;
+}
+
 export function collectHostCandidates(input: {
   prNumber?: number;
   prIdentity?: ResourceIdentity;
@@ -83,32 +118,8 @@ export function collectHostCandidates(input: {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const taskDir = path.join(activeRoot, entry.name);
-    const taskMdPath = path.join(taskDir, 'task.md');
-    let content: string;
-    try {
-      content = fs.readFileSync(taskMdPath, 'utf8');
-    } catch {
-      continue;
-    }
-    let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
-    try { frontmatter = parseTypedTaskFrontmatter(content); } catch { continue; }
-    const issueIdentity = taskIssueIdentity(frontmatter);
-    const issueNumber = resourceIdentityNumber(issueIdentity);
-    const fact = readPrDeliveryFact(frontmatter);
-    const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
-    const prNumber = resourceIdentityNumber(prIdentity);
-    const matchesPr = input.prIdentity
-      ? Boolean(prIdentity && resourceIdentityEquals(prIdentity, input.prIdentity))
-      : input.prNumber !== undefined && prNumber === input.prNumber;
-    const identityDetails = {
-      ...(issueIdentity && issueIdentity.kind !== 'number' ? { issueIdentity } : {}),
-      ...(prIdentity && prIdentity.kind !== 'number' ? { prIdentity } : {})
-    };
-    if (matchesPr) {
-      candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber, ...identityDetails });
-    } else if (issueNumber !== null && input.closingIssues.includes(issueNumber)) {
-      candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber, ...identityDetails });
-    }
+    const candidate = hostCandidateForTask(input, entry.name, taskDir);
+    if (candidate) candidates.push(candidate);
   }
   return candidates;
 }
