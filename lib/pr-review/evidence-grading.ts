@@ -61,11 +61,6 @@ export function extractClosingIssueNumbers(body: string): number[] {
   return result;
 }
 
-/**
- * Scan active project task workspace task.md files for tasks bound to the
- * PR number or to one of the PR's closing issues. A task is emitted at most once;
- * a verified fact identity hit takes priority over the issue-identity reverse lookup.
- */
 function hostCandidateForTask(input: {
   prNumber?: number;
   prIdentity?: ResourceIdentity;
@@ -101,6 +96,11 @@ function hostCandidateForTask(input: {
   return null;
 }
 
+/**
+ * Scan active project task workspace task.md files for tasks bound to the
+ * PR number or to one of the PR's closing issues. A task is emitted at most once;
+ * a verified fact identity hit takes priority over the issue-identity reverse lookup.
+ */
 export function collectHostCandidates(input: {
   prNumber?: number;
   prIdentity?: ResourceIdentity;
