@@ -1017,15 +1017,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/sections.ts",
-      "ruleId": "complexity",
-      "stableId": "046a8a5081c2dfd8ea4938225b9856abfa208efae027e788a6be3479133a7d88",
-      "displayName": "mutateTableRow",
-      "metric": 48,
-      "normalizedMessage": "complexity=48",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pull-requests.ts",
       "ruleId": "complexity",
       "stableId": "cc85dee9088ceac512966030d3cf60f7331f8022dead46196f678ac7b6a1230b",
@@ -1158,15 +1149,6 @@
       "displayName": "parseSandboxTaskView",
       "metric": 27,
       "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
-      "file": "lib/task/sections.ts",
-      "ruleId": "complexity",
-      "stableId": "c6e608dc16d0661dad466ebe2a2cd73fc4ed74ef8df69fedfa86d12827854c92",
-      "displayName": "parseTable",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
       "count": 1
     },
     {
