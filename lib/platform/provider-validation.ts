@@ -181,13 +181,19 @@ function validateContext(value: unknown, expectedProviderType?: string): Platfor
   };
 }
 
+function issueFields(item: Record<string, unknown>, expectedKind?: ResourceIdentityKind): Pick<IssueSnapshot, 'id' | 'identity' | 'number'> {
+  return {
+    id: item.id === undefined ? '' : stringValue(item.id, 'issue.id'),
+    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'issue.identity', expectedKind) }),
+    ...(item.number === undefined ? {} : { number: Number.isSafeInteger(item.number) && (item.number as number) > 0 ? item.number as number : (() => { throw new Error('issue.number is invalid'); })() })
+  };
+}
+
 function validateIssue(value: unknown, expectedKind?: ResourceIdentityKind, requireIdentity = false): IssueSnapshot {
   const item = record(value, 'issue');
   exactKeys(item, ['id', 'identity', 'number', 'title', 'body', 'state', 'labels', 'assignees', 'milestone', 'fields', 'issueType', 'author', 'displayUrl'], 'issue');
   const result: IssueSnapshot = {
-    id: item.id === undefined ? '' : stringValue(item.id, 'issue.id'),
-    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'issue.identity', expectedKind) }),
-    ...(item.number === undefined ? {} : { number: Number.isSafeInteger(item.number) && (item.number as number) > 0 ? item.number as number : (() => { throw new Error('issue.number is invalid'); })() }),
+    ...issueFields(item, expectedKind),
     title: stringValue(item.title, 'issue.title', true),
     body: stringValue(item.body, 'issue.body', true),
     state: item.state === 'closed' ? 'closed' : item.state === 'open' ? 'open' : (() => { throw new Error('issue.state is invalid'); })(),

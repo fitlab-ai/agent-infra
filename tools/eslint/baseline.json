@@ -2259,15 +2259,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/provider-validation.ts",
-      "ruleId": "complexity",
-      "stableId": "766a7cea981638db228d65c4e1a76c73978774cc873933ab62921391641994c1",
-      "displayName": "validateIssue",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/task/ledger.ts",
       "ruleId": "complexity",
       "stableId": "fd839d1863bb2abb8ea4558f0b5619d378d8126b82eb91dff85da9b7ac5122b6",
