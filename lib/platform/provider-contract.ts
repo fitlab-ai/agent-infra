@@ -496,6 +496,35 @@ function isPlatformProviderFactory(value: unknown): value is PlatformProviderFac
   return typeof value === 'function';
 }
 
+function validateProviderOperationGroup(
+  value: Record<string, unknown>,
+  groupName: string,
+  groupDefinition: { required: string[]; optional: string[] },
+  resourceKindsByGroup: Record<string, PlatformResourceKind[]>
+): ProviderError | undefined {
+  const group = value[groupName];
+  if (group !== undefined && (!isRecord(group)
+    || groupDefinition.required.some((method) => typeof group[method] !== 'function')
+    || Object.keys(group).some((method) => ![...groupDefinition.required, ...groupDefinition.optional].includes(method)))) {
+    return {
+      code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
+      message: `Provider operation group ${groupName} is incomplete`
+    };
+  }
+  if (group !== undefined) {
+    for (const resourceKind of resourceKindsByGroup[groupName] || []) {
+      const declaration = isRecord(value.identity) ? value.identity[resourceKind] : undefined;
+      if (declaration !== 'id' && declaration !== 'number' && declaration !== 'key') {
+        return {
+          code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
+          message: `Provider operation group ${groupName} requires an identity declaration for ${resourceKind}`
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
 function validatePlatformProvider(
   value: unknown,
   providerType: string
@@ -550,31 +579,9 @@ function validatePlatformProvider(
     }
   }
   for (const [groupName, groupDefinition] of Object.entries(operationGroups)) {
-    const group = value[groupName];
-    if (group !== undefined && (!isRecord(group)
-      || groupDefinition.required.some((method) => typeof group[method] !== 'function')
-      || Object.keys(group).some((method) => ![...groupDefinition.required, ...groupDefinition.optional].includes(method)))) {
-      return {
-        ok: false,
-        error: {
-          code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
-          message: `Provider operation group ${groupName} is incomplete`
-        }
-      };
-    }
-    if (group !== undefined) {
-      for (const resourceKind of resourceKindsByGroup[groupName] || []) {
-        const declaration = isRecord(value.identity) ? value.identity[resourceKind] : undefined;
-        if (declaration !== 'id' && declaration !== 'number' && declaration !== 'key') {
-          return {
-            ok: false,
-            error: {
-              code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
-              message: `Provider operation group ${groupName} requires an identity declaration for ${resourceKind}`,
-            }
-          };
-        }
-      }
+    const error = validateProviderOperationGroup(value, groupName, groupDefinition, resourceKindsByGroup);
+    if (error) {
+      return { ok: false, error };
     }
   }
   return { ok: true, value: value as unknown as PlatformProvider };

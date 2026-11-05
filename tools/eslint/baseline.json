@@ -2268,15 +2268,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/provider-contract.ts",
-      "ruleId": "complexity",
-      "stableId": "1d7a22ed3de01caa006aefcd0e30e3bcd3653176f233e23df438d7aec04c2bf0",
-      "displayName": "validatePlatformProvider",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/internal/demo-promotion.ts",
       "ruleId": "complexity",
       "stableId": "9109f40b22165d1e31ff4466240ed24be094491e75c94ea27095b528d4b4aeb6",
