@@ -432,15 +432,6 @@
       "count": 1
     },
     {
-      "file": "lib/pr-review/evidence-grading.ts",
-      "ruleId": "complexity",
-      "stableId": "f764753156f9d30702edf3a0b71c4ced988489eef8a107031704e0aa40077056",
-      "displayName": "collectHostCandidates",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/recovery.ts",
       "ruleId": "complexity",
       "stableId": "b4d6a4ded5dac43c782f4431e6c15023d82b6c8a1ab2f6b1c16ff75e934795eb",
