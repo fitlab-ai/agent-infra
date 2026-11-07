@@ -487,6 +487,21 @@ test('text output does not list names of passing checks', () => {
   assert.doesNotMatch(text, /artifact\.schema|snapshot\.fresh/);
 });
 
+test('text output preserves failed and default diagnostic bytes', () => {
+  const shared = {
+    changed: false as const, event: 'code.completed', requestRef: 'TASK-20260101-000001',
+    taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', taskState: 'active' as const,
+    skill: 'code-task', mode: 'checks' as const, artifact: null, error: null
+  };
+
+  assert.equal(renderTaskVerification({ ...shared, status: 'failed', invocations: [] }),
+    'Verification failed: VERIFY_FAILED - unknown error\n');
+
+  assert.equal(renderTaskVerification({
+    ...shared, status: 'pass', invocations: [{ status: 'fail', exitCode: 1, payload: { status: 'fail' } }]
+  }), 'Verification: pass | Target: code.completed | Skill: code-task\n\nResult: 0 passed, 1 failed\n  [FAIL] undefined (CHECK_FAILED) - CHECK_FAILED; Review validation output\n');
+});
+
 test('unknown events fail with a stable verification error', async () => {
   const f = fixture();
   const unknown = await verifyTaskEvent({ taskRef: f.taskId, event: 'unknown.completed' }, { repoRoot: f.root });

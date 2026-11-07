@@ -130,6 +130,38 @@ function statusLabel(status: unknown): string {
   return status === 'fail' ? 'FAIL' : status === 'blocked' ? 'BLOCKED' : 'pass';
 }
 
+function isHumanExemptionNotice(id: unknown, message: unknown): boolean {
+  return id === 'post-review-commit'
+    && typeof message === 'string'
+    && /\bhuman-decided (?:post-review )?exemption\b/i.test(message)
+    && /\bPRC-\d+\s*:/.test(message);
+}
+
+function appendVerificationWarnings(lines: string[], check: Record<string, unknown>, id: unknown): void {
+  if (Array.isArray(check.warnings)) {
+    for (const warning of check.warnings) if (typeof warning === 'string') lines.push(`Warning: ${id} - ${warning}`);
+  }
+}
+
+function appendVerificationCheck(lines: string[], check: Record<string, unknown>): void {
+  const rawStatus = check.status;
+  const effectiveStatus = check.effectiveStatus ?? rawStatus;
+  const isSoftWarning = (rawStatus === 'fail' || rawStatus === 'blocked') && effectiveStatus === 'pass';
+  const reason = check.reason ?? 'CHECK_FAILED';
+  const message = check.message ?? reason;
+  const action = check.action ?? 'Review validation output';
+  const id = check.checkId ?? check.type;
+  const isHumanNotice = isHumanExemptionNotice(id, message);
+
+  appendVerificationWarnings(lines, check, id);
+  if (effectiveStatus === 'pass' && !isSoftWarning && !isHumanNotice) return;
+  lines.push(isSoftWarning
+    ? `Warning: ${id} (${rawStatus === 'blocked' ? `raw BLOCKED; ` : ''}${reason}) - ${message}; ${action}`
+    : isHumanNotice
+      ? `Notice: ${id} - ${message}; ${action}`
+      : `  [${statusLabel(effectiveStatus)}] ${id} (${reason}) - ${message}; ${action}`);
+}
+
 function renderTaskVerification(result: TaskVerificationResult): string {
   if (result.status === 'failed') return `Verification failed: ${result.error?.code ?? 'VERIFY_FAILED'} - ${result.error?.message ?? 'unknown error'}\n`;
   const target = `${result.event}${result.artifact ? ` (${result.artifact})` : ''}`;
@@ -146,28 +178,7 @@ function renderTaskVerification(result: TaskVerificationResult): string {
   const summary = `${counts.pass} passed, ${counts.fail} failed${counts.blocked > 0 ? `, ${counts.blocked} blocked` : ''}`;
   lines.push('', `Result: ${summary}`);
 
-  for (const check of checks) {
-    const rawStatus = check.status;
-    const effectiveStatus = check.effectiveStatus ?? rawStatus;
-    const isSoftWarning = (rawStatus === 'fail' || rawStatus === 'blocked') && effectiveStatus === 'pass';
-    const reason = check.reason ?? 'CHECK_FAILED';
-    const message = check.message ?? reason;
-    const action = check.action ?? 'Review validation output';
-    const id = check.checkId ?? check.type;
-    const isHumanExemptionNotice = id === 'post-review-commit'
-      && typeof message === 'string'
-      && /\bhuman-decided (?:post-review )?exemption\b/i.test(message)
-      && /\bPRC-\d+\s*:/.test(message);
-    if (Array.isArray(check.warnings)) {
-      for (const warning of check.warnings) if (typeof warning === 'string') lines.push(`Warning: ${id} - ${warning}`);
-    }
-    if (effectiveStatus === 'pass' && !isSoftWarning && !isHumanExemptionNotice) continue;
-    lines.push(isSoftWarning
-      ? `Warning: ${id} (${rawStatus === 'blocked' ? `raw BLOCKED; ` : ''}${reason}) - ${message}; ${action}`
-      : isHumanExemptionNotice
-        ? `Notice: ${id} - ${message}; ${action}`
-        : `  [${statusLabel(effectiveStatus)}] ${id} (${reason}) - ${message}; ${action}`);
-  }
+  for (const check of checks) appendVerificationCheck(lines, check);
   return `${lines.join('\n')}\n`;
 }
 

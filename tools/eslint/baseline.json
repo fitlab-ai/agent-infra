@@ -1620,15 +1620,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/verification.ts",
-      "ruleId": "complexity",
-      "stableId": "3f3ef88ce0ce1415a12e02fc4b78d94f896cfe0b07449c411c271fce5bfe348e",
-      "displayName": "renderTaskVerification",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
       "file": "lib/task/platform-operation-recovery.ts",
       "ruleId": "complexity",
       "stableId": "0017348d3a91f0d12dd08f1577a22af52872d63c759fbcdbabec06ea505a35aa",
