@@ -2250,15 +2250,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/manual-validation-receipt.ts",
-      "ruleId": "complexity",
-      "stableId": "91fb0c76593eb2f88ece96642509ffc3ed394f1f1413cf8bb7dde55106c6375e",
-      "displayName": "validateManualValidationReceipt",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/task/manual-validation-transaction.ts",
       "ruleId": "complexity",
       "stableId": "66caf9126726abc4cfd0906b6f87992dec2d54a6d1b0c3ec89d4478eb2e1ad7b",
