@@ -1044,15 +1044,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/artifact-command.ts",
-      "ruleId": "complexity",
-      "stableId": "c9d6c198c3f43010d22ab9d11f5c9792a7ee30bb508fe156e2889bb19461ac8b",
-      "displayName": "parseArtifactCommand",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "tests/unit/core/requires-pr-gating.test.ts",
       "ruleId": "complexity",
       "stableId": "bd1bf76e224ed5009116f2615a5c02769289e8e175e00a2768eca479c3d94573",
