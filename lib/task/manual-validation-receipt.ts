@@ -87,16 +87,22 @@ function manualValidationFinalSummaryProjectionMatches(body: string, receipt: Ma
     && manualValidationFinalSummaryDigest(body) === receipt.finalSummaryDigest;
 }
 
-function validateManualValidationReceipt(value: unknown, expected?: ManualValidationReceiptIdentity): ManualValidationReceiptResult {
-  if (!isRecord(value)) return invalid('receipt must be a JSON object');
-  const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'artifact', 'artifactSha256', 'pendingSummaryDigest', 'finalSummaryDigest', 'committedAt', 'receiptDigest'];
-  const keyError = exactKeys(value, keys, 'receipt');
-  if (keyError) return invalid(keyError);
+function validateReceiptIdentityFields(value: Record<string, unknown>): ManualValidationReceiptResult | null {
   if (value.schema !== MANUAL_VALIDATION_RECEIPT_SCHEMA || value.version !== MANUAL_VALIDATION_RECEIPT_VERSION) return invalid('receipt schema or version is unsupported');
   if (typeof value.transactionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.transactionId)) return invalid('transactionId is invalid');
   if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) return invalid('taskId is invalid');
   const prNumber = value.prNumber;
   if (!Number.isSafeInteger(prNumber) || (prNumber as number) <= 0) return invalid('prNumber is invalid');
+  return null;
+}
+
+function validateManualValidationReceipt(value: unknown, expected?: ManualValidationReceiptIdentity): ManualValidationReceiptResult {
+  if (!isRecord(value)) return invalid('receipt must be a JSON object');
+  const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'artifact', 'artifactSha256', 'pendingSummaryDigest', 'finalSummaryDigest', 'committedAt', 'receiptDigest'];
+  const keyError = exactKeys(value, keys, 'receipt');
+  if (keyError) return invalid(keyError);
+  const identityError = validateReceiptIdentityFields(value);
+  if (identityError) return identityError;
   for (const [name, pattern] of [['prHeadSha', SHA40], ['evidenceDigest', SHA64], ['artifactSha256', SHA64], ['pendingSummaryDigest', SHA64], ['finalSummaryDigest', SHA64], ['receiptDigest', SHA64]] as const) {
     if (typeof value[name] !== 'string' || !pattern.test(value[name])) return invalid(`${name} is invalid`);
   }

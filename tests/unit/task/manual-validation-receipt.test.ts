@@ -50,3 +50,19 @@ test('manual-validation final summary digest binds the canonical identity projec
   assert.equal(manualValidationFinalSummaryProjectionMatches(body, receipt), true);
   assert.equal(manualValidationFinalSummaryProjectionMatches(body.replace(input.prHeadSha, 'f'.repeat(40)), receipt), false);
 });
+
+test('receipt validation preserves field ordering and exact first errors', () => {
+  const receipt = createManualValidationReceipt(input);
+  const cases: Array<[Record<string, unknown>, string]> = [
+    [{ schema: 'other', version: 2, transactionId: null }, 'receipt schema or version is unsupported'],
+    [{ version: 2, transactionId: null }, 'receipt schema or version is unsupported'],
+    [{ transactionId: null, taskId: null }, 'transactionId is invalid'],
+    [{ taskId: 1, prNumber: 0 }, 'taskId is invalid'],
+    [{ prNumber: 0, prHeadSha: null }, 'prNumber is invalid'],
+  ];
+  for (const [changes, message] of cases) {
+    assert.deepEqual(validateManualValidationReceipt({ ...receipt, ...changes }, { taskId: 'other' }), {
+      ok: false, error: { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message }
+    });
+  }
+});
