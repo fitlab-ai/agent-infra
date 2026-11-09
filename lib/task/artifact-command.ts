@@ -21,19 +21,8 @@ export type ArtifactCommand = Readonly<{
   sourceSha256?: string;
 }>;
 
-/** One option contract for the CLI and trusted projection executor. */
-export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
-  const [taskRef, operation] = args;
-  if (!taskRef || !['inspect', 'init', 'preflight', 'finalize-local'].includes(operation ?? '')) {
-    throw new Error('task ref and a supported artifact operation are required');
-  }
+function parseArtifactOptions(args: readonly string[], allowed: readonly string[]): Record<string, string> {
   const fields: Record<string, string> = {};
-  const allowed = {
-    inspect: ['--family', '--reason-code', '--source-finding', '--source-artifact', '--source-sha256'],
-    init: ['--family', '--artifact', '--locale'],
-    'preflight': ['--family', '--artifact'],
-    'finalize-local': ['--family', '--artifact']
-  }[operation as ArtifactCommand['operation']];
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
     if (!allowed.includes(flag)) throw new Error(`unknown option '${flag}'`);
@@ -42,6 +31,22 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
     if (!value || value.startsWith('--')) throw new Error(`option '${flag}' requires a value`);
     fields[flag] = value;
   }
+  return fields;
+}
+
+/** One option contract for the CLI and trusted projection executor. */
+export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
+  const [taskRef, operation] = args;
+  if (!taskRef || !['inspect', 'init', 'preflight', 'finalize-local'].includes(operation ?? '')) {
+    throw new Error('task ref and a supported artifact operation are required');
+  }
+  const allowed = {
+    inspect: ['--family', '--reason-code', '--source-finding', '--source-artifact', '--source-sha256'],
+    init: ['--family', '--artifact', '--locale'],
+    'preflight': ['--family', '--artifact'],
+    'finalize-local': ['--family', '--artifact']
+  }[operation as ArtifactCommand['operation']];
+  const fields = parseArtifactOptions(args, allowed);
   if (!fields['--family']) throw new Error("option '--family' is required");
   if (operation !== 'inspect' && !fields['--artifact']) throw new Error("option '--artifact' is required");
   const locale = fields['--locale'];
