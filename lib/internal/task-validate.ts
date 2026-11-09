@@ -24,6 +24,44 @@ type ValidateOptions = {
   help: boolean;
 };
 
+type ValidateOptionState = Pick<ValidateOptions, 'scope' | 'timeoutMs' | 'format' | 'evidenceFile'> & {
+  positionals: string[];
+};
+
+function consumeValidateOption(optionArgs: string[], index: number, state: ValidateOptionState): number {
+  const arg = optionArgs[index]!;
+  switch (arg) {
+    case '--scope': {
+      const value = optionArgs[index + 1];
+      if (value !== 'snapshot' && value !== 'inplace') throw new Error('validate --scope must be snapshot or inplace');
+      state.scope = value;
+      return 1;
+    }
+    case '--timeout': {
+      const value = Number(optionArgs[index + 1]);
+      if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMEOUT_MS) throw new Error(`validate --timeout must be 1..${MAX_TIMEOUT_MS}`);
+      state.timeoutMs = value;
+      return 1;
+    }
+    case '--format': {
+      const value = optionArgs[index + 1];
+      if (value !== 'text' && value !== 'json') throw new Error('validate --format must be text or json');
+      state.format = value;
+      return 1;
+    }
+    case '--evidence-file': {
+      const value = optionArgs[index + 1];
+      if (!value || value.startsWith('-')) throw new Error('validate --evidence-file requires a path');
+      state.evidenceFile = value;
+      return 1;
+    }
+    default:
+      if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
+      state.positionals.push(arg);
+      return 0;
+  }
+}
+
 export function parseValidateArgs(args: string[]): ValidateOptions {
   if (args.includes('--help') || args.includes('-h')) {
     return { target: '', scope: 'snapshot', timeoutMs: 300_000, format: 'text', evidenceFile: null, command: [], help: true };
@@ -32,37 +70,14 @@ export function parseValidateArgs(args: string[]): ValidateOptions {
   if (separator < 0) throw new Error(`${USAGE}\nA literal -- must separate validation options from the command.`);
   const optionArgs = args.slice(0, separator);
   const command = args.slice(separator + 1);
-  let scope: ValidateOptions['scope'] = 'snapshot';
-  let timeoutMs = 300_000;
-  let format: ValidateOptions['format'] = 'text';
-  let evidenceFile: string | null = null;
-  const positionals: string[] = [];
+  const state: ValidateOptionState = {
+    scope: 'snapshot', timeoutMs: 300_000, format: 'text', evidenceFile: null, positionals: []
+  };
   for (let index = 0; index < optionArgs.length; index += 1) {
-    const arg = optionArgs[index]!;
-    if (arg === '--scope') {
-      const value = optionArgs[++index];
-      if (value !== 'snapshot' && value !== 'inplace') throw new Error('validate --scope must be snapshot or inplace');
-      scope = value;
-    } else if (arg === '--timeout') {
-      const value = Number(optionArgs[++index]);
-      if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMEOUT_MS) throw new Error(`validate --timeout must be 1..${MAX_TIMEOUT_MS}`);
-      timeoutMs = value;
-    } else if (arg === '--format') {
-      const value = optionArgs[++index];
-      if (value !== 'text' && value !== 'json') throw new Error('validate --format must be text or json');
-      format = value;
-    } else if (arg === '--evidence-file') {
-      const value = optionArgs[++index];
-      if (!value || value.startsWith('-')) throw new Error('validate --evidence-file requires a path');
-      evidenceFile = value;
-    } else if (arg.startsWith('-')) {
-      throw new Error(`Unknown option: ${arg}`);
-    } else {
-      positionals.push(arg);
-    }
+    index += consumeValidateOption(optionArgs, index, state);
   }
-  if (positionals.length !== 1 || command.length === 0) throw new Error(USAGE);
-  return { target: positionals[0]!, scope, timeoutMs, format, evidenceFile, command, help: false };
+  if (state.positionals.length !== 1 || command.length === 0) throw new Error(USAGE);
+  return { target: state.positionals[0]!, scope: state.scope, timeoutMs: state.timeoutMs, format: state.format, evidenceFile: state.evidenceFile, command, help: false };
 }
 
 function runValidationCommand(command: string[], cwd: string, scope: string, timeoutMs: number, json: boolean) {
