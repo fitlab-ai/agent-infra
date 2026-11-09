@@ -63,6 +63,24 @@ test('parseWorkflowWarnings accepts CRLF line endings', () => {
   assert.equal(parseWorkflowWarnings(content).length, 1);
 });
 
+test('parseWorkflowWarnings preserves aggregated validation error order', () => {
+  const content = [
+    '## Workflow Warnings',
+    '',
+    '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+    '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+    '| WW-0 | invalid-time | step | IMPORTANT | CODE | open | target | message | action |  |  |',
+    '| WW-00 | also-invalid | step | IMPORTANT | CODE | open | target | message | action |  |  |'
+  ].join('\n');
+
+  assert.throws(() => parseWorkflowWarnings(content), (error) => {
+    const validationError = error as Error & { code: string };
+    assert.equal(validationError.code, 'WARNING_ID_INVALID');
+    assert.equal(validationError.message, "WW-0: invalid id; WW-0: invalid time 'invalid-time'; WW-00: invalid id; WW-00: invalid time 'also-invalid'");
+    return true;
+  });
+});
+
 test('formatWorkflowWarningSummary includes actionable fields', () => {
   const warnings = parseWorkflowWarnings([
     '## Workflow Warnings',
