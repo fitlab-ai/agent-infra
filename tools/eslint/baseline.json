@@ -2304,15 +2304,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/create.ts",
-      "ruleId": "complexity",
-      "stableId": "a0c6cda1dd33353a64b0dd194c600fc2f14a2ff7a1cfc88179880d248d067dae",
-      "displayName": "validateTaskCreateCandidate",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/task/events.ts",
       "ruleId": "complexity",
       "stableId": "20c26879af25a365fda5ab1e541557ead39a73b9a3e0f5c4c264dd6c55f6a29d",
