@@ -82,14 +82,16 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], labe
   return value as T;
 }
 
-function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) payloadError('candidate must be an object');
-  const candidate = value as Record<string, unknown>;
-  exactKeys(candidate, [
-    'version', 'idempotencyKey', 'agent', 'title', 'type', 'branchSlug',
-    'priority', 'effort', 'description', 'taskInput'
-  ], 'candidate', ['deliveryRemote', 'deliveryBaseRef']);
-  if (candidate.version !== 1) payloadError('version must be 1');
+type ValidatedTaskCreateCandidateFields = Readonly<{
+  idempotencyKey: string;
+  title: string;
+  branchSlug: string;
+  description: string;
+  deliveryRemote: string | undefined;
+  deliveryBaseRef: string | undefined;
+}>;
+
+function validateTaskCreateCandidateFields(candidate: Record<string, unknown>): ValidatedTaskCreateCandidateFields {
   const idempotencyKey = cleanString(candidate.idempotencyKey, 'idempotencyKey', 64, true);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
     payloadError('idempotencyKey must be a UUID v4');
@@ -109,6 +111,18 @@ function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
     : cleanString(candidate.deliveryBaseRef, 'deliveryBaseRef', 200, true);
   if (deliveryRemote !== undefined && !validateRemote(deliveryRemote)) payloadError('deliveryRemote is invalid');
   if (deliveryBaseRef !== undefined && !validateBaseRef(deliveryBaseRef)) payloadError('deliveryBaseRef is invalid');
+  return { idempotencyKey, title, branchSlug, description, deliveryRemote, deliveryBaseRef };
+}
+
+function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) payloadError('candidate must be an object');
+  const candidate = value as Record<string, unknown>;
+  exactKeys(candidate, [
+    'version', 'idempotencyKey', 'agent', 'title', 'type', 'branchSlug',
+    'priority', 'effort', 'description', 'taskInput'
+  ], 'candidate', ['deliveryRemote', 'deliveryBaseRef']);
+  if (candidate.version !== 1) payloadError('version must be 1');
+  const fields = validateTaskCreateCandidateFields(candidate);
   if (!candidate.taskInput || typeof candidate.taskInput !== 'object' || Array.isArray(candidate.taskInput)) {
     payloadError('taskInput must be an object');
   }
@@ -121,16 +135,16 @@ function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
   })) as unknown as TaskCreateCandidateV1['taskInput'];
   return {
     version: 1,
-    idempotencyKey,
+    idempotencyKey: fields.idempotencyKey,
     agent: enumValue(candidate.agent, AGENT_TOKEN_VALUES, 'agent'),
-    title,
+    title: fields.title,
     type: enumValue(candidate.type, TYPES, 'type'),
-    branchSlug,
+    branchSlug: fields.branchSlug,
     priority: enumValue(candidate.priority, PRIORITIES, 'priority'),
     effort: enumValue(candidate.effort, EFFORTS, 'effort'),
-    description,
-    ...(deliveryRemote === undefined ? {} : { deliveryRemote }),
-    ...(deliveryBaseRef === undefined ? {} : { deliveryBaseRef }),
+    description: fields.description,
+    ...(fields.deliveryRemote === undefined ? {} : { deliveryRemote: fields.deliveryRemote }),
+    ...(fields.deliveryBaseRef === undefined ? {} : { deliveryBaseRef: fields.deliveryBaseRef }),
     taskInput
   };
 }
