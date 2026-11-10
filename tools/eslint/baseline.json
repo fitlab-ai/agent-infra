@@ -1053,15 +1053,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/pr-delivery-fact.ts",
-      "ruleId": "complexity",
-      "stableId": "777e98b0a27c2f10908632448609e1de0772a93dd399d82cec76d398d643b25c",
-      "displayName": "parseFact",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/task/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "178cff9560fc829193ecf13af411ec322de14a157cbb88f158793a07ee18db29",
