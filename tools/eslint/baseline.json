@@ -1152,15 +1152,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/qualification-audit.ts",
-      "ruleId": "complexity",
-      "stableId": "b9e0e0de758df20d776d24c98015641f914e37106562ccec9741c446f9ed931b",
-      "displayName": "parseTaskQualification",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/task/gate-policy.ts",
       "ruleId": "complexity",
       "stableId": "7527e1d95d04abaf05a5ce490c146ec99e4cea72212708eb80c89b4f1ca16aad",

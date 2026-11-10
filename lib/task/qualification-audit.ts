@@ -211,48 +211,79 @@ function stripSectionAtLevel(content: string, aliases: readonly string[], level:
   return normalizeText(section ? content.slice(0, section.start) + content.slice(section.end) : content);
 }
 
+function unconfiguredTaskQualification(content: string): TaskQualification {
+  return {
+    present: false, constraints: [], candidates: [], constraintDigest: digest([]),
+    taskInputDigest: digest({ constraints: [], candidates: [] }),
+    nonConstraintInputDigest: nonConstraintInputDigest(content)
+  };
+}
+
+function hasQualificationTable(body: string): boolean {
+  return scanVisibleMarkdown(body).lines.some((line) => line.text.trim().startsWith('|'));
+}
+
+function isUnconfiguredQualification(constraintBody: string | null, candidateBody: string | null): boolean {
+  return (constraintBody === null && candidateBody === null)
+    || (constraintBody !== null && candidateBody !== null
+      && !hasQualificationTable(constraintBody)
+      && !hasQualificationTable(candidateBody));
+}
+
+function hasCanonicalQualificationTable(content: string): boolean {
+  const visible = scanVisibleMarkdown(content).lines.map((line) => line.text).join('\n');
+  return new RegExp(`\\|\\s*${CONSTRAINT_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible)
+    || new RegExp(`\\|\\s*${CANDIDATE_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible);
+}
+
+function parseConstraintRows(rows: readonly { values: Readonly<Record<string, string>> }[]): Constraint[] {
+  const constraints = rows.map(({ values }) => {
+    const row = {
+      constraintId: values.constraint_id ?? '', statement: values.statement ?? '', status: values.status as ConstraintStatus,
+      authority: values.authority ?? '', source: values.source ?? '', evidence: values.evidence ?? '',
+      derivedFrom: canonicalList(values.derived_from ?? ''), approvalEvidence: values.approval_evidence ?? ''
+    } satisfies Omit<Constraint, 'digest'>;
+    validateConstraint(row);
+    return { ...row, digest: constraintDigest(row) };
+  });
+  const ids = new Set(constraints.map((row) => row.constraintId));
+  for (const row of constraints) for (const parent of row.derivedFrom) if (!ids.has(parent)) throw new Error(`constraint '${row.constraintId}' references unknown derived constraint '${parent}'`);
+  return constraints;
+}
+
+function parseCandidateRows(
+  rows: readonly { values: Readonly<Record<string, string>> }[],
+  constraintIds: ReadonlySet<string>
+): Candidate[] {
+  return rows.map(({ values }) => {
+    const row: Candidate = {
+      candidateId: values.candidate_id ?? '', statement: values.statement ?? '', status: values.status as CandidateStatus,
+      constraintIds: canonicalList(values.constraint_ids ?? ''), impact: values.impact ?? '', evidence: values.evidence ?? ''
+    };
+    validateCandidate(row);
+    for (const id of row.constraintIds) if (!constraintIds.has(id)) throw new Error(`candidate '${row.candidateId}' references unknown constraint '${id}'`);
+    return row;
+  });
+}
+
 function parseTaskQualification(content: string): { ok: true; qualification: TaskQualification } | { ok: false; code: string; message: string } {
   const constraintBody = taskInputSection(content, TASK_CONSTRAINT_HEADINGS);
   const candidateBody = taskInputSection(content, TASK_CANDIDATE_HEADINGS);
   const hasConstraintHeading = constraintBody !== null;
   const hasCandidateHeading = candidateBody !== null;
-  if ((!hasConstraintHeading && !hasCandidateHeading)
-    || (hasConstraintHeading && hasCandidateHeading
-      && !scanVisibleMarkdown(constraintBody!).lines.some((line) => line.text.trim().startsWith('|'))
-      && !scanVisibleMarkdown(candidateBody!).lines.some((line) => line.text.trim().startsWith('|')))) {
-    return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
+  if (isUnconfiguredQualification(constraintBody, candidateBody)) {
+    return { ok: true, qualification: unconfiguredTaskQualification(content) };
   }
   if (!hasConstraintHeading || !hasCandidateHeading) {
-    const visible = scanVisibleMarkdown(content).lines.map((line) => line.text).join('\n');
-    const hasCanonicalTable = new RegExp(`\\|\\s*${CONSTRAINT_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible)
-      || new RegExp(`\\|\\s*${CANDIDATE_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible);
-    if (hasCanonicalTable) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_INVALID', message: 'task qualification requires both constraints and candidates sections' };
-    return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
+    if (hasCanonicalQualificationTable(content)) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_INVALID', message: 'task qualification requires both constraints and candidates sections' };
+    return { ok: true, qualification: unconfiguredTaskQualification(content) };
   }
   try {
     const constraintTable = constraintBody === null ? null : parseTable(`## 约束\n${constraintBody}`, { sectionAliases: ['约束'], columns: CONSTRAINT_COLUMNS });
     const candidateTable = candidateBody === null ? null : parseTable(`## 候选与否决方案\n${candidateBody}`, { sectionAliases: ['候选与否决方案'], columns: CANDIDATE_COLUMNS });
     if (!constraintTable || !candidateTable) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_INVALID', message: 'task qualification requires canonical constraints and candidates tables' };
-    const constraints = constraintTable.rows.map(({ values }) => {
-      const row = {
-        constraintId: values.constraint_id ?? '', statement: values.statement ?? '', status: values.status as ConstraintStatus,
-        authority: values.authority ?? '', source: values.source ?? '', evidence: values.evidence ?? '',
-        derivedFrom: canonicalList(values.derived_from ?? ''), approvalEvidence: values.approval_evidence ?? ''
-      } satisfies Omit<Constraint, 'digest'>;
-      validateConstraint(row);
-      return { ...row, digest: constraintDigest(row) };
-    });
-    const ids = new Set(constraints.map((row) => row.constraintId));
-    for (const row of constraints) for (const parent of row.derivedFrom) if (!ids.has(parent)) throw new Error(`constraint '${row.constraintId}' references unknown derived constraint '${parent}'`);
-    const candidates = candidateTable.rows.map(({ values }) => {
-      const row: Candidate = {
-        candidateId: values.candidate_id ?? '', statement: values.statement ?? '', status: values.status as CandidateStatus,
-        constraintIds: canonicalList(values.constraint_ids ?? ''), impact: values.impact ?? '', evidence: values.evidence ?? ''
-      };
-      validateCandidate(row);
-      for (const id of row.constraintIds) if (!ids.has(id)) throw new Error(`candidate '${row.candidateId}' references unknown constraint '${id}'`);
-      return row;
-    });
+    const constraints = parseConstraintRows(constraintTable.rows);
+    const candidates = parseCandidateRows(candidateTable.rows, new Set(constraints.map((row) => row.constraintId)));
     const qualification: TaskQualification = {
       present: true, constraints, candidates,
       constraintDigest: digest(constraints.map((row) => canonicalConstraintShape(row)).sort((a, b) => String(a.constraintId).localeCompare(String(b.constraintId)))),
