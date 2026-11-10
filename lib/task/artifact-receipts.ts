@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 
-import { parseArtifactName } from './artifact-name.ts';
+import { parseArtifactName, type ArtifactFamily } from './artifact-name.ts';
 import { extractSection, findSectionHeading, parseTable } from './sections.ts';
 
 const RECEIPT_SECTION_ALIASES = ['产物生命周期收据', 'Artifact Lifecycle Receipts'] as const;
@@ -15,14 +15,6 @@ const RECEIPT_EVENTS = new Set([
   'review-code.completed',
 ]);
 const SHA256_RE = /^[a-f0-9]{64}$/;
-const RECEIPT_SHAPES = {
-  'analysis.completed': { output: 'analysis', input: 'review-analysis' },
-  'plan.completed': { output: 'plan', input: 'analysis' },
-  'review-analysis.completed': { output: 'review-analysis', input: 'analysis' },
-  'review-plan.completed': { output: 'review-plan', input: 'plan' },
-  'code.completed': { output: 'code', input: 'plan' },
-  'review-code.completed': { output: 'review-code', input: 'code' }
-} as const;
 
 type ArtifactReceiptEvent =
   | 'analysis.completed'
@@ -31,6 +23,17 @@ type ArtifactReceiptEvent =
   | 'review-plan.completed'
   | 'code.completed'
   | 'review-code.completed';
+const RECEIPT_SHAPES: Record<
+  ArtifactReceiptEvent,
+  { output: ArtifactFamily; inputFamilies: readonly ArtifactFamily[] }
+> = {
+  'analysis.completed': { output: 'analysis', inputFamilies: ['review-analysis'] },
+  'plan.completed': { output: 'plan', inputFamilies: ['analysis', 'review-analysis', 'review-plan'] },
+  'review-analysis.completed': { output: 'review-analysis', inputFamilies: ['analysis'] },
+  'review-plan.completed': { output: 'review-plan', inputFamilies: ['plan', 'review-analysis'] },
+  'code.completed': { output: 'code', inputFamilies: ['analysis', 'plan', 'review-analysis', 'review-plan', 'review-code'] },
+  'review-code.completed': { output: 'review-code', inputFamilies: ['code', 'plan', 'review-plan'] }
+};
 type ArtifactReceipt = {
   event: ArtifactReceiptEvent;
   output: string;
@@ -70,18 +73,7 @@ function validateReceiptShape(event: ArtifactReceiptEvent, output: string, input
   const inputIdentity = parseArtifactName(input);
   if (!outputIdentity || !inputIdentity) throw new ArtifactReceiptError(`receipt artifact identity is invalid: ${output} -> ${input}`);
   const shape = RECEIPT_SHAPES[event];
-  const inputMatches = event === 'code.completed'
-    ? inputIdentity.family === 'analysis' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-analysis' || inputIdentity.family === 'review-plan' || inputIdentity.family === 'review-code'
-    : event === 'plan.completed'
-      ? inputIdentity.family === 'analysis' || inputIdentity.family === 'review-analysis' || inputIdentity.family === 'review-plan'
-      : event === 'analysis.completed'
-        ? inputIdentity.family === 'review-analysis'
-        : event === 'review-plan.completed'
-          ? inputIdentity.family === 'plan' || inputIdentity.family === 'review-analysis'
-          : event === 'review-code.completed'
-            ? inputIdentity.family === 'code' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-plan'
-        : inputIdentity.family === shape.input;
-  if (outputIdentity.family !== shape.output || !inputMatches) {
+  if (outputIdentity.family !== shape.output || !shape.inputFamilies.includes(inputIdentity.family)) {
     throw new ArtifactReceiptError(`receipt event '${event}' does not match ${output} -> ${input}`);
   }
 }
