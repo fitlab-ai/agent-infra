@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const EXPECTED_TAGS = ["arm64_tahoe", "arm64_sequoia", "arm64_sonoma"];
+const EXPECTED_TAGS = ["arm64_golden_gate", "arm64_tahoe", "arm64_sequoia"];
 const SYMBOL_CELLARS = new Set(["any", "any_skip_relocation"]);
 
 export function generateBottleBlock(jsonObjects, { expectedTags = EXPECTED_TAGS } = {}) {

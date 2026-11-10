@@ -8,7 +8,7 @@ import { createTempDir, filePath } from "../../helpers.ts";
 
 const scriptPath = filePath(".github/scripts/generate-bottle-block.mjs");
 const rootUrl = "https://github.com/fitlab-ai/agent-infra/releases/download/v0.6.2";
-const platforms = ["arm64_tahoe", "arm64_sequoia", "arm64_sonoma"];
+const platforms = ["arm64_golden_gate", "arm64_tahoe", "arm64_sequoia"];
 
 function bottleJson(platform: string, sha256: string, options: { rootUrl?: string; cellar?: string } = {}) {
   return {
@@ -94,18 +94,18 @@ test("generate-bottle-block replaces the formula placeholder when a formula path
     assert.equal(result.status, 0, result.stderr);
     assert.match(formula, /  bottle do/);
     assert.match(formula, /root_url/);
-    assert.match(formula, /sha256 cellar: :any_skip_relocation, arm64_sonoma:/);
+    assert.match(formula, /sha256 cellar: :any_skip_relocation, arm64_golden_gate:/);
   });
 });
 
 test("generate-bottle-block fails when an expected platform is missing", () => {
   withTempDir((dir) => {
-    writeBottles(dir, platforms.filter((platform) => platform !== "arm64_sonoma"));
+    writeBottles(dir, platforms.filter((platform) => platform !== "arm64_golden_gate"));
 
     const result = runScript(["--bottles", dir]);
 
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /missing bottle for platform: arm64_sonoma/);
+    assert.match(result.stderr, /missing bottle for platform: arm64_golden_gate/);
   });
 });
 
@@ -116,7 +116,7 @@ test("generate-bottle-block fails when root URLs disagree", () => {
       path.join(dir, "agent-infra--0.6.2.arm64_sequoia.bottle.json"),
       JSON.stringify(bottleJson("arm64_sequoia", "2".repeat(64), { rootUrl: `${rootUrl}-other` }), null, 2),
     );
-    writeBottles(dir, ["arm64_sonoma"]);
+    writeBottles(dir, ["arm64_golden_gate"]);
 
     const result = runScript(["--bottles", dir]);
 

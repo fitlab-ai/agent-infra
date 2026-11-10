@@ -105,10 +105,20 @@ jobs:
           npx -y "@fitlab-ai/agent-infra@${VERSION}" sandbox --help
 
   brew-smoke:
-    name: brew install (macos-latest)
+    name: brew install (${{ matrix.os }})
     needs: resolve-version
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: xcode-27
+            platform: arm64_golden_gate
+          - os: macos-26
+            platform: arm64_tahoe
+          - os: macos-15
+            platform: arm64_sequoia
     steps:
       - name: Wait for Homebrew tap formula bottle block
         shell: bash
@@ -129,12 +139,19 @@ jobs:
           echo "::error::Tap formula bottle block for ${VERSION} not present after 10 minutes"
           exit 1
 
+      - name: Configure brew tap
+        run: |
+          brew tap fitlab-ai/tap
+          brew trust fitlab-ai/tap
+
       - name: brew install (must pour from bottle)
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          brew install --verbose fitlab-ai/tap/agent-infra 2>&1 | tee install.log
-          if ! grep -q "Pouring agent-infra-" install.log; then
-            echo "::error::agent-infra was not poured from a bottle (no 'Pouring agent-infra-' in output)"
+          brew install --force-bottle --verbose fitlab-ai/tap/agent-infra 2>&1 | tee install.log
+          if ! grep "Pouring agent-infra-" install.log | grep -F ".${PLATFORM}.bottle.tar.gz"; then
+            echo "::error::agent-infra was not poured from the ${PLATFORM} bottle"
             exit 1
           fi
 

@@ -140,12 +140,12 @@ jobs:
       # users install via source build (`brew install` falls back automatically).
       matrix:
         include:
+          - os: xcode-27
+            platform: arm64_golden_gate
           - os: macos-26
             platform: arm64_tahoe
           - os: macos-15
             platform: arm64_sequoia
-          - os: macos-14
-            platform: arm64_sonoma
     steps:
       - name: Configure brew tap
         run: |
@@ -191,7 +191,7 @@ jobs:
       - name: Checkout repository (for generator script)
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -232,10 +232,12 @@ jobs:
 
       - name: Commit Formula with bottle block
         working-directory: homebrew-tap
+        env:
+          VERSION: ${{ needs.prepare-formula.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/agent-infra.rb
           git diff --cached --quiet && echo "No changes" && exit 0
-          git commit --amend --no-edit
-          git push --force-with-lease
+          git commit -m "agent-infra ${VERSION} bottles"
+          git push

@@ -7,6 +7,9 @@ import { parse } from "yaml";
 import { cliArgs, listFilesRecursive, read } from "../../../helpers.ts";
 
 type WorkflowStep = {
+  name?: string;
+  run?: string;
+  env?: Record<string, string>;
   uses?: string;
   with?: Record<string, unknown>;
 };
@@ -14,7 +17,11 @@ type WorkflowStep = {
 type ReleaseWorkflow = {
   "run-name"?: string;
   on?: Record<string, unknown>;
-  jobs?: Record<string, { steps?: WorkflowStep[] }>;
+  jobs?: Record<string, {
+    steps?: WorkflowStep[];
+    "runs-on"?: string;
+    strategy?: { "fail-fast"?: boolean; matrix?: { include?: Array<{ os: string; platform: string }> } };
+  }>;
 };
 
 type DependabotUpdate = {
@@ -258,6 +265,12 @@ test("project release skill runs local entropy-check without distributing it", (
   });
 });
 
+const homebrewPlatforms = [
+  { os: "xcode-27", platform: "arm64_golden_gate" },
+  { os: "macos-26", platform: "arm64_tahoe" },
+  { os: "macos-15", platform: "arm64_sequoia" }
+];
+
 test("post-release-smoke workflow verifies npm and brew install channels", () => {
   const workflow = parse(read(".github/workflows/post-release-smoke.yml")) as ReleaseWorkflow & {
     name?: string;
@@ -311,12 +324,53 @@ test("post-release-smoke workflow verifies npm and brew install channels", () =>
   assert.match(workflowText, /npx -y "@fitlab-ai\/agent-infra@\$\{VERSION\}" sandbox --help/);
 
   assert.match(workflowText, /brew-smoke:/);
-  assert.match(workflowText, /runs-on: macos-latest/);
   assert.match(workflowText, /timeout-minutes: 20/);
   assert.match(workflowText, /raw\.githubusercontent\.com\/fitlab-ai\/homebrew-tap\/main\/Formula\/agent-infra\.rb/);
   assert.match(workflowText, /grep -q "bottle do"/);
   assert.match(workflowText, /name: brew install \(must pour from bottle\)/);
-  assert.match(workflowText, /brew install --verbose fitlab-ai\/tap\/agent-infra/);
-  assert.match(workflowText, /grep -q "Pouring agent-infra-"/);
+  assert.match(workflowText, /brew install --force-bottle --verbose fitlab-ai\/tap\/agent-infra/);
+  assert.match(workflowText, /grep "Pouring agent-infra-"/);
   assert.match(workflowText, /agent-infra version/);
+});
+
+function requireWorkflowJob(workflow: ReleaseWorkflow, name: string) {
+  const job = workflow.jobs?.[name];
+  assert.ok(job, `${name} job must exist`);
+  return job;
+}
+
+function requireNamedStep(steps: WorkflowStep[], name: string) {
+  const step = steps.find((candidate) => candidate.name === name);
+  assert.ok(step, `${name} step must exist`);
+  return step;
+}
+
+test("Homebrew workflow builds the supported bottles and appends the formula commit", () => {
+  const workflow = parse(read(".github/workflows/update-homebrew.yml")) as ReleaseWorkflow;
+  const bake = requireWorkflowJob(workflow, "bake-bottle");
+  assert.equal(bake["runs-on"], "${{ matrix.os }}");
+  assert.deepEqual(bake.strategy, { "fail-fast": false, matrix: { include: homebrewPlatforms } });
+
+  const publish = requireWorkflowJob(workflow, "publish-bottle");
+  const publishSteps = publish.steps ?? [];
+  const checkout = requireActionStep(publishSteps, "actions/checkout", "bottle generator checkout");
+  assert.equal(checkout.with?.ref, "${{ github.event.workflow_run.head_sha || github.sha }}");
+  const commit = requireNamedStep(publishSteps, "Commit Formula with bottle block");
+  assert.equal(commit.env?.VERSION, "${{ needs.prepare-formula.outputs.version }}");
+  assert.match(commit.run ?? "", /^git commit -m "agent-infra \$\{VERSION\} bottles"$/m);
+  assert.match(commit.run ?? "", /^git push$/m);
+});
+
+test("Homebrew smoke requires the matching bottle on every supported runner", () => {
+  const workflow = parse(read(".github/workflows/post-release-smoke.yml")) as ReleaseWorkflow;
+  const brew = requireWorkflowJob(workflow, "brew-smoke");
+  assert.equal(brew["runs-on"], "${{ matrix.os }}");
+  assert.deepEqual(brew.strategy, { "fail-fast": false, matrix: { include: homebrewPlatforms } });
+  const steps = brew.steps ?? [];
+  const setup = requireNamedStep(steps, "Configure brew tap");
+  assert.match(setup.run ?? "", /^brew tap fitlab-ai\/tap$/m);
+  assert.match(setup.run ?? "", /^brew trust fitlab-ai\/tap$/m);
+  const install = requireNamedStep(steps, "brew install (must pour from bottle)");
+  assert.equal(install.env?.PLATFORM, "${{ matrix.platform }}");
+  assert.match(install.run ?? "", /grep -F "\.\$\{PLATFORM\}\.bottle\.tar\.gz"/);
 });
