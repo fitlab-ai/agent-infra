@@ -45,3 +45,22 @@ test('task-warning rejects invalid enum values without changing task.md', () => 
     assert.deepEqual(fs.readFileSync(f.file), before);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+
+test('task-warning preserves dry-run, duplicate-option, and validation-priority behavior', () => {
+  const f = fixture();
+  try {
+    const before = fs.readFileSync(f.file);
+    const planned = run(f.root, [f.id, 'add', '--step', 'issue-sync', '--severity', 'IMPORTANT', '--code', 'SYNC', '--target', 'task', '--message', 'failed', '--action', 'retry', '--dry-run']);
+    assert.equal(planned.status, 0, planned.stderr);
+    assert.equal(JSON.parse(planned.stdout).status, 'planned');
+    assert.deepEqual(fs.readFileSync(f.file), before);
+
+    const duplicate = run(f.root, [f.id, 'list', '--status', 'open', '--status', 'closed']);
+    assert.equal(duplicate.status, 1);
+    assert.equal(JSON.parse(duplicate.stdout).error.message, "duplicate option '--status'");
+
+    const invalid = run(f.root, [f.id, 'set-status', '--step', 'issue-sync']);
+    assert.equal(invalid.status, 1);
+    assert.equal(JSON.parse(invalid.stdout).error.message, "set-status does not accept 'step'");
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
