@@ -2144,15 +2144,6 @@
     {
       "file": "lib/task/finalization.ts",
       "ruleId": "complexity",
-      "stableId": "72f25cc5c703650e672cadea7d4ed70aedab2f742ccfd4712a50b3571bb984f2",
-      "displayName": "validWarning",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/task/finalization.ts",
-      "ruleId": "complexity",
       "stableId": "dd043556c6f0f3dc63ead04e8c32f955434a5fff777e932a22be36c7134fe7c5",
       "displayName": "validateCapabilityMutation",
       "metric": 23,
