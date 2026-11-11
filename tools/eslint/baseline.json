@@ -1962,15 +1962,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-platform-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "7719c1acb2452e9925655f9bcd7953ab39a628f64dd9bab2df67a08245a5d64e",
-      "displayName": "taskPlatformRecovery",
-      "metric": 27,
-      "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
       "file": "lib/internal/task-qualification.ts",
       "ruleId": "complexity",
       "stableId": "676de4ef4ddf815388c954b1d4b8de82cfbccc728c133366aa6b618a43aba685",
