@@ -77,6 +77,15 @@ export function parseSandboxTaskView(value: unknown): SandboxTaskView {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidView('taskView must be an object');
   const view = value as Record<string, unknown>;
   const receipt = view.receipt === null ? null : parseSandboxTaskViewReceipt(view.receipt);
+  validateSandboxTaskViewSchema(view, receipt);
+  validateSandboxTaskViewState(view);
+  return view as SandboxTaskView;
+}
+
+function validateSandboxTaskViewSchema(
+  view: Record<string, unknown>,
+  receipt: SandboxTaskViewReceipt | null
+): void {
   if (!SANDBOX_TASK_VIEW_STATES.includes(view.state as SandboxTaskViewState)
     || (view.taskId !== null && typeof view.taskId !== 'string')
     || (view.observedSource !== null && !SANDBOX_TASK_VIEW_SOURCES.includes(view.observedSource as SandboxTaskViewSource))
@@ -84,6 +93,9 @@ export function parseSandboxTaskView(value: unknown): SandboxTaskView {
     || (view.receipt !== null && receipt === null)) {
     throw invalidView('taskView schema is invalid');
   }
+}
+
+function validateSandboxTaskViewState(view: Record<string, unknown>): void {
   if (view.state === 'not-applicable' && (view.taskId !== null || view.observedSource !== null || view.receipt !== null)) {
     throw invalidView('not-applicable taskView cannot carry task evidence');
   }
@@ -96,7 +108,6 @@ export function parseSandboxTaskView(value: unknown): SandboxTaskView {
   if (view.state === 'finalized-stale' && (view.taskId === null || view.receipt === null)) {
     throw invalidView('finalized-stale taskView requires taskId and receipt');
   }
-  return view as SandboxTaskView;
 }
 
 function parseSandboxTaskViewReceipt(value: unknown): SandboxTaskViewReceipt | null {

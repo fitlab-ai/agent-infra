@@ -1089,15 +1089,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/task-view.ts",
-      "ruleId": "complexity",
-      "stableId": "0d9acc73183d2d4ba0c87649d568260946df780abd8ee438f659ab86775af41a",
-      "displayName": "parseSandboxTaskView",
-      "metric": 27,
-      "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
       "file": "lib/task/control-authority.ts",
       "ruleId": "complexity",
       "stableId": "2e051a20a0570212790bc14bd58d894d85a60a17173cc6ccb808c241395e8810",
