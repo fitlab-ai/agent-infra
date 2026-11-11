@@ -963,15 +963,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/manual-validation.ts",
-      "ruleId": "complexity",
-      "stableId": "ec09392742cd9049bdc2893dc6caf883b1241877939d8ae592edbcae6e5c7fa9",
-      "displayName": "manualValidation",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/materialize.ts",
       "ruleId": "complexity",
       "stableId": "fb21292a64f2e5682fe1d4639f9750c42e505e7611f45ecbc292c99ebdc3bfdb",
