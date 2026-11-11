@@ -214,17 +214,25 @@ function emptyReceipt(taskId: string, controlBinding?: Readonly<{ generation: st
   };
 }
 
+function hasExactWarningKeys(warning: Record<string, unknown>): boolean {
+  return Object.keys(warning).sort().join('\0') === [
+    'code', 'message', 'retryable', 'step', 'target', 'severity', 'status', 'resolvedAt'
+  ].sort().join('\0');
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
 function validWarning(value: unknown): value is FinalizationWarning {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const warning = value as Record<string, unknown>;
-  if (Object.keys(warning).sort().join('\0') !== [
-    'code', 'message', 'retryable', 'step', 'target', 'severity', 'status', 'resolvedAt'
-  ].sort().join('\0')) return false;
-  return typeof warning.code === 'string' && warning.code.length > 0
-    && typeof warning.message === 'string' && warning.message.length > 0
+  if (!hasExactWarningKeys(warning)) return false;
+  return isNonEmptyString(warning.code)
+    && isNonEmptyString(warning.message)
     && typeof warning.retryable === 'boolean'
-    && typeof warning.step === 'string' && warning.step.length > 0
-    && typeof warning.target === 'string' && warning.target.length > 0
+    && isNonEmptyString(warning.step)
+    && isNonEmptyString(warning.target)
     && (warning.severity === 'IMPORTANT' || warning.severity === 'ACTION_REQUIRED')
     && (warning.status === 'open' || warning.status === 'resolved')
     && (warning.resolvedAt === null || typeof warning.resolvedAt === 'string');
