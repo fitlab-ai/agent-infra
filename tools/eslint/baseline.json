@@ -1089,15 +1089,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/identity-sentinel.ts",
-      "ruleId": "complexity",
-      "stableId": "543614e2fbc498a4c1b709d86d6e7df658ed077c62ed562967f2306df96987bb",
-      "displayName": "parseSandboxControlIdentitySentinel",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/protocol.ts",
       "ruleId": "complexity",
       "stableId": "28d5e360d80a7abebfd512f4cd8fbf88a0a0b85ca536c128217d1c1fb5bbe0b1",
