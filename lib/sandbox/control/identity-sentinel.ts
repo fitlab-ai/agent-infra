@@ -32,6 +32,11 @@ function canonicalIdentity(value: SandboxControlIdentitySentinel): string {
   });
 }
 
+function hasMalformedIdentitySentinelIdentifiers(candidate: Partial<SandboxControlIdentitySentinel>): boolean {
+  return typeof candidate.generation !== 'string' || candidate.generation.length === 0
+    || typeof candidate.controlRootId !== 'string' || !/^[a-f0-9]{64,128}$/u.test(candidate.controlRootId);
+}
+
 export function identitySentinelPath(publicStatusDir: string): string {
   return path.join(publicStatusDir, SANDBOX_CONTROL_IDENTITY_FILE);
 }
@@ -71,8 +76,7 @@ export function parseSandboxControlIdentitySentinel(value: unknown): SandboxCont
     || (candidate.taskId !== null && typeof candidate.taskId !== 'string')
     || (candidate.mode === 'task-bound' && !candidate.taskId)
     || (candidate.mode === 'branch-only' && candidate.taskId !== null)
-    || typeof candidate.generation !== 'string' || candidate.generation.length === 0
-    || typeof candidate.controlRootId !== 'string' || !/^[a-f0-9]{64,128}$/u.test(candidate.controlRootId)) {
+    || hasMalformedIdentitySentinelIdentifiers(candidate)) {
     throw identityError('malformed');
   }
   return candidate as SandboxControlIdentitySentinel;
