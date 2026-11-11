@@ -1935,15 +1935,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-delivery.ts",
-      "ruleId": "complexity",
-      "stableId": "b7995ddbb576df1cac3473a84022807bb7bf51070608961ecd07c8ed55d84391",
-      "displayName": "taskDelivery",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/internal/task-finalization.ts",
       "ruleId": "complexity",
       "stableId": "484386b7341cbd3bc4a6fc0672b7fa8466ceffa454dba148ddb4c6ba2f8cb52f",
