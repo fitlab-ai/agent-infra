@@ -1971,15 +1971,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-short-id.ts",
-      "ruleId": "complexity",
-      "stableId": "49b98fb4373d46c00545f8ff3efc19268c2194cdbbe850240ec4da02d47f707b",
-      "displayName": "taskShortId",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
-      "count": 1
-    },
-    {
       "file": "lib/internal/task-snapshot.ts",
       "ruleId": "complexity",
       "stableId": "a99d3ea107df09db358927a687c3a1571460a1c6138f4d4ca23552ebae747571",
