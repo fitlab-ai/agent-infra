@@ -2169,15 +2169,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/implementation-inputs.ts",
-      "ruleId": "complexity",
-      "stableId": "724595693182d71c52981c87acb2b0049ffc393a2bb24ad6b069cbe11410cbcd",
-      "displayName": "validateInput",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
       "file": "lib/task/ledger.ts",
       "ruleId": "complexity",
       "stableId": "fd839d1863bb2abb8ea4558f0b5619d378d8126b82eb91dff85da9b7ac5122b6",
