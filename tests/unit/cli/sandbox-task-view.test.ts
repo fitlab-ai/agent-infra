@@ -97,3 +97,14 @@ test('status schema is v3-only and keeps health separate from task view', () => 
     taskView: view
   }), /SANDBOX_TASK_VIEW_INVALID/);
 });
+
+test('task-view parsing preserves unknown fields and prioritizes schema errors', () => {
+  const view = {
+    state: 'current', taskId, observedSource: 'active', receipt: null,
+    reasonCode: null, extension: { preserved: true }
+  };
+  assert.equal(parseSandboxTaskView(view), view);
+  assert.throws(() => parseSandboxTaskView({
+    state: 'not-a-state', taskId, observedSource: 'active', receipt: null, reasonCode: null
+  }), /taskView schema is invalid/);
+});
