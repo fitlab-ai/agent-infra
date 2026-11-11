@@ -65,6 +65,7 @@ const SCRIPT = path.resolve(
   process.cwd(),
   "templates/.agents/scripts/task-short-id.js"
 );
+const INTERNAL_CLI = path.resolve(process.cwd(), "bin/internal-cli.ts");
 
 function mkTmp(): string {
   const root = createTempDir("tsid-");
@@ -92,6 +93,43 @@ function run(
 ): SpawnSyncReturns<string> {
   return spawnSync("node", [SCRIPT, ...args], { encoding: "utf8", cwd });
 }
+
+function runInternal(args: string[], cwd: string): SpawnSyncReturns<string> {
+  return spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", INTERNAL_CLI, "task-short-id", ...args], {
+    encoding: "utf8",
+    cwd
+  });
+}
+
+test("internal task-short-id keeps option failure order and output channels", () => {
+  const tmp = mkTmp();
+  const active = path.join(tmp, "active");
+  const result = runInternal([
+    "list", "--verify", "--active-dir", active, "--active-dir", path.join(tmp, "other"), "--unknown"
+  ], tmp);
+
+  assert.equal(result.status, 1);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: "failed",
+    changed: false,
+    output: "",
+    error: { code: "SHORT_ID_PAYLOAD_INVALID", message: "duplicate option '--active-dir'" }
+  });
+  assert.equal(result.stderr, "Usage: agent-infra-internal task-short-id <alloc|release|resolve|list> [argument] [--active-dir <path>] [--short-id-length <N>] [--verify]\n");
+});
+
+test("internal list --verify uses the custom active directory", () => {
+  const tmp = mkTmp();
+  const active = path.join(tmp, "custom-active");
+  fs.mkdirSync(active, { recursive: true });
+  fs.writeFileSync(path.join(active, ".short-ids.json"), JSON.stringify({ version: 1, ids: {} }));
+
+  const result = runInternal(["list", "--verify", "--active-dir", active, "--short-id-length", "1"], tmp);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { status: "no-op", changed: false, output: "", error: null });
+  assert.equal(result.stderr, "");
+});
 
 // Tests that use the single-digit semantics (1, 2, …) explicitly request
 // shortIdLength=1 to remain independent of the project default (now 2).
