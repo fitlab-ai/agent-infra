@@ -33,4 +33,14 @@ test('internal task-snapshot resolves full and short task refs without writes', 
   const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-snapshot', id, '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
   assert.equal(duplicate.status, 1);
   assert.equal(JSON.parse(duplicate.stdout).error.code, 'SNAPSHOT_PAYLOAD_INVALID');
+
+  for (const options of [['--unknown'], ['--format']]) {
+    const invalidOption = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-snapshot', id, ...options], { cwd: root, encoding: 'utf8' });
+    assert.equal(invalidOption.status, 1);
+    assert.equal(JSON.parse(invalidOption.stdout).error.code, 'SNAPSHOT_PAYLOAD_INVALID');
+  }
+
+  const text = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-snapshot', id, '--format', 'text'], { cwd: root, encoding: 'utf8' });
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^git status --short --untracked-files=all\n/);
 });

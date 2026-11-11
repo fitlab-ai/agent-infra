@@ -1953,15 +1953,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-snapshot.ts",
-      "ruleId": "complexity",
-      "stableId": "a99d3ea107df09db358927a687c3a1571460a1c6138f4d4ca23552ebae747571",
-      "displayName": "taskSnapshot",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/internal/task-warning.ts",
       "ruleId": "complexity",
       "stableId": "3a0af536490a6056bb95991acc00f98a9303e0bcb01a233b22477bc583dd2110",
