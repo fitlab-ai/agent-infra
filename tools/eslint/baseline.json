@@ -1386,15 +1386,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commit-intent.ts",
-      "ruleId": "complexity",
-      "stableId": "d95f9a5d1ad134cb68373ba92bddcac8858fd3b59e6af14da2060057f2dfae82",
-      "displayName": "readCheckpointIntent",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "fb0d2f5f08c3e555377a8c37056110614f2be2550f9a68189db1febdddfccb38",

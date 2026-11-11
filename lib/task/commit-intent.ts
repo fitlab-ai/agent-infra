@@ -88,24 +88,40 @@ function invalidIntent(): never {
   throw new Error('COMMIT_INTENT_INVALID: checkpoint intent schema is invalid');
 }
 
-function readCheckpointIntent(taskDir: string, taskId: string): CheckpointIntent | null {
-  assertTaskDirectory(taskDir, taskId);
-  const target = intentPath(taskDir);
-  let before: fs.Stats;
-  try { before = fs.lstatSync(target); }
+function readCheckpointIntentStat(target: string): fs.Stats | null {
+  try { return fs.lstatSync(target); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
-  if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_INTENT_SIZE) return invalidIntent();
+}
+
+function isRegularCheckpointIntentFile(stat: fs.Stats): boolean {
+  return stat.isFile() && !stat.isSymbolicLink() && stat.size <= MAX_INTENT_SIZE;
+}
+
+function matchesCheckpointIntentFile(before: fs.Stats, opened: fs.Stats): boolean {
+  return opened.isFile() && opened.dev === before.dev && opened.ino === before.ino
+    && opened.size === before.size && opened.size <= MAX_INTENT_SIZE;
+}
+
+function checkpointIntentOpenFlags(): number {
+  const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+  return fs.constants.O_RDONLY | noFollow;
+}
+
+function readCheckpointIntent(taskDir: string, taskId: string): CheckpointIntent | null {
+  assertTaskDirectory(taskDir, taskId);
+  const target = intentPath(taskDir);
+  const before = readCheckpointIntentStat(target);
+  if (before === null) return null;
+  if (!isRegularCheckpointIntentFile(before)) return invalidIntent();
 
   let descriptor: number | undefined;
   try {
-    const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
-    descriptor = fs.openSync(target, fs.constants.O_RDONLY | noFollow);
+    descriptor = fs.openSync(target, checkpointIntentOpenFlags());
     const opened = fs.fstatSync(descriptor);
-    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino
-      || opened.size !== before.size || opened.size > MAX_INTENT_SIZE) return invalidIntent();
+    if (!matchesCheckpointIntentFile(before, opened)) return invalidIntent();
     const value = JSON.parse(fs.readFileSync(descriptor, 'utf8')) as unknown;
     if (!isIntent(value) || value.taskId !== taskId) return invalidIntent();
     return value;
