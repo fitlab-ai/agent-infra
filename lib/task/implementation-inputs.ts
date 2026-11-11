@@ -32,12 +32,19 @@ function validateInput(row: ImplementationInput): void {
   if (!row.ledgerId || !row.decisionEvidence || /[\r\n]/.test(row.ledgerId) || /[\r\n]/.test(row.decisionEvidence)) throw new Error(`implementation input ${row.id} has incomplete decision identity`);
   if (row.stage !== 'code') throw new Error(`implementation input ${row.id} has invalid stage`);
   const hasValidTimestamp = TIMESTAMP_RE.test(row.decidedAt) && Number.isFinite(Date.parse(row.decidedAt.replace(' ', 'T')));
-  const valid =
-    (row.status === 'declared' && row.decidedAt === '' && row.consumedBy === '') ||
-    (hasValidTimestamp && row.needsImplementation && row.status === 'pending' && row.consumedBy === '') ||
-    (hasValidTimestamp && !row.needsImplementation && row.status === 'not-required' && row.consumedBy === '') ||
-    (hasValidTimestamp && row.needsImplementation && row.status === 'consumed' && parseArtifactName(row.consumedBy)?.family === 'code');
-  if (!valid) throw new Error(`implementation input ${row.id} has an invalid state combination`);
+  if (!hasValidInputState(row, hasValidTimestamp)) throw new Error(`implementation input ${row.id} has an invalid state combination`);
+}
+
+function hasValidInputState(row: ImplementationInput, hasValidTimestamp: boolean): boolean {
+  return isDeclaredInputState(row) || (hasValidTimestamp && (
+    (row.needsImplementation && row.status === 'pending' && row.consumedBy === '') ||
+    (!row.needsImplementation && row.status === 'not-required' && row.consumedBy === '') ||
+    (row.needsImplementation && row.status === 'consumed' && parseArtifactName(row.consumedBy)?.family === 'code')
+  ));
+}
+
+function isDeclaredInputState(row: ImplementationInput): boolean {
+  return row.status === 'declared' && row.decidedAt === '' && row.consumedBy === '';
 }
 
 function parseImplementationInputs(content: string): { sectionFound: boolean; rows: ImplementationInput[] } {
