@@ -284,22 +284,41 @@ function parse(args: string[], start: number): { values: Record<string, string>;
   return { values };
 }
 
-async function manualValidation(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('manual-validation', args)) return;
-  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(`${USAGE}\n`); return; }
+type ManualValidationInvocation = {
+  taskRef: string;
+  values: Record<string, string>;
+  format: OutputFormat;
+};
+
+function resolveManualValidationInvocation(args: string[]): ManualValidationInvocation | null {
+  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(`${USAGE}\n`); return null; }
   const operation = args[0];
   const isTransaction = operation === 'transaction' && internalHandlerRoute('manual-validation', 'transaction', operation);
-  if (!isTransaction) { printFailure('json', { code: 'MANUAL_VALIDATION_ARGS_INVALID', message: 'transaction operation is required' }); return; }
+  if (!isTransaction) { printFailure('json', { code: 'MANUAL_VALIDATION_ARGS_INVALID', message: 'transaction operation is required' }); return null; }
   const taskRef = args[1];
-  if (!taskRef || taskRef.startsWith('--')) { printFailure('json', { code: 'MANUAL_VALIDATION_ARGS_INVALID', message: 'task ref is required' }); return; }
+  if (!taskRef || taskRef.startsWith('--')) { printFailure('json', { code: 'MANUAL_VALIDATION_ARGS_INVALID', message: 'task ref is required' }); return null; }
   const parsed = parse(args, 2);
-  if (parsed.error) { printFailure('json', { code: 'MANUAL_VALIDATION_ARGS_INVALID', message: parsed.error }); return; }
+  if (parsed.error) { printFailure('json', { code: 'MANUAL_VALIDATION_ARGS_INVALID', message: parsed.error }); return null; }
   const values = parsed.values;
-  const format = values.format === 'text' ? 'text' : 'json';
-  const output = await executeManualValidationTransaction(taskRef, values, path.resolve(values.cwd ?? process.cwd()));
+  return { taskRef, values, format: values.format === 'text' ? 'text' : 'json' };
+}
+
+function printManualValidationOutput(format: OutputFormat, output: ManualValidationResult): void {
   process.stdout.write(format === 'json' ? `${JSON.stringify(output)}\n` : `${output.status === 'applied' ? 'Manual validation transaction committed.' : `${output.error?.code}: ${output.error?.message}`}\n`);
   if (format === 'text' && Array.isArray(output.warnings)) for (const warning of output.warnings) process.stderr.write(`${warning.code}: ${warning.message}\n`);
   if (output.status === 'failed') process.exitCode = 1;
+}
+
+async function runManualValidationCommand(args: string[]): Promise<void> {
+  const invocation = resolveManualValidationInvocation(args);
+  if (!invocation) return;
+  const output = await executeManualValidationTransaction(invocation.taskRef, invocation.values, path.resolve(invocation.values.cwd ?? process.cwd()));
+  printManualValidationOutput(invocation.format, output);
+}
+
+async function manualValidation(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('manual-validation', args)) return;
+  await runManualValidationCommand(args);
 }
 
 export { executeManualValidationTransaction, manualValidation };
