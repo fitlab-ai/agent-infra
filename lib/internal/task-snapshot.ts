@@ -9,23 +9,30 @@ function fail(message: string): void {
   process.exitCode = 1;
 }
 
-function taskSnapshot(args: string[] = []): void {
-  if (!ensureInternalHandlerRoute('task-snapshot', args)) return;
-  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  if (!args[0] || args[0].startsWith('--') || !internalHandlerRoute('task-snapshot', 'snapshot', 'snapshot')) { fail('task ref is required'); return; }
+function parseTaskSnapshotCommand(args: string[]): { taskRef: string; format: 'json' | 'text' } | null {
+  if (!ensureInternalHandlerRoute('task-snapshot', args)) return null;
+  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return null; }
+  if (!args[0] || args[0].startsWith('--') || !internalHandlerRoute('task-snapshot', 'snapshot', 'snapshot')) { fail('task ref is required'); return null; }
+
   let format: 'json' | 'text' = 'json';
   let seenFormat = false;
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index];
-    if (flag !== '--format') { fail(`unknown option '${flag}'`); return; }
-    if (seenFormat) { fail("duplicate option '--format'"); return; }
+    if (flag !== '--format') { fail(`unknown option '${flag}'`); return null; }
+    if (seenFormat) { fail("duplicate option '--format'"); return null; }
     const value = args[++index];
-    if (value !== 'json' && value !== 'text') { fail("option '--format' requires 'json' or 'text'"); return; }
+    if (value !== 'json' && value !== 'text') { fail("option '--format' requires 'json' or 'text'"); return null; }
     seenFormat = true;
     format = value;
   }
-  const result = collectTaskSnapshot(args[0]);
-  if (format === 'text') {
+  return { taskRef: args[0], format };
+}
+
+function taskSnapshot(args: string[] = []): void {
+  const command = parseTaskSnapshotCommand(args);
+  if (!command) return;
+  const result = collectTaskSnapshot(command.taskRef);
+  if (command.format === 'text') {
     process.stdout.write(result.status === 'ready' ? `${result.evidence}\n` : `Snapshot failed: ${result.error?.code} - ${result.error?.message}\n`);
   } else process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
