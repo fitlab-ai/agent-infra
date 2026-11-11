@@ -20,7 +20,11 @@ function usageFailure(message: string): void {
 }
 
 function isSupportedIntent(kind: string): boolean {
-  return ['add', 'set-status', 'list'].some((intent) => internalHandlerRoute('task-warning', intent, kind));
+  return [
+    internalHandlerRoute('task-warning', 'add', kind),
+    internalHandlerRoute('task-warning', 'set-status', kind),
+    internalHandlerRoute('task-warning', 'list', kind)
+  ].some(Boolean);
 }
 
 function parseOptions(args: string[], values: Record<string, unknown>): boolean {
