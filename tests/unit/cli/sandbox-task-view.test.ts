@@ -105,6 +105,6 @@ test('task-view parsing preserves unknown fields and prioritizes schema errors',
   };
   assert.equal(parseSandboxTaskView(view), view);
   assert.throws(() => parseSandboxTaskView({
-    state: 'not-a-state', taskId, observedSource: 'active', receipt: null, reasonCode: null
+    state: 'not-applicable', taskId, observedSource: 'active', receipt: null, reasonCode: 17
   }), /taskView schema is invalid/);
 });
