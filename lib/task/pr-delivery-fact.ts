@@ -105,21 +105,19 @@ function legacyFactError(): PrDeliveryFactError {
   );
 }
 
-function parseFact(value: unknown): PrDeliveryFact {
-  if (!isRecord(value)) throw factError('fact must be an object');
-  if (value.version === 1) throw legacyFactError();
-  if (value.version !== 2 || typeof value.state !== 'string') throw factError('version or state is invalid');
-  if (value.state === 'unbound') {
-    exactKeys(value, ['version', 'state', 'reason'], 'unbound fact');
-    if (value.reason !== 'initial') throw factError('unbound reason is invalid');
-    return { version: 2, state: 'unbound', reason: 'initial' };
-  }
-  if (value.state === 'skipped') {
-    exactKeys(value, ['version', 'state', 'reason', 'decidedAt'], 'skipped fact');
-    if (value.reason !== 'explicit') throw factError('skipped reason is invalid');
-    return { version: 2, state: 'skipped', reason: 'explicit', decidedAt: timestamp(value.decidedAt, 'skipped.decidedAt') };
-  }
-  if (value.state !== 'bound') throw factError('state is invalid');
+function parseUnboundFact(value: Record<string, unknown>): PrDeliveryFact {
+  exactKeys(value, ['version', 'state', 'reason'], 'unbound fact');
+  if (value.reason !== 'initial') throw factError('unbound reason is invalid');
+  return { version: 2, state: 'unbound', reason: 'initial' };
+}
+
+function parseSkippedFact(value: Record<string, unknown>): PrDeliveryFact {
+  exactKeys(value, ['version', 'state', 'reason', 'decidedAt'], 'skipped fact');
+  if (value.reason !== 'explicit') throw factError('skipped reason is invalid');
+  return { version: 2, state: 'skipped', reason: 'explicit', decidedAt: timestamp(value.decidedAt, 'skipped.decidedAt') };
+}
+
+function parseBoundFact(value: Record<string, unknown>): PrDeliveryFact {
   exactKeys(value, ['version', 'state', 'identity', 'binding', 'provenance'], 'bound fact');
   if (!isRecord(value.binding) || !isRecord(value.provenance)) throw factError('binding or provenance is invalid');
   exactKeys(value.binding, ['status', 'source', 'verifiedAt', 'issueIdentity', 'remoteState', 'mergedAt', 'mergeCommitSha'], 'binding');
@@ -140,6 +138,16 @@ function parseFact(value: unknown): PrDeliveryFact {
     binding: { status: 'verified', source: value.binding.source as PrDeliveryBindingSource, verifiedAt: timestamp(value.binding.verifiedAt, 'binding.verifiedAt'), issueIdentity, remoteState: value.binding.remoteState, mergedAt, mergeCommitSha },
     provenance: { establishedBy: value.provenance.establishedBy as PrDeliveryProvenance }
   };
+}
+
+function parseFact(value: unknown): PrDeliveryFact {
+  if (!isRecord(value)) throw factError('fact must be an object');
+  if (value.version === 1) throw legacyFactError();
+  if (value.version !== 2 || typeof value.state !== 'string') throw factError('version or state is invalid');
+  if (value.state === 'unbound') return parseUnboundFact(value);
+  if (value.state === 'skipped') return parseSkippedFact(value);
+  if (value.state !== 'bound') throw factError('state is invalid');
+  return parseBoundFact(value);
 }
 
 function decodePrDeliveryFact(value: unknown, _runtimeVersion?: string): PrDeliveryFact {
