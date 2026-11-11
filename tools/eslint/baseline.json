@@ -873,15 +873,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/review-identity.ts",
-      "ruleId": "complexity",
-      "stableId": "212563d5351057c82e4920f88f1bc24cb1090cca4ee96a3b168e07c80700ed6f",
-      "displayName": "inspectReviewIdentity",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
       "file": "lib/task/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "a6b5c1d8255d64d661d820b77328fb39d438f379369632349bbefeb689cff08c",
