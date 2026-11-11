@@ -64,38 +64,56 @@ function parseLedgerDocument(content: string): LedgerDocument {
   };
 }
 
+function validatePostReviewExemptionRow(row: LedgerRow): LedgerValidationError | null {
+  if (
+    row.stage !== 'post-review-commit' ||
+    row.round !== '-' ||
+    row.severity !== '-' ||
+    row.status !== 'human-decided' ||
+    row.evidence === '' ||
+    /[\r\n]/.test(row.evidence)
+  ) {
+    return { code: 'LEDGER_DOCUMENT_INVALID', message: `post-review exemption row '${row.id}' is invalid` };
+  }
+  return null;
+}
+
+function validateLedgerRowIdentityAndStatus(row: LedgerRow): LedgerValidationError | null {
+  if (row.stage === 'post-review-commit') {
+    return { code: 'LEDGER_DOCUMENT_INVALID', message: `post-review exemption row '${row.id}' must use a PRC id` };
+  }
+  if (!/^(AN|PL|CD|HD)-[1-9]\d*$/.test(row.id)) return { code: 'LEDGER_ID_INVALID', message: `ledger id '${row.id}' is invalid` };
+  if (!['analysis', 'plan', 'code', 'post-review-commit'].includes(row.stage)) return { code: 'LEDGER_STAGE_INVALID', message: `ledger stage '${row.stage}' is invalid` };
+  if (!FINDING_STATUSES.has(row.status)) return { code: 'LEDGER_STATUS_INVALID', message: `ledger status '${row.status}' is invalid` };
+  if (row.id.startsWith('AN-') && row.stage !== 'analysis' || row.id.startsWith('PL-') && row.stage !== 'plan' || row.id.startsWith('CD-') && row.stage !== 'code') {
+    return { code: 'LEDGER_STAGE_INVALID', message: `ledger id '${row.id}' conflicts with stage '${row.stage}'` };
+  }
+  return null;
+}
+
+function validateLedgerRowDetails(row: LedgerRow): LedgerValidationError | null {
+  if (row.id.startsWith('HD-')) {
+    if (row.round !== '-' || row.severity !== 'decision' || !HUMAN_DECISION_STATUSES.has(row.status)) return { code: 'LEDGER_DOCUMENT_INVALID', message: `decision row '${row.id}' is invalid` };
+  } else if (!/^[1-9]\d*$/.test(row.round) || !['blocker', 'major', 'minor'].includes(row.severity)) {
+    return { code: 'LEDGER_DOCUMENT_INVALID', message: `finding row '${row.id}' is invalid` };
+  }
+  return null;
+}
+
 function validateLedgerRows(rows: readonly LedgerRow[]): LedgerValidationError | null {
   const seen = new Set<string>();
   for (const row of rows) {
     if (seen.has(row.id)) return { code: 'LEDGER_DUPLICATE_ID', message: `duplicate ledger id '${row.id}'` };
     seen.add(row.id);
     if (/^PRC-[1-9]\d*$/.test(row.id)) {
-      if (
-        row.stage !== 'post-review-commit' ||
-        row.round !== '-' ||
-        row.severity !== '-' ||
-        row.status !== 'human-decided' ||
-        row.evidence === '' ||
-        /[\r\n]/.test(row.evidence)
-      ) {
-        return { code: 'LEDGER_DOCUMENT_INVALID', message: `post-review exemption row '${row.id}' is invalid` };
-      }
+      const invalid = validatePostReviewExemptionRow(row);
+      if (invalid) return invalid;
       continue;
     }
-    if (row.stage === 'post-review-commit') {
-      return { code: 'LEDGER_DOCUMENT_INVALID', message: `post-review exemption row '${row.id}' must use a PRC id` };
-    }
-    if (!/^(AN|PL|CD|HD)-[1-9]\d*$/.test(row.id)) return { code: 'LEDGER_ID_INVALID', message: `ledger id '${row.id}' is invalid` };
-    if (!['analysis', 'plan', 'code', 'post-review-commit'].includes(row.stage)) return { code: 'LEDGER_STAGE_INVALID', message: `ledger stage '${row.stage}' is invalid` };
-    if (!FINDING_STATUSES.has(row.status)) return { code: 'LEDGER_STATUS_INVALID', message: `ledger status '${row.status}' is invalid` };
-    if (row.id.startsWith('AN-') && row.stage !== 'analysis' || row.id.startsWith('PL-') && row.stage !== 'plan' || row.id.startsWith('CD-') && row.stage !== 'code') {
-      return { code: 'LEDGER_STAGE_INVALID', message: `ledger id '${row.id}' conflicts with stage '${row.stage}'` };
-    }
-    if (row.id.startsWith('HD-')) {
-      if (row.round !== '-' || row.severity !== 'decision' || !HUMAN_DECISION_STATUSES.has(row.status)) return { code: 'LEDGER_DOCUMENT_INVALID', message: `decision row '${row.id}' is invalid` };
-    } else if (!/^[1-9]\d*$/.test(row.round) || !['blocker', 'major', 'minor'].includes(row.severity)) {
-      return { code: 'LEDGER_DOCUMENT_INVALID', message: `finding row '${row.id}' is invalid` };
-    }
+    const identityOrStatusError = validateLedgerRowIdentityAndStatus(row);
+    if (identityOrStatusError) return identityOrStatusError;
+    const detailError = validateLedgerRowDetails(row);
+    if (detailError) return detailError;
   }
   return null;
 }

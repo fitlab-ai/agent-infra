@@ -2151,15 +2151,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/ledger.ts",
-      "ruleId": "complexity",
-      "stableId": "fd839d1863bb2abb8ea4558f0b5619d378d8126b82eb91dff85da9b7ac5122b6",
-      "displayName": "validateLedgerRows",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
       "file": "lib/task/manual-validation-transaction.ts",
       "ruleId": "complexity",
       "stableId": "66caf9126726abc4cfd0906b6f87992dec2d54a6d1b0c3ec89d4478eb2e1ad7b",
