@@ -376,12 +376,16 @@ export function writeSandboxControlStatus(
   return status;
 }
 
+function hasValidSandboxControlBroker(broker: SandboxControlStatus['broker'] | null | undefined): boolean {
+  if (!broker) return false;
+  return Number.isSafeInteger(broker.pid) && typeof broker.startTime === 'number'
+    && Number.isSafeInteger(broker.startTime) && typeof broker.brokerId === 'string' && broker.brokerId.length > 0;
+}
+
 export function parseSandboxControlStatus(value: unknown): SandboxControlStatus {
   const status = value as Partial<SandboxControlStatus> | null;
   if (!status || status.version !== 3 || typeof status.generation !== 'string'
-    || !status.broker || !Number.isSafeInteger(status.broker.pid) || typeof status.broker.startTime !== 'number'
-    || !Number.isSafeInteger(status.broker.startTime) || typeof status.broker.brokerId !== 'string'
-    || status.broker.brokerId.length === 0
+    || !hasValidSandboxControlBroker(status.broker)
     || !['starting', 'healthy', 'busy', 'parked'].includes(status.state ?? '')
     || (status.reasonCode !== null && typeof status.reasonCode !== 'string')
     || (status.activeRequestId !== null && typeof status.activeRequestId !== 'string')
