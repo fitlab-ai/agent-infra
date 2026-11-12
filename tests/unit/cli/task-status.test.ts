@@ -422,9 +422,34 @@ test('buildStatusModel constructs the model without parsing rendered stdout', ()
   assert.equal(model.taskId, taskId);
   assert.equal(model.title, 'demo title');
   assert.equal(model.workflow.state, 'in-progress');
+  assert.equal(model.recommendation, 'analysis');
+  assert.equal(model.recommendationReason, 'LIFECYCLE_PATH_MISSING');
+  assert.equal(model.lifecyclePath, 'missing');
   assert.equal(model.git.match, 'yes');
   assert.deepEqual(model.artifacts.groups, [
     { stage: 'analysis', files: ['analysis.md'] },
     { stage: 'task', files: ['task.md'] }
   ]);
+
+  const historyContent = fs.readFileSync(taskMdPath, 'utf8');
+  const structuredContent = historyContent.replace(
+    'branch: feat\n',
+    'branch: feat\nlifecycle_execution: \'{"version":1,"open":[],"prReview":{"open":null,"terminals":[]}}\'\n'
+  );
+  fs.writeFileSync(taskMdPath, structuredContent, 'utf8');
+
+  const structuredModel = buildStatusModel({
+    taskId,
+    taskDir,
+    taskMdPath,
+    repoRoot,
+    shortId: '01',
+    run,
+    now: new Date('2026-07-02T12:30:00Z')
+  });
+
+  assert.equal(structuredModel.workflow.state, 'idle');
+  assert.equal(structuredModel.recommendation, 'analysis');
+  assert.equal(structuredModel.recommendationReason, 'LIFECYCLE_PATH_MISSING');
+  assert.equal(structuredModel.lifecyclePath, 'missing');
 });
