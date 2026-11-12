@@ -49,6 +49,26 @@ function fixture() {
   return { root, base, head, merge, pullRequest };
 }
 
+test("accepts a strict reviewed head match", () => {
+  const f = fixture();
+  try {
+    f.pullRequest.state = "open";
+    f.pullRequest.mergedAt = null;
+    f.pullRequest.mergeCommitSha = null;
+    assert.deepEqual(resolveReviewedHeadRelation({
+      gitRoot: f.root,
+      comparisonHead: f.head,
+      lastReviewedCommit: f.head,
+      pullRequest: f.pullRequest
+    }), {
+      status: "strict",
+      reviewedHead: f.head
+    });
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 function advancedTargetFixture() {
   const root = createTempDir("merged-pr-equivalence-advanced-");
   git(root, ["init", "-q", "-b", "master"]);
