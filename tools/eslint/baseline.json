@@ -1080,15 +1080,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/state.ts",
-      "ruleId": "complexity",
-      "stableId": "1ca4a96f97441b89ae732bc4866bdf501236186cf2b3be33fba0dfc1c9913d88",
-      "displayName": "parseSandboxControlStatus",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/task/control-authority.ts",
       "ruleId": "complexity",
       "stableId": "2e051a20a0570212790bc14bd58d894d85a60a17173cc6ccb808c241395e8810",
