@@ -450,15 +450,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/merged-pr-equivalence.ts",
-      "ruleId": "complexity",
-      "stableId": "64ddb5a39003ff1e7f76753162c02c7d22c102f21aa5ac3b5c20f4a3779fe726",
-      "displayName": "compareReplayedTree",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/platform/operation-coordinator.ts",
       "ruleId": "complexity",
       "stableId": "68ad0c757c1763a26e834ff8b923437f2fef8785e8f7c950d380d3a4da47f2c9",

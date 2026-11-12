@@ -83,6 +83,19 @@ function resolveUniqueMergeBase(
   return { status: "ok", mergeBase: candidate };
 }
 
+function cleanupTempDir(
+  tempDir: string | undefined,
+  relation: ReviewedHeadRelation | null
+): ReviewedHeadRelation | null {
+  if (!tempDir) return relation;
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    return blocked("Unable to clean up isolated squash merge evidence");
+  }
+  return relation;
+}
+
 function compareReplayedTree(input: {
   gitRoot: string;
   mergeBase: string;
@@ -148,13 +161,7 @@ function compareReplayedTree(input: {
   } catch {
     relation = blocked("Unable to create isolated squash merge evidence");
   } finally {
-    if (tempDir) {
-      try {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      } catch {
-        relation = blocked("Unable to clean up isolated squash merge evidence");
-      }
-    }
+    relation = cleanupTempDir(tempDir, relation);
   }
   return relation;
 }
