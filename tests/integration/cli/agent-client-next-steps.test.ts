@@ -157,6 +157,24 @@ test('agent-client next-steps fails closed for invalid config and arguments', ()
   }
 });
 
+test('agent-client next-steps preserves help priority and first argument error', () => {
+  const root = fixture({ project: 'demo', agentClients: canonical([]) });
+  const help = spawnSync(
+    process.execPath,
+    [INTERNAL_CLI_PATH, 'agent-client', '--help', '--unknown'],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.equal(help.status, 0, help.stderr);
+  assert.equal(help.stdout, 'Usage: agent-infra-internal agent-client <next-steps|model-selection> [options]\n');
+
+  const invalidFormat = run(root, ['--skill', 'commit', '--format', 'yaml', '--unknown']);
+  assert.equal(invalidFormat.status, 1);
+  assert.deepEqual(JSON.parse(invalidFormat.stdout).error, {
+    code: 'AGENT_CLIENT_PAYLOAD_INVALID',
+    message: "format must be 'text' or 'json'"
+  });
+});
+
 test('agent-client model-selection labels host-only guidance without inventing a catalog', () => {
   const root = fixture({ project: 'demo', agentClients: canonical(['claude-code']) });
   const result = spawnSync(
