@@ -567,15 +567,6 @@
       "count": 1
     },
     {
-      "file": "lib/decide.ts",
-      "ruleId": "complexity",
-      "stableId": "994eddb42b6edb8b2e00fbca40b7e18a1afdb7e22dd484496784439c7d4dacd6",
-      "displayName": "decide",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/task/delivery.ts",
       "ruleId": "complexity",
       "stableId": "a4d17bb7dcc6099c4579e0e52b14a5ac0d7527b038646f4ec0b1084a58d703ea",

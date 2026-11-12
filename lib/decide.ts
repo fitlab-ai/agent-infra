@@ -32,23 +32,30 @@ function parseDecisionParts(parts: string[]): { decision: string; needsImplement
   return { decision: decision.join(' '), needsImplementation };
 }
 
+function parseItemOptions(positionals: string[]): { item: string | undefined; operands: string[]; error: string | null } {
+  let item: string | undefined;
+  const operands: string[] = [];
+  for (let index = 0; index < positionals.length; index += 1) {
+    const arg = positionals[index]!;
+    if (arg === '--item' || arg === '-i') {
+      if (item !== undefined) return { item, operands, error: "duplicate option '--item'" };
+      item = positionals[++index];
+      if (!item) return { item, operands, error: `${arg} requires a value` };
+    } else if (arg.startsWith('--item=')) {
+      return { item, operands, error: '--item=... is not supported; use --item <selector> or -i <selector>' };
+    } else operands.push(arg);
+  }
+  return { item, operands, error: null };
+}
+
 export async function decide(args: string[], options: DecideOptions = {}): Promise<number> {
   let scope;
   try { scope = parseTaskScope(args); } catch (error) {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`); return 1;
   }
-  let item: string | undefined;
-  const operands: string[] = [];
-  for (let index = 0; index < scope.positionals.length; index += 1) {
-    const arg = scope.positionals[index]!;
-    if (arg === '--item' || arg === '-i') {
-      if (item !== undefined) { process.stderr.write("Error: duplicate option '--item'\n"); return 1; }
-      item = scope.positionals[++index];
-      if (!item) { process.stderr.write(`Error: ${arg} requires a value\n`); return 1; }
-    } else if (arg.startsWith('--item=')) {
-      process.stderr.write('Error: --item=... is not supported; use --item <selector> or -i <selector>\n'); return 1;
-    } else operands.push(arg);
-  }
+  const parsedItemOptions = parseItemOptions(scope.positionals);
+  if (parsedItemOptions.error) { process.stderr.write(`Error: ${parsedItemOptions.error}\n`); return 1; }
+  const { item, operands } = parsedItemOptions;
   const taskRef = scope.taskRef;
   const selector = item;
   const decisionParts = operands;
