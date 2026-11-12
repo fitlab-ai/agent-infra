@@ -520,6 +520,24 @@ async function inspectBoundPullRequest(
   };
 }
 
+async function summaryPullRequestContext(
+  resolved: ResolvedTaskRef,
+  prIdentity: ResourceIdentity | null,
+  loaded: LoadedContext | null,
+  fallbackNumber: number | null
+): Promise<{ pullRequest: PlatformChangeRequestSnapshot | null; prNumber: number | null }> {
+  let pullRequest: PlatformChangeRequestSnapshot | null = null;
+  let prNumber = fallbackNumber;
+  if (loaded && prIdentity && loaded.context.platform.repository && ['no-op', 'degraded'].includes(loaded.context.status)) {
+    const inspected = await inspectBoundPullRequest(loaded.context, resolved.repoRoot, prIdentity, loaded);
+    if (inspected.ok) {
+      pullRequest = inspected.value;
+      if (Number.isSafeInteger(inspected.value.number) && inspected.value.number > 0) prNumber = inspected.value.number;
+    }
+  }
+  return { pullRequest, prNumber };
+}
+
 function sameIdentity(left: PlatformChangeRequestSnapshot, right: PlatformChangeRequestSnapshot): boolean {
   return JSON.stringify({
     repository: left.repository,
@@ -640,19 +658,10 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
     artifacts: []
   };
   const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
-  let prNumber = resourceIdentityNumber(prIdentity);
+  const fallbackPrNumber = resourceIdentityNumber(prIdentity);
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
-  let pullRequest: PlatformChangeRequestSnapshot | null = null;
-  if (loaded.ok && prIdentity && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
-    const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
-    if (inspected.ok) {
-      pullRequest = inspected.value;
-      if (Number.isSafeInteger(inspected.value.number) && inspected.value.number > 0) {
-        prNumber = inspected.value.number;
-      }
-    }
-  }
+  const { pullRequest, prNumber } = await summaryPullRequestContext(resolved, prIdentity, loaded.ok ? loaded.value : null, fallbackPrNumber);
   const report = summaryReportStatus(reportPath, pullRequest, taskContent, resolved.repoRoot);
   return {
     ...platformResult(context.status, {
