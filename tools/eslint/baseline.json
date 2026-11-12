@@ -1584,15 +1584,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/index.ts",
-      "ruleId": "complexity",
-      "stableId": "405a46c52ad50c6cd62d3003455a3735fad380fa2173a9f6561f76c67318dc22",
-      "displayName": "runSandbox",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/executor.ts",
       "ruleId": "complexity",
       "stableId": "f5c4a908d96309d227a27600447d9601483e6829eafce5e447de8a8ba6fe0ec6",

@@ -29,6 +29,57 @@ Commands:
 Run 'ai sandbox <command> --help' for details.`;
 const SANDBOX_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS.sandbox;
 
+type SandboxHandler = (args: string[]) => Promise<void>;
+
+const SANDBOX_HANDLERS = {
+  create: async (args) => {
+    const { create } = await import('./commands/create.ts');
+    await create(args);
+  },
+  exec: async (args) => {
+    const { enter } = await import('./commands/enter.ts');
+    const exitCode = await enter(args);
+    if (typeof exitCode === 'number' && exitCode !== 0) {
+      process.exitCode = exitCode;
+    }
+  },
+  ls: async (args) => {
+    const { ls } = await import('./commands/ls.ts');
+    ls(args);
+  },
+  show: async (args) => {
+    const { show } = await import('./commands/show.ts');
+    show(args);
+  },
+  prune: async (args) => {
+    const { prune } = await import('./commands/prune.ts');
+    await prune(args);
+  },
+  rebuild: async (args) => {
+    const { rebuild } = await import('./commands/rebuild.ts');
+    await rebuild(args);
+  },
+  refresh: async (args) => {
+    const { refresh } = await import('./commands/refresh.ts');
+    const exitCode = await refresh(args);
+    if (typeof exitCode === 'number' && exitCode !== 0) {
+      process.exitCode = exitCode;
+    }
+  },
+  rm: async (args) => {
+    const { rm } = await import('./commands/rm.ts');
+    await rm(args);
+  },
+  start: async (args) => {
+    const { start } = await import('./commands/start.ts');
+    await start(args);
+  },
+  vm: async (args) => {
+    const { vm } = await import('./commands/vm.ts');
+    await vm(args);
+  }
+} satisfies Record<typeof SANDBOX_OPERATIONS[number], SandboxHandler>;
+
 export async function runSandbox(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
 
@@ -47,64 +98,5 @@ export async function runSandbox(args: string[]): Promise<void> {
     throw new Error(`Unknown sandbox command: ${subcommand}`);
   }
 
-  switch (subcommand) {
-    case 'create': {
-      const { create } = await import('./commands/create.ts');
-      await create(rest);
-      break;
-    }
-    case 'exec': {
-      const { enter } = await import('./commands/enter.ts');
-      const exitCode = await enter(rest);
-      if (typeof exitCode === 'number' && exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
-      break;
-    }
-    case 'ls': {
-      const { ls } = await import('./commands/ls.ts');
-      ls(rest);
-      break;
-    }
-    case 'show': {
-      const { show } = await import('./commands/show.ts');
-      show(rest);
-      break;
-    }
-    case 'prune': {
-      const { prune } = await import('./commands/prune.ts');
-      await prune(rest);
-      break;
-    }
-    case 'rebuild': {
-      const { rebuild } = await import('./commands/rebuild.ts');
-      await rebuild(rest);
-      break;
-    }
-    case 'refresh': {
-      const { refresh } = await import('./commands/refresh.ts');
-      const exitCode = await refresh(rest);
-      if (typeof exitCode === 'number' && exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
-      break;
-    }
-    case 'rm': {
-      const { rm } = await import('./commands/rm.ts');
-      await rm(rest);
-      break;
-    }
-    case 'start': {
-      const { start } = await import('./commands/start.ts');
-      await start(rest);
-      break;
-    }
-    case 'vm': {
-      const { vm } = await import('./commands/vm.ts');
-      await vm(rest);
-      break;
-    }
-    default:
-      throw new Error(`Unknown sandbox command: ${subcommand}`);
-  }
+  await SANDBOX_HANDLERS[subcommand as typeof SANDBOX_OPERATIONS[number]](rest);
 }
