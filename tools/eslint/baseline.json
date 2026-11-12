@@ -1143,15 +1143,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/platform-metadata.ts",
-      "ruleId": "complexity",
-      "stableId": "a55cf930645b1116adb35f8443ca7e6307923d725ec992e0afa8d60c37689a57",
-      "displayName": "platformMetadata",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/internal/platform-pr.ts",
       "ruleId": "complexity",
       "stableId": "a1bc7b8dca98f0e54dfe8c5116258e0cc35a3f69c12427d466a3ba159b59f42b",

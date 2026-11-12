@@ -36,3 +36,31 @@ test('platform-metadata exposes structured degraded labels and preserves milesto
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('platform-metadata preserves help and action-specific option errors', () => {
+  const root = rootWithNoneProvider();
+  const usage = 'Usage: agent-infra-internal platform-metadata init-labels [--cleanup-stale-in] [--cwd <path>]\n'
+    + '       agent-infra-internal platform-metadata init-milestones [--history] [--cwd <path>]\n';
+  try {
+    const help = run(root, '--help');
+    assert.equal(help.status, 0, help.stderr);
+    assert.equal(help.stdout, usage);
+    assert.equal(help.stderr, '');
+
+    for (const [action, option, message] of [
+      ['init-labels', '--history', 'init-labels does not accept --history'],
+      ['init-milestones', '--cleanup-stale-in', 'init-milestones does not accept --cleanup-stale-in']
+    ] as const) {
+      const invalid = run(root, action, option);
+      assert.equal(invalid.status, 1);
+      assert.deepEqual(JSON.parse(invalid.stdout), {
+        status: 'failed',
+        changed: false,
+        error: { code: 'METADATA_INPUT_INVALID', message, retryable: false }
+      });
+      assert.equal(invalid.stderr, usage);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
