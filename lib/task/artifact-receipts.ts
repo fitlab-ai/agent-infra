@@ -138,10 +138,7 @@ function upsertArtifactReceipt(content: string, receipt: ArtifactReceipt): Recei
   return upsertArtifactReceipts(content, [receipt]);
 }
 
-function upsertArtifactReceipts(content: string, receiptsToAdd: readonly ArtifactReceipt[]): ReceiptSectionMutation {
-  if (receiptsToAdd.length === 0) throw new ArtifactReceiptError('at least one receipt is required');
-  const additions = new Map<string, ArtifactReceipt>();
-  for (const receipt of receiptsToAdd) {
+function validateReceiptForUpsert(receipt: ArtifactReceipt): void {
   if (!RECEIPT_EVENTS.has(receipt.event)) throw new ArtifactReceiptError(`unknown receipt event '${receipt.event}'`);
   if (!receipt.output || !receipt.input) throw new ArtifactReceiptError('receipt output and input are required');
   validateReceiptShape(receipt.event, receipt.output, receipt.input);
@@ -149,6 +146,13 @@ function upsertArtifactReceipts(content: string, receiptsToAdd: readonly Artifac
   if (!receipt.completedAt || Number.isNaN(Date.parse(receipt.completedAt.replace(' ', 'T')))) {
     throw new ArtifactReceiptError(`receipt completion time for '${receipt.output}' is invalid`);
   }
+}
+
+function upsertArtifactReceipts(content: string, receiptsToAdd: readonly ArtifactReceipt[]): ReceiptSectionMutation {
+  if (receiptsToAdd.length === 0) throw new ArtifactReceiptError('at least one receipt is required');
+  const additions = new Map<string, ArtifactReceipt>();
+  for (const receipt of receiptsToAdd) {
+    validateReceiptForUpsert(receipt);
 
     const key = `${receipt.output}\0${receipt.input}`;
     const duplicate = additions.get(key);
