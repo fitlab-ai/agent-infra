@@ -198,15 +198,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commands/status.ts",
-      "ruleId": "complexity",
-      "stableId": "aeb797dec5aa33af697db170fbc03433180cccab2ffacdebc4fcf9dee942f4f2",
-      "displayName": "buildFromResolved",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/task/capabilities.ts",
       "ruleId": "complexity",
       "stableId": "1817c805c8ac4f72314ba5a08524a0558858886fbae2654999b54489380f83fc",

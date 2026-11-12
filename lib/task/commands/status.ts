@@ -12,7 +12,7 @@ import { parseActivityLog, pairEntries, startedBackedRows } from '../activity-lo
 import { lifecycleExecutions } from '../lifecycle-execution.ts';
 import { parseTypedTaskFrontmatter } from '../frontmatter.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
-import { buildLifecycleFacts, recommendNext } from '../capabilities.ts';
+import { buildLifecycleFacts, recommendNext, type LifecycleFactsResult } from '../capabilities.ts';
 
 const USAGE = `Usage: ai task status [--task <ref> | -t <ref>]
 
@@ -371,6 +371,41 @@ type BuildStatusModelOptions = {
   now?: Date;
 };
 
+type WorkflowCollector = (content: string, now?: Date) => WorkflowInfo;
+type LifecyclePresentation = Pick<StatusModel, 'recommendation' | 'recommendationReason' | 'lifecyclePath'>;
+
+const collectStructuredWorkflowForStatus: WorkflowCollector = (content, now) =>
+  collectStructuredWorkflow(content, now ?? new Date());
+
+function collectWorkflowForStatus(content: string, now?: Date): WorkflowInfo {
+  const collector = parseTypedTaskFrontmatter(content).lifecycle_execution !== undefined
+    ? collectStructuredWorkflowForStatus
+    : collectWorkflow;
+  return collector(content, now);
+}
+
+function lifecyclePathForStatus(facts: LifecycleFactsResult): string {
+  if (!facts.ok) return DASH;
+  const pathState = facts.facts.pathState;
+  if (pathState?.status === 'valid') return pathState.decision.path;
+  return pathState?.status ?? DASH;
+}
+
+function collectLifecyclePresentation(
+  taskDir: string,
+  content: string,
+  taskState: string,
+  repositoryRoot: string
+): LifecyclePresentation {
+  const facts = buildLifecycleFacts(taskDir, content, taskState, false, repositoryRoot);
+  const next = facts.ok ? recommendNext(facts.facts) : null;
+  return {
+    recommendation: next?.action ?? DASH,
+    recommendationReason: next?.reasonCode ?? 'TASK_CAPABILITY_FACTS_INVALID',
+    lifecyclePath: lifecyclePathForStatus(facts)
+  };
+}
+
 // Indent each label/value pair by two spaces and pad labels to a common width so
 // every section reads as an aligned "key   value" block.
 function renderPairs(rows: [string, string][]): string[] {
@@ -465,11 +500,8 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
   const fm = parseTaskFrontmatter(content);
   const run = input.run ?? makeRunner(input.repoRoot);
   const artifacts = enumerateArtifacts(input.taskDir);
-  const workflow = parseTypedTaskFrontmatter(content).lifecycle_execution !== undefined
-    ? collectStructuredWorkflow(content, input.now ?? new Date()) : collectWorkflow(content, input.now);
-  const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active', false, input.repoRoot);
-  const next = facts.ok ? recommendNext(facts.facts) : null;
-  const recommendation = next?.action ?? DASH;
+  const workflow = collectWorkflowForStatus(content, input.now);
+  const lifecycle = collectLifecyclePresentation(input.taskDir, content, fm.status ?? 'active', input.repoRoot);
 
   return {
     taskId: input.taskId,
@@ -480,9 +512,9 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
     artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
     workflow,
     runtime: collectRuntime(input.taskDir, workflow, run),
-    recommendation,
-    recommendationReason: next?.reasonCode ?? 'TASK_CAPABILITY_FACTS_INVALID',
-    lifecyclePath: facts.ok && facts.facts.pathState?.status === 'valid' ? facts.facts.pathState.decision.path : facts.ok ? facts.facts.pathState?.status ?? DASH : DASH,
+    recommendation: lifecycle.recommendation,
+    recommendationReason: lifecycle.recommendationReason,
+    lifecyclePath: lifecycle.lifecyclePath,
     git: collectGit(fm.branch ?? '', run)
   };
 }
