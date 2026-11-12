@@ -326,15 +326,6 @@
     {
       "file": "lib/task/verification-engine.ts",
       "ruleId": "complexity",
-      "stableId": "b349df140c5a3f38fe6820af7542a7ced24cd420f290b3abed8a570fc552cb02",
-      "displayName": "checkReviewLedger",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
       "stableId": "42a0923eb2aa6883320e84f2b80c94880deca8df2c66c8c1d4e89a34cc878978",
       "displayName": "checkTaskMeta",
       "metric": 46,

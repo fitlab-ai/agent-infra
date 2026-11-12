@@ -636,6 +636,26 @@ function checkCompletionChecklist({ taskDir, config }: any): any {
   return passResult("completion-checklist", `Completion Checklist valid (${items.length} items checked)`);
 }
 
+function reviewLedgerRowIsInScope(stage: string, stageScope: string[] | null): boolean {
+  const stageScoped = stageScope ? stageScope.includes(stage) : true;
+  return stage !== POST_REVIEW_COMMIT_STAGE && stageScoped;
+}
+
+function reviewLedgerRowProblems(row: any): string[] {
+  const { id, status, evidence } = row;
+  const invalid = validateLedgerRows([row]);
+  if (invalid) return [`${invalid.code}: ${invalid.message}`];
+
+  const problems = [];
+  if (status !== "open" && evidence === "") {
+    problems.push(`${id}: status '${status}' requires evidence`);
+  }
+  if (!LEDGER_TERMINAL.has(status!)) {
+    problems.push(`${id}: unresolved (status '${status}')`);
+  }
+  return problems;
+}
+
 function checkReviewLedger({ taskDir, config }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
@@ -655,41 +675,14 @@ function checkReviewLedger({ taskDir, config }: any): any {
   }
 
   const stageScope = Array.isArray(config.stage_scope) ? config.stage_scope : null;
-  const problems = [];
-  let inScopeCount = 0;
-
-  for (const row of rows) {
-    const { id, stage, status, evidence } = row;
-    const stageScoped = stageScope ? stageScope.includes(stage) : true;
-    // post-review-commit exemption rows are consumed by the post-review-commit
-    // check, not enforced here.
-    if (stage === POST_REVIEW_COMMIT_STAGE) {
-      continue;
-    }
-    if (!stageScoped) {
-      continue;
-    }
-    inScopeCount += 1;
-
-    const invalid = validateLedgerRows([row]);
-    if (invalid) {
-      problems.push(`${invalid.code}: ${invalid.message}`);
-      continue;
-    }
-    if (status !== "open" && evidence === "") {
-      problems.push(`${id}: status '${status}' requires evidence`);
-    }
-    if (!LEDGER_TERMINAL.has(status!)) {
-      problems.push(`${id}: unresolved (status '${status}')`);
-    }
-  }
-
+  const inScopeRows = rows.filter((row: any) => reviewLedgerRowIsInScope(row.stage, stageScope));
+  const problems = inScopeRows.flatMap(reviewLedgerRowProblems);
   if (problems.length > 0) {
     return failResult("review-ledger", `Unclosed/invalid disagreements: ${problems.join("; ")}`);
   }
 
   const scopeLabel = stageScope ? ` for stages [${stageScope.join(", ")}]` : "";
-  return passResult("review-ledger", `Disagreement ledger clean (${inScopeCount} in-scope entries terminal${scopeLabel})`);
+  return passResult("review-ledger", `Disagreement ledger clean (${inScopeRows.length} in-scope entries terminal${scopeLabel})`);
 }
 
 async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<any> {
