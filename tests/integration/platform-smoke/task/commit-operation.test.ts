@@ -100,6 +100,30 @@ test('commit core rejects a missing push policy before writing Git state', () =>
   }
 });
 
+test('commit core preserves push ref validation and earlier path error priority', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+    const invalidRef = executeCommitOperation(input(root, {
+      push: { remote: 'origin', refs: ['refs/heads/other'] }
+    }));
+    assert.equal(invalidRef.status, 'blocked');
+    assert.equal(invalidRef.error?.code, 'GIT_PUSH_INPUT_INVALID');
+    assert.equal(invalidRef.error?.message, 'Push ref must be the current full heads ref');
+
+    const unsafePath = executeCommitOperation(input(root, {
+      paths: ['../escape'],
+      push: { remote: 'origin', refs: ['refs/heads/other'] }
+    }));
+    assert.equal(unsafePath.status, 'blocked');
+    assert.equal(unsafePath.error?.code, 'GIT_COMMIT_INPUT_INVALID');
+    assert.equal(unsafePath.error?.message, 'Commit paths must stay inside the repository');
+    assert.equal(git(root, ['rev-list', '--count', 'HEAD']), '1');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('taskless protected branch keeps the local commit and reports a push warning', () => {
   const root = fixture('main');
   const remote = createTempDir('commit-operation-remote-');
