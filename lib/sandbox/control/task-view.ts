@@ -51,25 +51,37 @@ function invalidView(message: string): Error {
   return new Error(`SANDBOX_TASK_VIEW_INVALID: ${message}`);
 }
 
+function isValidReceiptMetadata(receipt: Record<string, unknown>): boolean {
+  return receipt.version === 4
+    && typeof receipt.receiptId === 'string'
+    && receipt.receiptId.length > 0
+    && Number.isSafeInteger(receipt.revision)
+    && (receipt.revision as number) >= 0
+    && receipt.lifecycle === 'done'
+    && ['pending', 'done', 'skipped'].includes(String(receipt.summary));
+}
+
+function matchesControlBinding(
+  binding: Record<string, unknown>, generation: string, requestId?: string
+): boolean {
+  return binding.generation === generation
+    && typeof binding.requestId === 'string'
+    && /^[a-f0-9-]{16,64}$/u.test(binding.requestId)
+    && (requestId === undefined || binding.requestId === requestId);
+}
+
 function receiptIdentity(value: unknown, generation: string, requestId?: string): SandboxTaskViewReceipt | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const receipt = value as Record<string, unknown>;
   const binding = receipt.controlBinding;
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return null;
   const controlBinding = binding as Record<string, unknown>;
-  if (receipt.version !== 4 || typeof receipt.receiptId !== 'string' || receipt.receiptId.length === 0
-    || !Number.isSafeInteger(receipt.revision) || (receipt.revision as number) < 0
-    || receipt.lifecycle !== 'done'
-    || !['pending', 'done', 'skipped'].includes(String(receipt.summary))
-    || controlBinding.generation !== generation
-    || typeof controlBinding.requestId !== 'string'
-    || !/^[a-f0-9-]{16,64}$/u.test(controlBinding.requestId)
-    || (requestId !== undefined && controlBinding.requestId !== requestId)) return null;
+  if (!isValidReceiptMetadata(receipt) || !matchesControlBinding(controlBinding, generation, requestId)) return null;
   return {
-    receiptId: receipt.receiptId,
+    receiptId: receipt.receiptId as string,
     revision: receipt.revision as number,
     generation,
-    requestId: controlBinding.requestId
+    requestId: controlBinding.requestId as string
   };
 }
 
