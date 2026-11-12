@@ -1764,15 +1764,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pr-summary.ts",
-      "ruleId": "complexity",
-      "stableId": "79ca129f21fd4426fca825e74d9487439813b537dc8dd03adec957ee7cf39a39",
-      "displayName": "summaryContext",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/commands/create.ts",
       "ruleId": "complexity",
       "stableId": "9ccb34cb0c4d6859a0d5732084ec5ee0b8da553a6a71f58d6f71a8e685fea776",
