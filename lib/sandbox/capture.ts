@@ -180,6 +180,42 @@ EOF
 `;
 }
 
+async function readyCaptureContainer(
+  request: SandboxCaptureRequest,
+  options: SandboxCaptureOptions,
+  config: ReturnType<typeof loadConfig> | null,
+  engine: string,
+  workspace: SandboxWorkspaceIdentity | undefined,
+  found: SandboxRow
+): Promise<string> {
+  if (options.ensureReady) {
+    return (await options.ensureReady({
+      branch: request.branch,
+      workspace,
+      row: found,
+      allowRecreate: request.recreate ?? false
+    })).container;
+  }
+  if (config) {
+    return (await ensureSandboxReady({
+      config,
+      engine,
+      branch: request.branch,
+      workspace,
+      row: found,
+      allowRecreate: request.recreate,
+      recreate: async () => {
+        const { create } = await import('./commands/create.ts');
+        await create([request.taskRef, '--no-refresh'], { runProjectInitCommand: false });
+      }
+    })).container;
+  }
+  if (!found.running) {
+    (options.startContainer ?? ((name: string) => startSandboxContainer(engine, name)))(found.name);
+  }
+  return found.name;
+}
+
 export async function runInSandbox(
   request: SandboxCaptureRequest,
   options: SandboxCaptureOptions = {}
@@ -201,30 +237,7 @@ export async function runInSandbox(
       `Sandbox for ${request.branch} not found. Create it first with ai sandbox create ${request.taskRef}.`
     );
   }
-  let container = found.name;
-  if (options.ensureReady) {
-    container = (await options.ensureReady({
-      branch: request.branch,
-      workspace,
-      row: found,
-      allowRecreate: request.recreate ?? false
-    })).container;
-  } else if (config) {
-    container = (await ensureSandboxReady({
-      config,
-      engine,
-      branch: request.branch,
-      workspace,
-      row: found,
-      allowRecreate: request.recreate,
-      recreate: async () => {
-        const { create } = await import('./commands/create.ts');
-        await create([request.taskRef, '--no-refresh'], { runProjectInitCommand: false });
-      }
-    })).container;
-  } else if (!found.running) {
-    (options.startContainer ?? ((name: string) => startSandboxContainer(engine, name)))(found.name);
-  }
+  const container = await readyCaptureContainer(request, options, config, engine, workspace, found);
   const runId = options.runId ?? createRunId();
   const runDir = `/tmp/agent-infra-runs/${runId}`;
   const dockerArgs = [

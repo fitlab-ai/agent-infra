@@ -1620,15 +1620,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/capture.ts",
-      "ruleId": "complexity",
-      "stableId": "5a849ea0aae3a81dc24527d62088e42d4dd589eb6fb398f8d91b6c5aa1d85576",
-      "displayName": "runInSandbox",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/clipboard/bridge.ts",
       "ruleId": "complexity",
       "stableId": "3f61dc3238d4a12da2dcf086df374ca134dcb904710880f5aae0f154cc761312",
