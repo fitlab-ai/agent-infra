@@ -52,6 +52,46 @@ export function collectSandboxDetail(config: SandboxConfig, branch: string): San
   return { worktrees, toolStates };
 }
 
+function renderWorktrees(worktrees: string[]): void {
+  p.log.step('Worktree');
+  if (worktrees.length === 0) {
+    p.log.warn('  No worktree for this branch');
+  } else {
+    for (const worktree of worktrees) {
+      process.stdout.write(`  ${worktree}\n`);
+    }
+  }
+}
+
+function renderControlStatus(
+  controlStatus: ReturnType<typeof readSandboxControlStatusForRow>
+): void {
+  p.log.step('Control status');
+  if (!controlStatus) {
+    p.log.warn('  Control status unavailable');
+  } else {
+    process.stdout.write(`  Health: ${controlStatus.state}\n`);
+    process.stdout.write(`  Task view: ${controlStatus.taskView.state}\n`);
+    process.stdout.write(`  Task source: ${controlStatus.taskView.observedSource ?? '-'}\n`);
+    if (controlStatus.taskView.reasonCode) {
+      process.stdout.write(`  Task view reason: ${controlStatus.taskView.reasonCode}\n`);
+    }
+  }
+}
+
+function renderToolStates(toolStates: SandboxDetail['toolStates']): void {
+  for (const tool of toolStates) {
+    p.log.step(`${tool.name} state`);
+    if (tool.entries.length === 0) {
+      p.log.warn(`  No ${tool.name} sandbox state`);
+      continue;
+    }
+    for (const entry of tool.entries) {
+      process.stdout.write(`  ${entry}\n`);
+    }
+  }
+}
+
 export function show(args: string[] = []): void {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(`${USAGE}\n`);
@@ -80,43 +120,15 @@ export function show(args: string[] = []): void {
   );
 
   p.intro(pc.cyan(`Sandbox detail for ${config.project} · ${branch}`));
-
-  p.log.step('Worktree');
-  if (detail.worktrees.length === 0) {
-    p.log.warn('  No worktree for this branch');
-  } else {
-    for (const worktree of detail.worktrees) {
-      process.stdout.write(`  ${worktree}\n`);
-    }
-  }
+  renderWorktrees(detail.worktrees);
 
   p.log.step('Workspace identity');
   process.stdout.write(`  Mode: ${container?.workspaceMode ?? 'legacy-invalid'}\n`);
   process.stdout.write(`  Task: ${container?.taskId ?? '-'}\n`);
 
-  p.log.step('Control status');
   const controlStatus = container
     ? readSandboxControlStatusForRow(config, container)
     : null;
-  if (!controlStatus) {
-    p.log.warn('  Control status unavailable');
-  } else {
-    process.stdout.write(`  Health: ${controlStatus.state}\n`);
-    process.stdout.write(`  Task view: ${controlStatus.taskView.state}\n`);
-    process.stdout.write(`  Task source: ${controlStatus.taskView.observedSource ?? '-'}\n`);
-    if (controlStatus.taskView.reasonCode) {
-      process.stdout.write(`  Task view reason: ${controlStatus.taskView.reasonCode}\n`);
-    }
-  }
-
-  for (const tool of detail.toolStates) {
-    p.log.step(`${tool.name} state`);
-    if (tool.entries.length === 0) {
-      p.log.warn(`  No ${tool.name} sandbox state`);
-      continue;
-    }
-    for (const entry of tool.entries) {
-      process.stdout.write(`  ${entry}\n`);
-    }
-  }
+  renderControlStatus(controlStatus);
+  renderToolStates(detail.toolStates);
 }
