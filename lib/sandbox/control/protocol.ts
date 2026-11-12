@@ -146,18 +146,36 @@ export function parseSandboxControlResultEvidence(value: unknown): SandboxContro
   return evidence as SandboxControlResultEvidence;
 }
 
-function validPayloadReference(value: unknown, id: string, generation: string): value is SandboxControlPayloadReference {
-  const payload = value as Partial<SandboxControlPayloadReference> | null;
+function validPayloadIdentity(
+  payload: Partial<SandboxControlPayloadReference> | null,
+  id: string,
+  generation: string
+): boolean {
   const keys = payload && typeof payload === 'object' ? Object.keys(payload).sort().join(',') : '';
   return keys === 'generation,id,stderrBytes,stderrSha256,stdoutBytes,stdoutSha256,version'
     && payload?.version === 1
     && payload.id === id
-    && payload.generation === generation
-    && Number.isSafeInteger(payload.stdoutBytes) && (payload.stdoutBytes as number) >= 0
-    && Number.isSafeInteger(payload.stderrBytes) && (payload.stderrBytes as number) >= 0
-    && (payload.stdoutBytes as number) + (payload.stderrBytes as number) <= SANDBOX_CONTROL_MAX_RESPONSE_BYTES
-    && typeof payload.stdoutSha256 === 'string' && /^[a-f0-9]{64}$/u.test(payload.stdoutSha256)
-    && typeof payload.stderrSha256 === 'string' && /^[a-f0-9]{64}$/u.test(payload.stderrSha256);
+    && payload.generation === generation;
+}
+
+function validPayloadByteCounts(payload: Partial<SandboxControlPayloadReference> | null): boolean {
+  return Number.isSafeInteger(payload?.stdoutBytes) && (payload?.stdoutBytes as number) >= 0
+    && Number.isSafeInteger(payload?.stderrBytes) && (payload?.stderrBytes as number) >= 0
+    && (payload?.stdoutBytes as number) + (payload?.stderrBytes as number) <= SANDBOX_CONTROL_MAX_RESPONSE_BYTES;
+}
+
+function validPayloadDigests(payload: Partial<SandboxControlPayloadReference> | null): boolean {
+  return typeof payload?.stdoutSha256 === 'string' && /^[a-f0-9]{64}$/u.test(payload.stdoutSha256)
+    && typeof payload?.stderrSha256 === 'string' && /^[a-f0-9]{64}$/u.test(payload.stderrSha256);
+}
+
+function validPayloadOutputMetadata(payload: Partial<SandboxControlPayloadReference> | null): boolean {
+  return validPayloadByteCounts(payload) && validPayloadDigests(payload);
+}
+
+function validPayloadReference(value: unknown, id: string, generation: string): value is SandboxControlPayloadReference {
+  const payload = value as Partial<SandboxControlPayloadReference> | null;
+  return validPayloadIdentity(payload, id, generation) && validPayloadOutputMetadata(payload);
 }
 
 export function parseSandboxControlPayload(value: unknown): SandboxControlPayload {

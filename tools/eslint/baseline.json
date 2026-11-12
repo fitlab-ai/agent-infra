@@ -1953,15 +1953,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/protocol.ts",
-      "ruleId": "complexity",
-      "stableId": "28d2de21c1e1072564a05a3ed6230201139ebbdb4dc40d715db3f43ad54a79f1",
-      "displayName": "validPayloadReference",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/task/finalization.ts",
       "ruleId": "complexity",
       "stableId": "dd043556c6f0f3dc63ead04e8c32f955434a5fff777e932a22be36c7134fe7c5",
