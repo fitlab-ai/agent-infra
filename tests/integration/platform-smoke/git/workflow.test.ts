@@ -183,17 +183,28 @@ test('inspect and push expose recoverable per-ref outcomes', () => {
   const root = fixture();
   assert.equal(inspectGitWorkflow(root).status, 'no-op');
   const calls: string[][] = [];
-  const result = pushGitRefs({ cwd: root, remote: 'origin', refs: ['main', 'bad ref'] }, (args) => {
+  const expectedSha = 'a'.repeat(40);
+  const result = pushGitRefs({ cwd: root, remote: 'origin', refs: ['failed', 'main', 'bad ref'], expectedSha }, (args) => {
     calls.push([...args]);
-    if (args[0] === 'push' || args[0] === 'ls-remote') return { status: 0, stdout: '', stderr: '' };
+    if (args[0] === 'push' && args[2] === 'failed') return { status: 1, stdout: '', stderr: 'push rejected' };
+    if (args[0] === 'push') return { status: 0, stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') return { status: 0, stdout: `${expectedSha}\trefs/heads/main\n`, stderr: '' };
     if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: 'abc\n', stderr: '' };
     if (args[0] === 'branch') return { status: 0, stdout: 'main\n', stderr: '' };
     if (args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
     return { status: 1, stdout: '', stderr: '' };
   });
   assert.equal(result.status, 'degraded');
-  assert.equal(result.operations.length, 2);
-  assert.deepEqual(calls.filter((call) => call[0] === 'push'), [['push', 'origin', 'main']]);
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.operations.map(({ ref, status }) => ({ ref, status })), [
+    { ref: 'failed', status: 'failed' },
+    { ref: 'main', status: 'applied' },
+    { ref: 'bad ref', status: 'failed' }
+  ]);
+  assert.deepEqual(calls.filter((call) => call[0] === 'push'), [
+    ['push', 'origin', 'failed'],
+    ['push', 'origin', 'main']
+  ]);
   assert.deepEqual(calls.filter((call) => call[0] === 'ls-remote'), [['ls-remote', '--exit-code', 'origin', 'refs/heads/main']]);
 });
 

@@ -142,34 +142,40 @@ function previewCommitTree(input: { cwd: string; paths: readonly string[]; expec
   }
 }
 
+function pushGitRef(input: { cwd: string; remote: string; expectedSha?: string }, ref: string, runner: GitRunner): GitOperation {
+  if (!/^(?:refs\/(?:heads|tags)\/)?[A-Za-z0-9._/-]+$/.test(ref) || ref.startsWith('-')) {
+    return { name: 'push', ref, status: 'failed', message: 'Invalid ref' };
+  }
+  const pushed = run(runner, input.cwd, ['push', input.remote, ref]);
+  if (pushed.status !== 0) return { name: 'push', ref, status: 'failed', message: pushed.stderr.trim() };
+
+  const canonical = ref.startsWith('refs/') ? ref : `refs/heads/${ref}`;
+  const remoteFact = run(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, canonical]);
+  const remoteSha = remoteFact.status === 0 ? remoteFact.stdout.trim().split(/\s+/)[0] ?? null : null;
+  const verified = remoteFact.status === 0 && (!input.expectedSha || remoteSha === input.expectedSha);
+  return {
+    name: 'push',
+    ref,
+    status: verified ? 'applied' : 'failed',
+    message: verified ? undefined : input.expectedSha
+      ? `Remote ref verification failed: expected ${input.expectedSha}, received ${remoteSha ?? 'unavailable'}`
+      : 'Remote ref verification failed'
+  };
+}
+
+function summarizePushOperations(operations: GitOperation[]) {
+  const failures = operations.filter((item) => item.status === 'failed').length;
+  return {
+    status: failures === 0 ? 'applied' as const : failures === operations.length ? 'failed' as const : 'degraded' as const,
+    changed: failures < operations.length,
+    error: failures ? { code: 'GIT_PUSH_PARTIAL', message: `${failures} ref push operation(s) failed` } : null
+  };
+}
+
 function pushGitRefs(input: { cwd: string; remote: string; refs: readonly string[]; expectedSha?: string }, runner: GitRunner = defaultRunner) {
   if (!input.remote || input.refs.length === 0) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [], error: { code: 'GIT_PUSH_INPUT_INVALID', message: 'Remote and refs are required' } };
-  const operations: GitOperation[] = [];
-  for (const ref of input.refs) {
-    if (!/^(?:refs\/(?:heads|tags)\/)?[A-Za-z0-9._/-]+$/.test(ref) || ref.startsWith('-')) {
-      operations.push({ name: 'push', ref, status: 'failed', message: 'Invalid ref' });
-      continue;
-    }
-    const pushed = run(runner, input.cwd, ['push', input.remote, ref]);
-    if (pushed.status !== 0) {
-      operations.push({ name: 'push', ref, status: 'failed', message: pushed.stderr.trim() });
-      continue;
-    }
-    const canonical = ref.startsWith('refs/') ? ref : `refs/heads/${ref}`;
-    const remoteFact = run(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, canonical]);
-    const remoteSha = remoteFact.status === 0 ? remoteFact.stdout.trim().split(/\s+/)[0] ?? null : null;
-    const verified = remoteFact.status === 0 && (!input.expectedSha || remoteSha === input.expectedSha);
-    operations.push({
-      name: 'push',
-      ref,
-      status: verified ? 'applied' : 'failed',
-      message: verified ? undefined : input.expectedSha
-        ? `Remote ref verification failed: expected ${input.expectedSha}, received ${remoteSha ?? 'unavailable'}`
-        : 'Remote ref verification failed'
-    });
-  }
-  const failures = operations.filter((item) => item.status === 'failed').length;
-  return { status: failures === 0 ? 'applied' as const : failures === operations.length ? 'failed' as const : 'degraded' as const, changed: failures < operations.length, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations, error: failures ? { code: 'GIT_PUSH_PARTIAL', message: `${failures} ref push operation(s) failed` } : null };
+  const operations = input.refs.map((ref) => pushGitRef(input, ref, runner));
+  return { ...summarizePushOperations(operations), snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations };
 }
 
 type PushRebasedInput = {
