@@ -6,7 +6,7 @@ import type { Logger } from './logger.ts';
 import { loadAdapters, unloadAdapters } from './plugin-loader.ts';
 import type { InboundMessage } from './adapters/_contract.ts';
 import { authorize } from './auth.ts';
-import { commandHelp, parseCommand } from './protocol.ts';
+import { commandHelp, parseCommand, type CommandPlan } from './protocol.ts';
 import { runAi } from './runner.ts';
 import type { RunnerOptions, RunnerResult } from './runner.ts';
 import { streamCommand } from './streamer.ts';
@@ -30,6 +30,33 @@ function isTaskStatus(argv: string[]): boolean {
   return argv[0] === 'task' && argv[1] === 'status' && typeof argv[2] === 'string';
 }
 
+async function handleTerminalPlan(
+  plan: CommandPlan,
+  message: InboundMessage,
+  logger: Pick<Logger, 'info'>
+): Promise<boolean> {
+  if (plan.kind === 'ignore') return true;
+  if (plan.kind === 'error') {
+    await replyOutbound(message, textMessage(plan.message));
+    logger.info(`command rejected from ${message.adapter}:${message.userId}: ${plan.message}`);
+    return true;
+  }
+  if (plan.kind !== 'builtin') return false;
+
+  switch (plan.name) {
+    case 'ping':
+      await replyOutbound(message, textMessage(`pong ${VERSION}`));
+      break;
+    case 'help':
+      await replyOutbound(message, markdownMessage(commandHelp()));
+      break;
+    case 'version':
+      await replyOutbound(message, textMessage(`agent-infra ${VERSION}`));
+      break;
+  }
+  return true;
+}
+
 export function createMessageDispatcher(options: MessageDispatcherOptions): (message: InboundMessage) => Promise<void> {
   const runAiImpl = options.runAi ?? runAi;
   const buildStatusModelImpl = options.buildStatusModel ?? buildStatusModel;
@@ -37,56 +64,39 @@ export function createMessageDispatcher(options: MessageDispatcherOptions): (mes
 
   return async (message: InboundMessage): Promise<void> => {
     const plan = parseCommand(message.text);
-    if (plan.kind === 'ignore') return;
-    if (plan.kind === 'error') {
-      await replyOutbound(message, textMessage(plan.message));
-      options.logger.info(`command rejected from ${message.adapter}:${message.userId}: ${plan.message}`);
+    if (await handleTerminalPlan(plan, message, options.logger)) return;
+    if (plan.kind !== 'ai') return;
+
+    const allowed = authorize(
+      { adapter: message.adapter, userId: message.userId },
+      plan.role,
+      options.config.auth
+    );
+    if (!allowed.ok) {
+      await replyOutbound(message, textMessage(allowed.message));
+      options.logger.info(`unauthorized command from ${message.adapter}:${message.userId}: ${allowed.message}`);
       return;
     }
-    if (plan.kind === 'builtin' && plan.name === 'ping') {
-      await replyOutbound(message, textMessage(`pong ${VERSION}`));
-      return;
-    }
-    if (plan.kind === 'builtin' && plan.name === 'help') {
-      await replyOutbound(message, markdownMessage(commandHelp()));
-      return;
-    }
-    if (plan.kind === 'builtin' && plan.name === 'version') {
-      await replyOutbound(message, textMessage(`agent-infra ${VERSION}`));
-      return;
-    }
-    if (plan.kind === 'ai') {
-      const allowed = authorize(
-        { adapter: message.adapter, userId: message.userId },
-        plan.role,
-        options.config.auth
-      );
-      if (!allowed.ok) {
-        await replyOutbound(message, textMessage(allowed.message));
-        options.logger.info(`unauthorized command from ${message.adapter}:${message.userId}: ${allowed.message}`);
+
+    if (isTaskStatus(plan.argv)) {
+      try {
+        await replyOutbound(message, statusModelToDisplayImpl(buildStatusModelImpl(plan.argv[2]!)));
         return;
+      } catch {
+        // Fall back to the existing CLI streaming path. This preserves the
+        // old behavior for invalid refs and any status-model collection error.
       }
-
-      if (isTaskStatus(plan.argv)) {
-        try {
-          await replyOutbound(message, statusModelToDisplayImpl(buildStatusModelImpl(plan.argv[2]!)));
-          return;
-        } catch {
-          // Fall back to the existing CLI streaming path. This preserves the
-          // old behavior for invalid refs and any status-model collection error.
-        }
-      }
-
-      await streamCommand(
-        {
-          title: `ai ${plan.argv.join(' ')}`,
-          chunkChars: typeof options.config.stream?.chunkChars === 'number' ? options.config.stream.chunkChars : 4000,
-          throttleMs: typeof options.config.stream?.throttleMs === 'number' ? options.config.stream.throttleMs : 1500
-        },
-        (emit) => runAiImpl(plan.argv, { onChunk: emit, cwd: options.config.repoRoot }),
-        (outbound) => replyOutbound(message, outbound)
-      );
     }
+
+    await streamCommand(
+      {
+        title: `ai ${plan.argv.join(' ')}`,
+        chunkChars: typeof options.config.stream?.chunkChars === 'number' ? options.config.stream.chunkChars : 4000,
+        throttleMs: typeof options.config.stream?.throttleMs === 'number' ? options.config.stream.throttleMs : 1500
+      },
+      (emit) => runAiImpl(plan.argv, { onChunk: emit, cwd: options.config.repoRoot }),
+      (outbound) => replyOutbound(message, outbound)
+    );
   };
 }
 

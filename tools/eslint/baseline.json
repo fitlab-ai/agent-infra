@@ -513,15 +513,6 @@
       "count": 1
     },
     {
-      "file": "lib/server/daemon.ts",
-      "ruleId": "complexity",
-      "stableId": "e00b3546c2b66b632ebcc4a878149ecae3958bdcb96d31ccc4820f7cc535dca7",
-      "displayName": "createMessageDispatcher.<anonymous ArrowFunctionExpression#1>",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/platform/issues.ts",
       "ruleId": "complexity",
       "stableId": "24b8af90580d7bf1252eef3dcc67c6b146d4fa0f6b0f8dca236079c1ab818d35",
