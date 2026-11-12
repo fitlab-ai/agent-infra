@@ -683,7 +683,7 @@ function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: T
   catch { return receipt; }
 }
 
-async function syncPendingTaskComment(input: {
+type PendingTaskCommentInput = {
   repoRoot: string;
   taskId: string;
   agent: string;
@@ -691,13 +691,58 @@ async function syncPendingTaskComment(input: {
   projection?: TaskCompletionProjection;
   refreshProjection?: () => TaskCompletionProjection | undefined;
   commentSync: typeof syncPlatformComment;
-}): Promise<TaskCommentSyncOutcome> {
+};
+
+async function completeTaskCommentSync(
+  input: PendingTaskCommentInput,
+  result: PlatformResult,
+  step: TaskFinalizationStep
+): Promise<TaskCommentSyncOutcome> {
+  const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
+  let receipt = mutateFinalizationReceipt(input.repoRoot, input.receipt, issueCapability(input.receipt, 'task-comment'), {
+    scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
+  });
+  receipt = reconcileWarningProjection(input.repoRoot, input.taskId, receipt);
+  if (!skipped && receipt.taskComment === 'pending') {
+    const retry = await syncPendingTaskComment({
+      ...input,
+      receipt,
+      projection: input.refreshProjection?.() ?? input.projection
+    });
+    return { ...retry, changed: result.changed || retry.changed };
+  }
+  return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
+}
+
+function failTaskCommentSync(
+  input: PendingTaskCommentInput,
+  result: PlatformResult,
+  step: TaskFinalizationStep
+): TaskCommentSyncOutcome {
+  const detail = step.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
+  let receipt = mutateFinalizationReceipt(input.repoRoot, input.receipt, issueCapability(input.receipt, 'task-comment'), {
+    scope: 'task-comment', operation: 'failed', error: detail
+  });
+  receipt = reconcileWarningProjection(input.repoRoot, input.taskId, receipt);
+  return { receipt, step, changed: result.changed, error: detail };
+}
+
+function handleTaskCommentSyncResult(
+  input: PendingTaskCommentInput,
+  result: PlatformResult
+): Promise<TaskCommentSyncOutcome> | TaskCommentSyncOutcome {
+  const step = commentStep(result);
+  if (result.status === 'applied' || result.status === 'no-op') return completeTaskCommentSync(input, result, step);
+  return failTaskCommentSync(input, result, step);
+}
+
+async function syncPendingTaskComment(input: PendingTaskCommentInput): Promise<TaskCommentSyncOutcome> {
   const { repoRoot, taskId, agent, commentSync } = input;
   let receipt = input.receipt;
-  if (receipt.taskComment !== 'pending') {
+  if (input.receipt.taskComment !== 'pending') {
     return {
-      receipt,
-      step: { status: receipt.taskComment === 'skipped' ? 'skipped' : 'no-op', changed: false, error: null },
+      receipt: input.receipt,
+      step: { status: input.receipt.taskComment === 'skipped' ? 'skipped' : 'no-op', changed: false, error: null },
       changed: false,
       error: null
     };
@@ -712,39 +757,16 @@ async function syncPendingTaskComment(input: {
         }
       } : {})
     });
-    const step = commentStep(result);
-    if (result.status === 'applied' || result.status === 'no-op') {
-      const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
-      const capability = issueCapability(receipt, 'task-comment');
-      receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
-        scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
-      });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
-      if (!skipped && receipt.taskComment === 'pending') {
-        const retry = await syncPendingTaskComment({
-          ...input,
-          receipt,
-          projection: input.refreshProjection?.() ?? input.projection
-        });
-        return { ...retry, changed: result.changed || retry.changed };
-      }
-      return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
-    }
-    const detail = step.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
-    const capability = issueCapability(receipt, 'task-comment');
-    receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
-      scope: 'task-comment', operation: 'failed', error: detail
-    });
-    receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
-    return { receipt, step, changed: result.changed, error: detail };
+    return await handleTaskCommentSyncResult({ ...input, receipt: input.receipt }, result);
   } catch (error) {
     const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
+    try { receipt = readReceipt(repoRoot, taskId) ?? receipt; } catch { /* preserve the primary error */ }
     try {
-      const capability = issueCapability(receipt, 'task-comment');
-      receipt = mutateFinalizationReceipt(repoRoot, receipt, capability, {
+      receipt = mutateFinalizationReceipt(repoRoot, receipt, issueCapability(receipt, 'task-comment'), {
         scope: 'task-comment', operation: 'failed', error: detail
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
+      return { receipt, step: { status: 'blocked', changed: false, error: detail }, changed: false, error: detail };
     } catch { /* preserve the primary error */ }
     return { receipt, step: { status: 'blocked', changed: false, error: detail }, changed: false, error: detail };
   }
