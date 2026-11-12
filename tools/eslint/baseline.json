@@ -1458,15 +1458,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/merged-pr-equivalence.ts",
-      "ruleId": "complexity",
-      "stableId": "dc0aaa43a24b1e4326d6b3bb0f43ab80b6345a0e8a677d7225cc944bdde27c69",
-      "displayName": "resolveReviewedHeadRelation",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/environment.ts",
       "ruleId": "complexity",
       "stableId": "69894de5bce09af98852c4cf3b3bd35cc1fd7bc149ca9189149e0ca97af26c47",

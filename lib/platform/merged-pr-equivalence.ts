@@ -166,29 +166,18 @@ function compareReplayedTree(input: {
   return relation;
 }
 
-export function resolveReviewedHeadRelation(input: {
+function resolveMergedGitEvidence(input: {
   gitRoot: string;
   comparisonHead: string;
-  lastReviewedCommit: string;
+  mergeCommitSha: string;
   pullRequest: PullRequestSnapshot;
-}): ReviewedHeadRelation {
-  const { gitRoot, comparisonHead, lastReviewedCommit, pullRequest } = input;
-  if (
-    comparisonHead === lastReviewedCommit &&
-    lastReviewedCommit === pullRequest.head.sha &&
-    !(pullRequest.state === "closed" && pullRequest.mergedAt && pullRequest.mergeCommitSha)
-  ) {
-    return { status: "strict", reviewedHead: lastReviewedCommit };
-  }
-  if (pullRequest.state !== "closed" || !pullRequest.mergedAt || !pullRequest.mergeCommitSha ||
-      lastReviewedCommit !== pullRequest.head.sha) {
-    return { status: "failed", code: "PR_MERGE_IDENTITY_INVALID", message: "PR merge identity does not match the reviewed head" };
-  }
-  const shas = [pullRequest.base.sha, pullRequest.head.sha, pullRequest.mergeCommitSha, comparisonHead];
+}): ReviewedHeadRelation | null {
+  const { gitRoot, comparisonHead, mergeCommitSha, pullRequest } = input;
+  const shas = [pullRequest.base.sha, pullRequest.head.sha, mergeCommitSha, comparisonHead];
   if (shas.some((sha) => !SHA_PATTERN.test(sha) || !commitExists(gitRoot, sha))) {
     return { status: "blocked", code: "PR_MERGE_OBJECT_MISSING", message: "Required PR merge Git objects are unavailable" };
   }
-  const ancestry = isAncestor(gitRoot, pullRequest.mergeCommitSha, comparisonHead);
+  const ancestry = isAncestor(gitRoot, mergeCommitSha, comparisonHead);
   if (ancestry.status === "no") {
     return {
       status: "failed",
@@ -204,7 +193,7 @@ export function resolveReviewedHeadRelation(input: {
     };
   }
   try {
-    const parents = git(gitRoot, ["rev-list", "--parents", "-n", "1", pullRequest.mergeCommitSha]).trim().split(/\s+/);
+    const parents = git(gitRoot, ["rev-list", "--parents", "-n", "1", mergeCommitSha]).trim().split(/\s+/);
     if (parents.length !== 2) {
       return { status: "failed", code: "PR_MERGE_TOPOLOGY_INVALID", message: "PR merge commit is not a single-parent squash commit" };
     }
@@ -214,17 +203,38 @@ export function resolveReviewedHeadRelation(input: {
     }
     const mergeBase = resolveUniqueMergeBase(gitRoot, pullRequest.head.sha, squashParent);
     if (mergeBase.status !== "ok") return mergeBase.relation;
-    const replayFailure = compareReplayedTree({
+    return compareReplayedTree({
       gitRoot,
       mergeBase: mergeBase.mergeBase,
       reviewedHead: pullRequest.head.sha,
       squashParent,
-      squashCommit: pullRequest.mergeCommitSha
+      squashCommit: mergeCommitSha
     });
-    if (replayFailure) return replayFailure;
   } catch {
     return { status: "blocked", code: "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE", message: "Unable to verify PR merge topology or content" };
   }
+}
+
+export function resolveReviewedHeadRelation(input: {
+  gitRoot: string;
+  comparisonHead: string;
+  lastReviewedCommit: string;
+  pullRequest: PullRequestSnapshot;
+}): ReviewedHeadRelation {
+  const { comparisonHead, lastReviewedCommit, pullRequest } = input;
+  if (
+    comparisonHead === lastReviewedCommit &&
+    lastReviewedCommit === pullRequest.head.sha &&
+    !(pullRequest.state === "closed" && pullRequest.mergedAt && pullRequest.mergeCommitSha)
+  ) {
+    return { status: "strict", reviewedHead: lastReviewedCommit };
+  }
+  if (pullRequest.state !== "closed" || !pullRequest.mergedAt || !pullRequest.mergeCommitSha ||
+      lastReviewedCommit !== pullRequest.head.sha) {
+    return { status: "failed", code: "PR_MERGE_IDENTITY_INVALID", message: "PR merge identity does not match the reviewed head" };
+  }
+  const evidenceFailure = resolveMergedGitEvidence({ ...input, mergeCommitSha: pullRequest.mergeCommitSha });
+  if (evidenceFailure) return evidenceFailure;
   return {
     status: "merged-equivalent",
     reviewedHead: lastReviewedCommit,
