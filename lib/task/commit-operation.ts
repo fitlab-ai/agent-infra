@@ -170,6 +170,15 @@ function boundTask(
   return { kind: 'bound', task: { repoRoot, taskId, taskDir, taskMdPath, state, branch } };
 }
 
+function validatePushDelivery(delivery: Readonly<{ remote: string; refs: readonly string[] }>, branch: string | null): Readonly<{ code: string; message: string }> | null {
+  if (!delivery.remote || delivery.refs.length !== 1) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push requires one remote and one ref' };
+  const ref = delivery.refs[0] ?? '';
+  if (!HEAD_REF.test(ref) || HEAD_REF.exec(ref)?.[1] !== branch) {
+    return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push ref must be the current full heads ref' };
+  }
+  return null;
+}
+
 function validateCommon(input: CommitOperationInput, branch: string | null): Readonly<{ code: string; message: string }> | null {
   if (!input.message.trim()) return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Commit message is required' };
   if (!/^[a-f0-9]{40,64}$/.test(input.expectedHead)) return { code: 'GIT_HEAD_EXPECTATION_REQUIRED', message: 'A valid expected HEAD is required' };
@@ -184,11 +193,8 @@ function validateCommon(input: CommitOperationInput, branch: string | null): Rea
   }
   if (branch !== null && branch === '') return { code: 'GIT_BRANCH_INVALID', message: 'A named branch is required' };
   if (delivery.mode === 'push') {
-    if (!delivery.remote || delivery.refs.length !== 1) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push requires one remote and one ref' };
-    const ref = delivery.refs[0] ?? '';
-    if (!HEAD_REF.test(ref) || HEAD_REF.exec(ref)?.[1] !== branch) {
-      return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push ref must be the current full heads ref' };
-    }
+    const pushError = validatePushDelivery(delivery, branch);
+    if (pushError) return pushError;
   }
   return null;
 }
