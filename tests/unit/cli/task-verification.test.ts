@@ -41,6 +41,40 @@ function engine(status: 'pass' | 'fail' | 'blocked') {
   });
 }
 
+test('review ledger success count includes only scoped, non-exempt rows', async () => {
+  const f = fixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const writeVerifyConfig = (skillName: string, reviewLedger: Record<string, unknown>) => {
+    const configPath = path.join(f.root, '.agents', 'skills', skillName, 'config', 'verify.json');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ skill: skillName, checks: { 'review-ledger': reviewLedger } }));
+  };
+  const writeLedger = (rows: string[]) => fs.writeFileSync(taskPath, [
+    '---', `id: ${f.taskId}`, 'status: active', '---', '', '# Task', '',
+    '## Review Disagreement Ledger', '',
+    '| id | stage | round | severity | status | evidence |',
+    '| --- | --- | --- | --- | --- | --- |', ...rows, ''
+  ].join('\n'));
+  const verify = (skillName: string) => verifyInProcess({
+    mode: 'checks', skillName, taskDir: f.taskDir, checks: ['review-ledger'], repositoryRoot: f.root
+  });
+
+  writeVerifyConfig('plan-task', { stage_scope: ['analysis'] });
+  writeLedger([
+    '| AN-1 | analysis | 1 | major | confirmed | accepted |',
+    '| PL-1 | plan | 1 | major | open |  |',
+    '| PRC-1 | post-review-commit | - | - | human-decided | reviewed commits approved |'
+  ]);
+
+  try {
+    const result = await verify('plan-task');
+    assert.equal(result.status, 'pass', result.message);
+    assert.equal(result.message, 'Disagreement ledger clean (1 in-scope entries terminal for stages [analysis])');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('verification catalog is a closed mapping of all business events', async () => {
   assert.deepEqual(Object.keys(VERIFICATION_CATALOG).sort(), [...EXPECTED_EVENTS].sort());
   const expected = {
