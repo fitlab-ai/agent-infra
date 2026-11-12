@@ -9,15 +9,6 @@
   "scopeDigest": "040bd30c2a679e8fbf8bdc8aa1f1788129f6bc6c0b05e0a9d6a0ef7842774c03",
   "entries": [
     {
-      "file": "lib/fs/file-lock.ts",
-      "ruleId": "complexity",
-      "stableId": "4046a6c188e5b94899d97f558d2aa1b2b3cd18c96e6493df964371ab54fbb408",
-      "displayName": "acquireFileLock",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/checkpoint.ts",
       "ruleId": "complexity",
       "stableId": "de89987688b034834502536df377a87ed1c701ee4ae316b1cdc1c6656cfe09ec",
