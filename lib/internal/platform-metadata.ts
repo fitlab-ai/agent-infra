@@ -46,6 +46,12 @@ function parseOptions(args: string[]): { cwd: string; cleanup: boolean; history:
   return { cwd: path.resolve(cwd), cleanup, history };
 }
 
+function actionOptionError(action: string, parsed: { cleanup: boolean; history: boolean }): string | null {
+  if (action === 'init-labels' && parsed.history) return 'init-labels does not accept --history';
+  if (action === 'init-milestones' && parsed.cleanup) return 'init-milestones does not accept --cleanup-stale-in';
+  return null;
+}
+
 async function platformMetadata(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('platform-metadata', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
@@ -58,8 +64,8 @@ async function platformMetadata(args: string[] = []): Promise<void> {
   if (action !== 'init-labels' && action !== 'init-milestones') { fail('a valid operation is required'); return; }
   const parsed = parseOptions(args.slice(1));
   if (!parsed) { fail('invalid metadata options'); return; }
-  if (action === 'init-labels' && parsed.history) { fail('init-labels does not accept --history'); return; }
-  if (action === 'init-milestones' && parsed.cleanup) { fail('init-milestones does not accept --cleanup-stale-in'); return; }
+  const optionError = actionOptionError(action, parsed);
+  if (optionError) { fail(optionError); return; }
   if (action === 'init-labels') {
     finish(await initializeLabels({ cleanupStaleIn: parsed.cleanup }, { cwd: parsed.cwd }));
     return;
