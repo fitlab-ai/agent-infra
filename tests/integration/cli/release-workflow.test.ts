@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 
 import { createTempDir, INTERNAL_CLI_PATH, gitSafeEnv, onPlatforms } from '../../helpers.ts';
 import { collectDemoTranscript, DEMO_PROJECT_PATH, sha256Transcript } from '../../../lib/internal/demo-transcript.ts';
+import { loadNodePty } from '../../../lib/sandbox/clipboard/node-pty.ts';
 
 type Fixture = { root: string; origin: string; preload: string; tools: string; environment: NodeJS.ProcessEnv };
 
@@ -119,6 +120,33 @@ test('demo collector handles a temporary root with spaces and shell metacharacte
     else process.env.TMPDIR = previousTmpdir;
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     cleanup(input);
+  }
+});
+
+test('demo collector reports a missing local CLI and removes temporary resources', onPlatforms('linux', 'darwin'), async (context) => {
+  if (!await loadNodePty()) {
+    context.skip('@lydell/node-pty is unavailable');
+    return;
+  }
+
+  const root = createTempDir('release-workflow-missing-cli-');
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'demo collector cleanup-'));
+  const previousTmpdir = process.env.TMPDIR;
+  try {
+    process.env.TMPDIR = tmpRoot;
+
+    const result = await collectDemoTranscript(root);
+
+    assert.equal(result.status, 'failed');
+    if (result.status !== 'failed') assert.fail('expected collector failure');
+    assert.equal(result.reasonCode, 'DEMO_TRANSCRIPT_FAILED');
+    assert.equal(result.message, `${path.join(root, 'dist', 'bin', 'cli.js')} not found; run npm run build first`);
+    assert.deepEqual(fs.readdirSync(tmpRoot), []);
+  } finally {
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 

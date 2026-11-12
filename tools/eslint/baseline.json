@@ -414,15 +414,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/demo-transcript.ts",
-      "ruleId": "complexity",
-      "stableId": "28b2ebb0b54ec2e3fa4d0bbc9f79b4e22929bea1c2dfaa3fbfcbab876d30d099",
-      "displayName": "collectDemoTranscript",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/sources.ts",
       "ruleId": "complexity",
       "stableId": "54ad9a197a637338b206d30eefc0aa5d96cd5b769f451df1095dfd782a4b5c36",

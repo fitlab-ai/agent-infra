@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadNodePty } from '../sandbox/clipboard/node-pty.ts';
+import { loadNodePty, type NodePty } from '../sandbox/clipboard/node-pty.ts';
 
 const DEMO_COLUMNS = 128;
 const DEMO_ROWS = 40;
@@ -334,60 +334,29 @@ function buildDemoPrepareCommand(project: string): string {
   return DEMO_VISIBLE_COMMANDS.prepare.replaceAll(DEMO_PROJECT_PATH, shellQuote(project));
 }
 
-async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
-  const ptyModule = await loadNodePty();
-  if (!ptyModule) return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE', message: '@lydell/node-pty is unavailable' };
+function createDemoShims(shimDir: string, basePath: string): void {
+  for (const name of ['ai', 'agent-infra']) {
+    const shim = path.join(shimDir, name);
+    const checkpoint = name === 'ai' ? `\nprintf '${CHECKPOINT}'\n` : '';
+    fs.writeFileSync(shim, `#!/bin/sh\n"$AGENT_INFRA_DEMO_NODE" "$AGENT_INFRA_DEMO_CLI" "$@"\nstatus=$?${checkpoint}\nexit $status\n`);
+    fs.chmodSync(shim, 0o755);
+  }
+  const treeShim = path.join(shimDir, 'tree');
+  fs.writeFileSync(
+    treeShim,
+    `#!/bin/sh\nPATH=${shellQuote(basePath)} command tree "$@"\nstatus=$?\nprintf '${TREE_CHECKPOINT}'\nexit $status\n`
+  );
+  fs.chmodSync(treeShim, 0o755);
+}
 
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-'));
-  const projectName = path.basename(project);
-  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-shim-'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-home-'));
-  const globalGitConfig = path.join(home, 'empty-gitconfig');
-  const localCli = path.join(cwd, 'dist', 'bin', 'cli.js');
-  const basePath = process.env.PATH ?? '';
+async function runDemoSession(ptyModule: NodePty, shellCwd: string, projectName: string, environment: NodeJS.ProcessEnv): Promise<TranscriptResult> {
   let processHandle: ReturnType<typeof ptyModule.spawn> | null = null;
   let output = '';
   let exited: { exitCode: number; signal?: number | string } | null = null;
 
   try {
-    if (!fs.existsSync(localCli)) throw new Error(`${localCli} not found; run npm run build first`);
-    fs.writeFileSync(globalGitConfig, '');
-    for (const name of ['ai', 'agent-infra']) {
-      const shim = path.join(shimDir, name);
-      const checkpoint = name === 'ai' ? `\nprintf '${CHECKPOINT}'\n` : '';
-      fs.writeFileSync(shim, `#!/bin/sh\n"$AGENT_INFRA_DEMO_NODE" "$AGENT_INFRA_DEMO_CLI" "$@"\nstatus=$?${checkpoint}\nexit $status\n`);
-      fs.chmodSync(shim, 0o755);
-    }
-    const treeShim = path.join(shimDir, 'tree');
-    fs.writeFileSync(
-      treeShim,
-      `#!/bin/sh\nPATH=${shellQuote(basePath)} command tree "$@"\nstatus=$?\nprintf '${TREE_CHECKPOINT}'\nexit $status\n`
-    );
-    fs.chmodSync(treeShim, 0o755);
-    const environment = {
-      ...process.env,
-      HOME: home,
-      PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ''}`,
-      TERM: 'xterm-256color',
-      LANG: 'C.UTF-8',
-      LC_ALL: 'C.UTF-8',
-      GIT_CONFIG_GLOBAL: globalGitConfig,
-      AGENT_INFRA_DEMO_NODE: process.execPath,
-      AGENT_INFRA_DEMO_CLI: localCli,
-      AGENT_INFRA_DEMO_PLATFORM: 'linux',
-      TERM_PROGRAM: '',
-      PS1: 'demo$ ',
-      PROMPT: 'demo$ ',
-      RPS1: '',
-      RPROMPT: '',
-      PS2: 'demo> ',
-      PROMPT2: 'demo> ',
-      PS3: 'demo? ',
-      PROMPT3: 'demo? ',
-      PS4: '+ '
-    };
     processHandle = ptyModule.spawn('zsh', ['-f', '-i'], {
-      name: 'xterm-256color', cols: DEMO_COLUMNS, rows: DEMO_ROWS, cwd: path.dirname(project), env: environment
+      name: 'xterm-256color', cols: DEMO_COLUMNS, rows: DEMO_ROWS, cwd: shellCwd, env: environment
     });
     processHandle.onData((data) => { output += data; });
     processHandle.onExit((event) => { exited = event; });
@@ -425,6 +394,50 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
     return { status: 'ok', transcript, sha256: sha256Transcript(transcript) };
   } catch (error) {
     try { processHandle?.kill('SIGTERM'); } catch { /* best effort cleanup */ }
+    return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_FAILED', message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
+  const ptyModule = await loadNodePty();
+  if (!ptyModule) return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE', message: '@lydell/node-pty is unavailable' };
+
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-'));
+  const projectName = path.basename(project);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-shim-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-home-'));
+  const globalGitConfig = path.join(home, 'empty-gitconfig');
+  const localCli = path.join(cwd, 'dist', 'bin', 'cli.js');
+  const basePath = process.env.PATH ?? '';
+
+  try {
+    if (!fs.existsSync(localCli)) throw new Error(`${localCli} not found; run npm run build first`);
+    fs.writeFileSync(globalGitConfig, '');
+    createDemoShims(shimDir, basePath);
+    const environment = {
+      ...process.env,
+      HOME: home,
+      PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ''}`,
+      TERM: 'xterm-256color',
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      GIT_CONFIG_GLOBAL: globalGitConfig,
+      AGENT_INFRA_DEMO_NODE: process.execPath,
+      AGENT_INFRA_DEMO_CLI: localCli,
+      AGENT_INFRA_DEMO_PLATFORM: 'linux',
+      TERM_PROGRAM: '',
+      PS1: 'demo$ ',
+      PROMPT: 'demo$ ',
+      RPS1: '',
+      RPROMPT: '',
+      PS2: 'demo> ',
+      PROMPT2: 'demo> ',
+      PS3: 'demo? ',
+      PROMPT3: 'demo? ',
+      PS4: '+ '
+    };
+    return await runDemoSession(ptyModule, path.dirname(project), projectName, environment);
+  } catch (error) {
     return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_FAILED', message: error instanceof Error ? error.message : String(error) };
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
