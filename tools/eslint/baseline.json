@@ -1224,15 +1224,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/demo-promotion.ts",
-      "ruleId": "complexity",
-      "stableId": "2ec7ce5c386c2361725bbe1e07d76bb1bfb96d84ea6df10cc08902fb178495a1",
-      "displayName": "promoteDemoAssets",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/commands/prune.ts",
       "ruleId": "complexity",
       "stableId": "30a05cbe1f0d1efb20a4528ff147f7703283ebcbdc87e1b874f46b70c5e8be51",

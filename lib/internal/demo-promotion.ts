@@ -262,6 +262,26 @@ function createDemoPromotion(cwd: string, transcript: string): { directory: stri
   return { directory, staging, sha256 };
 }
 
+function preparePromotionEntries(staging: DemoAssetPaths, targets: DemoAssetPaths, io: PromotionFs): PromotionEntry[] {
+  const entries: PromotionEntry[] = [];
+  for (const name of DEMO_ASSET_NAMES) {
+    if (!io.existsSync(staging[name])) throw new Error(`staged demo asset is missing: ${staging[name]}`);
+    const target = targets[name];
+    const backup = path.join(path.dirname(staging[name]), `old-${name}`);
+    const existed = existingRegularFile(target, io);
+    const oldSha256 = existed ? sha256File(target, io) : null;
+    if (existed) {
+      io.copyFileSync(target, backup);
+      if (sha256File(backup, io) !== oldSha256) throw new Error(`promotion backup verification failed: ${target}`);
+    }
+    entries.push({
+      name, target, staging: staging[name], backup, existed, oldSha256,
+      newSha256: sha256File(staging[name], io)
+    });
+  }
+  return entries;
+}
+
 function promoteDemoAssets(cwd: string, staging: DemoAssetPaths, generation: string, io: PromotionFs = fs): PromotionResult {
   const targets = assetTargets(cwd);
   const directory = path.relative(cwd, path.dirname(staging.gif));
@@ -274,21 +294,7 @@ function promoteDemoAssets(cwd: string, staging: DemoAssetPaths, generation: str
     entries: []
   };
   try {
-    for (const name of DEMO_ASSET_NAMES) {
-      if (!io.existsSync(staging[name])) throw new Error(`staged demo asset is missing: ${staging[name]}`);
-      const target = targets[name];
-      const backup = path.join(path.dirname(staging[name]), `old-${name}`);
-      const existed = existingRegularFile(target, io);
-      const oldSha256 = existed ? sha256File(target, io) : null;
-      if (existed) {
-        io.copyFileSync(target, backup);
-        if (sha256File(backup, io) !== oldSha256) throw new Error(`promotion backup verification failed: ${target}`);
-      }
-      journal.entries.push({
-        name, target, staging: staging[name], backup, existed, oldSha256,
-        newSha256: sha256File(staging[name], io)
-      });
-    }
+    journal.entries = preparePromotionEntries(staging, targets, io);
     writeJournal(cwd, journal, io);
     for (let index = 0; index < journal.entries.length; index += 1) {
       journal.phase = 'promoting';
