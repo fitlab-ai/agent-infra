@@ -1728,15 +1728,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/commands/show.ts",
-      "ruleId": "complexity",
-      "stableId": "7eaf769a0ac32fd322f1fee5a3920908c780b69f44b79ac5487db3033ea539f7",
-      "displayName": "show",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "2e8a9f089a3cfb3651fbedff02e003a00a8ff06a6e96e393493ffe9cea61725b",
