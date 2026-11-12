@@ -1989,6 +1989,15 @@
       "count": 2
     },
     {
+      "file": "lib/run/host.ts",
+      "ruleId": "max-depth",
+      "stableId": "fde96ad91612c638051e7ad3e062d683d79dc8e769fd6a1ad511181d9b275977",
+      "displayName": "resolveCommandDetails",
+      "metric": 5,
+      "normalizedMessage": "depth=5",
+      "count": 2
+    },
+    {
       "file": "lib/sandbox/removal.ts",
       "ruleId": "max-depth",
       "stableId": "e3cefdc6bc17605f6c093d4b2b4ced6a3873e4fc41c68e6a2b028dd5d3507ff6",
