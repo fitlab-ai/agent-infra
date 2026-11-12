@@ -82,6 +82,27 @@ test('receipt and source conflicts fail closed as unknown', () => {
   assert.equal(accessSandboxTaskView(view, 'terminal-verdict').allowed, false);
 });
 
+test('receipt identity rejects invalid receipt fields and request bindings', () => {
+  const invalidReceipts = [
+    { ...receipt, version: 3 },
+    { ...receipt, revision: -1 },
+    { ...receipt, lifecycle: 'running' },
+    { ...receipt, summary: 'failed' },
+    { ...receipt, controlBinding: { generation, requestId: 'invalid' } },
+    { ...receipt, controlBinding: { generation, requestId: 'fedcba9876543210' } }
+  ];
+
+  for (const invalidReceipt of invalidReceipts) {
+    assert.deepEqual(projectSandboxTaskView({
+      mode: 'task-bound', taskId, generation, source: 'completed', sourceMatches: true,
+      receipt: invalidReceipt, requestId
+    }), {
+      state: 'unknown', taskId, observedSource: 'completed', receipt: null,
+      reasonCode: 'SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE'
+    });
+  }
+});
+
 test('status schema is v3-only and keeps health separate from task view', () => {
   const view = parseSandboxTaskView({
     state: 'finalized-stale', taskId, observedSource: 'active', receipt: {

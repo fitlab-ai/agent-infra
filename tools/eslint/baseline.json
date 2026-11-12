@@ -1395,15 +1395,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/task-view.ts",
-      "ruleId": "complexity",
-      "stableId": "ea1dd8ebf4c4482cafcab3fa008de84880c11619066f1b83f1ee1a8e2d4e1ebe",
-      "displayName": "receiptIdentity",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/task/capabilities.ts",
       "ruleId": "complexity",
       "stableId": "393f0cfbe27b01cc52234802587e032f7272ba0d6f964da8eafd2582a3adf05b",
