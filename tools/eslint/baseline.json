@@ -936,15 +936,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/qualification-audit.ts",
-      "ruleId": "complexity",
-      "stableId": "c09b9fd349d30105f3cc781a6885ac26746af3f3f8f1555dcd995e27ac0eaadb",
-      "displayName": "parseQualificationConfirmations.table.rows.map callback[0]#1",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "7a1dc21733e9da8a40d612f6888bedf86ddcda8cc094bc9a3697cda62c8104ca",

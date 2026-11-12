@@ -362,6 +362,27 @@ function parseQualificationAudit(content: string): { ok: true; audit: Qualificat
   }
 }
 
+function validQualificationConfirmationIdentity(row: QualificationConfirmation): boolean {
+  return /^QCR-[1-9]\d*$/.test(row.qcrId) && /^C-[1-9]\d*$/.test(row.constraintId)
+    && row.actor === 'human-declared' && row.entrypoint === 'task-qualification';
+}
+
+function validQualificationConfirmationMetadata(row: QualificationConfirmation): boolean {
+  return Boolean(row.requestId) && /^[a-f0-9]{64}$/.test(row.approvedDigest)
+    && Boolean(row.confirmedAt) && !Number.isNaN(Date.parse(row.confirmedAt.replace(' ', 'T')))
+    && Boolean(row.rationale) && !/[\r\n]/.test(row.rationale);
+}
+
+function parseQualificationConfirmation(values: Readonly<Record<string, string>>): QualificationConfirmation {
+  const row: QualificationConfirmation = {
+    qcrId: values.qcr_id ?? '', constraintId: values.constraint_id ?? '', actor: values.actor as 'human-declared',
+    entrypoint: values.entrypoint as 'task-qualification', requestId: values.request_id ?? '', approvedDigest: values.approved_digest ?? '',
+    confirmedAt: values.confirmed_at ?? '', rationale: values.rationale ?? ''
+  };
+  if (!validQualificationConfirmationIdentity(row) || !validQualificationConfirmationMetadata(row)) throw new Error(`qualification confirmation '${row.qcrId}' is invalid`);
+  return row;
+}
+
 function parseQualificationConfirmations(content: string): { ok: true; confirmations: readonly QualificationConfirmation[] } | { ok: false; code: string; message: string } {
   const body = sectionBody(content, CONFIRMATION_HEADINGS);
   if (body === null) return { ok: true, confirmations: [] };
@@ -370,12 +391,7 @@ function parseQualificationConfirmations(content: string): { ok: true; confirmat
     if (!table) throw new Error('qualification confirmation section requires a canonical table');
     const seen = new Set<string>();
     const confirmations = table.rows.map(({ values }) => {
-      const row: QualificationConfirmation = {
-        qcrId: values.qcr_id ?? '', constraintId: values.constraint_id ?? '', actor: values.actor as 'human-declared',
-        entrypoint: values.entrypoint as 'task-qualification', requestId: values.request_id ?? '', approvedDigest: values.approved_digest ?? '',
-        confirmedAt: values.confirmed_at ?? '', rationale: values.rationale ?? ''
-      };
-      if (!/^QCR-[1-9]\d*$/.test(row.qcrId) || !/^C-[1-9]\d*$/.test(row.constraintId) || row.actor !== 'human-declared' || row.entrypoint !== 'task-qualification' || !row.requestId || !/^[a-f0-9]{64}$/.test(row.approvedDigest) || !row.confirmedAt || Number.isNaN(Date.parse(row.confirmedAt.replace(' ', 'T'))) || !row.rationale || /[\r\n]/.test(row.rationale)) throw new Error(`qualification confirmation '${row.qcrId}' is invalid`);
+      const row = parseQualificationConfirmation(values);
       if (seen.has(row.qcrId)) throw new Error(`duplicate qualification confirmation '${row.qcrId}'`);
       seen.add(row.qcrId);
       return row;
