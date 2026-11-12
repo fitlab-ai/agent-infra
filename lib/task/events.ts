@@ -278,6 +278,16 @@ function eventParts(event: string): { family: EventFamily; phase: 'started' | 'w
   return { family, phase: suffix === 'started' ? 'started' : suffix === 'awaiting-input' ? 'waiting' : 'completed' };
 }
 
+function completionNote(request: TaskEventRequest, family: EventFamily): string {
+  if (family === 'analyze') return `Analysis completed → ${request.artifact}`;
+  if (family === 'plan') return `Plan completed, awaiting human review → ${request.artifact}`;
+  if (family === 'code' && request.fixFor) return `Fixed ${request.blockers} blockers, ${request.major} major, ${request.minor} minor issues${request.manualValidation ? `, skipped ${request.manualValidation} manual-validation` : ''} → ${request.artifact}`;
+  if (family === 'code') return `Code implemented, ${request.filesModified} files modified, ${request.testsPassed} tests passed → ${request.artifact}`;
+  if (family === 'validation-run') return `Validation evidence recorded → ${request.artifact}`;
+  const verdict = request.verdict === 'approved' ? 'Approved' : request.verdict === 'changes-requested' ? 'Changes Requested' : 'Rejected';
+  return `Verdict: ${verdict}, blockers: ${request.blockers}, major: ${request.major}, minor: ${request.minor}, Manual-validation: ${request.manualValidation} → ${request.artifact}`;
+}
+
 function identity(request: TaskEventRequest) {
   const { family, phase } = eventParts(request.event);
   if (phase === 'waiting') return { family, phase, action: 'Analyze Task (Brainstorming)', note: `Asked Q${request.question}, awaiting answer`, target: FAMILY.analyze.target } as const;
@@ -295,18 +305,11 @@ function identity(request: TaskEventRequest) {
     ? `, fix for ${request.fixFor}`
     : request.implementationInput ? `, decision ${request.implementationInput}` : '';
   const action = `${spec.label} (Round ${request.round}${qualifier})`;
-  if (phase === 'started') return { family, phase, action, note: 'started', target: null } as const;
-  let note: string;
-  if (family === 'analyze') note = `Analysis completed → ${request.artifact}`;
-  else if (family === 'plan') note = `Plan completed, awaiting human review → ${request.artifact}`;
-  else if (family === 'code' && request.fixFor) note = `Fixed ${request.blockers} blockers, ${request.major} major, ${request.minor} minor issues${request.manualValidation ? `, skipped ${request.manualValidation} manual-validation` : ''} → ${request.artifact}`;
-  else if (family === 'code') note = `Code implemented, ${request.filesModified} files modified, ${request.testsPassed} tests passed → ${request.artifact}`;
-  else if (family === 'validation-run') note = `Validation evidence recorded → ${request.artifact}`;
-  else {
-    const verdict = request.verdict === 'approved' ? 'Approved' : request.verdict === 'changes-requested' ? 'Changes Requested' : 'Rejected';
-    note = `Verdict: ${verdict}, blockers: ${request.blockers}, major: ${request.major}, minor: ${request.minor}, Manual-validation: ${request.manualValidation} → ${request.artifact}`;
-  }
-  return { family, phase, action, note, target: spec.target } as const;
+  return {
+    family, phase, action,
+    note: phase === 'started' ? 'started' : completionNote(request, family),
+    target: phase === 'started' ? null : spec.target
+  } as const;
 }
 
 function failed(request: TaskEventRequest, error: TaskEventError, extra: Partial<TaskEventResult> = {}): TaskEventResult {

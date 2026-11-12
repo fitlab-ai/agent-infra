@@ -544,6 +544,7 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.deepEqual(fs.readFileSync(f.file, 'utf8'), beforeReplay);
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
+  assert.match(content, /\*\*Plan Task \(Round 1\)\*\* by codex — Plan completed, awaiting human review → plan\.md/);
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /`plan\.md`/);
   assert.deepEqual(parseArtifactReceipts(content).rows.filter((row) => row.output === 'plan.md').map((row) => row.input), ['analysis.md', 'review-analysis.md']);
