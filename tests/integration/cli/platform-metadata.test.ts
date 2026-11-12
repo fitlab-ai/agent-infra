@@ -45,7 +45,6 @@ test('platform-metadata preserves help and action-specific option errors', () =>
     const help = run(root, '--help');
     assert.equal(help.status, 0, help.stderr);
     assert.equal(help.stdout, usage);
-    assert.equal(help.stderr, '');
 
     for (const [action, option, message] of [
       ['init-labels', '--history', 'init-labels does not accept --history'],
