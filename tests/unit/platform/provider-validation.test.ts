@@ -20,6 +20,20 @@ test('provider invocation maps throws and malformed envelopes to stable failures
   if (!envelope.ok) assert.equal(envelope.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
 });
 
+test('provider invocation rejects extra fields in result and error envelopes', async () => {
+  const success = await invokeProviderOperation('trae', 'issues.inspect', async () => ({
+    ok: true, value: { id: 'issue-1' }, extra: true
+  }), (value) => value as never);
+  assert.equal(success.ok, false);
+  if (!success.ok) assert.equal(success.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+
+  const failure = await invokeProviderOperation('trae', 'issues.inspect', async () => ({
+    ok: false, error: { code: 'REMOTE_BUSY', message: 'try later', detail: 'unexpected' }
+  }), (value) => value as never);
+  assert.equal(failure.ok, false);
+  if (!failure.ok) assert.equal(failure.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+});
+
 test('provider errors expose code and message while request retry policy stays internal', async () => {
   const result = await invokeProviderOperation('trae', 'issues.inspect', async () => ({ ok: false, error: { code: 'REMOTE_BUSY', message: 'try later' } }), (value) => value as never);
   assert.deepEqual(result, { ok: false, error: { code: 'REMOTE_BUSY', message: 'Platform provider is temporarily busy', retryable: true, providerType: 'trae', phase: 'issues.inspect' } });

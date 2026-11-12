@@ -819,15 +819,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/provider-validation.ts",
-      "ruleId": "complexity",
-      "stableId": "4f860024e36e9a8a0ecc0e52f839352d52ae16f78732cf6add4b66ad0d745503",
-      "displayName": "invokeProviderOperation",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/task/commit-intent.ts",
       "ruleId": "complexity",
       "stableId": "33ec343b8e613dedfc16a9455504da5fdfda09446db8c49726cac2f7714290e3",

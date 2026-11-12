@@ -523,6 +523,54 @@ function providerErrorRetryable(code: string): boolean {
   return PROVIDER_ERROR_CATALOG[code]?.retryable ?? false;
 }
 
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validProviderError(value: Record<string, unknown>): boolean {
+  return typeof value.code === 'string' && value.code.length > 0 &&
+    typeof value.message === 'string' && value.message.length > 0;
+}
+
+function invalidProviderResult(providerType: string, operation: string, message: string): NormalizedProviderResult<never> {
+  return { ok: false, error: validationError(providerType, operation, message) };
+}
+
+function validateProviderSuccess<T>(
+  providerType: string,
+  operation: string,
+  envelope: Record<string, unknown>,
+  validate: ResultValidator<T>
+): NormalizedProviderResult<T> {
+  try {
+    exactKeys(envelope, ['ok', 'value'], `${operation} result`);
+    return { ok: true, value: validate(envelope.value) };
+  } catch {
+    return invalidProviderResult(providerType, operation, 'Provider operation returned an invalid value');
+  }
+}
+
+function validateProviderFailure<T>(
+  providerType: string,
+  operation: string,
+  envelope: Record<string, unknown>,
+  validate: ResultValidator<T>
+): NormalizedProviderResult<T> {
+  try {
+    exactKeys(envelope, Object.hasOwn(envelope, 'value') ? ['ok', 'error', 'value'] : ['ok', 'error'], `${operation} result`);
+    const error = envelope.error as Record<string, unknown>;
+    exactKeys(error, ['code', 'message'], `${operation} error`);
+    if (!validProviderError(error)) throw new Error('invalid provider error');
+    return {
+      ok: false,
+      error: safeProviderError(providerType, operation, error),
+      ...(Object.hasOwn(envelope, 'value') ? { value: validate(envelope.value) } : {})
+    };
+  } catch {
+    return invalidProviderResult(providerType, operation, 'Provider operation returned an invalid error');
+  }
+}
+
 function validators(providerType: string, declaration?: ProviderIdentityDeclaration): Record<string, ResultValidator<unknown>> {
   return {
     'context.resolve': (value) => validateContext(value, providerType),
@@ -611,32 +659,10 @@ async function invokeProviderOperation<T>(
 ): Promise<NormalizedProviderResult<T>> {
   try {
     const raw = await call();
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: validationError(providerType, operation, 'Provider operation returned an invalid result envelope') };
-    const envelope = raw as Record<string, unknown>;
-    if (envelope.ok === true) {
-      try {
-        exactKeys(envelope, ['ok', 'value'], `${operation} result`);
-        return { ok: true, value: validate(envelope.value) };
-      } catch {
-        return { ok: false, error: validationError(providerType, operation, 'Provider operation returned an invalid value') };
-      }
-    }
-    if (envelope.ok === false && envelope.error && typeof envelope.error === 'object' && !Array.isArray(envelope.error)) {
-      try {
-        exactKeys(envelope, Object.hasOwn(envelope, 'value') ? ['ok', 'error', 'value'] : ['ok', 'error'], `${operation} result`);
-        const error = envelope.error as Record<string, unknown>;
-        exactKeys(error, ['code', 'message'], `${operation} error`);
-        if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' || !error.message) throw new Error('invalid provider error');
-        return {
-          ok: false,
-          error: safeProviderError(providerType, operation, error),
-          ...(Object.hasOwn(envelope, 'value') ? { value: validate(envelope.value) } : {})
-        };
-      } catch {
-        return { ok: false, error: validationError(providerType, operation, 'Provider operation returned an invalid error') };
-      }
-    }
-    return { ok: false, error: validationError(providerType, operation, 'Provider operation returned an invalid result envelope') };
+    if (!objectRecord(raw)) return invalidProviderResult(providerType, operation, 'Provider operation returned an invalid result envelope');
+    if (raw.ok === true) return validateProviderSuccess(providerType, operation, raw, validate);
+    if (raw.ok === false && objectRecord(raw.error)) return validateProviderFailure(providerType, operation, raw, validate);
+    return invalidProviderResult(providerType, operation, 'Provider operation returned an invalid result envelope');
   } catch {
     return { ok: false, error: validationError(providerType, operation, 'Platform provider operation failed', 'PLATFORM_PROVIDER_OPERATION_FAILED') };
   }
