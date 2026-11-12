@@ -169,6 +169,93 @@ function locateHotTaskDirs(
   });
 }
 
+type BranchTaskMatch = { taskId: string; taskDir: string; taskMdPath: string };
+
+function findActiveBranchMatches(
+  repoRoot: string,
+  branch: string
+): { matches: BranchTaskMatch[]; failure?: ResolveRefResult } {
+  const activeDir = path.join(taskRoot(repoRoot), 'active');
+  const matches: BranchTaskMatch[] = [];
+  if (!fs.existsSync(activeDir)) return { matches };
+
+  for (const entry of fs.readdirSync(activeDir).sort()) {
+    if (!TASK_ID_RE.test(entry)) continue;
+    const taskDir = path.join(activeDir, entry);
+    const taskMdPath = path.join(taskDir, 'task.md');
+    if (!fs.existsSync(taskMdPath)) continue;
+    try {
+      const frontmatter = parseTaskFrontmatter(fs.readFileSync(taskMdPath, 'utf8'));
+      if (!frontmatter.id || !frontmatter.branch) {
+        return {
+          matches,
+          failure: {
+            ok: false,
+            code: 'TASK_CONTEXT_UNREADABLE',
+            message: `cannot prove current task context because ${entry}/task.md has invalid frontmatter`,
+            repoRoot,
+            taskId: null
+          }
+        };
+      }
+      if (frontmatter.branch === branch) matches.push({ taskId: entry, taskDir, taskMdPath });
+    } catch (error) {
+      return {
+        matches,
+        failure: {
+          ok: false,
+          code: 'TASK_CONTEXT_UNREADABLE',
+          message: `cannot read active task candidate ${entry}: ${error instanceof Error ? error.message : String(error)}`,
+          repoRoot,
+          taskId: null
+        }
+      };
+    }
+  }
+  return { matches };
+}
+
+function resolveCurrentBranchTaskContext(repoRoot: string): ResolveRefResult {
+  let branch: string;
+  try {
+    branch = execFileSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim();
+  } catch {
+    return {
+      ok: false,
+      code: 'TASK_CONTEXT_DETACHED_HEAD',
+      message: 'cannot infer the current task from detached HEAD',
+      repoRoot,
+      taskId: null
+    };
+  }
+
+  const { matches, failure } = findActiveBranchMatches(repoRoot, branch);
+  if (failure) return failure;
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      code: 'TASK_CONTEXT_NOT_FOUND',
+      message: `no active task matches current branch '${branch}'; use --task <ref>`,
+      repoRoot,
+      taskId: null
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      code: 'TASK_CONTEXT_AMBIGUOUS',
+      message: `multiple active tasks match current branch '${branch}'; use --task <ref>`,
+      repoRoot,
+      taskId: null
+    };
+  }
+  return { ok: true, repoRoot, ...matches[0]!, state: 'active' };
+}
+
 /**
  * Resolve a task ref (bare short id or `TASK-YYYYMMDD-HHMMSS`) to its
  * task directory across active / blocked / completed / archive.
@@ -267,75 +354,7 @@ function resolveTaskContext(
     };
   }
 
-  let branch: string;
-  try {
-    branch = execFileSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
-  } catch {
-    return {
-      ok: false,
-      code: 'TASK_CONTEXT_DETACHED_HEAD',
-      message: 'cannot infer the current task from detached HEAD',
-      repoRoot,
-      taskId: null
-    };
-  }
-
-  const activeDir = path.join(taskRoot(repoRoot), 'active');
-  const matches: { taskId: string; taskDir: string; taskMdPath: string }[] = [];
-  if (fs.existsSync(activeDir)) {
-    for (const entry of fs.readdirSync(activeDir).sort()) {
-      if (!TASK_ID_RE.test(entry)) continue;
-      const taskDir = path.join(activeDir, entry);
-      const taskMdPath = path.join(taskDir, 'task.md');
-      if (!fs.existsSync(taskMdPath)) continue;
-      try {
-        const frontmatter = parseTaskFrontmatter(fs.readFileSync(taskMdPath, 'utf8'));
-        if (!frontmatter.id || !frontmatter.branch) {
-          return {
-            ok: false,
-            code: 'TASK_CONTEXT_UNREADABLE',
-            message: `cannot prove current task context because ${entry}/task.md has invalid frontmatter`,
-            repoRoot,
-            taskId: null
-          };
-        }
-        if (frontmatter.branch === branch) matches.push({ taskId: entry, taskDir, taskMdPath });
-      } catch (error) {
-        return {
-          ok: false,
-          code: 'TASK_CONTEXT_UNREADABLE',
-          message: `cannot read active task candidate ${entry}: ${error instanceof Error ? error.message : String(error)}`,
-          repoRoot,
-          taskId: null
-        };
-      }
-    }
-  }
-
-  if (matches.length === 0) {
-    return {
-      ok: false,
-      code: 'TASK_CONTEXT_NOT_FOUND',
-      message: `no active task matches current branch '${branch}'; use --task <ref>`,
-      repoRoot,
-      taskId: null
-    };
-  }
-  if (matches.length > 1) {
-    return {
-      ok: false,
-      code: 'TASK_CONTEXT_AMBIGUOUS',
-      message: `multiple active tasks match current branch '${branch}'; use --task <ref>`,
-      repoRoot,
-      taskId: null
-    };
-  }
-  const match = matches[0]!;
-  return { ok: true, repoRoot, ...match, state: 'active' };
+  return resolveCurrentBranchTaskContext(repoRoot);
 }
 
 export {

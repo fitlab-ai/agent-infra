@@ -1629,15 +1629,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/resolve-ref.ts",
-      "ruleId": "complexity",
-      "stableId": "b6310f28102aee804a779e1246a1008e06b4a4cbf935df58995d3c10922c3a47",
-      "displayName": "resolveTaskContext",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "tests/integration/platform-smoke/platform/pr-summary.test.ts",
       "ruleId": "complexity",
       "stableId": "fbc43b64ff5e76b6145f9929ebc77d3b30a9eea6dc41904cffa0423a40c24d35",
