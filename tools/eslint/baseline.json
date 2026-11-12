@@ -1017,15 +1017,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/agent-client.ts",
-      "ruleId": "complexity",
-      "stableId": "620151f04652d2fd46925ed520e29168f85b3bab8029e5410abe31dc5188c0db",
-      "displayName": "parseArgs",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "tests/unit/core/requires-pr-gating.test.ts",
       "ruleId": "complexity",
       "stableId": "bd1bf76e224ed5009116f2615a5c02769289e8e175e00a2768eca479c3d94573",

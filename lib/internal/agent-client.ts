@@ -31,6 +31,10 @@ function failure(code: string, message: string): void {
   process.exitCode = 1;
 }
 
+function invalidOutputFormat(flag: string, value: string): boolean {
+  return flag === '--format' && value !== 'text' && value !== 'json';
+}
+
 function parseArgs(args: string[]): ParsedArgs | null {
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
@@ -40,10 +44,7 @@ function parseArgs(args: string[]): ParsedArgs | null {
     failure('AGENT_CLIENT_PAYLOAD_INVALID', "operation must be 'next-steps'");
     return null;
   }
-  let skillName: string | undefined;
-  let taskRef: string | undefined;
-  let version: string | undefined;
-  let format: 'text' | 'json' = 'text';
+  const values: Record<string, string> = {};
   const seen = new Set<string>();
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index]!;
@@ -60,26 +61,23 @@ function parseArgs(args: string[]): ParsedArgs | null {
       failure('AGENT_CLIENT_PAYLOAD_INVALID', `option '${flag}' requires a value`);
       return null;
     }
-    seen.add(flag);
-    if (flag === '--skill') skillName = value;
-    if (flag === '--task-ref') taskRef = value;
-    if (flag === '--version') version = value;
-    if (flag === '--format') {
-      if (value !== 'text' && value !== 'json') {
-        failure('AGENT_CLIENT_PAYLOAD_INVALID', "format must be 'text' or 'json'");
-        return null;
-      }
-      format = value;
+    if (invalidOutputFormat(flag, value)) {
+      failure('AGENT_CLIENT_PAYLOAD_INVALID', "format must be 'text' or 'json'");
+      return null;
     }
+    seen.add(flag);
+    values[flag] = value;
   }
+  const skillName = values['--skill'];
   if (!skillName) {
     failure('AGENT_CLIENT_PAYLOAD_INVALID', "option '--skill' is required");
     return null;
   }
+  const format = (values['--format'] as ParsedArgs['format'] | undefined) ?? 'text';
   return {
     skillName,
-    ...(taskRef ? { taskRef } : {}),
-    ...(version ? { version } : {}),
+    ...(values['--task-ref'] ? { taskRef: values['--task-ref'] } : {}),
+    ...(values['--version'] ? { version: values['--version'] } : {}),
     format
   };
 }
