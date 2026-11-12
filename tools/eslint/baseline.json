@@ -2133,15 +2133,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pr-checks.ts",
-      "ruleId": "complexity",
-      "stableId": "efa942eb1add14e1a44740cb1f9b7993c87abe6e4d9773b595aaf74476366a14",
-      "displayName": "watchPullRequestReadiness",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "stableId": "9e56f331256291cfb3babf82b3ed9194e0cf0b78eb5ffb942e920a794aa72d58",

@@ -62,6 +62,10 @@ function checksResult(status: PlatformResult['status'], overrides: Partial<Check
   };
 }
 
+function isPendingReadiness(result: ChecksResult): boolean {
+  return result.readiness?.state === 'pending' && result.error?.code === 'PR_READINESS_PENDING';
+}
+
 async function resolvedTask(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: checksResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }) };
@@ -173,7 +177,7 @@ async function watchPullRequestReadiness(taskRef: string, options: InspectionOpt
       error: { code: 'PR_READINESS_CANCELLED', message: 'Pull request readiness watch was cancelled', retryable: false }
     });
     last = await inspectPullRequestReadiness(taskRef, options);
-    if (last.readiness?.state !== 'pending' || last.error?.code !== 'PR_READINESS_PENDING') return last;
+    if (!isPendingReadiness(last)) return last;
     const elapsed = now() - started;
     if (elapsed >= options.deadlineSeconds * 1000) return checksResult('blocked', {
       ...last,
