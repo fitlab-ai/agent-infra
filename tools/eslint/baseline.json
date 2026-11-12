@@ -1557,15 +1557,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "9616d6043f8ff4d6169774ea1c1ad6323954f5080fa03f7fd79dc2c4097ec1c2",
-      "displayName": "selectExternalPullRequest",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "4db70cefc7f1fcd3c885d55612f9dff6eebd9da6b000c980a70f6ad2f1073d14",

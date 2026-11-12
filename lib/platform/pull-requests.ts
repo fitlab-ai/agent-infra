@@ -199,6 +199,40 @@ function hasCompleteExternalIdentity(pullRequest: PullRequestSnapshot): boolean 
     (pullRequest.state === 'open' || Boolean(pullRequest.mergedAt) === Boolean(pullRequest.mergeCommitSha));
 }
 
+function selectExplicitExternalPullRequest(
+  candidates: PullRequestSnapshot[],
+  unique: PullRequestSnapshot[],
+  eligible: PullRequestSnapshot[],
+  existingIdentity: ResourceIdentity | null,
+  explicitIdentity: ResourceIdentity
+): ExternalPullRequestSelection {
+  const selected = unique.find((candidate) => resourceIdentityEquals(pullRequestIdentity(candidate), explicitIdentity));
+  if (!selected) return { status: 'failed', code: 'PR_NOT_FOUND', message: `PR ${identityLabel(explicitIdentity)} is not a closing PR`, candidates, eligible };
+  if (!eligible.some((candidate) => resourceIdentityEquals(pullRequestIdentity(candidate), explicitIdentity))) {
+    return { status: 'failed', code: 'PR_IDENTITY_INVALID', message: `PR ${identityLabel(explicitIdentity)} is not an eligible merged PR`, candidates, eligible };
+  }
+  if (existingIdentity !== null && !resourceIdentityEquals(existingIdentity, explicitIdentity)) {
+    return { status: 'failed', code: 'PR_BIND_CONFLICT', message: `Task is already bound to ${identityLabel(existingIdentity)}`, candidates, eligible };
+  }
+  return { status: 'selected', source: 'explicit', selected, candidates, eligible };
+}
+
+function selectUnspecifiedExternalPullRequest(
+  candidates: PullRequestSnapshot[],
+  eligible: PullRequestSnapshot[],
+  existingIdentity: ResourceIdentity | null
+): ExternalPullRequestSelection {
+  if (existingIdentity !== null && eligible.length === 1 && !resourceIdentityEquals(existingIdentity, pullRequestIdentity(eligible[0]!))) {
+    return { status: 'failed', code: 'PR_BIND_CONFLICT', message: `Task is already bound to ${identityLabel(existingIdentity)}`, candidates, eligible };
+  }
+  if (eligible.length === 0) return { status: 'normal', candidates, eligible: [] };
+  if (eligible.length > 1) return {
+    status: 'failed', code: 'PR_IDENTITY_AMBIGUOUS',
+    message: 'Multiple eligible merged closing pull requests were found', candidates, eligible
+  };
+  return { status: 'selected', source: 'unique', selected: eligible[0]!, candidates, eligible };
+}
+
 function selectExternalPullRequest(
   candidates: PullRequestSnapshot[],
   repository: string,
@@ -236,25 +270,9 @@ function selectExternalPullRequest(
     Boolean(candidate.mergedAt && candidate.mergeCommitSha)
   );
   if (explicitIdentity !== null) {
-    const selected = unique.find((candidate) => resourceIdentityEquals(pullRequestIdentity(candidate), explicitIdentity));
-    if (!selected) return { status: 'failed', code: 'PR_NOT_FOUND', message: `PR ${identityLabel(explicitIdentity)} is not a closing PR`, candidates, eligible };
-    if (!eligible.some((candidate) => resourceIdentityEquals(pullRequestIdentity(candidate), explicitIdentity))) {
-      return { status: 'failed', code: 'PR_IDENTITY_INVALID', message: `PR ${identityLabel(explicitIdentity)} is not an eligible merged PR`, candidates, eligible };
-    }
-    if (existingIdentity !== null && !resourceIdentityEquals(existingIdentity, explicitIdentity)) {
-      return { status: 'failed', code: 'PR_BIND_CONFLICT', message: `Task is already bound to ${identityLabel(existingIdentity)}`, candidates, eligible };
-    }
-    return { status: 'selected', source: 'explicit', selected, candidates, eligible };
+    return selectExplicitExternalPullRequest(candidates, unique, eligible, existingIdentity, explicitIdentity);
   }
-  if (existingIdentity !== null && eligible.length === 1 && !resourceIdentityEquals(existingIdentity, pullRequestIdentity(eligible[0]!))) {
-    return { status: 'failed', code: 'PR_BIND_CONFLICT', message: `Task is already bound to ${identityLabel(existingIdentity)}`, candidates, eligible };
-  }
-  if (eligible.length === 0) return { status: 'normal', candidates, eligible: [] };
-  if (eligible.length > 1) return {
-    status: 'failed', code: 'PR_IDENTITY_AMBIGUOUS',
-    message: 'Multiple eligible merged closing pull requests were found', candidates, eligible
-  };
-  return { status: 'selected', source: 'unique', selected: eligible[0]!, candidates, eligible };
+  return selectUnspecifiedExternalPullRequest(candidates, eligible, existingIdentity);
 }
 
 function expectedHead(repository: string, head: string): { repository: string; ref: string } {
