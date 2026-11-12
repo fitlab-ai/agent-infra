@@ -1,5 +1,4 @@
 import {
-  PUBLIC_CLI_ROUTE_SELECTORS,
   PUBLIC_CLI_SELECTOR_ALIASES
 } from '../internal/cli-route-inventory.ts';
 
@@ -35,7 +34,46 @@ Examples:
   ai task status --task 11
 
 Run 'ai task <command> --help' for details.`;
-const TASK_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS.task;
+type TaskCommand = (args: string[]) => Promise<void>;
+
+const TASK_COMMANDS = new Map<string, TaskCommand>([
+  ['cat', async (args) => {
+    const { cat } = await import('./commands/cat.ts');
+    cat(args);
+  }],
+  ['decisions', async (args) => {
+    const { decisions } = await import('./commands/decisions.ts');
+    decisions(args);
+  }],
+  ['files', async (args) => {
+    const { files } = await import('./commands/files.ts');
+    files(args);
+  }],
+  ['grep', async (args) => {
+    const { grep } = await import('./commands/grep.ts');
+    grep(args);
+  }],
+  ['issue-body', async (args) => {
+    const { issueBody } = await import('./commands/issue-body.ts');
+    issueBody(args);
+  }],
+  ['log', async (args) => {
+    const { log } = await import('./commands/log.ts');
+    log(args);
+  }],
+  ['ls', async (args) => {
+    const { ls } = await import('./commands/ls.ts');
+    ls(args);
+  }],
+  ['show', async (args) => {
+    const { show } = await import('./commands/show.ts');
+    show(args);
+  }],
+  ['status', async (args) => {
+    const { status } = await import('./commands/status.ts');
+    status(args);
+  }]
+]);
 
 export async function runTask(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
@@ -52,62 +90,13 @@ export async function runTask(args: string[]): Promise<void> {
   }
 
   const routeSelector: string = PUBLIC_CLI_SELECTOR_ALIASES.task[subcommand as keyof typeof PUBLIC_CLI_SELECTOR_ALIASES.task] ?? subcommand;
-  if (!TASK_OPERATIONS.includes(routeSelector as typeof TASK_OPERATIONS[number])) {
+  const command = TASK_COMMANDS.get(routeSelector);
+  if (!command) {
     process.stderr.write(`Unknown task command: ${subcommand}\n\n`);
     process.stdout.write(`${USAGE}\n`);
     process.exitCode = 1;
     return;
   }
 
-  switch (routeSelector) {
-    case 'cat': {
-      const { cat } = await import('./commands/cat.ts');
-      cat(rest);
-      break;
-    }
-    case 'decisions': {
-      const { decisions } = await import('./commands/decisions.ts');
-      decisions(rest);
-      break;
-    }
-    case 'files': {
-      const { files } = await import('./commands/files.ts');
-      files(rest);
-      break;
-    }
-    case 'grep': {
-      const { grep } = await import('./commands/grep.ts');
-      grep(rest);
-      break;
-    }
-    case 'issue-body': {
-      const { issueBody } = await import('./commands/issue-body.ts');
-      issueBody(rest);
-      break;
-    }
-    case 'log': {
-      const { log } = await import('./commands/log.ts');
-      log(rest);
-      break;
-    }
-    case 'ls': {
-      const { ls } = await import('./commands/ls.ts');
-      ls(rest);
-      break;
-    }
-    case 'show': {
-      const { show } = await import('./commands/show.ts');
-      show(rest);
-      break;
-    }
-    case 'status': {
-      const { status } = await import('./commands/status.ts');
-      status(rest);
-      break;
-    }
-    default:
-      process.stderr.write(`Unknown task command: ${subcommand}\n\n`);
-      process.stdout.write(`${USAGE}\n`);
-      process.exitCode = 1;
-  }
+  await command(rest);
 }

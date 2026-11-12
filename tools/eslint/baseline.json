@@ -1728,15 +1728,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/index.ts",
-      "ruleId": "complexity",
-      "stableId": "00efee0da6d46e6e64a3000d39da65ac34d15a62bcbb53a7ae51ff913cfa22de",
-      "displayName": "runTask",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "tests/e2e/core/validate-artifact-helpers.ts",
       "ruleId": "complexity",
       "stableId": "9af71f6b11199d52bdf8dbb532b5d12266282c78211bb70c09a9418b8761383d",
