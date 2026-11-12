@@ -431,6 +431,33 @@ test('host finalization records and returns an exception from task comment sync'
   }
 });
 
+test('host finalization does not mutate a receipt rebound during task comment sync', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({ ...deliveryStage })}\n`);
+  let rebound: TaskFinalizationReceipt | undefined;
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    if (received.kind === 'task') {
+      rebound = bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, {
+        generation: 'new-owner', requestId: 'aaaaaaaaaaaaaaaa'
+      });
+    }
+    return platformResult('no-op');
+  };
+  try {
+    const result = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+    const stored = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.taskComment?.error?.code, 'FINALIZATION_CAPABILITY_STALE');
+    assert.ok(rebound);
+    assert.equal(stored?.revision, rebound.revision);
+    assert.deepEqual(stored?.warnings, rebound.warnings);
+    assert.equal(stored?.controlBinding?.generation, 'new-owner');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('completed finalization does not replay lifecycle for a backfill warning', async () => {
   const f = fixture();
   let calls = 0;

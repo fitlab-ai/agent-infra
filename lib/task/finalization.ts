@@ -688,6 +688,7 @@ type PendingTaskCommentInput = {
   taskId: string;
   agent: string;
   receipt: TaskFinalizationReceipt;
+  receiptUpdated?: (receipt: TaskFinalizationReceipt) => void;
   projection?: TaskCompletionProjection;
   refreshProjection?: () => TaskCompletionProjection | undefined;
   commentSync: typeof syncPlatformComment;
@@ -702,7 +703,9 @@ async function completeTaskCommentSync(
   let receipt = mutateFinalizationReceipt(input.repoRoot, input.receipt, issueCapability(input.receipt, 'task-comment'), {
     scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
   });
+  input.receiptUpdated?.(receipt);
   receipt = reconcileWarningProjection(input.repoRoot, input.taskId, receipt);
+  input.receiptUpdated?.(receipt);
   if (!skipped && receipt.taskComment === 'pending') {
     const retry = await syncPendingTaskComment({
       ...input,
@@ -723,7 +726,9 @@ function failTaskCommentSync(
   let receipt = mutateFinalizationReceipt(input.repoRoot, input.receipt, issueCapability(input.receipt, 'task-comment'), {
     scope: 'task-comment', operation: 'failed', error: detail
   });
+  input.receiptUpdated?.(receipt);
   receipt = reconcileWarningProjection(input.repoRoot, input.taskId, receipt);
+  input.receiptUpdated?.(receipt);
   return { receipt, step, changed: result.changed, error: detail };
 }
 
@@ -757,10 +762,13 @@ async function syncPendingTaskComment(input: PendingTaskCommentInput): Promise<T
         }
       } : {})
     });
-    return await handleTaskCommentSyncResult({ ...input, receipt: input.receipt }, result);
+    return await handleTaskCommentSyncResult({
+      ...input,
+      receipt: input.receipt,
+      receiptUpdated: (updated) => { receipt = updated; }
+    }, result);
   } catch (error) {
     const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
-    try { receipt = readReceipt(repoRoot, taskId) ?? receipt; } catch { /* preserve the primary error */ }
     try {
       receipt = mutateFinalizationReceipt(repoRoot, receipt, issueCapability(receipt, 'task-comment'), {
         scope: 'task-comment', operation: 'failed', error: detail
