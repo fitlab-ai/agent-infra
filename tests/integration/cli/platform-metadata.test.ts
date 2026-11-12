@@ -15,7 +15,7 @@ function rootWithNoneProvider(): string {
 
 function run(root: string, command: string, ...args: string[]) {
   return spawnSync(process.execPath, ['--experimental-strip-types', INTERNAL_CLI_PATH, 'platform-metadata', command, '--cwd', root, ...args], {
-    cwd: root, encoding: 'utf8'
+    cwd: root, encoding: 'utf8', env: { ...process.env, NODE_NO_WARNINGS: '1' }
   });
 }
 
@@ -45,6 +45,7 @@ test('platform-metadata preserves help and action-specific option errors', () =>
     const help = run(root, '--help');
     assert.equal(help.status, 0, help.stderr);
     assert.equal(help.stdout, usage);
+    assert.equal(help.stderr, '');
 
     for (const [action, option, message] of [
       ['init-labels', '--history', 'init-labels does not accept --history'],
