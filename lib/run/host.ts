@@ -15,6 +15,46 @@ type CommandResolution = Readonly<{
   pathEntry?: string;
 }>;
 
+function resolveCommandCandidate(
+  dir: string,
+  candidateName: string,
+  platform: NodeJS.Platform
+): CommandResolution | null {
+  const candidate = path.resolve(dir || '.', candidateName);
+  try {
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) return null;
+    if (platform !== 'win32' && (stat.mode & 0o111) === 0) return null;
+    return {
+      path: candidate,
+      source: dir ? 'path' : 'current-directory',
+      pathEntry: dir
+    };
+  } catch {
+    return null;
+  }
+}
+
+function findCommandInPath(
+  file: string,
+  pathValue: string,
+  extensions: readonly string[],
+  platform: NodeJS.Platform
+): CommandResolution | null {
+  for (const dir of pathValue.split(path.delimiter)) {
+    for (const extension of extensions) {
+      const candidates = extension
+        ? [`${file}${extension.toLowerCase()}`, `${file}${extension.toUpperCase()}`]
+        : [file];
+      for (const candidateName of candidates) {
+        const resolution = resolveCommandCandidate(dir, candidateName, platform);
+        if (resolution) return resolution;
+      }
+    }
+  }
+  return null;
+}
+
 function resolveCommandDetails(
   file: string,
   platform: NodeJS.Platform = process.platform,
@@ -30,30 +70,8 @@ function resolveCommandDetails(
       ? ['']
       : (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean))
     : [''];
-  for (const dir of pathValue.split(path.delimiter)) {
-    for (const extension of extensions) {
-      const candidates = extension
-        ? [`${file}${extension.toLowerCase()}`, `${file}${extension.toUpperCase()}`]
-        : [file];
-      for (const candidateName of candidates) {
-        const candidate = path.resolve(dir || '.', candidateName);
-        try {
-          const stat = fs.statSync(candidate);
-          if (!stat.isFile()) continue;
-          if (platform !== 'win32' && (stat.mode & 0o111) === 0) continue;
-          return {
-            path: candidate,
-            source: dir ? 'path' : 'current-directory',
-            pathEntry: dir
-          };
-        } catch {
-          // Keep searching the remaining PATH entries.
-        }
-      }
-    }
-  }
-
-  return { path: file, source: 'unresolved' };
+  return findCommandInPath(file, pathValue, extensions, platform)
+    ?? { path: file, source: 'unresolved' };
 }
 
 function resolveCommand(
