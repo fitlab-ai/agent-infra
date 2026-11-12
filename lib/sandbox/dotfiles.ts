@@ -73,14 +73,112 @@ function copyDotfile(
   }
 }
 
-function walkAndMaterializeDotfiles(context: WalkContext): void {
-  const {
+function recurseDotfiles(
+  context: WalkContext,
+  srcDir: string,
+  dstDir: string,
+  relParts: string[],
+  realPath: string | null = null
+): void {
+  if (realPath) {
+    context.activeDirs.add(realPath);
+  }
+  walkAndMaterializeDotfiles({
+    ...context,
     srcDir,
     dstDir,
     relParts,
+    depth: context.depth + 1
+  });
+  if (realPath) {
+    context.activeDirs.delete(realPath);
+  }
+}
+
+function materializeSymlink(
+  childSrc: string,
+  childDst: string,
+  childRelParts: string[],
+  childRelPath: string,
+  context: WalkContext
+): void {
+  const { activeDirs, warnings, writeStderr, fsModule } = context;
+  let resolvedTarget: string;
+  try {
+    resolvedTarget = fsModule.realpathSync(childSrc);
+  } catch (error) {
+    const code = errorCodeOrDetail(error);
+    const reason = code === 'ELOOP' ? 'symlink loop' : 'dangling symlink';
+    dotfilesWarning(warnings, writeStderr, childRelPath, reason, code || 'unresolved');
+    return;
+  }
+
+  let targetStat: fs.Stats;
+  try {
+    targetStat = fsModule.statSync(resolvedTarget);
+  } catch (error) {
+    dotfilesWarning(warnings, writeStderr, childRelPath, 'target stat failed', errorCodeOrDetail(error));
+    return;
+  }
+
+  if (targetStat.isDirectory()) {
+    if (activeDirs.has(resolvedTarget)) {
+      dotfilesWarning(warnings, writeStderr, childRelPath, 'symlink loop');
+      return;
+    }
+    recurseDotfiles(context, resolvedTarget, childDst, childRelParts, resolvedTarget);
+    return;
+  }
+
+  if (targetStat.isFile()) {
+    copyDotfile(resolvedTarget, childDst, {
+      fsModule,
+      relPath: childRelPath,
+      warnings,
+      writeStderr
+    });
+  }
+}
+
+function materializeEntry(entry: fs.Dirent, context: WalkContext): void {
+  const { srcDir, dstDir, relParts, fsModule } = context;
+  const childSrc = path.join(srcDir, entry.name);
+  const childDst = path.join(dstDir, entry.name);
+  const childRelParts = [...relParts, entry.name];
+  const childRelPath = childRelParts.join('/');
+
+  if (entry.isSymbolicLink()) {
+    materializeSymlink(childSrc, childDst, childRelParts, childRelPath, context);
+    return;
+  }
+
+  if (entry.isDirectory()) {
+    let childRealPath: string | null = null;
+    try {
+      childRealPath = fsModule.realpathSync(childSrc);
+    } catch {
+      // A real directory may disappear during traversal; readdir will warn below.
+    }
+    recurseDotfiles(context, childSrc, childDst, childRelParts, childRealPath);
+    return;
+  }
+
+  if (entry.isFile()) {
+    copyDotfile(childSrc, childDst, {
+      fsModule,
+      relPath: childRelPath,
+      warnings: context.warnings,
+      writeStderr: context.writeStderr
+    });
+  }
+}
+
+function walkAndMaterializeDotfiles(context: WalkContext): void {
+  const {
+    srcDir,
+    relParts,
     depth,
     maxDepth,
-    activeDirs,
     warnings,
     writeStderr,
     fsModule
@@ -101,98 +199,7 @@ function walkAndMaterializeDotfiles(context: WalkContext): void {
   }
 
   for (const entry of entries) {
-    const childSrc = path.join(srcDir, entry.name);
-    const childDst = path.join(dstDir, entry.name);
-    const childRelParts = [...relParts, entry.name];
-    const childRelPath = childRelParts.join('/');
-
-    if (entry.isSymbolicLink()) {
-      let resolvedTarget: string;
-      try {
-        resolvedTarget = fsModule.realpathSync(childSrc);
-      } catch (error) {
-        const code = errorCodeOrDetail(error);
-        const reason = code === 'ELOOP' ? 'symlink loop' : 'dangling symlink';
-        dotfilesWarning(warnings, writeStderr, childRelPath, reason, code || 'unresolved');
-        continue;
-      }
-
-      let targetStat: fs.Stats;
-      try {
-        targetStat = fsModule.statSync(resolvedTarget);
-      } catch (error) {
-        dotfilesWarning(warnings, writeStderr, childRelPath, 'target stat failed', errorCodeOrDetail(error));
-        continue;
-      }
-
-      if (targetStat.isDirectory()) {
-        if (activeDirs.has(resolvedTarget)) {
-          dotfilesWarning(warnings, writeStderr, childRelPath, 'symlink loop');
-          continue;
-        }
-
-        activeDirs.add(resolvedTarget);
-        walkAndMaterializeDotfiles({
-          srcDir: resolvedTarget,
-          dstDir: childDst,
-          relParts: childRelParts,
-          depth: depth + 1,
-          maxDepth,
-          activeDirs,
-          warnings,
-          writeStderr,
-          fsModule
-        });
-        activeDirs.delete(resolvedTarget);
-        continue;
-      }
-
-      if (targetStat.isFile()) {
-        copyDotfile(resolvedTarget, childDst, {
-          fsModule,
-          relPath: childRelPath,
-          warnings,
-          writeStderr
-        });
-      }
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      let childRealPath: string | null = null;
-      try {
-        childRealPath = fsModule.realpathSync(childSrc);
-      } catch {
-        // A real directory may disappear during traversal; readdir will warn below.
-      }
-      if (childRealPath) {
-        activeDirs.add(childRealPath);
-      }
-      walkAndMaterializeDotfiles({
-        srcDir: childSrc,
-        dstDir: childDst,
-        relParts: childRelParts,
-        depth: depth + 1,
-        maxDepth,
-        activeDirs,
-        warnings,
-        writeStderr,
-        fsModule
-      });
-      if (childRealPath) {
-        activeDirs.delete(childRealPath);
-      }
-      continue;
-    }
-
-    if (entry.isFile()) {
-      copyDotfile(childSrc, childDst, {
-        fsModule,
-        relPath: childRelPath,
-        warnings,
-        writeStderr
-      });
-    }
+    materializeEntry(entry, context);
   }
 }
 
