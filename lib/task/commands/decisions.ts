@@ -248,6 +248,42 @@ function renderDetail(
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
+type LoadedDecisionLedger = {
+  taskId: string;
+  taskDir: string;
+  content: string;
+  rows: LedgerRow[];
+};
+
+function loadDecisionLedger(taskRef: string | undefined): LoadedDecisionLedger | null {
+  const resolved = resolveTaskContext(taskRef);
+  if (!resolved.ok) {
+    fail(resolved.message);
+    return null;
+  }
+
+  let content: string;
+  let ledger;
+  try {
+    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    ledger = parseLedgerDocument(content);
+  } catch (error) {
+    fail(`ledger unavailable [LEDGER_DOCUMENT_INVALID]: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+  if (!ledger.present) {
+    fail('ledger unavailable [LEDGER_SECTION_MISSING]: review disagreement ledger section is missing');
+    return null;
+  }
+
+  return {
+    taskId: resolved.taskId,
+    taskDir: resolved.taskDir,
+    content,
+    rows: ledger.rows as LedgerRow[]
+  };
+}
+
 function decisions(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
@@ -266,46 +302,27 @@ function decisions(args: string[] = []): void {
     return;
   }
 
-  const taskRef = scope.taskRef;
   const selector = parsed.item;
   if (parsed.positionals.length > 0) {
     fail('positional task ref/selector is not supported; use --task <ref> or -t <ref>, and --item <selector> or -i <selector>');
     return;
   }
-  const resolved = resolveTaskContext(taskRef);
-  if (!resolved.ok) {
-    fail(resolved.message);
-    return;
-  }
-
-  let content: string;
-  let ledger;
-  try {
-    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-    ledger = parseLedgerDocument(content);
-  } catch (error) {
-    fail(`ledger unavailable [LEDGER_DOCUMENT_INVALID]: ${error instanceof Error ? error.message : String(error)}`);
-    return;
-  }
-  if (!ledger.present) {
-    fail('ledger unavailable [LEDGER_SECTION_MISSING]: review disagreement ledger section is missing');
-    return;
-  }
-  const rows = listDecisionItems(ledger.rows as LedgerRow[], {
+  const loaded = loadDecisionLedger(scope.taskRef);
+  if (loaded === null) return;
+  const rows = listDecisionItems(loaded.rows, {
     includeDecided: parsed.all,
     stage: parsed.stage as ReviewStage | undefined
   });
-
   if (selector === undefined) {
-    renderList(rows, parsed.format, resolved.taskDir, resolved.taskId);
+    renderList(rows, parsed.format, loaded.taskDir, loaded.taskId);
   } else {
     const selectionRows = /^[A-Za-z]+-\d+$/.test(selector)
-      ? listDecisionItems(ledger.rows as LedgerRow[], {
+      ? listDecisionItems(loaded.rows, {
         includeDecided: true,
         stage: parsed.stage as ReviewStage | undefined
       })
       : rows;
-    renderDetail(selectionRows, selector, parsed.format, resolved.taskDir, content, resolved.taskId);
+    renderDetail(selectionRows, selector, parsed.format, loaded.taskDir, loaded.content, loaded.taskId);
   }
 }
 

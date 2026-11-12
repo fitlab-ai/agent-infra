@@ -603,15 +603,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commands/decisions.ts",
-      "ruleId": "complexity",
-      "stableId": "1cea60b056e0467adca996b757a6a7a85163b6c2e41970279b4ace89ebd80561",
-      "displayName": "decisions",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/task/delivery.ts",
       "ruleId": "complexity",
       "stableId": "a4d17bb7dcc6099c4579e0e52b14a5ac0d7527b038646f4ec0b1084a58d703ea",
