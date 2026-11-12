@@ -2025,15 +2025,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/artifact-receipts.ts",
-      "ruleId": "complexity",
-      "stableId": "1d75e4ca93adfc24abd9a790367cbff8492277fa74acffbce6c72fcb851c5870",
-      "displayName": "upsertArtifactReceipts",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/protocol.ts",
       "ruleId": "complexity",
       "stableId": "28d2de21c1e1072564a05a3ed6230201139ebbdb4dc40d715db3f43ad54a79f1",
