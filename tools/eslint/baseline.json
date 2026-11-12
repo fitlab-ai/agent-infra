@@ -918,15 +918,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commands/status.ts",
-      "ruleId": "complexity",
-      "stableId": "a6c16314e120484fb1199060e69760afcf44ffaf63d75a90c68050d04d252ee3",
-      "displayName": "latestRunRecord",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "402e89cdc5ecf59c8ba902f12f4e920d57559e1c08278e85fbe993de107260d4",

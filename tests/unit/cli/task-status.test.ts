@@ -268,6 +268,44 @@ test('collectRuntime reads the latest managed tmux run through docker exec', () 
   assert.equal(runtime.log, '/tmp/agent-infra-runs/run-test/output.log');
 });
 
+test('collectRuntime skips invalid newer runs and uses fallback paths from the latest valid run', () => {
+  const taskDir = createTempDir('task-status-runtime-');
+  const runsDir = path.join(taskDir, 'runs');
+  fs.mkdirSync(runsDir);
+  const oldPath = path.join(runsDir, 'old.json');
+  const currentPath = path.join(runsDir, 'current.json');
+  const invalidPath = path.join(runsDir, 'invalid.json');
+  fs.writeFileSync(
+    oldPath,
+    JSON.stringify({ run_id: 'old', engine: 'native', container: 'old-container', run_dir: '/tmp/old' }),
+    'utf8'
+  );
+  fs.writeFileSync(
+    currentPath,
+    JSON.stringify({ run_id: 'current', engine: 'native', container: 'current-container', run_dir: '/tmp/current' }),
+    'utf8'
+  );
+  fs.writeFileSync(invalidPath, '{ invalid json', 'utf8');
+  fs.utimesSync(oldPath, 10, 10);
+  fs.utimesSync(currentPath, 20, 20);
+  fs.utimesSync(invalidPath, 30, 30);
+
+  const run: Runner = (_file, args) => {
+    const filePath = args[3] ?? '';
+    if (filePath === '/tmp/current/status') return 'running\n';
+    throw new Error(`missing file ${filePath}`);
+  };
+
+  const runtime = collectRuntime(
+    taskDir,
+    { state: 'idle', step: '-', agent: '-', startedAt: '-', doneAt: '-', stale: '-' },
+    run
+  );
+  assert.equal(runtime.run, 'current');
+  assert.equal(runtime.status, 'running');
+  assert.equal(runtime.log, '/tmp/current/output.log');
+});
+
 // --- renderStatus ----------------------------------------------------------
 
 const baseModel: StatusModel = {
