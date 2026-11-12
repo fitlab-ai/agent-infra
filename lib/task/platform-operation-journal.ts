@@ -95,6 +95,9 @@ type RecordOperationInput = Readonly<{
   cwd?: string;
 }>;
 
+type PlatformOperationIntentFields = Pick<PlatformOperation,
+  'issueMetadata' | 'issueCreate' | 'pullRequest' | 'pullRequestSummary' | 'pullRequestReview'>;
+
 function operationId(input: Pick<RecordOperationInput, 'kind' | 'target' | 'expectedDigest'>): string {
   return createHash('sha256')
     .update(`${input.kind}\0${input.target}\0${input.expectedDigest}`)
@@ -214,6 +217,31 @@ function resolveJournal(taskRef: string, cwd?: string): { taskId: string; file: 
   return { taskId: resolved.taskId, file: journalPath(resolved.taskDir) };
 }
 
+function operationIntentFields(input: RecordOperationInput): PlatformOperationIntentFields {
+  return {
+    ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
+    ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
+    ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
+    ...(input.pullRequestSummary ? { pullRequestSummary: input.pullRequestSummary } : {}),
+    ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {})
+  };
+}
+
+function updateOperations(
+  operations: readonly PlatformOperation[],
+  replacementIndex: number,
+  targetIndex: number,
+  next: PlatformOperation
+): PlatformOperation[] {
+  if (replacementIndex >= 0) {
+    return operations.flatMap((item, index) => index === replacementIndex
+      ? [next]
+      : index === targetIndex ? [] : [item]);
+  }
+  if (targetIndex >= 0) return operations.map((item, index) => index === targetIndex ? next : item);
+  return [...operations, next];
+}
+
 function recordPlatformOperation(input: RecordOperationInput): PlatformOperation {
   if (!/^[a-f0-9]{64}$/u.test(input.expectedDigest) || !input.target.trim()) {
     throw Object.assign(new Error('Platform operation requires a stable target and SHA-256 digest'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
@@ -237,20 +265,10 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     state: input.state,
     attempts: previousAttempts + (input.state === 'pending' ? 1 : 0),
     lastCode: input.lastCode ?? null,
-    ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
-    ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
-    ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
-    ...(input.pullRequestSummary ? { pullRequestSummary: input.pullRequestSummary } : {}),
-    ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
+    ...operationIntentFields(input),
     updatedAt: new Date().toISOString()
   };
-  const operations = replacementIndex >= 0
-    ? journal.operations.flatMap((item, index) => index === replacementIndex
-      ? [next]
-      : index === targetIndex ? [] : [item])
-    : targetIndex >= 0
-      ? journal.operations.map((item, index) => index === targetIndex ? next : item)
-      : [...journal.operations, next];
+  const operations = updateOperations(journal.operations, replacementIndex, targetIndex, next);
   writeJournal(file, { version: 1, taskId, operations });
   return next;
 }

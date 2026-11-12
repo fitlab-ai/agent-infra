@@ -1341,15 +1341,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/platform-operation-journal.ts",
-      "ruleId": "complexity",
-      "stableId": "588c6d08766e81e32ddc159d04175debefcc87b43b3578dfd70cfa9ec0fa7e38",
-      "displayName": "recordPlatformOperation",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/platform/pull-requests.ts",
       "ruleId": "complexity",
       "stableId": "7261515a20bdb4149a020ddf6e297ecdd2e3b0f07fd25b18fd7bfec8f7a6dc35",
