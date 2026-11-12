@@ -456,11 +456,7 @@ function verificationWarnings(result: TaskVerificationResult): readonly Operatio
   return mergeOperationWarnings(warnings);
 }
 
-function applyVerificationWarnings(
-  receipt: TaskFinalizationReceipt,
-  result: TaskVerificationResult
-): readonly FinalizationWarning[] {
-  if (result.status === 'pass') return resolveStepWarnings(receipt, 'verification');
+function collectVerificationObservations(result: TaskVerificationResult): Map<string, 'pass' | OperationWarning> {
   const observed = new Map<string, 'pass' | OperationWarning>();
   for (const invocation of result.invocations) {
     const checks = Array.isArray(invocation.payload.checks) ? invocation.payload.checks : [invocation.payload];
@@ -474,9 +470,13 @@ function applyVerificationWarnings(
     }
   }
   for (const warning of verificationWarnings(result)) observed.set(warning.target, warning);
-  if (observed.size === 0) {
-    return replaceWarning(receipt, warningFromError('verification', verificationFailure(result)), 'open');
-  }
+  return observed;
+}
+
+function applyObservedVerificationWarnings(
+  receipt: TaskFinalizationReceipt,
+  observed: ReadonlyMap<string, 'pass' | OperationWarning>
+): readonly FinalizationWarning[] {
   let warnings = [...receipt.warnings];
   for (const [target, current] of observed) {
     if (current === 'pass') {
@@ -493,6 +493,18 @@ function applyVerificationWarnings(
     warnings = [...warnings.filter((warning) => warningKey(warning) !== key), warningRecord(current, 'open')];
   }
   return warnings;
+}
+
+function applyVerificationWarnings(
+  receipt: TaskFinalizationReceipt,
+  result: TaskVerificationResult
+): readonly FinalizationWarning[] {
+  if (result.status === 'pass') return resolveStepWarnings(receipt, 'verification');
+  const observed = collectVerificationObservations(result);
+  if (observed.size === 0) {
+    return replaceWarning(receipt, warningFromError('verification', verificationFailure(result)), 'open');
+  }
+  return applyObservedVerificationWarnings(receipt, observed);
 }
 
 function shouldRunBackfill(receipt: TaskFinalizationReceipt): boolean {
