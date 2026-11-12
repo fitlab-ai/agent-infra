@@ -240,6 +240,32 @@ type ManagedRunRecord = {
   log_file: string;
 };
 
+function readManagedRunRecord(filePath: string): ManagedRunRecord | null {
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (
+      typeof data?.run_id === 'string' &&
+      typeof data?.engine === 'string' &&
+      typeof data?.container === 'string' &&
+      typeof data?.run_dir === 'string'
+    ) {
+      return {
+        run_id: data.run_id,
+        engine: data.engine,
+        container: data.container,
+        run_dir: data.run_dir,
+        status_file:
+          typeof data.status_file === 'string' ? data.status_file : `${data.run_dir}/status`,
+        log_file:
+          typeof data.log_file === 'string' ? data.log_file : `${data.run_dir}/output.log`
+      };
+    }
+  } catch {
+    // Ignore malformed local records and try the next newest file.
+  }
+  return null;
+}
+
 function latestRunRecord(taskDir: string): ManagedRunRecord | null {
   const runsDir = path.join(taskDir, 'runs');
   if (!fs.existsSync(runsDir)) return null;
@@ -253,28 +279,8 @@ function latestRunRecord(taskDir: string): ManagedRunRecord | null {
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
   for (const candidate of candidates) {
-    try {
-      const data = JSON.parse(fs.readFileSync(candidate.path, 'utf8'));
-      if (
-        typeof data?.run_id === 'string' &&
-        typeof data?.engine === 'string' &&
-        typeof data?.container === 'string' &&
-        typeof data?.run_dir === 'string'
-      ) {
-        return {
-          run_id: data.run_id,
-          engine: data.engine,
-          container: data.container,
-          run_dir: data.run_dir,
-          status_file:
-            typeof data.status_file === 'string' ? data.status_file : `${data.run_dir}/status`,
-          log_file:
-            typeof data.log_file === 'string' ? data.log_file : `${data.run_dir}/output.log`
-        };
-      }
-    } catch {
-      // Ignore malformed local records and try the next newest file.
-    }
+    const record = readManagedRunRecord(candidate.path);
+    if (record) return record;
   }
 
   return null;
