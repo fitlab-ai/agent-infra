@@ -141,20 +141,24 @@ function auditProof(manifest: SandboxControlManifest, requestId: string): AuditR
   return related;
 }
 
+function isValidPublishedRecord(record: AuditRecord, manifest: SandboxControlManifest, digest: string): boolean {
+  return record.version === 2 && record.generation === manifest.generation && record.identityDigest === digest
+    && typeof record.requestFamily === 'string'
+    && ['task-lifecycle', 'task-create'].includes(record.requestFamily)
+    && (record.sandboxTaskId === null || typeof record.sandboxTaskId === 'string')
+    && Number.isSafeInteger(record.exitCode)
+    && Number.isSafeInteger(record.outputBytes) && Number.isSafeInteger(record.errorBytes)
+    && typeof record.outputDigest === 'string' && /^[a-f0-9]{64}$/u.test(record.outputDigest)
+    && typeof record.errorDigest === 'string' && /^[a-f0-9]{64}$/u.test(record.errorDigest);
+}
+
 function publishedEvidence(records: AuditRecord[], manifest: SandboxControlManifest): AuditRecord | null {
   const publications = records.filter((record) => record.event === 'executor-result-published');
   let selected: AuditRecord | null = null;
   let selectedSummary: string | null = null;
   const digest = manifestDigest(manifest);
   for (const record of publications) {
-    if (record.version !== 2 || record.generation !== manifest.generation || record.identityDigest !== digest
-      || typeof record.requestFamily !== 'string'
-      || !['task-lifecycle', 'task-create'].includes(record.requestFamily)
-      || (record.sandboxTaskId !== null && typeof record.sandboxTaskId !== 'string')
-      || !Number.isSafeInteger(record.exitCode)
-      || !Number.isSafeInteger(record.outputBytes) || !Number.isSafeInteger(record.errorBytes)
-      || typeof record.outputDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(record.outputDigest)
-      || typeof record.errorDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(record.errorDigest)) {
+    if (!isValidPublishedRecord(record, manifest, digest)) {
       throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
     }
     const summary = JSON.stringify([
