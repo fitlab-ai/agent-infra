@@ -1017,15 +1017,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "178cff9560fc829193ecf13af411ec322de14a157cbb88f158793a07ee18db29",
-      "displayName": "parseJournal",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/task/platform-operation-journal.ts",
       "ruleId": "complexity",
       "stableId": "9b1e2e6e13fa31a0c259ec68a3641fe2b3926a46d13eba9e30ecb74f5a742798",

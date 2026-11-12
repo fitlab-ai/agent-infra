@@ -525,19 +525,31 @@ function rememberJournalFailure(file: string, journal: LifecycleJournal, io: Lif
   }
 }
 
+function hasValidLifecycleJournalIdentity(value: Partial<LifecycleJournal>): boolean {
+  return value.version === 1 && typeof value.taskId === 'string' &&
+    lifecycleIntentCatalog.includes(value.intent as TaskLifecycleIntent) &&
+    typeof value.intentDigest === 'string' && Boolean(value.intentDigest) &&
+    ['active', 'blocked', 'completed', 'staging'].includes(value.sourceState ?? '') &&
+    ['active', 'blocked', 'completed'].includes(value.targetState ?? '');
+}
+
+function hasValidLifecycleJournalMetadata(value: Partial<LifecycleJournal>): boolean {
+  if (!value.metadata) return false;
+  return typeof value.metadata.timestamp === 'string' &&
+    typeof value.metadata.agentInfraVersion === 'string';
+}
+
+function hasValidLifecycleJournalSteps(value: Partial<LifecycleJournal>): boolean {
+  return Array.isArray(value.completedSteps) &&
+    !value.completedSteps.some((step) => !STEPS.includes(step)) &&
+    new Set(value.completedSteps).size === value.completedSteps.length;
+}
+
 function parseJournal(content: string): LifecycleJournal {
   const value = JSON.parse(content) as Partial<LifecycleJournal>;
-  if (
-    value.version !== 1 || typeof value.taskId !== 'string' ||
-    !lifecycleIntentCatalog.includes(value.intent as TaskLifecycleIntent) ||
-    typeof value.intentDigest !== 'string' || !value.intentDigest ||
-    !['active', 'blocked', 'completed', 'staging'].includes(value.sourceState ?? '') ||
-    !['active', 'blocked', 'completed'].includes(value.targetState ?? '') ||
-    !value.metadata || typeof value.metadata.timestamp !== 'string' ||
-    typeof value.metadata.agentInfraVersion !== 'string' || !Array.isArray(value.completedSteps) ||
-    value.completedSteps.some((step) => !STEPS.includes(step)) ||
-    new Set(value.completedSteps).size !== value.completedSteps.length
-  ) {
+  if (!hasValidLifecycleJournalIdentity(value) ||
+    !hasValidLifecycleJournalMetadata(value) ||
+    !hasValidLifecycleJournalSteps(value)) {
     throw new Error('lifecycle journal has invalid schema');
   }
   return value as LifecycleJournal;

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { applyTaskLifecycle, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
+import { applyTaskLifecycle, lifecycleIntentCatalog, readLifecycleJournalEvidence } from '../../../lib/task/lifecycle.ts';
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
@@ -38,6 +38,30 @@ test('lifecycle catalog exposes the approved closed intent set', () => {
   assert.deepEqual(lifecycleIntentCatalog, [
     'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
   ]);
+});
+
+test('lifecycle journal evidence rejects unknown and duplicate completed steps', () => {
+  const f = fixture();
+  const journalPath = path.join(f.taskDir, '.task-lifecycle.json');
+  const journal = {
+    version: 1,
+    taskId: TASK_ID,
+    intent: 'complete',
+    intentDigest: 'digest',
+    sourceState: 'active',
+    targetState: 'completed',
+    metadata: { timestamp: 'old', agentInfraVersion: 'v9.9.9' },
+    completedSteps: []
+  };
+
+  for (const completedSteps of [['unknown-step'], ['task-written', 'task-written']]) {
+    fs.writeFileSync(journalPath, `${JSON.stringify({ ...journal, completedSteps })}\n`);
+    assert.deepEqual(readLifecycleJournalEvidence(f.repoRoot, TASK_ID), {
+      exists: true,
+      completedSteps: [],
+      failure: 'SANDBOX_CONTROL_LIFECYCLE_JOURNAL_INVALID'
+    });
+  }
 });
 
 test('block moves the task, updates one metadata pair, logs a pair, and releases its short id', () => {
