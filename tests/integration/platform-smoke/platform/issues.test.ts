@@ -106,6 +106,30 @@ test('issue create binds exactly once and replay inspects the existing binding',
   assert.equal(posts, 1);
 });
 
+test('issue create preserves the created identity when task binding fails', async () => {
+  const root = fixture();
+  const taskPath = path.join(taskWorkspaceRoot(root), 'active', 'TASK-20260101-000001', 'task.md');
+  let posts = 0;
+  const client = clientFor((args) => {
+    const context = contextResponse(args);
+    if (context) return context;
+    if (args.includes('POST')) {
+      posts += 1;
+      return { number: 9, id: 90, node_id: 'I_9', html_url: 'https://github.com/acme/widgets/issues/9' };
+    }
+    if (args.some((arg) => arg.includes('/issues/9'))) fs.writeFileSync(taskPath, 'invalid task document');
+    return { number: 9, id: 90, node_id: 'I_9', html_url: 'https://github.com/acme/widgets/issues/9', state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null };
+  });
+
+  const result = await createPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', client });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'ISSUE_CREATED_BIND_FAILED');
+  assert.equal(result.error?.retryable, true);
+  assert.deepEqual(result.resource, { kind: 'issue', number: 9, identity: { kind: 'number', value: 9 } });
+  assert.equal(posts, 1);
+});
+
 test('issue sync plans dry-run without writes and applies incremental label writes', async () => {
   const root = fixture('7');
   let patches = 0;

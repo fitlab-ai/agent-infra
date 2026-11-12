@@ -103,6 +103,8 @@ async function resolvedContext(taskRef: string, options: SharedOptions) {
   return { ok: true as const, resolved, content, frontmatter, issueIdentity, issueNumber, client: options.client, context, provider: loaded.value.provider, providerType: loaded.value.providerType, loadedContext: loaded.value };
 }
 
+type ResolvedPlatformContext = Extract<Awaited<ReturnType<typeof resolvedContext>>, { ok: true }>;
+
 function normalizeProviderIssue(remote: ProviderIssueSnapshot, repository: string, fallbackNumber: number | null): IssueSnapshot {
   const identity = remote.identity || (remote.number ? { kind: 'number' as const, value: remote.number } : { kind: 'id' as const, value: remote.id });
   const snapshot: IssueSnapshot = {
@@ -195,6 +197,32 @@ async function inspectExternalIssue(
   });
 }
 
+function bindCreatedPlatformIssue(
+  base: ResolvedPlatformContext,
+  createdIdentity: ResourceIdentity,
+  inspected: ProviderIssueSnapshot
+): IssueResult {
+  const issueIdentity = inspected.identity || createdIdentity;
+  const issueNumber = resourceIdentityNumber(issueIdentity);
+  const written = writeTask({
+    taskRef: base.resolved.taskId, expectedState: 'active', mutations: [{ kind: 'frontmatter', set: { platform_issue_identity: serializeResourceIdentity(issueIdentity) } }]
+  }, { repoRoot: base.resolved.repoRoot });
+  if (written.status === 'failed') return result('failed', base.resolved.taskId, null, {
+    platform: base.context.platform, capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: issueNumber, identity: issueIdentity },
+    error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: true }
+  });
+  return result('applied', base.resolved.taskId, issueNumber, {
+    changed: true,
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: issueNumber, identity: issueIdentity },
+    operations: [{ name: 'issue:create', status: 'applied', reasonCode: null }, { name: 'task:bind', status: 'applied', reasonCode: null }],
+    issue: normalizeProviderIssue(inspected, base.context.platform.repository!, issueNumber),
+    error: null
+  });
+}
+
 async function inspectPlatformIssue(taskRef: string, options: SharedOptions = {}): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
@@ -279,7 +307,6 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (base.issueIdentity) return inspectPlatformIssue(taskRef, options);
-  const repository = base.context.platform.repository!;
   let repositoryLabels: string[] = [];
   let milestones: string[] = [];
   if (base.context.capabilities.triage) {
@@ -341,24 +368,7 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
       })
       : unsupportedProviderOperation(base.provider, 'issues.inspect');
     if (!inspected.ok) return providerIssueError(base, inspected.error, createdIdentity);
-    const issueNumber = resourceIdentityNumber(inspected.value.identity || createdIdentity);
-    const written = writeTask({
-      taskRef: base.resolved.taskId, expectedState: 'active', mutations: [{ kind: 'frontmatter', set: { platform_issue_identity: serializeResourceIdentity(inspected.value.identity || createdIdentity) } }]
-    }, { repoRoot: base.resolved.repoRoot });
-    if (written.status === 'failed') return result('failed', base.resolved.taskId, null, {
-      platform: base.context.platform, capabilities: base.context.capabilities,
-      resource: { kind: 'issue', number: issueNumber, identity: inspected.value.identity || createdIdentity },
-      error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: true }
-    });
-    return result('applied', base.resolved.taskId, issueNumber, {
-      changed: true,
-      platform: base.context.platform,
-      capabilities: base.context.capabilities,
-      resource: { kind: 'issue', number: issueNumber, identity: inspected.value.identity || createdIdentity },
-      operations: [{ name: 'issue:create', status: 'applied', reasonCode: null }, { name: 'task:bind', status: 'applied', reasonCode: null }],
-      issue: normalizeProviderIssue(inspected.value, repository, issueNumber),
-      error: null
-    });
+    return bindCreatedPlatformIssue(base, createdIdentity, inspected.value);
   };
   const issueCreate = { title: payload.title, bodyDigest: createHash('sha256').update(payload.body).digest('hex') };
   const operation = {
