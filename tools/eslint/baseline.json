@@ -1224,15 +1224,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/host-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "84ee0d5fc3e10e6802a6cb52dc15908f344bbfd052e7030d995c62a8aeca527f",
-      "displayName": "publishedEvidence",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/git/workflow.ts",
       "ruleId": "complexity",
       "stableId": "54a5d6288c1540caede2e64493eae01a4e03cc1f829183070a810f2d038a87f4",
