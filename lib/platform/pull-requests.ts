@@ -479,6 +479,37 @@ async function inspectPlatformPullRequest(taskRef: string, options: InspectionOp
   return inspectExternalPullRequest(base, base.prIdentity);
 }
 
+async function inspectLoadedPlatformPullRequestByNumber(
+  loaded: Awaited<ReturnType<typeof resolvePlatformProviderContext>>,
+  identity: ResourceIdentity
+): Promise<PullRequestResult> {
+  if (!loaded.ok) return result('failed', null, null, null, {
+    platform: loaded.context.platform, capabilities: loaded.context.capabilities,
+    resource: { kind: 'pull-request', number: null },
+    error: { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false }
+  });
+
+  const { context } = loaded.value;
+  const number = resourceIdentityNumber(identity);
+  const inspected = loaded.value.provider.changeRequests?.inspect
+    ? await loaded.value.provider.changeRequests.inspect({ context: providerOperationContext(loaded.value), target: identity })
+    : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.inspect');
+  if (!inspected.ok) return result(providerStatus(inspected.error), null, null, number, {
+    platform: context.platform, capabilities: context.capabilities,
+    resource: { kind: 'pull-request', number, identity }, error: providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+  });
+  const identityError = inspectedPullRequestIdentityError(inspected.value, identity);
+  if (identityError) return result('failed', null, null, number, {
+    platform: context.platform, capabilities: context.capabilities,
+    resource: { kind: 'pull-request', number, identity }, error: identityError
+  });
+  return result('no-op', null, null, number, {
+    platform: context.platform, capabilities: context.capabilities,
+    resource: { kind: 'pull-request', number, identity },
+    pullRequest: normalizeProviderPullRequest(inspected.value, context.platform.repository!, number || 0), error: null
+  });
+}
+
 async function inspectPlatformPullRequestByNumber(prNumber: string | number, options: InspectionOptions = {}): Promise<PullRequestResult> {
   const loaded = await resolvePlatformProviderContext({ cwd: options.cwd || process.cwd(), client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -496,31 +527,7 @@ async function inspectPlatformPullRequestByNumber(prNumber: string | number, opt
       error: { code: 'PLATFORM_IDENTITY_TOKEN_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
     });
   }
-  if (loaded.ok) {
-    const inspected = loaded.value.provider.changeRequests?.inspect
-      ? await loaded.value.provider.changeRequests.inspect({ context: providerOperationContext(loaded.value), target: identity })
-      : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.inspect');
-    const number = resourceIdentityNumber(identity);
-    if (!inspected.ok) return result(providerStatus(inspected.error), null, null, number, {
-      platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number, identity }, error: providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
-    });
-    const identityError = inspectedPullRequestIdentityError(inspected.value, identity);
-    if (identityError) return result('failed', null, null, number, {
-      platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number, identity }, error: identityError
-    });
-    return result('no-op', null, null, number, {
-      platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number, identity },
-      pullRequest: normalizeProviderPullRequest(inspected.value, context.platform.repository!, number || 0), error: null
-    });
-  }
-  return result('failed', null, null, null, {
-    platform: context.platform, capabilities: context.capabilities,
-    resource: { kind: 'pull-request', number: null },
-    error: { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false }
-  });
+  return inspectLoadedPlatformPullRequestByNumber(loaded, identity);
 }
 
 function readInLabelMapping(repoRoot: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: { code: string; message: string; retryable: boolean } } {

@@ -819,15 +819,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "6849b6ac383f6e2d6b0f9bdb42caeb55164b10902ea3e880f2481b030d509cc3",
-      "displayName": "inspectPlatformPullRequestByNumber",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/internal/release-workflow.ts",
       "ruleId": "complexity",
       "stableId": "ae83e6a237ed8187442a897411902d465ac5fbc5a9f6a1c60e65e5a4234382af",
