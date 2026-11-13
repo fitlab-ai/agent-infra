@@ -909,15 +909,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/protocol.ts",
-      "ruleId": "complexity",
-      "stableId": "28d5e360d80a7abebfd512f4cd8fbf88a0a0b85ca536c128217d1c1fb5bbe0b1",
-      "displayName": "parseSandboxControlResultEvidence",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/task/control-authority.ts",
       "ruleId": "complexity",
       "stableId": "2e051a20a0570212790bc14bd58d894d85a60a17173cc6ccb808c241395e8810",
@@ -1770,15 +1761,6 @@
       "displayName": "validateRestoreStaging",
       "metric": 25,
       "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/control/protocol.ts",
-      "ruleId": "complexity",
-      "stableId": "75578d01f75ae4728496fb7a5bc4b2233646f8d4ed6209e7b4ddf0b0a45a630b",
-      "displayName": "validateSandboxControlRequest",
-      "metric": 46,
-      "normalizedMessage": "complexity=46",
       "count": 1
     },
     {
