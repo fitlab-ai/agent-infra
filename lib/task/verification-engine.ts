@@ -343,38 +343,27 @@ function loadProjectName(repoRoot: string): any {
   }
 }
 
-function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
-  const resolvedArtifact = resolveArtifactPath(taskDir, config.file_pattern, artifactFile);
-  if (!resolvedArtifact.ok) {
-    return failResult("artifact", resolvedArtifact.message);
-  }
+const ARTIFACT_SCHEMA_FAMILIES: Readonly<Record<string, string>> = {
+  "analyze-task": "analysis",
+  "review-analysis": "review-analysis",
+  "plan-task": "plan",
+  "review-plan": "review-plan",
+  "code-task": "code",
+  "review-code": "review-code"
+};
 
-  const artifactPath = resolvedArtifact.path;
-  const stat = safeStat(artifactPath);
-  if (!stat) {
-    return failResult("artifact", `Artifact not found: ${path.basename(artifactPath)}`);
-  }
+const LOCAL_ARTIFACT_FAMILIES: Readonly<Record<string, "analysis" | "plan" | "code">> = {
+  "analyze-task": "analysis",
+  "plan-task": "plan",
+  "code-task": "code"
+};
 
-  if (stat.size === 0) {
-    return failResult("artifact", `Artifact is empty: ${path.basename(artifactPath)}`);
-  }
-
-  const content = fs.readFileSync(artifactPath, "utf8");
-  const schemaFamily = skillName === "analyze-task"
-    ? "analysis"
-    : skillName === "review-analysis"
-      ? "review-analysis"
-      : skillName === "plan-task"
-        ? "plan"
-        : skillName === "review-plan"
-          ? "review-plan"
-          : skillName === "code-task"
-            ? "code"
-            : skillName === "review-code" ? "review-code" : null;
+function checkArtifactSchema(content: string, artifactPath: string, skillName: string): any | null {
+  const schemaFamily = ARTIFACT_SCHEMA_FAMILIES[skillName];
   const schema = schemaFamily ? getArtifactSchema(schemaFamily) : null;
-  const localFamily = skillName === "analyze-task"
-    ? "analysis"
-    : skillName === "plan-task" ? "plan" : skillName === "code-task" ? "code" : null;
+  const localFamily = LOCAL_ARTIFACT_FAMILIES[skillName];
+  if (!schema && !localFamily) return null;
+
   if (schema) {
     const structure = inspectArtifactContract(content, schema);
     if (!structure.ok && !localFamily) {
@@ -382,9 +371,7 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     }
   }
   if (localFamily) {
-    const local = validateLocalArtifact(content, {
-      family: localFamily
-    });
+    const local = validateLocalArtifact(content, { family: localFamily });
     if (!local.ok) {
       return failResult(
         "artifact",
@@ -402,6 +389,10 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
       `${path.basename(artifactPath)} passed (${schema.sections.length} sections)`
     );
   }
+  return null;
+}
+
+function checkConfiguredArtifact(content: string, artifactPath: string, config: any): any {
   const requiredSections = config.required_sections || [];
   const missingSections = requiredSections.filter(
     (section: any) => !new RegExp(`^##\\s+${escapeRegExp(section)}\\s*$`, "m").test(content)
@@ -442,6 +433,28 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     "artifact",
     `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`
   );
+}
+
+function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
+  const resolvedArtifact = resolveArtifactPath(taskDir, config.file_pattern, artifactFile);
+  if (!resolvedArtifact.ok) {
+    return failResult("artifact", resolvedArtifact.message);
+  }
+
+  const artifactPath = resolvedArtifact.path;
+  const stat = safeStat(artifactPath);
+  if (!stat) {
+    return failResult("artifact", `Artifact not found: ${path.basename(artifactPath)}`);
+  }
+
+  if (stat.size === 0) {
+    return failResult("artifact", `Artifact is empty: ${path.basename(artifactPath)}`);
+  }
+
+  const content = fs.readFileSync(artifactPath, "utf8");
+  const schemaResult = checkArtifactSchema(content, artifactPath, skillName);
+  if (schemaResult) return schemaResult;
+  return checkConfiguredArtifact(content, artifactPath, config);
 }
 
 function checkDecisionDetails({ taskDir, artifactFile }: any): any {
@@ -545,37 +558,47 @@ const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event:
   "review-code": { family: "review-code", event: "review-code.completed" }
 };
 
-function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, task: any): any {
-  const stage = ARTIFACT_ACTIVITY_STAGES[skillName];
-  if (!stage) return null;
+function resolveCurrentLifecycleArtifact(taskDir: string, artifactFile: string | undefined, skillName: string, stage: { family: string; event: string }): any {
   const inventory = inspectArtifactDirectory(taskDir, stage.family as any);
   if (inventory.status !== "ready" || !inventory.latest) {
-    return failResult("activity-log", `Current ${stage.family} artifact is unavailable: ${inventory.error?.message ?? "no artifact exists"}`);
+    return { error: `Current ${stage.family} artifact is unavailable: ${inventory.error?.message ?? "no artifact exists"}` };
   }
   const output = artifactFile || inventory.latest.name;
   if (output !== inventory.latest.name) {
-    return failResult("activity-log", `Artifact '${output}' is not the current ${stage.family} artifact; rerun ${skillName} for '${inventory.latest.name}'`);
+    return { error: `Artifact '${output}' is not the current ${stage.family} artifact; rerun ${skillName} for '${inventory.latest.name}'` };
   }
   const identity = parseArtifactName(output);
   if (!identity || identity.family !== stage.family) {
-    return failResult("activity-log", `Artifact '${output}' does not belong to ${stage.family}`);
+    return { error: `Artifact '${output}' does not belong to ${stage.family}` };
   }
-  if (!hasValidArtifactCompletion(task.content, taskDir, output, stage.event)) {
-    return failResult("activity-log", `Completion fact for '${output}' is missing or stale; rerun ${skillName} to record a current completion`);
-  }
+  return { output, identity };
+}
 
+function validateLifecycleArtifactCompletion(taskDir: string, output: string, skillName: string, stage: { family: string; event: string }, task: any): string | null {
+  if (!hasValidArtifactCompletion(task.content, taskDir, output, stage.event)) {
+    return `Completion fact for '${output}' is missing or stale; rerun ${skillName} to record a current completion`;
+  }
   const receipts = parseArtifactReceipts(task.content).rows.filter((receipt) => receipt.output === output);
   for (const receipt of receipts) {
     const inputIdentity = parseArtifactName(receipt.input);
-    if (!inputIdentity) return failResult("activity-log", `Completion receipt for '${output}' has invalid input '${receipt.input}'; rerun ${skillName}`);
+    if (!inputIdentity) return `Completion receipt for '${output}' has invalid input '${receipt.input}'; rerun ${skillName}`;
     const inputInventory = inspectArtifactDirectory(taskDir, inputIdentity.family as any);
     if (inputInventory.status !== "ready" || inputInventory.latest?.name !== receipt.input
       || sha256File(path.join(taskDir, receipt.input)) !== receipt.inputSha256) {
-      return failResult("activity-log", `Input '${receipt.input}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`);
+      return `Input '${receipt.input}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`;
     }
   }
+  return null;
+}
 
-  return passResult("activity-log", `Current ${stage.family} completion '${output}' is valid for Round ${identity.round}`);
+function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, task: any): any {
+  const stage = ARTIFACT_ACTIVITY_STAGES[skillName];
+  if (!stage) return null;
+  const current = resolveCurrentLifecycleArtifact(taskDir, artifactFile, skillName, stage);
+  if (current.error) return failResult("activity-log", current.error);
+  const completionError = validateLifecycleArtifactCompletion(taskDir, current.output, skillName, stage, task);
+  if (completionError) return failResult("activity-log", completionError);
+  return passResult("activity-log", `Current ${stage.family} completion '${current.output}' is valid for Round ${current.identity.round}`);
 }
 
 function checkActivityLog({ taskDir, skillName, artifactFile }: any): any {
