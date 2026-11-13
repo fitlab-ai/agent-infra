@@ -117,15 +117,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/worktree-safety.ts",
-      "ruleId": "complexity",
-      "stableId": "e067fe6ed060d38685b7ea06dce9e77fe11fc319fa1110730c44e6d0933f4f22",
-      "displayName": "assertRecoverableMetadata",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
-      "count": 1
-    },
-    {
       "file": "lib/platform/completion-backfill.ts",
       "ruleId": "complexity",
       "stableId": "9616fd047b3f948e370cc81c9c645dc24c810db5c88f1fb18e66fde2aecf12c1",
@@ -213,15 +204,6 @@
       "displayName": "capture",
       "metric": 40,
       "normalizedMessage": "complexity=40",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/worktree-safety.ts",
-      "ruleId": "complexity",
-      "stableId": "0d003fe4fbb234bed353492615db7117b7a72f4e5181a06ec2a4ad5002bc18a6",
-      "displayName": "captureRecoveredOnce",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
       "count": 1
     },
     {
