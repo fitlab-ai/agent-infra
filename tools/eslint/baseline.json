@@ -693,30 +693,12 @@
       "count": 1
     },
     {
-      "file": "lib/task/artifact-lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "5dafce1d2069adf3adfedb40dd74673dc8d97e4b0ee5fc94e17e076b1b0c5731",
-      "displayName": "hasSelectionEvidence",
-      "metric": 34,
-      "normalizedMessage": "complexity=34",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/codex-sandbox.ts",
       "ruleId": "complexity",
       "stableId": "db301fadb8eab7da60f312a668eddd8c556b35df1438a4fcf6c4aac08ec76f20",
       "displayName": "inheritCodexHookTrustState",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/task/artifact-lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "7acd0b09cf63551ea407b82bfbe2ef8101955ee90e6d5681faaee932b1442ec5",
-      "displayName": "inspectArtifactDirectory",
-      "metric": 41,
-      "normalizedMessage": "complexity=41",
       "count": 1
     },
     {
@@ -1320,15 +1302,6 @@
       "displayName": "reportWrite.<anonymous ArrowFunctionExpression#1>",
       "metric": 20,
       "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
-      "file": "lib/task/artifact-lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "428233e572a5e5e699b93429a5f2e0e9be6ff6e5cc1c817db7d4c20d97673a6b",
-      "displayName": "resolveArtifactContextFromTask",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
       "count": 1
     },
     {

@@ -22,7 +22,7 @@ import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
 import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
-import { createTempDir, recordArtifactCompletions } from '../../../helpers.ts';
+import { createTempDir, onPlatforms, recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
@@ -271,6 +271,28 @@ test('read inventory returns canonical history plus topology diagnostics', () =>
   assert.equal(result.status, 'ready');
   assert.deepEqual(result.artifacts.map((item) => item.name), ['analysis.md', 'analysis-r3.md']);
   assert.deepEqual(result.diagnostics.map((item) => item.code).sort(), ['NONCANONICAL_NAME', 'ROUND_GAP']);
+});
+
+test('read inventory rejects artifact symlinks', onPlatforms('linux', 'darwin'), () => {
+  const f = fixture();
+  const target = path.join(f.taskDir, 'target.md');
+  fs.writeFileSync(target, '# target');
+  fs.symlinkSync(target, path.join(f.taskDir, 'analysis.md'));
+
+  const result = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.diagnostics.map((item) => item.code), ['SYMBOLIC_LINK']);
+});
+
+test('read inventory rejects artifact directories as non-regular files', () => {
+  const f = fixture();
+  fs.mkdirSync(path.join(f.taskDir, 'analysis.md'));
+
+  const result = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.diagnostics.map((item) => item.code), ['NON_REGULAR_FILE']);
 });
 
 test('legacy invalidation text is inert and does not filter the physical artifact inventory', () => {
