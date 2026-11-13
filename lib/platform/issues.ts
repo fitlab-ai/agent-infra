@@ -303,10 +303,15 @@ function deterministicIssueBody(repoRoot: string, content: string, taskType: str
   return buildDefaultBody(content);
 }
 
-async function createPlatformIssue(taskRef: string, options: CreateOptions): Promise<IssueResult> {
-  const base = await resolvedContext(taskRef, options);
-  if (!base.ok) return base.output;
-  if (base.issueIdentity) return inspectPlatformIssue(taskRef, options);
+type CreateIssuePayload = {
+  title: string;
+  body: string;
+  assignees: string[];
+  labels?: string[];
+  milestone?: string;
+};
+
+async function createIssuePayload(base: ResolvedPlatformContext): Promise<CreateIssuePayload | IssueResult> {
   let repositoryLabels: string[] = [];
   let milestones: string[] = [];
   if (base.context.capabilities.triage) {
@@ -325,17 +330,16 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
   const explicitMilestone = base.frontmatter.milestone && milestones.some((item) => item === base.frontmatter.milestone)
     ? base.frontmatter.milestone
     : chooseMilestone('initial', milestones);
-  const payload = {
+  return {
     title: conventionalTitle(base.content, base.frontmatter.type || 'task', base.resolved.repoRoot),
     body: deterministicIssueBody(base.resolved.repoRoot, base.content, base.frontmatter.type || 'task'),
     assignees: base.context.platform.currentUser ? [base.context.platform.currentUser] : [],
     ...(typeLabel && repositoryLabels.includes(typeLabel) ? { labels: [typeLabel] } : {}),
     ...(explicitMilestone ? { milestone: explicitMilestone } : {})
   };
-  if (options.dryRun) return result('planned', base.resolved.taskId, null, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    operations: [{ name: 'issue:create', status: 'planned', reasonCode: null }], error: null
-  });
+}
+
+async function executePlatformIssueCreate(base: ResolvedPlatformContext, payload: CreateIssuePayload, options: CreateOptions): Promise<IssueResult> {
   const execute = async (): Promise<IssueResult> => {
     const created = base.provider.issues?.create
       ? await base.provider.issues.create({
@@ -389,6 +393,19 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
     block: (error) => result('blocked', base.resolved.taskId, null, { platform: base.context.platform, capabilities: base.context.capabilities, error }),
     persistenceFailure: (error) => result('failed', base.resolved.taskId, null, { error })
   });
+}
+
+async function createPlatformIssue(taskRef: string, options: CreateOptions): Promise<IssueResult> {
+  const base = await resolvedContext(taskRef, options);
+  if (!base.ok) return base.output;
+  if (base.issueIdentity) return inspectPlatformIssue(taskRef, options);
+  const payload = await createIssuePayload(base);
+  if ('status' in payload) return payload;
+  if (options.dryRun) return result('planned', base.resolved.taskId, null, {
+    platform: base.context.platform, capabilities: base.context.capabilities,
+    operations: [{ name: 'issue:create', status: 'planned', reasonCode: null }], error: null
+  });
+  return executePlatformIssueCreate(base, payload, options);
 }
 
 async function bindPlatformIssue(taskRef: string, options: BindOptions): Promise<IssueResult> {
@@ -511,6 +528,188 @@ function desiredFieldValues(frontmatter: Record<string, string>, fields: IssueFi
   return desired;
 }
 
+function planInLabelsFromDiff(
+  base: ResolvedPlatformContext,
+  options: SyncOptions,
+  snapshot: IssueSnapshot,
+  repositoryLabels: string[]
+): PlannedOperation {
+  const taskBase = typeof base.frontmatter.delivery_base_ref === 'string' ? base.frontmatter.delivery_base_ref.trim() : '';
+  if (!taskBase) return { name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISSING' };
+  if (options.base && options.base !== taskBase) return { name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISMATCH' };
+  try {
+    const changed = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+      cwd: base.resolved.repoRoot, encoding: 'utf8'
+    }).trim().split(/\r?\n/).filter(Boolean);
+    const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8')) as {
+      labels?: { in?: Record<string, unknown> };
+    };
+    const mapping = validateInLabelMapping(config.labels?.in);
+    if (!mapping.ok) return { name: 'labels:in', status: 'failed', reasonCode: mapping.error.code };
+    const planned = planInLabelUpdate({ changedFiles: changed, currentLabels: snapshot.labels, mapping: mapping.value, repositoryLabels: new Set(repositoryLabels) });
+    if (planned.error) return { name: 'labels:in', status: 'failed', reasonCode: planned.error.code };
+    return planned.changed
+      ? { name: 'labels:in', status: 'planned', reasonCode: null, value: planned.labels }
+      : { name: 'labels:in', status: 'no-op', reasonCode: null };
+  } catch {
+    return { name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE' };
+  }
+}
+
+function appendInLabelOperation(
+  plan: ReturnType<typeof planIssueMetadata>,
+  base: ResolvedPlatformContext,
+  options: SyncOptions,
+  snapshot: IssueSnapshot,
+  repositoryLabels: string[]
+): void {
+  if (options.inLabels === 'none') {
+    const labels = snapshot.labels.filter((label) => !label.startsWith('in:')).sort();
+    plan.operations.splice(plan.operations.findIndex((operation) => operation.name === 'assignees') >= 0 ? 1 : plan.operations.length, 0,
+      base.context.capabilities.triage
+        ? labels.join('\0') === snapshot.labels.join('\0')
+          ? { name: 'labels:in', status: 'no-op', reasonCode: null }
+          : { name: 'labels:in', status: 'planned', reasonCode: null, value: labels }
+        : { name: 'labels:in', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' });
+  }
+  if (options.inLabels === 'from-diff') plan.operations.push(planInLabelsFromDiff(base, options, snapshot, repositoryLabels));
+}
+
+function appendProviderMetadataOperations(
+  plan: ReturnType<typeof planIssueMetadata>,
+  base: ResolvedPlatformContext,
+  options: SyncOptions,
+  inspected: ProviderIssueSnapshot,
+  providerMetadata: RepositoryMetadataSnapshot | null
+): void {
+  if (!options.issueType && !options.fields) return;
+  plan.operations.push(...(!base.context.capabilities.push
+    ? [
+      ...(options.issueType ? [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : []),
+      ...(options.fields ? [{ name: 'fields', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : [])
+    ]
+    : providerMetadata
+      ? planProviderMetadata(inspected, providerMetadata, base.frontmatter, options, base.context.capabilities)
+      : [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }]));
+}
+
+function buildIssueSyncOperations(
+  base: ResolvedPlatformContext,
+  options: SyncOptions,
+  snapshot: IssueSnapshot,
+  inspected: ProviderIssueSnapshot,
+  providerMetadata: RepositoryMetadataSnapshot | null,
+  repositoryLabels: string[],
+  milestones: string[]
+): PlannedOperation[] {
+  const desired: IssueDesiredState = {
+    status: options.status, assignees: options.assignees, milestone: options.milestone,
+    requirements: options.requirements ? requirementsFromTask(base.content) : undefined, state: options.state
+  };
+  const plan = planIssueMetadata({
+    snapshot: options.milestone === 'specific' ? { ...snapshot, milestone: milestoneBasis(base.resolved.repoRoot, snapshot.milestone) } : snapshot,
+    desired, repositoryLabels: new Set(repositoryLabels), milestones,
+    currentUser: base.context.platform.currentUser,
+    requirementAnchors: requirementSectionAnchors(base.resolved.repoRoot, base.frontmatter.type || 'task'),
+    capabilities: base.context.capabilities
+  });
+  appendInLabelOperation(plan, base, options, snapshot, repositoryLabels);
+  appendProviderMetadataOperations(plan, base, options, inspected, providerMetadata);
+  return plan.operations;
+}
+
+async function loadSyncRepositoryMetadata(
+  base: ResolvedPlatformContext,
+  options: SyncOptions
+): Promise<{ metadata: RepositoryMetadataSnapshot | null; labels: string[]; milestones: string[] } | IssueResult> {
+  const shouldLoad = base.context.capabilities.triage && (options.status !== undefined || options.inLabels !== undefined || options.milestone !== undefined
+    || (base.context.capabilities.push && (options.issueType || options.fields)));
+  if (!shouldLoad) return { metadata: null, labels: [], milestones: [] };
+  const loaded = base.provider.issues?.describeRepository
+    ? await base.provider.issues.describeRepository({ context: providerOperationContext(base.loadedContext) })
+    : unsupportedProviderOperation(base.provider, 'issues.describeRepository');
+  if (!loaded.ok) return providerIssueError(base, loaded.error, base.issueIdentity!);
+  return {
+    metadata: loaded.value,
+    labels: loaded.value.labels.map((label) => label.name),
+    milestones: loaded.value.milestones.map((milestone) => milestone.title)
+  };
+}
+
+async function settleIssueSyncPlan(
+  base: ResolvedPlatformContext,
+  repository: string,
+  snapshot: IssueSnapshot,
+  operations: PlannedOperation[],
+  planned: PlannedOperation[],
+  changed: boolean
+): Promise<IssueResult> {
+  const labelOperations = planned.filter((operation) => operation.name === 'labels:status' || operation.name === 'labels:in');
+  if (labelOperations.length === 0) return result('applied', base.resolved.taskId, base.issueNumber, {
+    changed, platform: base.context.platform, capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity! }, issue: snapshot,
+    operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
+  });
+  return rereadIssueLabels(base, repository, snapshot, operations, labelOperations, changed);
+}
+
+async function rereadIssueLabels(
+  base: ResolvedPlatformContext,
+  repository: string,
+  snapshot: IssueSnapshot,
+  operations: PlannedOperation[],
+  labelOperations: PlannedOperation[],
+  changed: boolean
+): Promise<IssueResult> {
+  const reread = base.provider.issues?.inspect
+    ? await base.provider.issues.inspect({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity! })
+    : unsupportedProviderOperation(base.provider, 'issues.inspect');
+  if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
+    changed, issue: snapshot, operations,
+    error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
+  });
+  const finalIssue = normalizeProviderIssue(reread.value, repository, resourceIdentityNumber(base.issueIdentity!));
+  let expectedLabels = [...snapshot.labels];
+  for (const operation of labelOperations) {
+    expectedLabels = applyLabelDeltaToSnapshot(expectedLabels, operation.value as string[], operation.name === 'labels:status' ? 'status:' : 'in:');
+  }
+  const expected = expectedLabels.filter((label) => label.startsWith('status:') || label.startsWith('in:')).sort();
+  const actual = finalIssue.labels.filter((label) => label.startsWith('status:') || label.startsWith('in:')).sort();
+  if (expected.join('\0') !== actual.join('\0')) return result('blocked', base.resolved.taskId, base.issueNumber, {
+    changed, issue: finalIssue, operations,
+    error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue labels did not converge after update', retryable: true }
+  });
+  return result('applied', base.resolved.taskId, base.issueNumber, {
+    changed, platform: base.context.platform, capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity! }, issue: finalIssue,
+    operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
+  });
+}
+
+async function executeIssueSyncPlan(
+  base: ResolvedPlatformContext,
+  options: SyncOptions,
+  repository: string,
+  snapshot: IssueSnapshot,
+  operations: PlannedOperation[]
+): Promise<IssueResult> {
+  const failure = operations.find((operation) => operation.status === 'failed');
+  if (failure) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations, error: { code: failure.reasonCode || 'ISSUE_SYNC_FAILED', message: `Operation ${failure.name} failed`, retryable: false } });
+  const planned = operations.filter((operation) => operation.status === 'planned');
+  if (options.dryRun || planned.length === 0) return result(planned.length && options.dryRun ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities, issue: snapshot, operations, error: null
+  });
+  const payload = applyRestOperations(snapshot, planned) as Partial<{
+    title: string; body: string; labels: string[]; assignees: string[];
+    milestone: string | null; state: 'open' | 'closed'; fields: Record<string, string | number | null>;
+  }>;
+  const updated = base.provider.issues?.update
+    ? await base.provider.issues.update({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity!, currentLabels: snapshot.labels, patch: payload, mutation: { idempotencyKey: `issue:update:${base.resolved.taskId}` } })
+    : unsupportedProviderOperation(base.provider, 'issues.update');
+  if (!updated.ok) return providerIssueError(base, updated.error, base.issueIdentity!);
+  return settleIssueSyncPlan(base, repository, snapshot, operations, planned, updated.value.changed);
+}
+
 async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
@@ -521,163 +720,40 @@ async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Pro
     : unsupportedProviderOperation(base.provider, 'issues.inspect');
   if (!inspected.ok) return providerIssueError(base, inspected.error, base.issueIdentity);
   const snapshot = normalizeProviderIssue(inspected.value, repository, resourceIdentityNumber(base.issueIdentity));
-  let providerMetadata: RepositoryMetadataSnapshot | null = null;
-  let repositoryLabels: string[] = [];
-  let milestones: string[] = [];
-  if (base.context.capabilities.triage && (options.status !== undefined || options.inLabels !== undefined || options.milestone !== undefined
-    || (base.context.capabilities.push && (options.issueType || options.fields)))) {
-    const metadata = base.provider.issues?.describeRepository
-      ? await base.provider.issues.describeRepository({ context: providerOperationContext(base.loadedContext) })
-      : unsupportedProviderOperation(base.provider, 'issues.describeRepository');
-    if (!metadata.ok) return providerIssueError(base, metadata.error, base.issueIdentity);
-    providerMetadata = metadata.value;
-    repositoryLabels = metadata.value.labels.map((label) => label.name);
-    milestones = metadata.value.milestones.map((milestone) => milestone.title);
-  }
-  const desired: IssueDesiredState = {
-    status: options.status,
-    assignees: options.assignees,
-    milestone: options.milestone,
-    requirements: options.requirements ? requirementsFromTask(base.content) : undefined,
-    state: options.state
-  };
-  const plan = planIssueMetadata({
-    snapshot: options.milestone === 'specific'
-      ? { ...snapshot, milestone: milestoneBasis(base.resolved.repoRoot, snapshot.milestone) }
-      : snapshot,
-    desired, repositoryLabels: new Set(repositoryLabels), milestones,
-    currentUser: base.context.platform.currentUser,
-    requirementAnchors: requirementSectionAnchors(base.resolved.repoRoot, base.frontmatter.type || 'task'),
-    capabilities: base.context.capabilities
-  });
-  if (options.inLabels === 'none') {
-    const labels = snapshot.labels.filter((label) => !label.startsWith('in:')).sort();
-    plan.operations.splice(plan.operations.findIndex((operation) => operation.name === 'assignees') >= 0 ? 1 : plan.operations.length, 0,
-      base.context.capabilities.triage
-        ? labels.join('\0') === snapshot.labels.join('\0')
-          ? { name: 'labels:in', status: 'no-op', reasonCode: null }
-          : { name: 'labels:in', status: 'planned', reasonCode: null, value: labels }
-        : { name: 'labels:in', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' });
-  }
-  if (options.inLabels === 'from-diff') {
-    const taskBase = typeof base.frontmatter.delivery_base_ref === 'string'
-      ? base.frontmatter.delivery_base_ref.trim()
-      : '';
-    if (!taskBase) {
-      plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISSING' });
-    } else if (options.base && options.base !== taskBase) {
-      plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISMATCH' });
-    } else {
-      try {
-        const changed = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
-          cwd: base.resolved.repoRoot, encoding: 'utf8'
-        }).trim().split(/\r?\n/).filter(Boolean);
-        const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8')) as {
-          labels?: { in?: Record<string, unknown> };
-        };
-        const mapping = validateInLabelMapping(config.labels?.in);
-        if (!mapping.ok) {
-          plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: mapping.error.code });
-        } else {
-          const planned = planInLabelUpdate({
-            changedFiles: changed,
-            currentLabels: snapshot.labels,
-            mapping: mapping.value,
-            repositoryLabels: new Set(repositoryLabels)
-          });
-          if (planned.error) {
-            plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: planned.error.code });
-          } else {
-            plan.operations.push(planned.changed
-              ? { name: 'labels:in', status: 'planned', reasonCode: null, value: planned.labels }
-              : { name: 'labels:in', status: 'no-op', reasonCode: null });
-          }
-        }
-      } catch {
-        if (!plan.operations.some((operation) => operation.name === 'labels:in' && operation.status === 'failed')) {
-          plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE' });
-        }
-      }
-    }
-  }
-  if (options.issueType || options.fields) {
-    plan.operations.push(...(!base.context.capabilities.push
-      ? [
-        ...(options.issueType ? [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : []),
-        ...(options.fields ? [{ name: 'fields', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : [])
-      ]
-      : providerMetadata
-        ? planProviderMetadata(inspected.value, providerMetadata, base.frontmatter, options, base.context.capabilities)
-        : [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }]));
-  }
-  const failure = plan.operations.find((operation) => operation.status === 'failed');
-  if (failure) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: { code: failure.reasonCode || 'ISSUE_SYNC_FAILED', message: `Operation ${failure.name} failed`, retryable: false } });
-  const planned = plan.operations.filter((operation) => operation.status === 'planned');
-  if (options.dryRun) return result(planned.length ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    issue: snapshot, operations: plan.operations, error: null
-  });
-  if (planned.length === 0) return result('no-op', base.resolved.taskId, base.issueNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    issue: snapshot, operations: plan.operations, error: null
-  });
-  const payload = applyRestOperations(snapshot, planned) as Partial<{
-    title: string; body: string; labels: string[]; assignees: string[];
-    milestone: string | null; state: 'open' | 'closed'; fields: Record<string, string | number | null>;
-  }>;
-  const updated = base.provider.issues?.update
-    ? await base.provider.issues.update({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity, currentLabels: snapshot.labels, patch: payload, mutation: { idempotencyKey: `issue:update:${base.resolved.taskId}` } })
-    : unsupportedProviderOperation(base.provider, 'issues.update');
-  if (!updated.ok) return providerIssueError(base, updated.error, base.issueIdentity);
-  const labelOperations = planned.filter((operation) => operation.name === 'labels:status' || operation.name === 'labels:in');
-  let finalIssue = snapshot;
-  if (labelOperations.length > 0) {
-    const reread = base.provider.issues?.inspect
-      ? await base.provider.issues.inspect({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity })
-      : unsupportedProviderOperation(base.provider, 'issues.inspect');
-    if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
-      changed: updated.value.changed,
-      issue: snapshot,
-      operations: plan.operations,
-      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
-    });
-    finalIssue = normalizeProviderIssue(reread.value, repository, resourceIdentityNumber(base.issueIdentity));
-    let expectedLabels = [...snapshot.labels];
-    for (const operation of labelOperations) {
-      expectedLabels = applyLabelDeltaToSnapshot(expectedLabels, operation.value as string[], operation.name === 'labels:status' ? 'status:' : 'in:');
-    }
-    const expected = expectedLabels.filter((label) => label.startsWith('status:') || label.startsWith('in:')).sort();
-    const actual = finalIssue.labels.filter((label) => label.startsWith('status:') || label.startsWith('in:')).sort();
-    if (expected.join('\0') !== actual.join('\0')) return result('blocked', base.resolved.taskId, base.issueNumber, {
-      changed: updated.value.changed,
-      issue: finalIssue,
-      operations: plan.operations,
-      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue labels did not converge after update', retryable: true }
-    });
-  }
-  return result('applied', base.resolved.taskId, base.issueNumber, {
-    changed: updated.value.changed, platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: finalIssue,
-    operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
-  });
+  const metadata = await loadSyncRepositoryMetadata(base, options);
+  if ('status' in metadata) return metadata;
+  const operations = buildIssueSyncOperations(base, options, snapshot, inspected.value, metadata.metadata, metadata.labels, metadata.milestones);
+  return executeIssueSyncPlan(base, options, repository, snapshot, operations);
 }
 
-async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
-  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok || options.dryRun) return syncPlatformIssueImpl(taskRef, options);
-  let frontmatter: Record<string, string>;
+type SyncTaskEvidence = {
+  taskContent: string;
+  frontmatter: Record<string, string>;
+  identity: ResourceIdentity;
+  fromDiffFiles?: string[];
+  mappingDigest?: string;
+};
+
+function syncHasDesiredState(options: SyncOptions): boolean {
+  return [options.requirements, options.issueType, options.fields, options.status !== undefined,
+    options.assignees !== undefined, options.milestone !== undefined,
+    options.inLabels !== undefined, options.state !== undefined].some(Boolean);
+}
+
+function deriveSyncTaskEvidence(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  options: SyncOptions
+): SyncTaskEvidence | null | IssueResult {
   let taskContent: string;
+  let frontmatter: Record<string, string>;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     frontmatter = parseTaskFrontmatter(taskContent);
+  } catch {
+    return null;
   }
-  catch { return syncPlatformIssueImpl(taskRef, options); }
   const identity = taskIssueIdentity(frontmatter);
-  if (!identity || ![
-    options.requirements, options.issueType, options.fields, options.status !== undefined,
-    options.assignees !== undefined, options.milestone !== undefined,
-    options.inLabels !== undefined, options.state !== undefined
-  ].some(Boolean)) return syncPlatformIssueImpl(taskRef, options);
+  if (!identity || !syncHasDesiredState(options)) return null;
   let fromDiffFiles: string[] | undefined;
   let mappingDigest: string | undefined;
   if (options.inLabels === 'from-diff') {
@@ -700,6 +776,10 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
       }
     }
   }
+  return { taskContent, frontmatter, identity, ...(fromDiffFiles ? { fromDiffFiles } : {}), ...(mappingDigest ? { mappingDigest } : {}) };
+}
+
+function syncIssueMetadata(options: SyncOptions, evidence: SyncTaskEvidence) {
   const issueMetadata = {
     requirements: options.requirements === true,
     issueType: options.issueType === true,
@@ -709,11 +789,22 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     ...(options.milestone !== undefined ? { milestone: options.milestone } : {}),
     ...(options.inLabels ? { inLabels: options.inLabels } : {}),
     ...(options.base ? { base: options.base } : {}),
-    ...(fromDiffFiles ? { fromDiffFiles } : {}),
-    ...(mappingDigest ? { inLabelMappingDigest: mappingDigest } : {}),
+    ...(evidence.fromDiffFiles ? { fromDiffFiles: evidence.fromDiffFiles } : {}),
+    ...(evidence.mappingDigest ? { inLabelMappingDigest: evidence.mappingDigest } : {}),
     ...(options.state ? { state: options.state } : {}),
     ...(options.closeReason ? { closeReason: options.closeReason } : {})
   };
+  return issueMetadata;
+}
+
+async function coordinateIssueSync(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  taskContent: string,
+  issueMetadata: ReturnType<typeof syncIssueMetadata>,
+  identity: ResourceIdentity,
+  taskRef: string,
+  options: SyncOptions
+): Promise<IssueResult> {
   const operation = {
     kind: 'issue-metadata' as const,
     target: JSON.stringify(identity),
@@ -733,6 +824,16 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     block: (error) => result('blocked', resolved.taskId, resourceIdentityNumber(identity), { error }),
     persistenceFailure: (error) => result('failed', resolved.taskId, resourceIdentityNumber(identity), { error })
   });
+}
+
+async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok || options.dryRun) return syncPlatformIssueImpl(taskRef, options);
+  const evidence = deriveSyncTaskEvidence(resolved, options);
+  if (!evidence) return syncPlatformIssueImpl(taskRef, options);
+  if ('status' in evidence) return evidence;
+  const metadata = syncIssueMetadata(options, evidence);
+  return coordinateIssueSync(resolved, evidence.taskContent, metadata, evidence.identity, taskRef, options);
 }
 
 export { bindPlatformIssue, createPlatformIssue, inspectPlatformIssue, requirementSectionAnchors, syncPlatformIssue };
