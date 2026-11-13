@@ -386,6 +386,78 @@ test('final task comment uses the warning projection after summary recovery', as
   }
 });
 
+test('host finalization skips the task comment when the Issue is not linked', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({ ...deliveryStage })}\n`);
+  const calls: string[] = [];
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    calls.push(received.kind);
+    return received.kind === 'task'
+      ? platformResult('no-op', { error: { code: 'ISSUE_NOT_LINKED', message: 'task has no linked Issue', retryable: false } })
+      : platformResult('applied');
+  };
+  try {
+    const result = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+
+    assert.equal(result.status, 'prepared');
+    assert.equal(result.taskComment?.status, 'skipped');
+    assert.equal(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.taskComment, 'skipped');
+    assert.deepEqual(calls, ['summary', 'task']);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization records and returns an exception from task comment sync', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({ ...deliveryStage })}\n`);
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    if (received.kind === 'task') {
+      throw Object.assign(new Error('task comment transport failed'), { code: 'COMMENT_TRANSPORT', retryable: true });
+    }
+    return platformResult('applied');
+  };
+  try {
+    const result = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+    const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.taskComment?.error?.code, 'COMMENT_TRANSPORT');
+    assert.equal(result.taskComment?.status, 'blocked');
+    assert.equal(receipt?.taskComment, 'pending');
+    assert.equal(receipt?.warnings.some((warning) => warning.code === 'COMMENT_TRANSPORT' && warning.status === 'open'), true);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization does not mutate a receipt rebound during task comment sync', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({ ...deliveryStage })}\n`);
+  let rebound: TaskFinalizationReceipt | undefined;
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    if (received.kind === 'task') {
+      rebound = bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, {
+        generation: 'new-owner', requestId: 'aaaaaaaaaaaaaaaa'
+      });
+    }
+    return platformResult('no-op');
+  };
+  try {
+    const result = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+    const stored = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.taskComment?.error?.code, 'FINALIZATION_CAPABILITY_STALE');
+    assert.ok(rebound);
+    assert.equal(stored?.revision, rebound.revision);
+    assert.deepEqual(stored?.warnings, rebound.warnings);
+    assert.equal(stored?.controlBinding?.generation, 'new-owner');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('completed finalization does not replay lifecycle for a backfill warning', async () => {
   const f = fixture();
   let calls = 0;

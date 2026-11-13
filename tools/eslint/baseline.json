@@ -1539,15 +1539,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/finalization.ts",
-      "ruleId": "complexity",
-      "stableId": "5ad778a8462c497e9f74527d8badc81c390f46272d58bdb02b2a681adffde41b",
-      "displayName": "syncPendingTaskComment",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/platform/issues.ts",
       "ruleId": "complexity",
       "stableId": "2fc062bf1db98843c7eebe6b13b4b13e78eb7df8f56306aee295f2322348022a",
