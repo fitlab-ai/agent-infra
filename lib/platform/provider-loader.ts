@@ -78,14 +78,7 @@ function failure(
   phase: string,
   code: string,
   message: string
-): ProviderLoadResult {
-  return {
-    ok: false,
-    error: { code, message, retryable: false, providerType, phase }
-  };
-}
-
-function selectionFailure(providerType: string, phase: string, code: string, message: string): ProviderSelectionResult {
+): { ok: false; error: PlatformError } {
   return {
     ok: false,
     error: { code, message, retryable: false, providerType, phase }
@@ -283,13 +276,13 @@ function resolveProviderSelection(
   const providerType = options.platformType
     ?? (typeof platform.type === 'string' ? platform.type : '');
   if (!providerType) {
-    return selectionFailure('', 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'platform.type must be a non-empty string');
+    return failure('', 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'platform.type must be a non-empty string');
   }
 
   const entry = selectedEntry(config, providerType);
   const rawConfig = entry.config === undefined ? {} : entry.config;
   if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig) || !isJsonValue(rawConfig)) {
-    return selectionFailure(providerType, 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'Selected provider config must be a JSON object');
+    return failure(providerType, 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'Selected provider config must be a JSON object');
   }
   const providerConfig = rawConfig as Record<string, JsonValue>;
   const source = resolveProviderSource(repositoryRoot, providerType, entry);
