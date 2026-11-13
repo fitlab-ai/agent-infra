@@ -1944,15 +1944,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/dotfiles.ts",
-      "ruleId": "complexity",
-      "stableId": "b10080eea6234f62d5696e45ea9ff3efde7a84082d60d28e50bf955d0c2cffd3",
-      "displayName": "walkAndMaterializeDotfiles",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "stableId": "9e56f331256291cfb3babf82b3ed9194e0cf0b78eb5ffb942e920a794aa72d58",
