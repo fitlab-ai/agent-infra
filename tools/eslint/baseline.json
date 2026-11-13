@@ -567,15 +567,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/short-id.ts",
-      "ruleId": "complexity",
-      "stableId": "366bf257d8e1bd33c20810b02878c7dfb1e171276f35f3fd520fd347f43040a7",
-      "displayName": "executeShortIdCommand",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/task/commit-operation.ts",
       "ruleId": "complexity",
       "stableId": "a08f68a1f1e47cf643864c99eb6b121a5f7f9ed29b8bd37ada90abce355173e0",
@@ -733,15 +724,6 @@
       "ruleId": "complexity",
       "stableId": "56ab0cb108240d632053f73ad53dbe8132c769d137a52457238b2264f14beb62",
       "displayName": "mockClient.json",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/task/short-id.ts",
-      "ruleId": "complexity",
-      "stableId": "b0db61bcd6151d531d6a8dbbfb9876084ee7c188dd0444906d9004827fd42fce",
-      "displayName": "mutateShortIdRegistryAt.withRegistryLock callback[1]#1",
       "metric": 19,
       "normalizedMessage": "complexity=19",
       "count": 1
@@ -1203,15 +1185,6 @@
       "displayName": "resolveSandboxControlTransport",
       "metric": 34,
       "normalizedMessage": "complexity=34",
-      "count": 1
-    },
-    {
-      "file": "lib/task/short-id.ts",
-      "ruleId": "complexity",
-      "stableId": "1313b1bdf8a36572dd2d4c418f4169659f9a42548a7184008aa137ce970de0e4",
-      "displayName": "resolveShortIdReadOnly",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
       "count": 1
     },
     {
