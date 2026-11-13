@@ -958,24 +958,9 @@ function resolvePostReviewExemption(content: string):
 }
 
 function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
-  const resolvedArtifact = resolveArtifactPath(
-    taskDir,
-    "review-code.md|review-code-r{N}.md",
-    artifactFile
-  );
-  if (!resolvedArtifact.ok) {
-    return failResult("review-fact", resolvedArtifact.message);
-  }
-
-  const authoritative = findAuthoritativeReviewCodeArtifact(taskDir);
-  if (!authoritative.ok) {
-    return failResult("review-fact", authoritative.error ?? "No active review-code artifact is available");
-  }
-  if (path.basename(resolvedArtifact.path) !== authoritative.fileName) {
-    return failResult(
-      "review-fact",
-      `review-code artifact ${path.basename(resolvedArtifact.path)} is not the current active artifact ${authoritative.fileName}; re-run review-code`
-    );
+  const artifact = resolveReviewFactArtifact(taskDir, artifactFile);
+  if (!artifact.ok) {
+    return artifact.result;
   }
 
   const task = loadTask(taskDir);
@@ -983,10 +968,11 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
     return failResult("review-fact", task.message);
   }
 
-  const content = fs.readFileSync(resolvedArtifact.path, "utf8");
-  if (!hasValidArtifactCompletion(task.content, taskDir, path.basename(resolvedArtifact.path), 'review-code.completed')) {
-    return failResult("review-fact", `Review Code completion fact does not match ${path.basename(resolvedArtifact.path)}`);
+  const content = fs.readFileSync(artifact.path, "utf8");
+  if (!hasValidArtifactCompletion(task.content, taskDir, path.basename(artifact.path), 'review-code.completed')) {
+    return failResult("review-fact", `Review Code completion fact does not match ${path.basename(artifact.path)}`);
   }
+
   const verdict = parseReviewVerdict(content);
   const reviewTargetHead = extractReviewTargetHead(content);
   const reviewReviewedHead = extractReviewedHead(content);
@@ -1005,26 +991,71 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
     return failResult("review-fact", "Review fact must record target head, reviewed head, and diff base");
   }
 
-  const identity = inspectReviewIdentity(taskDir, content, repositoryRoot);
-  if (identity.status !== 'matched' || !identity.reviewedHead) {
-    return failResult('review-fact', `Review identity is ${identity.status}: ${identity.message}; re-run review-code`);
-  }
-  const baseline = identity.reviewedHead;
-
-  if (["通过", "Approved"].includes(verdict)) {
-    const lastReviewedCommit = String(task.metadata.last_reviewed_commit || "").trim();
-    if (lastReviewedCommit !== baseline) {
-      return failResult(
-        "review-fact",
-        `Approved clean review must set task last_reviewed_commit to reviewed head ${baseline.slice(0, 8)}`
-      );
-    }
+  const identity = validateReviewFactIdentity(taskDir, content, repositoryRoot, task, verdict);
+  if (!identity.ok) {
+    return identity.result;
   }
 
   return passResult(
     "review-fact",
-    `Review fact valid for ${path.basename(resolvedArtifact.path)} at ${baseline.slice(0, 8)}`
+    `Review fact valid for ${path.basename(artifact.path)} at ${identity.reviewedHead.slice(0, 8)}`
   );
+}
+
+function resolveReviewFactArtifact(taskDir: any, artifactFile: any): any {
+  const resolvedArtifact = resolveArtifactPath(
+    taskDir,
+    "review-code.md|review-code-r{N}.md",
+    artifactFile
+  );
+  if (!resolvedArtifact.ok) {
+    return { ok: false, result: failResult("review-fact", resolvedArtifact.message) };
+  }
+
+  const authoritative = findAuthoritativeReviewCodeArtifact(taskDir);
+  if (!authoritative.ok) {
+    return {
+      ok: false,
+      result: failResult("review-fact", authoritative.error ?? "No active review-code artifact is available")
+    };
+  }
+  if (path.basename(resolvedArtifact.path) !== authoritative.fileName) {
+    return {
+      ok: false,
+      result: failResult(
+        "review-fact",
+        `review-code artifact ${path.basename(resolvedArtifact.path)} is not the current active artifact ${authoritative.fileName}; re-run review-code`
+      )
+    };
+  }
+
+  return { ok: true, path: resolvedArtifact.path };
+}
+
+function validateReviewFactIdentity(taskDir: any, content: string, repositoryRoot: any, task: any, verdict: any): any {
+  const identity = inspectReviewIdentity(taskDir, content, repositoryRoot);
+  if (identity.status !== 'matched' || !identity.reviewedHead) {
+    return {
+      ok: false,
+      result: failResult('review-fact', `Review identity is ${identity.status}: ${identity.message}; re-run review-code`)
+    };
+  }
+
+  const baseline = identity.reviewedHead;
+  if (["通过", "Approved"].includes(verdict)) {
+    const lastReviewedCommit = String(task.metadata.last_reviewed_commit || "").trim();
+    if (lastReviewedCommit !== baseline) {
+      return {
+        ok: false,
+        result: failResult(
+          "review-fact",
+          `Approved clean review must set task last_reviewed_commit to reviewed head ${baseline.slice(0, 8)}`
+        )
+      };
+    }
+  }
+
+  return { ok: true, reviewedHead: baseline };
 }
 
 function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact }: any): any {
