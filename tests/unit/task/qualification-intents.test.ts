@@ -181,6 +181,34 @@ test('internal qualification confirms the current digest and creates a core-owne
   }
 });
 
+test('qualification confirmation parser preserves row validation and duplicate QCR rejection', () => {
+  const columns = '| qcr_id | constraint_id | actor | entrypoint | request_id | approved_digest | confirmed_at | rationale |';
+  const separator = '| --- | --- | --- | --- | --- | --- | --- | --- |';
+  const row = (overrides: Partial<Record<string, string>> = {}) => {
+    const values = {
+      qcr_id: 'QCR-1', constraint_id: 'C-1', actor: 'human-declared', entrypoint: 'task-qualification',
+      request_id: 'request-1', approved_digest: 'a'.repeat(64), confirmed_at: '2026-01-01T00:00:00Z', rationale: 'Confirmed by user',
+      ...overrides
+    };
+    return `| ${Object.values(values).join(' | ')} |`;
+  };
+  const parse = (...rows: string[]) => parseQualificationConfirmations(`## Qualification Confirmations\n\n${columns}\n${separator}\n${rows.join('\n')}\n`);
+
+  const valid = parse(row());
+  assert.equal(valid.ok, true);
+  if (valid.ok) assert.equal(valid.confirmations[0]?.qcrId, 'QCR-1');
+
+  for (const invalidRow of [row({ actor: 'agent' }), row({ approved_digest: 'A'.repeat(64) }), row({ confirmed_at: 'not-a-date' })]) {
+    const invalid = parse(invalidRow);
+    assert.equal(invalid.ok, false);
+    if (!invalid.ok) assert.equal(invalid.code, 'QUALIFICATION_CONFIRMATION_INVALID');
+  }
+
+  const duplicate = parse(row(), row({ request_id: 'request-2' }));
+  assert.equal(duplicate.ok, false);
+  if (!duplicate.ok) assert.equal(duplicate.code, 'QUALIFICATION_CONFIRMATION_INVALID');
+});
+
 test('internal qualification supersedes and revokes confirmed constraints', () => {
   for (const operation of ['supersede', 'revoke'] as const) {
     const { repoRoot, taskMd } = fixture();
