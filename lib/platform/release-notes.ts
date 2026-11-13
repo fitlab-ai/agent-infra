@@ -7,7 +7,7 @@ import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
-import type { ReleaseNoteAuthor } from './provider-contract.ts';
+import type { ReleaseNoteAuthor, ReleaseNotesFacts } from './provider-contract.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
 type ReleaseNoteOptions = {
@@ -131,66 +131,53 @@ function configuredPlatform(cwd: string): string | null {
   }
 }
 
-async function releaseNoteContext(
-  input: { fromTag: string; toTag: string; branch: string; historyLimit?: number },
-  options: ReleaseNoteOptions = {}
-) {
-  const historyLimit = input.historyLimit ?? 3;
-  if (!input.fromTag || !input.toTag || !input.branch || !Number.isInteger(historyLimit) || historyLimit < 1 || historyLimit > 100) {
-    return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_INPUT_INVALID', message: 'from-tag, to-tag, branch, and a history limit from 1 to 100 are required', retryable: false } };
-  }
-  const cwd = path.resolve(options.cwd || process.cwd());
-  const platformType = options.platformType ?? configuredPlatform(cwd);
-  const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
-  if (!loaded.ok) {
-    if (loaded.context.status === 'no-op') return baseResult('no-op');
-    const status = loaded.context.status === 'blocked' ? 'blocked' : 'failed';
-    return { ...baseResult(status), error: loaded.context.error };
-  }
-  if (!loaded.value.context.platform.repository) return baseResult('no-op');
-  let fromOid: string;
-  let toOid: string;
-  let fromTime: string;
-  let toTime: string;
-  let commitFacts: Array<{ oid: string; title: string }>;
+type ReleaseNoteRange = {
+  fromOid: string;
+  toOid: string;
+  fromTime: string;
+  toTime: string;
+  commitFacts: Array<{ oid: string; title: string }>;
+};
+
+type LoadedReleaseNotesProvider = Extract<Awaited<ReturnType<typeof resolvePlatformProviderContext>>, { ok: true }>['value'];
+
+function readReleaseNoteRange(cwd: string, fromTag: string, toTag: string): ReleaseNoteRange | null {
   try {
-    fromOid = git(cwd, ['rev-parse', '--verify', `${input.fromTag}^{commit}`]);
-    toOid = git(cwd, ['rev-parse', '--verify', `${input.toTag}^{commit}`]);
+    const fromOid = git(cwd, ['rev-parse', '--verify', `${fromTag}^{commit}`]);
+    const toOid = git(cwd, ['rev-parse', '--verify', `${toTag}^{commit}`]);
     git(cwd, ['merge-base', '--is-ancestor', fromOid, toOid]);
-    fromTime = git(cwd, ['show', '-s', '--format=%cI', fromOid]);
-    toTime = git(cwd, ['show', '-s', '--format=%cI', toOid]);
+    const fromTime = git(cwd, ['show', '-s', '--format=%cI', fromOid]);
+    const toTime = git(cwd, ['show', '-s', '--format=%cI', toOid]);
     const raw = git(cwd, ['log', '--reverse', '--no-merges', '--format=%H%x00%s', `${fromOid}..${toOid}`]);
-    commitFacts = raw ? raw.split('\n').map((line) => {
+    const commitFacts = raw ? raw.split('\n').map((line) => {
       const [oid = '', title = ''] = line.split('\0');
       return { oid, title };
     }) : [];
+    return { fromOid, toOid, fromTime, toTime, commitFacts };
   } catch {
-    return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_RANGE_INVALID', message: 'The release tag range is missing or is not ancestral', retryable: false } };
+    return null;
   }
-  const platform = loaded.value.provider.releases?.collectNotes
-    ? await loaded.value.provider.releases.collectNotes({
-      context: providerOperationContext(loaded.value),
-      commitOids: commitFacts.map((item) => item.oid),
-      branch: input.branch,
-      historyLimit,
-      fromTime,
-      toTime
-    })
-    : unsupportedProviderOperation(loaded.value.provider, 'releases.collectNotes');
-  if (!platform.ok) return { ...baseResult(platform.error.retryable ? 'blocked' : 'failed'), error: providerError(platform.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
-  const commits = commitFacts.map((commit) => {
+}
+
+function mapReleaseNoteCommits(
+  commitFacts: Array<{ oid: string; title: string }>,
+  providerFacts: ReleaseNotesFacts
+): ReleaseNoteCommit[] {
+  return commitFacts.map((commit) => {
     const seen = new Set<string>();
-    const facts = platform.value.commits.find((item) => item.sha === commit.oid);
-    const authors = (facts?.authors || [])
-      .filter((actor) => {
+    const facts = providerFacts.commits.find((item) => item.sha === commit.oid);
+    const authors = (facts?.authors || []).filter((actor) => {
       const key = actor.login || actor.name;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-      });
+    });
     return { ...commit, url: facts?.url || null, pullRequestNumbers: facts?.pullRequestNumbers || [], authors };
   });
-  const pullRequests: ReleaseNotePullRequest[] = platform.value.mergedPullRequests
+}
+
+function mapReleaseNotePullRequests(providerFacts: ReleaseNotesFacts): ReleaseNotePullRequest[] {
+  return providerFacts.mergedPullRequests
     .map((item) => ({
       number: item.number || resourceIdentityNumber(item.identity) || 0,
       ...(item.identity ? { identity: item.identity } : {}),
@@ -209,33 +196,59 @@ async function releaseNoteContext(
       }))
     }))
     .sort((left, right) => left.number - right.number);
-  return {
-    status: 'no-op' as const,
-    changed: false,
-    range: { fromTag: input.fromTag, toTag: input.toTag, fromOid, toOid },
-    history: platform.value.history,
-    pullRequests,
-    commits,
-    error: null
-  };
 }
 
-async function publishReleaseNotes(
-  input: { tag: string; title: string; notesFile: string; expectedSha256: string; dryRun?: boolean },
-  options: ReleaseNoteOptions = {}
+async function collectReleaseNotes(
+  loaded: LoadedReleaseNotesProvider,
+  range: ReleaseNoteRange,
+  branch: string,
+  historyLimit: number
 ) {
+  return loaded.provider.releases?.collectNotes
+    ? loaded.provider.releases.collectNotes({
+      context: providerOperationContext(loaded),
+      commitOids: range.commitFacts.map((item) => item.oid),
+      branch,
+      historyLimit,
+      fromTime: range.fromTime,
+      toTime: range.toTime
+    })
+    : unsupportedProviderOperation(loaded.provider, 'releases.collectNotes');
+}
+
+type PublishReleaseNotesInput = {
+  tag: string;
+  title: string;
+  notesFile: string;
+  expectedSha256: string;
+  dryRun?: boolean;
+};
+
+type PublishReleaseNotesValidation =
+  | { ok: true; actualSha256: string }
+  | { ok: false; result: ReturnType<typeof releaseNoteFailure> };
+
+function validateReleaseNotesPublishInput(input: PublishReleaseNotesInput): PublishReleaseNotesValidation {
   if (!input.tag || !input.title || !input.notesFile || !SHA256_PATTERN.test(input.expectedSha256)) {
-    return releaseNoteFailure('RELEASE_NOTES_INPUT_INVALID', 'tag, title, notes-file, and expected-sha256 are required');
+    return { ok: false, result: releaseNoteFailure('RELEASE_NOTES_INPUT_INVALID', 'tag, title, notes-file, and expected-sha256 are required') };
   }
   let actualSha256: string;
   try {
     actualSha256 = releaseNoteSha256(fs.readFileSync(input.notesFile));
   } catch {
-    return releaseNoteFailure('RELEASE_NOTES_FILE_UNREADABLE', 'notes-file could not be read');
+    return { ok: false, result: releaseNoteFailure('RELEASE_NOTES_FILE_UNREADABLE', 'notes-file could not be read') };
   }
   if (actualSha256 !== input.expectedSha256) {
-    return releaseNoteFailure('RELEASE_NOTES_DIGEST_MISMATCH', 'notes-file does not match the confirmed SHA-256 digest');
+    return { ok: false, result: releaseNoteFailure('RELEASE_NOTES_DIGEST_MISMATCH', 'notes-file does not match the confirmed SHA-256 digest') };
   }
+  return { ok: true, actualSha256 };
+}
+
+async function publishValidatedReleaseNotes(
+  input: PublishReleaseNotesInput,
+  actualSha256: string,
+  options: ReleaseNoteOptions
+) {
   const cwd = path.resolve(options.cwd || process.cwd());
   const platformType = options.platformType ?? configuredPlatform(cwd);
   const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
@@ -248,26 +261,75 @@ async function publishReleaseNotes(
       error: loaded.context.error || { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false }
     };
   }
-  if (loaded.ok) {
-    const context = loaded.value.context;
-    if (!context.platform.repository) return { status: context.status === 'blocked' ? 'blocked' as const : 'failed' as const, changed: false, operation: null, url: null, error: context.error };
-    const published = loaded.value.provider.releases?.publishNotes
-      ? await loaded.value.provider.releases.publishNotes({
-        context: providerOperationContext(loaded.value),
-        release: { kind: 'key', value: input.tag },
-        title: input.title,
-        notes: {
-          text: fs.readFileSync(input.notesFile, 'utf8'),
-          sha256: actualSha256,
-          byteLength: fs.statSync(input.notesFile).size
-        },
-        mutation: { idempotencyKey: `release-notes:publish:${input.tag}` }
-      })
-      : unsupportedProviderOperation(loaded.value.provider, 'releases.publishNotes');
-    if (!published.ok) return { status: providerStatus(published.error), changed: false, operation: null, url: null, error: providerError(published.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
-    return { status: 'applied' as const, changed: published.value.changed, operation: 'publish-notes', url: null, error: null };
+  const context = loaded.value.context;
+  if (!context.platform.repository) return { status: context.status === 'blocked' ? 'blocked' as const : 'failed' as const, changed: false, operation: null, url: null, error: context.error };
+  const published = loaded.value.provider.releases?.publishNotes
+    ? await loaded.value.provider.releases.publishNotes({
+      context: providerOperationContext(loaded.value),
+      release: { kind: 'key', value: input.tag },
+      title: input.title,
+      notes: {
+        text: fs.readFileSync(input.notesFile, 'utf8'),
+        sha256: actualSha256,
+        byteLength: fs.statSync(input.notesFile).size
+      },
+      mutation: { idempotencyKey: `release-notes:publish:${input.tag}` }
+    })
+    : unsupportedProviderOperation(loaded.value.provider, 'releases.publishNotes');
+  if (!published.ok) return { status: providerStatus(published.error), changed: false, operation: null, url: null, error: providerError(published.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
+  return { status: 'applied' as const, changed: published.value.changed, operation: 'publish-notes', url: null, error: null };
+}
+
+function isValidReleaseNoteContextInput(
+  input: { fromTag: string; toTag: string; branch: string },
+  historyLimit: number
+): boolean {
+  return Boolean(input.fromTag && input.toTag && input.branch && Number.isInteger(historyLimit) && historyLimit >= 1 && historyLimit <= 100);
+}
+
+async function releaseNoteContext(
+  input: { fromTag: string; toTag: string; branch: string; historyLimit?: number },
+  options: ReleaseNoteOptions = {}
+) {
+  const historyLimit = input.historyLimit ?? 3;
+  if (!isValidReleaseNoteContextInput(input, historyLimit)) {
+    return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_INPUT_INVALID', message: 'from-tag, to-tag, branch, and a history limit from 1 to 100 are required', retryable: false } };
   }
-  return { status: 'failed' as const, changed: false, operation: null, url: null, error: { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false } };
+  const cwd = path.resolve(options.cwd || process.cwd());
+  const platformType = options.platformType ?? configuredPlatform(cwd);
+  const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
+  if (!loaded.ok) {
+    if (loaded.context.status === 'no-op') return baseResult('no-op');
+    const status = loaded.context.status === 'blocked' ? 'blocked' : 'failed';
+    return { ...baseResult(status), error: loaded.context.error };
+  }
+  if (!loaded.value.context.platform.repository) return baseResult('no-op');
+  const range = readReleaseNoteRange(cwd, input.fromTag, input.toTag);
+  if (!range) {
+    return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_RANGE_INVALID', message: 'The release tag range is missing or is not ancestral', retryable: false } };
+  }
+  const platform = await collectReleaseNotes(loaded.value, range, input.branch, historyLimit);
+  if (!platform.ok) return { ...baseResult(platform.error.retryable ? 'blocked' : 'failed'), error: providerError(platform.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
+  const commits = mapReleaseNoteCommits(range.commitFacts, platform.value);
+  const pullRequests = mapReleaseNotePullRequests(platform.value);
+  return {
+    status: 'no-op' as const,
+    changed: false,
+    range: { fromTag: input.fromTag, toTag: input.toTag, fromOid: range.fromOid, toOid: range.toOid },
+    history: platform.value.history,
+    pullRequests,
+    commits,
+    error: null
+  };
+}
+
+async function publishReleaseNotes(
+  input: PublishReleaseNotesInput,
+  options: ReleaseNoteOptions = {}
+) {
+  const validation = validateReleaseNotesPublishInput(input);
+  if (!validation.ok) return validation.result;
+  return publishValidatedReleaseNotes(input, validation.actualSha256, options);
 }
 
 export {

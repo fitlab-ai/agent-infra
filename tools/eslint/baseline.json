@@ -972,15 +972,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/release-notes.ts",
-      "ruleId": "complexity",
-      "stableId": "3e6c9a7ca305211eccbc7957b9777e914ead91849c347390d1991e8d5188102d",
-      "displayName": "publishReleaseNotes",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/git/workflow.ts",
       "ruleId": "complexity",
       "stableId": "24ed948fc63457059853a37f8055eb1c7f13da062a680ba8e4270750a786b70a",
@@ -1122,15 +1113,6 @@
       "displayName": "recoverSandboxControlFromChannel",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/release-notes.ts",
-      "ruleId": "complexity",
-      "stableId": "9511a69726c7d50a56e50fdecc1418e7aa1af189349c5b99e305209cbe014c82",
-      "displayName": "releaseNoteContext",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
       "count": 1
     },
     {
