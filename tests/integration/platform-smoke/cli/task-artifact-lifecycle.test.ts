@@ -220,6 +220,27 @@ test('review-code reuses only a completed report bound to the current commit', (
   assert.equal(changed.selection?.artifact.name, 'review-code-r2.md');
 });
 
+test('review-code reuse does not parse unrelated review receipts after a matched completion', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
+  completedReviewFixture(f);
+  fs.writeFileSync(path.join(f.taskDir, 'review-plan.md'), [
+    '## 审查摘要', '',
+    '- **总体结论**：需要修改',
+    '- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0', ''
+  ].join('\n'));
+  recordArtifactCompletions(f.taskDir, [
+    { name: 'analysis.md', lifecycleInputs: [] },
+    { name: 'review-code.md', lifecycleInputs: [] },
+    { name: 'review-plan.md', lifecycleInputs: [] }
+  ]);
+  fs.appendFileSync(path.join(f.taskDir, 'task.md'), '\n## 产物生命周期收据\n\nmalformed receipt table\n');
+
+  const result = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready', JSON.stringify(result.error));
+  assert.equal(result.selection?.disposition, 'reuse');
+  assert.equal(result.selection?.reasonCode, 'history-matched');
+});
+
 test('review-code creates a new round when a completed report omits Reviewed Head', () => {
   const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
   completedReviewFixture(f, { includeReviewedHead: false });

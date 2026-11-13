@@ -414,10 +414,11 @@ function hasSelectionEvidence(
   context: ArtifactContextResult,
   pathState: LifecyclePathState
 ): boolean {
-  return hasExplicitSelectionEvidence(options, family)
-    || hasExecutionInputChangeEvidence(content, family, context, pathState)
-    || hasReviewSelectionEvidence(content, family, options, context)
-    || hasPendingTaskSelectionEvidence(content, family, context)
+  if (hasExplicitSelectionEvidence(options, family)
+    || hasExecutionInputChangeEvidence(content, family, context, pathState)) return true;
+  const reviewEvidence = hasReviewSelectionEvidence(content, family, options, context);
+  if (reviewEvidence !== null) return reviewEvidence;
+  return hasPendingTaskSelectionEvidence(content, family, context)
     || hasUnresolvedReviewChanges(content, context);
 }
 
@@ -451,11 +452,11 @@ function hasReviewSelectionEvidence(
   family: ArtifactFamily,
   options: InspectOptions,
   context: ArtifactContextResult
-): boolean {
-  if (!family.startsWith('review-')) return false;
+): boolean | null {
+  if (!family.startsWith('review-')) return null;
   const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
   const currentInput = context.inputs.find((input) => input.family === reviewedFamily);
-  if (family !== 'review-code') return Boolean(currentInput && context.reviewedInput?.name !== currentInput.name);
+  if (family !== 'review-code') return currentInput && context.reviewedInput?.name !== currentInput.name ? true : null;
   if (!context.latest) return false;
   try {
     const reportContent = fs.readFileSync(context.latest.path, 'utf8');
