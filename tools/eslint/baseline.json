@@ -522,15 +522,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/issues.ts",
-      "ruleId": "complexity",
-      "stableId": "5ade443f4554cc32a80a92bacf1679dd2965c48972c418da4fc53c9e3f362d17",
-      "displayName": "createPlatformIssue.execute",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/task/create-service.ts",
       "ruleId": "complexity",
       "stableId": "81992b1791fd7f7540abe9d74f7b0dce6b10ee90697ffbeedadca6138d9c69ab",
