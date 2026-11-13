@@ -180,15 +180,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/verification-sync.ts",
-      "ruleId": "complexity",
-      "stableId": "fad6645c95a3f58c05c7a22de308111207d09bfadf9ab23c5761e3bd13681f47",
-      "displayName": "buildSyncContext",
-      "metric": 36,
-      "normalizedMessage": "complexity=36",
-      "count": 1
-    },
-    {
       "file": "lib/task/capabilities.ts",
       "ruleId": "complexity",
       "stableId": "ef17c7b98d592ec2d11b64e9b83636cef67e10263eb264121226cd4a6c7d2d9c",
@@ -618,15 +609,6 @@
       "displayName": "fetchGitHubReleaseNoteData",
       "metric": 45,
       "normalizedMessage": "complexity=45",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/verification-sync.ts",
-      "ruleId": "complexity",
-      "stableId": "0a8cb3c1bfc1e69ddc7dba22bb0d67f14ef1007a06262a7e53466375702578e0",
-      "displayName": "fetchRemoteData",
-      "metric": 42,
-      "normalizedMessage": "complexity=42",
       "count": 1
     },
     {

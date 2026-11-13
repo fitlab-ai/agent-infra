@@ -112,44 +112,12 @@ export async function check({ taskDir, config, artifactFile, skillName }: any, s
 }
 
 async function buildSyncContext({ taskDir, config, artifactFile, skillName }: any, shared: VerificationShared): Promise<any> {
-  const task = shared.loadTask(taskDir);
-  if (!task.ok) {
-    return { earlyReturn: shared.failResult(CHECK_TYPE, task.message) };
-  }
+  const taskContext = loadSyncTaskContext(taskDir, config, shared);
+  if (taskContext.earlyReturn) return taskContext;
 
-  const issueIdentity = taskIssueIdentity(task.metadata);
-  const issueNumber = resourceIdentityNumber(issueIdentity);
-  const fact = readPrDeliveryFact(task.metadata);
-  if (fact.status === "invalid") {
-    return { earlyReturn: shared.failResult(CHECK_TYPE, fact.error.message, "check_failed") };
-  }
-  const prIdentity = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.resource : null;
-  const prNumber = resourceIdentityNumber(prIdentity);
-  if (config.when === "platform_issue_identity_exists" && !issueIdentity) {
-    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no platform_issue_identity") };
-  }
-  if (config.when === "pr_fact_bound" && !prIdentity) {
-    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
-  }
+  const providerContext = await loadSyncProviderContext(shared.repoRoot, shared);
+  if (providerContext.earlyReturn) return providerContext;
 
-  if (!issueIdentity) {
-    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
-  }
-
-  const loaded = await resolvePlatformProviderContext({ cwd: shared.repoRoot });
-  const platformContext = loaded.ok ? loaded.value.context : loaded.context;
-  if (platformContext.status === "failed") {
-    return { earlyReturn: shared.failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed") };
-  }
-  if (platformContext.status === "blocked") {
-    return { earlyReturn: shared.blockedResult(CHECK_TYPE, platformContext.error?.message || "Platform context blocked", "network_error") };
-  }
-  if (!platformContext.platform.repository) {
-    if (platformContext.error?.code === "REMOTE_MISSING" || platformContext.error?.code === "REMOTE_INVALID") {
-      return { earlyReturn: shared.blockedResult(CHECK_TYPE, platformContext.error.message, "network_error") };
-    }
-    return { earlyReturn: shared.passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`) };
-  }
   const effectiveSkillName = skillName || config.skillName || "code-task";
   const expectedValues = resolveExpectedValues(effectiveSkillName, artifactFile);
   if (!expectedValues.ok) {
@@ -165,26 +133,71 @@ async function buildSyncContext({ taskDir, config, artifactFile, skillName }: an
   const artifactPath = artifactFile ? path.join(taskDir, artifactFile) : null;
 
   return {
-    task,
     taskDir,
     config,
     skillName: effectiveSkillName,
     artifactFile,
     artifactPath,
-    issueIdentity,
-    prIdentity,
-    issueNumber,
-    prNumber,
+    ...taskContext,
+    ...providerContext,
+    expectedStatusLabel: expectedValues.statusLabel,
+    marker,
+    prMarker
+  };
+}
+
+function loadSyncTaskContext(taskDir: string, config: any, shared: VerificationShared): any {
+  const task = shared.loadTask(taskDir);
+  if (!task.ok) return { earlyReturn: shared.failResult(CHECK_TYPE, task.message) };
+
+  const issueIdentity = taskIssueIdentity(task.metadata);
+  const issueNumber = resourceIdentityNumber(issueIdentity);
+  const fact = readPrDeliveryFact(task.metadata);
+  if (fact.status === "invalid") return { earlyReturn: shared.failResult(CHECK_TYPE, fact.error.message, "check_failed") };
+
+  const prIdentity = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
+  if (config.when === "platform_issue_identity_exists" && !issueIdentity) {
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no platform_issue_identity") };
+  }
+  if (config.when === "pr_fact_bound" && !prIdentity) {
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
+  }
+  if (!issueIdentity) return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
+
+  return { task, issueIdentity, issueNumber, prIdentity, prNumber };
+}
+
+async function loadSyncProviderContext(repoRoot: string, shared: VerificationShared): Promise<any> {
+  const loaded = await resolvePlatformProviderContext({ cwd: repoRoot });
+  const platformContext = loaded.ok ? loaded.value.context : loaded.context;
+  const earlyReturn = syncPlatformEarlyReturn(platformContext, shared);
+  if (earlyReturn) return { earlyReturn };
+
+  return {
     repoOwnerType: String(loaded.ok ? loaded.value.snapshot.metadata?.ownerType || "unknown" : "unknown"),
     hasTriage: platformContext.capabilities.triage,
     hasPush: platformContext.capabilities.push,
-    expectedStatusLabel: expectedValues.statusLabel,
-    marker,
-    prMarker,
     provider: loaded.ok ? loaded.value.provider : null,
     providerType: loaded.ok ? loaded.value.providerType : null,
     loadedContext: loaded.ok ? loaded.value : null
   };
+}
+
+function syncPlatformEarlyReturn(platformContext: any, shared: VerificationShared): any {
+  if (platformContext.status === "failed") {
+    return shared.failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed");
+  }
+  if (platformContext.status === "blocked") {
+    return shared.blockedResult(CHECK_TYPE, platformContext.error?.message || "Platform context blocked", "network_error");
+  }
+  if (!platformContext.platform.repository) {
+    if (platformContext.error?.code === "REMOTE_MISSING" || platformContext.error?.code === "REMOTE_INVALID") {
+      return shared.blockedResult(CHECK_TYPE, platformContext.error.message, "network_error");
+    }
+    return shared.passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`);
+  }
+  return null;
 }
 
 function resolveExpectedValues(skillName: string, artifactFile: string | undefined): any {
@@ -203,8 +216,37 @@ function resolveExpectedValues(skillName: string, artifactFile: string | undefin
 }
 
 async function fetchRemoteData(context: any, shared: VerificationShared): Promise<any> {
-  const provider = context.provider;
   const operationContext = providerOperationContext(context.loadedContext, context.taskDir);
+  const facts = await fetchRemoteFacts(context, operationContext, shared);
+  if (facts.earlyReturn) return facts;
+
+  const issueData = normalizeRemoteIssue(facts.value.issue);
+  const prComments = await fetchRemotePrComments(context, operationContext, shared);
+  if (prComments.earlyReturn) return prComments;
+
+  const inLabels = await fetchRepositoryLabels(context, operationContext, shared);
+  if (inLabels.earlyReturn) return inLabels;
+
+  const changeRequest = facts.value.changeRequest;
+  return {
+    issue: issueData.issue,
+    comments: facts.value.comments.map((comment: { id: string; body: string; createdSequence: number | null }) => ({ id: comment.id, body: comment.body, createdSequence: comment.createdSequence })),
+    prComments: prComments.value,
+    prLabels: changeRequest?.labels || null,
+    issueType: issueData.issueType,
+    issueFields: issueData.issueFields,
+    prMilestone: changeRequest
+      ? (changeRequest.milestone ? { title: changeRequest.milestone } : null)
+      : undefined,
+    prAssignees: changeRequest?.assignees,
+    prHeadSha: changeRequest?.headSha,
+    inLabelMapping: inLabels.mapping,
+    repositoryLabels: inLabels.labels
+  };
+}
+
+async function fetchRemoteFacts(context: any, operationContext: any, shared: VerificationShared): Promise<any> {
+  const provider = context.provider;
   const facts = provider?.verification?.fetchRemoteFacts
     ? await provider.verification.fetchRemoteFacts({
       context: operationContext,
@@ -222,7 +264,10 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
         : shared.failResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "check_failed")
     };
   }
-  const issueSnapshot = facts.value.issue;
+  return { value: facts.value };
+}
+
+function normalizeRemoteIssue(issueSnapshot: any): any {
   const issue = issueSnapshot
     ? {
       state: issueSnapshot.state.toUpperCase(),
@@ -239,57 +284,48 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
       values: new Map(Object.entries(issueSnapshot.fields).map(([name, value]) => [name, { kind: fieldKinds.get(name) || (typeof value === "number" ? "number" : "single-select"), value }]))
     };
   }
-  let prComments = null;
-  if (context.prMarker && context.prIdentity && shouldFetchPrComments(context) && provider?.comments?.list) {
-    const listed = await provider.comments.list({ context: operationContext, parent: context.prIdentity });
-    if (!listed.ok) return {
+  return { issue, issueFields, issueType: issueSnapshot ? (issueSnapshot.issueType ? issueSnapshot.issueType.name : null) : undefined };
+}
+
+async function fetchRemotePrComments(context: any, operationContext: any, shared: VerificationShared): Promise<any> {
+  const provider = context.provider;
+  if (!(context.prMarker && context.prIdentity && shouldFetchPrComments(context) && provider?.comments?.list)) {
+    return { value: null };
+  }
+  const listed = await provider.comments.list({ context: operationContext, parent: context.prIdentity });
+  if (!listed.ok) {
+    return {
       earlyReturn: listed.error.retryable
         ? shared.blockedResult(CHECK_TYPE, listed.error.message, "network_error")
         : shared.failResult(CHECK_TYPE, listed.error.message, "check_failed")
     };
-    prComments = listed.value.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body }));
   }
-  const changeRequest = facts.value.changeRequest;
-  let inLabelMapping: Record<string, string[]> = {};
-  let repositoryLabels: string[] = [];
+  return { value: listed.value.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body })) };
+}
+
+async function fetchRepositoryLabels(context: any, operationContext: any, shared: VerificationShared): Promise<any> {
+  let mapping: Record<string, string[]> = {};
+  let labels: string[] = [];
   if (platformAuditPolicy('in-labels-computed', context).enabled && context.hasTriage) {
-    const mapping = loadInLabelMapping(shared);
-    if (!mapping.ok) return { earlyReturn: shared.failResult(CHECK_TYPE, mapping.message, "check_failed") };
-    inLabelMapping = mapping.value;
-    if (Object.keys(inLabelMapping).length > 0) {
-      const labels = provider?.issues?.listLabels
-        ? await provider.issues.listLabels({ context: operationContext })
-        : unsupportedProviderOperation(provider, "issues.listLabels");
-      if (!labels.ok) {
-        const error = providerError(labels.error, "PLATFORM_PROVIDER_OPERATION_FAILED");
+    const loadedMapping = loadInLabelMapping(shared);
+    if (!loadedMapping.ok) return { earlyReturn: shared.failResult(CHECK_TYPE, loadedMapping.message, "check_failed") };
+    mapping = loadedMapping.value;
+    if (Object.keys(mapping).length > 0) {
+      const result = context.provider?.issues?.listLabels
+        ? await context.provider.issues.listLabels({ context: operationContext })
+        : unsupportedProviderOperation(context.provider, "issues.listLabels");
+      if (!result.ok) {
+        const error = providerError(result.error, "PLATFORM_PROVIDER_OPERATION_FAILED");
         return {
           earlyReturn: error.retryable
             ? shared.blockedResult(CHECK_TYPE, `${error.code}: ${error.message}`, "network_error")
             : shared.failResult(CHECK_TYPE, `${error.code}: ${error.message}`, "check_failed")
         };
       }
-      repositoryLabels = labels.value;
+      labels = result.value;
     }
   }
-  return {
-    issue,
-    comments: facts.value.comments.map((comment: { id: string; body: string; createdSequence: number | null }) => ({
-      id: comment.id, body: comment.body, createdSequence: comment.createdSequence
-    })),
-    prComments,
-    prLabels: changeRequest?.labels || null,
-    issueType: issueSnapshot
-      ? (issueSnapshot.issueType ? issueSnapshot.issueType.name : null)
-      : undefined,
-    issueFields,
-    prMilestone: changeRequest
-      ? (changeRequest.milestone ? { title: changeRequest.milestone } : null)
-      : undefined,
-    prAssignees: changeRequest?.assignees,
-    prHeadSha: changeRequest?.headSha,
-    inLabelMapping,
-    repositoryLabels
-  };
+  return { mapping, labels };
 }
 
 function mapTaskTypeToLabel(taskType: any): any {
