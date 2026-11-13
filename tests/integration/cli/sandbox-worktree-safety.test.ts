@@ -563,6 +563,8 @@ test("recovered worktree safety uses an isolated branch snapshot after metadata 
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const fixture = createLinkedWorktree();
   try {
+    const repositoryIndex = path.join(fixture.repo, ".git", "index");
+    const repositoryIndexBefore = fs.readFileSync(repositoryIndex);
     removeWorktreeMetadata(fixture.worktree);
     const recovery = {
       repoRoot: fixture.repo,
@@ -576,11 +578,63 @@ test("recovered worktree safety uses an isolated branch snapshot after metadata 
     const clean = safety.inspectRecoveredWorktree(fixture.worktree, recovery);
     assert.equal(clean.status, "clean");
     assert.equal(clean.snapshot.source, "recovered");
+    assert.deepEqual(fs.readFileSync(repositoryIndex), repositoryIndexBefore);
 
     fs.writeFileSync(path.join(fixture.worktree, "tracked.txt"), "recovered dirty\n", "utf8");
     const dirty = safety.inspectRecoveredWorktree(fixture.worktree, recovery);
     assert.equal(dirty.status, "dirty");
     assert.ok(dirty.snapshot.changes.some((change) => change.path === "tracked.txt"));
+    assert.deepEqual(fs.readFileSync(repositoryIndex), repositoryIndexBefore);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("recovered worktree safety rejects a symlinked .git metadata pointer", onPlatforms("linux", "darwin"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const fixture = createLinkedWorktree();
+  try {
+    const dotGit = path.join(fixture.worktree, ".git");
+    fs.renameSync(dotGit, `${dotGit}.original`);
+    fs.symlinkSync(`${dotGit}.original`, dotGit);
+
+    const recovered = safety.inspectRecoveredWorktree(fixture.worktree, {
+      repoRoot: fixture.repo,
+      worktreeBase: fixture.base,
+      branch: "feature/safe-delete",
+      identitySource: "branch-only",
+      taskId: null
+    });
+
+    assert.equal(recovered.status, "failed");
+    assert.match(recovered.message, /WORKTREE_RECOVERY_METADATA_NOT_ELIGIBLE/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("recovered worktree safety rejects a symlinked admin directory", onPlatforms("linux", "darwin"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const fixture = createLinkedWorktree();
+  try {
+    const dotGit = path.join(fixture.worktree, ".git");
+    const match = /^gitdir:\s*(.+)$/i.exec(fs.readFileSync(dotGit, "utf8").trim());
+    assert.ok(match?.[1]);
+    const adminPath = path.resolve(path.dirname(dotGit), match[1]);
+    const movedAdminPath = `${adminPath}.original`;
+    fs.renameSync(adminPath, movedAdminPath);
+    fs.symlinkSync(movedAdminPath, adminPath, "dir");
+
+    const recovered = safety.inspectRecoveredWorktree(fixture.worktree, {
+      repoRoot: fixture.repo,
+      worktreeBase: fixture.base,
+      branch: "feature/safe-delete",
+      identitySource: "branch-only",
+      taskId: null
+    });
+
+    assert.equal(recovered.status, "failed");
+    assert.match(recovered.message, /WORKTREE_RECOVERY_METADATA_INVALID/);
   } finally {
     fixture.cleanup();
   }

@@ -206,6 +206,72 @@ function hasValidHeadContent(content: string): boolean {
   return /^(?:ref:\s+refs\/\S+|[0-9a-f]{40}|[0-9a-f]{64})$/i.test(content.trim());
 }
 
+function assertRegularAdminMetadataFiles(adminPath: string, requiredFiles: string[]): boolean {
+  if (requiredFiles.some((name) => !fs.existsSync(path.join(adminPath, name)))) return false;
+  for (const name of requiredFiles) {
+    const filePath = path.join(adminPath, name);
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
+  }
+  return true;
+}
+
+function assertAdminMetadataPointers(adminPath: string, dotGit: string, commonDir: string): void {
+  const adminGitdir = fs.readFileSync(path.join(adminPath, 'gitdir'), 'utf8').trim();
+  const adminCommonDir = fs.readFileSync(path.join(adminPath, 'commondir'), 'utf8').trim();
+  const adminGitdirPath = adminGitdir
+    ? fs.realpathSync.native(path.resolve(adminPath, adminGitdir))
+    : '';
+  const canonicalDotGit = fs.realpathSync.native(dotGit);
+  const adminCommonDirPath = adminCommonDir
+    ? fs.realpathSync.native(path.resolve(adminPath, adminCommonDir))
+    : '';
+  if (!adminGitdir || adminGitdirPath !== canonicalDotGit
+    || !adminCommonDir || adminCommonDirPath !== commonDir) {
+    throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
+  }
+}
+
+function assertRegisteredAdminMetadata(
+  worktree: string,
+  repoRoot: string,
+  adminPath: string,
+  probe: Probe
+): void {
+  const headContent = fs.readFileSync(path.join(adminPath, 'HEAD'), 'utf8');
+  const indexContent = fs.readFileSync(path.join(adminPath, 'index'));
+  if (!hasValidHeadContent(headContent) || indexContent.subarray(0, 4).toString('ascii') !== 'DIRC') return;
+
+  const validationEnv: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX']) {
+    delete validationEnv[key];
+  }
+  validationEnv.GIT_DIR = adminPath;
+  validationEnv.GIT_WORK_TREE = path.resolve(worktree);
+  if (!probeMetadataCommand(probe, repoRoot, ['rev-parse', '--verify', 'HEAD^{commit}'], validationEnv)) return;
+  if (!probeMetadataCommand(probe, repoRoot, ['ls-files', '--stage', '-z'], validationEnv)) return;
+  throw new Error('WORKTREE_RECOVERY_METADATA_REGISTERED');
+}
+
+function assertAdminMetadataRecoverable(
+  worktree: string,
+  dotGit: string,
+  adminPath: string,
+  commonDir: string,
+  repoRoot: string,
+  probe: Probe
+): void {
+  if (!fs.existsSync(adminPath)) return;
+  const adminStat = fs.lstatSync(adminPath);
+  if (adminStat.isSymbolicLink()) throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
+  if (!adminStat.isDirectory()) return;
+
+  const requiredFiles = ['HEAD', 'gitdir', 'commondir', 'index'];
+  if (!assertRegularAdminMetadataFiles(adminPath, requiredFiles)) return;
+  assertAdminMetadataPointers(adminPath, dotGit, commonDir);
+  assertRegisteredAdminMetadata(worktree, repoRoot, adminPath, probe);
+}
+
 function assertRecoverableMetadata(worktree: string, repoRoot: string, probe: Probe): void {
   const dotGit = path.join(worktree, '.git');
   let dotGitStat: fs.Stats;
@@ -233,47 +299,7 @@ function assertRecoverableMetadata(worktree: string, repoRoot: string, probe: Pr
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.includes(path.sep)) {
     throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
   }
-
-  if (!fs.existsSync(adminPath)) return;
-  const adminStat = fs.lstatSync(adminPath);
-  if (adminStat.isSymbolicLink()) throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
-  if (!adminStat.isDirectory()) return;
-
-  const requiredFiles = ['HEAD', 'gitdir', 'commondir', 'index'];
-  if (requiredFiles.some((name) => !fs.existsSync(path.join(adminPath, name)))) return;
-  for (const name of requiredFiles) {
-    const filePath = path.join(adminPath, name);
-    const stat = fs.lstatSync(filePath);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
-  }
-
-  const adminGitdir = fs.readFileSync(path.join(adminPath, 'gitdir'), 'utf8').trim();
-  const adminCommonDir = fs.readFileSync(path.join(adminPath, 'commondir'), 'utf8').trim();
-  const adminGitdirPath = adminGitdir
-    ? fs.realpathSync.native(path.resolve(adminPath, adminGitdir))
-    : '';
-  const canonicalDotGit = fs.realpathSync.native(dotGit);
-  const adminCommonDirPath = adminCommonDir
-    ? fs.realpathSync.native(path.resolve(adminPath, adminCommonDir))
-    : '';
-  if (!adminGitdir || adminGitdirPath !== canonicalDotGit
-    || !adminCommonDir || adminCommonDirPath !== commonDir) {
-    throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
-  }
-
-  const headContent = fs.readFileSync(path.join(adminPath, 'HEAD'), 'utf8');
-  const indexContent = fs.readFileSync(path.join(adminPath, 'index'));
-  if (!hasValidHeadContent(headContent) || indexContent.subarray(0, 4).toString('ascii') !== 'DIRC') return;
-
-  const validationEnv: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX']) {
-    delete validationEnv[key];
-  }
-  validationEnv.GIT_DIR = adminPath;
-  validationEnv.GIT_WORK_TREE = path.resolve(worktree);
-  if (!probeMetadataCommand(probe, repoRoot, ['rev-parse', '--verify', 'HEAD^{commit}'], validationEnv)) return;
-  if (!probeMetadataCommand(probe, repoRoot, ['ls-files', '--stage', '-z'], validationEnv)) return;
-  throw new Error('WORKTREE_RECOVERY_METADATA_REGISTERED');
+  assertAdminMetadataRecoverable(worktree, dotGit, adminPath, commonDir, repoRoot, probe);
 }
 
 function parseRecoveredStatus(raw: string): WorktreeChange[] {
@@ -301,13 +327,9 @@ function parseRecoveredStatus(raw: string): WorktreeChange[] {
   return changes;
 }
 
-function captureRecoveredOnce(
-  worktree: string,
-  recovery: WorktreeRecoveryContext,
-  probe: Probe
-): WorktreeSnapshot {
+function assertRecoverableWorktreePath(worktree: string, worktreeBase: string): string {
   const resolvedWorktree = path.resolve(worktree);
-  const resolvedBase = path.resolve(recovery.worktreeBase);
+  const resolvedBase = path.resolve(worktreeBase);
   const relative = path.relative(resolvedBase, resolvedWorktree);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`WORKTREE_RECOVERY_PATH_INVALID: ${resolvedWorktree}`);
@@ -320,6 +342,10 @@ function captureRecoveredOnce(
   if (!canonicalRelative || canonicalRelative.startsWith('..') || path.isAbsolute(canonicalRelative)) {
     throw new Error('WORKTREE_RECOVERY_PATH_INVALID');
   }
+  return resolvedWorktree;
+}
+
+function assertRecoveryIdentity(recovery: WorktreeRecoveryContext): void {
   const resolvedWorkspace = resolveSandboxTarget(recovery.branch, recovery.repoRoot).workspace;
   if (recovery.identitySource === 'branch-only' && resolvedWorkspace.mode !== 'branch-only') {
     throw new Error('WORKTREE_RECOVERY_IDENTITY_CHANGED');
@@ -328,6 +354,55 @@ function captureRecoveredOnce(
     && (resolvedWorkspace.mode !== 'task-bound' || resolvedWorkspace.taskId !== recovery.taskId)) {
     throw new Error('WORKTREE_RECOVERY_IDENTITY_CHANGED');
   }
+}
+
+function captureRecoveredSnapshot(
+  resolvedWorktree: string,
+  recovery: WorktreeRecoveryContext,
+  env: NodeJS.ProcessEnv,
+  probe: Probe
+): WorktreeSnapshot {
+  const baseline = probeTextWithEnv(probe, recovery.repoRoot, [
+    'rev-parse', '--verify', `refs/heads/${recovery.branch}^{commit}`
+  ], env).trim();
+  if (!baseline) throw new Error(`WORKTREE_RECOVERY_BRANCH_INVALID: ${recovery.branch}`);
+  probeTextWithEnv(probe, recovery.repoRoot, ['read-tree', baseline], env);
+  probeTextWithEnv(probe, recovery.repoRoot, ['add', '-A', '--', '.'], env);
+  const status = probeTextWithEnv(probe, recovery.repoRoot, [
+    'diff', '--cached', '--name-status', '--find-renames', '-z', '--', '.'
+  ], env);
+  const changes = parseRecoveredStatus(status);
+  const hash = createHash('sha256');
+  updatePart(hash, 'source', 'recovered');
+  updatePart(hash, 'worktree', resolvedWorktree);
+  updatePart(hash, 'repo-root', path.resolve(recovery.repoRoot));
+  updatePart(hash, 'branch', recovery.branch);
+  updatePart(hash, 'baseline', baseline);
+  updatePart(hash, 'identity-source', recovery.identitySource);
+  updatePart(hash, 'task-id', recovery.taskId ?? '');
+  updatePart(hash, 'status', status);
+  for (const change of changes) {
+    hashPath(hash, resolvedWorktree, change.path, probe);
+    if (change.originalPath) hashPath(hash, resolvedWorktree, change.originalPath, probe);
+  }
+  return {
+    worktree: resolvedWorktree,
+    branch: recovery.branch,
+    head: baseline,
+    changes,
+    identity: hash.digest('hex'),
+    source: 'recovered',
+    recovery: { ...recovery }
+  };
+}
+
+function captureRecoveredOnce(
+  worktree: string,
+  recovery: WorktreeRecoveryContext,
+  probe: Probe
+): WorktreeSnapshot {
+  const resolvedWorktree = assertRecoverableWorktreePath(worktree, recovery.worktreeBase);
+  assertRecoveryIdentity(recovery);
   assertRecoverableMetadata(resolvedWorktree, recovery.repoRoot, probe);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovered-index-'));
@@ -336,38 +411,7 @@ function captureRecoveredOnce(
   env.GIT_INDEX_FILE = path.join(tempDir, 'index');
   env.GIT_WORK_TREE = resolvedWorktree;
   try {
-    const baseline = probeTextWithEnv(probe, recovery.repoRoot, [
-      'rev-parse', '--verify', `refs/heads/${recovery.branch}^{commit}`
-    ], env).trim();
-    if (!baseline) throw new Error(`WORKTREE_RECOVERY_BRANCH_INVALID: ${recovery.branch}`);
-    probeTextWithEnv(probe, recovery.repoRoot, ['read-tree', baseline], env);
-    probeTextWithEnv(probe, recovery.repoRoot, ['add', '-A', '--', '.'], env);
-    const status = probeTextWithEnv(probe, recovery.repoRoot, [
-      'diff', '--cached', '--name-status', '--find-renames', '-z', '--', '.'
-    ], env);
-    const changes = parseRecoveredStatus(status);
-    const hash = createHash('sha256');
-    updatePart(hash, 'source', 'recovered');
-    updatePart(hash, 'worktree', resolvedWorktree);
-    updatePart(hash, 'repo-root', path.resolve(recovery.repoRoot));
-    updatePart(hash, 'branch', recovery.branch);
-    updatePart(hash, 'baseline', baseline);
-    updatePart(hash, 'identity-source', recovery.identitySource);
-    updatePart(hash, 'task-id', recovery.taskId ?? '');
-    updatePart(hash, 'status', status);
-    for (const change of changes) {
-      hashPath(hash, resolvedWorktree, change.path, probe);
-      if (change.originalPath) hashPath(hash, resolvedWorktree, change.originalPath, probe);
-    }
-    return {
-      worktree: resolvedWorktree,
-      branch: recovery.branch,
-      head: baseline,
-      changes,
-      identity: hash.digest('hex'),
-      source: 'recovered',
-      recovery: { ...recovery }
-    };
+    return captureRecoveredSnapshot(resolvedWorktree, recovery, env, probe);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
