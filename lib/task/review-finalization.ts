@@ -118,53 +118,80 @@ function preflightFailed(
   };
 }
 
-/** Validate the current review draft before any finding-ledger write. */
-function preflightReviewSummary(
+type PreflightContext = Readonly<{
+  spec: (typeof STAGES)[ReviewStage];
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+}>;
+type PreflightContextResult = Readonly<{ ok: true; context: PreflightContext }> | Readonly<{ ok: false; result: ReviewPreflightResult }>;
+
+function resolvePreflightContext(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
-): ReviewPreflightResult {
+): PreflightContextResult {
   const stage = request.stage as ReviewStage;
   const spec = STAGES[stage];
-  if (!spec) return preflightFailed(request, 'REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`);
-  if (!request.taskRef || !request.artifact) return preflightFailed(request, 'REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required');
+  if (!spec) return { ok: false, result: preflightFailed(request, 'REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`) };
+  if (!request.taskRef || !request.artifact) return { ok: false, result: preflightFailed(request, 'REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required') };
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return preflightFailed(request, resolved.code, resolved.message, resolved.taskId ?? null);
-  if (resolved.state !== 'active') return preflightFailed(request, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  if (!resolved.ok) return { ok: false, result: preflightFailed(request, resolved.code, resolved.message, resolved.taskId ?? null) };
+  if (resolved.state !== 'active') return { ok: false, result: preflightFailed(request, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId) };
   const parsed = parseArtifactName(request.artifact);
-  if (!parsed || parsed.family !== spec.family) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`, resolved.taskId);
+  if (!parsed || parsed.family !== spec.family) return { ok: false, result: preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`, resolved.taskId) };
   const publicationError = validateArtifactPublication(resolved.taskDir, spec.family, request.artifact);
-  if (publicationError) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message, resolved.taskId);
+  if (publicationError) return { ok: false, result: preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message, resolved.taskId) };
+  return { ok: true, context: { spec, resolved } };
+}
 
-  let content: string;
+function readPreflightArtifact(
+  request: ReviewFinalizationRequest,
+  context: PreflightContext
+): { ok: true; content: string } | { ok: false; result: ReviewPreflightResult } {
   try {
-    const validated = validateCompletedArtifact(resolved.taskDir, spec.family, request.artifact);
-    if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
-    content = fs.readFileSync(validated.artifact.path, 'utf8');
-  } catch (error) { return preflightFailed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
+    const validated = validateCompletedArtifact(context.resolved.taskDir, context.spec.family, request.artifact);
+    if (!validated.ok) {
+      const code = validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID';
+      return { ok: false, result: preflightFailed(request, code, validated.error.message, context.resolved.taskId) };
+    }
+    return { ok: true, content: fs.readFileSync(validated.artifact.path, 'utf8') };
+  } catch (error) {
+    return { ok: false, result: preflightFailed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), context.resolved.taskId) };
+  }
+}
 
+function inspectPreflightArtifact(
+  request: ReviewFinalizationRequest,
+  context: PreflightContext,
+  content: string
+): ReviewPreflightResult {
   const artifactSha256 = sha256Content(content);
   const semanticDigest = canonicalSemanticDigest(content);
   const detail = inspectDecisionDetailDuplicates(content);
-  const structure = inspectArtifactContract(content, getArtifactSchema(spec.family)!);
+  const structure = inspectArtifactContract(content, getArtifactSchema(context.spec.family)!);
   if (!detail.ok || !structure.ok) {
     const diagnostics = [
       ...(!detail.ok ? [`${detail.code}: ${detail.message}`] : []),
       ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`)
     ].join('; ');
-    return preflightFailed(request, !detail.ok ? 'REVIEW_DECISION_DETAIL_INVALID' : 'REVIEW_ARTIFACT_STRUCTURE_INVALID', diagnostics, resolved.taskId, {
+    return preflightFailed(request, !detail.ok ? 'REVIEW_DECISION_DETAIL_INVALID' : 'REVIEW_ARTIFACT_STRUCTURE_INVALID', diagnostics, context.resolved.taskId, {
       artifactSha256, semanticDigest,
     });
   }
-  if (request.dryRun) {
-    return {
-      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
-      status: 'passed', changed: false, error: null
-    };
-  }
   return {
-    ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
+    ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', context.resolved.taskId, { artifactSha256, semanticDigest }),
     status: 'passed', changed: false, error: null
   };
+}
+
+/** Validate the current review draft before any finding-ledger write. */
+function preflightReviewSummary(
+  request: ReviewFinalizationRequest,
+  options: ReviewFinalizationOptions = {}
+): ReviewPreflightResult {
+  const context = resolvePreflightContext(request, options);
+  if (!context.ok) return context.result;
+  const artifact = readPreflightArtifact(request, context.context);
+  if (!artifact.ok) return artifact.result;
+  return inspectPreflightArtifact(request, context.context, artifact.content);
 }
 
 type ReviewSummaryCandidatePreparation = Readonly<{
@@ -172,73 +199,134 @@ type ReviewSummaryCandidatePreparation = Readonly<{
   content: string;
 }>;
 
-/** Prepare domain validation, summary bytes and provenance before any publication. */
-function prepareReviewSummaryCandidate(
+type CandidateContext = Readonly<{
+  stage: ReviewStage;
+  spec: (typeof STAGES)[ReviewStage];
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+}>;
+type CandidateContextResult = Readonly<{ ok: true; context: CandidateContext }> | Readonly<{ ok: false; result: ReviewSummaryCandidatePreparation }>;
+
+function candidateFailure(
+  request: ReviewFinalizationRequest,
+  content: string,
+  code: ReviewFinalizationErrorCode,
+  message: string,
+  taskId: string | null = null,
+  stageStatus: LedgerStageStatus | null = null,
+  extra: Partial<ReviewFinalizationResult> = {}
+): ReviewSummaryCandidatePreparation {
+  return { result: failed(request, code, message, taskId, stageStatus, extra), content };
+}
+
+function resolveCandidateContext(
   request: ReviewFinalizationRequest,
   artifactContent: string,
-  options: ReviewFinalizationOptions = {}
-): ReviewSummaryCandidatePreparation {
-  let taskId: string | null = null;
-  let stageStatus: LedgerStageStatus | null = null;
-  const reject = (code: ReviewFinalizationErrorCode, message: string, extra: Partial<ReviewFinalizationResult> = {}): ReviewSummaryCandidatePreparation => ({
-    result: failed(request, code, message, taskId, stageStatus, extra), content: artifactContent
-  });
+  options: ReviewFinalizationOptions
+): CandidateContextResult {
   const stage = request.stage as ReviewStage;
   const spec = STAGES[stage];
-  if (!spec) return reject('REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`);
-  if (!request.taskRef || !request.artifact) return reject('REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required');
+  if (!spec) return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`) };
+  if (!request.taskRef || !request.artifact) return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required') };
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  taskId = resolved.taskId ?? null;
-  if (!resolved.ok) return reject(resolved.code, resolved.message);
-  if (resolved.state !== 'active') {
-    return reject('TASK_STATE_MISMATCH', `task ${taskId} is ${resolved.state}, expected active`);
-  }
+  const taskId = resolved.taskId ?? null;
+  if (!resolved.ok) return { ok: false, result: candidateFailure(request, artifactContent, resolved.code, resolved.message, taskId) };
+  if (resolved.state !== 'active') return { ok: false, result: candidateFailure(request, artifactContent, 'TASK_STATE_MISMATCH', `task ${taskId} is ${resolved.state}, expected active`, taskId) };
   const parsed = parseArtifactName(request.artifact);
-  if (!parsed || parsed.family !== spec.family) return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`);
+  if (!parsed || parsed.family !== spec.family) return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`, taskId) };
   const publicationError = validateArtifactPublication(resolved.taskDir, spec.family, request.artifact);
-  if (publicationError) return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message);
-  let taskContent: string;
-  try { taskContent = (options.fileSystem?.readFileSync ?? DEFAULT_FILE_SYSTEM.readFileSync)(resolved.taskMdPath); }
-  catch (error) { return reject('REVIEW_ARTIFACT_NOT_REGULAR', String(error)); }
-  const artifactSha256 = sha256Content(artifactContent);
-  const semanticDigest = canonicalSemanticDigest(artifactContent);
+  if (publicationError) return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message, taskId) };
+  return { ok: true, context: { stage, spec, resolved } };
+}
+
+function readCandidateTaskContent(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  context: CandidateContext,
+  options: ReviewFinalizationOptions
+): { ok: true; taskContent: string } | { ok: false; result: ReviewSummaryCandidatePreparation } {
+  try {
+    const readFile = options.fileSystem?.readFileSync ?? DEFAULT_FILE_SYSTEM.readFileSync;
+    return { ok: true, taskContent: readFile(context.resolved.taskMdPath) };
+  } catch (error) {
+    return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), context.resolved.taskId) };
+  }
+}
+
+function validateCandidateLedger(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  taskContent: string,
+  context: CandidateContext
+): { ok: true; stageStatus: LedgerStageStatus } | { ok: false; result: ReviewSummaryCandidatePreparation } {
   try {
     const ledger = parseLedgerDocument(taskContent);
-    if (!ledger.present) return reject('REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);
+    if (!ledger.present) return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, context.resolved.taskId) };
     const error = validateLedgerRows(ledger.rows);
-    if (error) return reject('REVIEW_LEDGER_INVALID', `${error.code}: ${error.message}`);
-    stageStatus = summarizeLedgerStage(ledger.rows, stage);
-  } catch (error) { return reject('REVIEW_LEDGER_INVALID', String(error)); }
+    if (error) return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_LEDGER_INVALID', `${error.code}: ${error.message}`, context.resolved.taskId) };
+    return { ok: true, stageStatus: summarizeLedgerStage(ledger.rows, context.stage) };
+  } catch (error) {
+    return { ok: false, result: candidateFailure(request, artifactContent, 'REVIEW_LEDGER_INVALID', String(error), context.resolved.taskId) };
+  }
+}
+
+function validateCandidateArtifact(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  taskContent: string,
+  context: CandidateContext,
+  stageStatus: LedgerStageStatus,
+  digests: { artifactSha256: string; semanticDigest: string }
+): ReviewSummaryCandidatePreparation | null {
   const detail = inspectDecisionDetailDuplicates(artifactContent);
-  if (!detail.ok) return reject('REVIEW_DECISION_DETAIL_INVALID', `${detail.code}: ${detail.message}`);
-  const schema = getArtifactSchema(spec.family)!;
-  const structure = inspectArtifactContract(artifactContent, schema);
-  if (!structure.ok) {
-    return reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
-      artifactSha256, semanticDigest: structure.semanticDigest
-    });
-  }
-  const qualification = validateQualificationAudit(taskContent, artifactContent, { family: spec.family, artifact: request.artifact });
-  if (!qualification.ok) {
-    return reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', `${qualification.code}: ${qualification.message}`, {
-      artifactSha256, semanticDigest
-    });
-  }
+  if (!detail.ok) return candidateFailure(request, artifactContent, 'REVIEW_DECISION_DETAIL_INVALID', `${detail.code}: ${detail.message}`, context.resolved.taskId, stageStatus);
+  const structure = inspectArtifactContract(artifactContent, getArtifactSchema(context.spec.family)!);
+  if (!structure.ok) return candidateFailure(request, artifactContent, 'REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), context.resolved.taskId, stageStatus, {
+    artifactSha256: digests.artifactSha256, semanticDigest: structure.semanticDigest
+  });
+  const qualification = validateQualificationAudit(taskContent, artifactContent, { family: context.spec.family, artifact: request.artifact });
+  if (!qualification.ok) return candidateFailure(request, artifactContent, 'REVIEW_ARTIFACT_STRUCTURE_INVALID', `${qualification.code}: ${qualification.message}`, context.resolved.taskId, stageStatus, digests);
+  return null;
+}
+
+function finalizeCandidateSummary(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  context: CandidateContext,
+  stageStatus: LedgerStageStatus
+): ReviewSummaryCandidatePreparation {
   const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts, {
     refreshNumericCounts: true
   });
-  if (!transformed.ok) return reject(transformed.code, transformed.message);
+  if (!transformed.ok) return candidateFailure(request, artifactContent, transformed.code, transformed.message, context.resolved.taskId, stageStatus);
   const finalDigests = { artifactSha256: sha256Content(transformed.content), semanticDigest: canonicalSemanticDigest(transformed.content) };
   return {
     content: transformed.content,
     result: {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', taskId, stageStatus, finalDigests),
+      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', context.resolved.taskId, stageStatus, finalDigests),
       status: transformed.changed ? request.dryRun ? 'planned' : 'applied' : 'no-op',
       changed: transformed.changed,
       operations: transformed.changed ? [{ kind: 'artifact', artifact: request.artifact, operation: 'update' }] : [],
       error: null
     },
   };
+}
+
+/** Prepare domain validation, summary bytes and provenance before any publication. */
+function prepareReviewSummaryCandidate(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  options: ReviewFinalizationOptions = {}
+): ReviewSummaryCandidatePreparation {
+  const context = resolveCandidateContext(request, artifactContent, options);
+  if (!context.ok) return context.result;
+  const task = readCandidateTaskContent(request, artifactContent, context.context, options);
+  if (!task.ok) return task.result;
+  const digests = { artifactSha256: sha256Content(artifactContent), semanticDigest: canonicalSemanticDigest(artifactContent) };
+  const ledger = validateCandidateLedger(request, artifactContent, task.taskContent, context.context);
+  if (!ledger.ok) return ledger.result;
+  const artifactError = validateCandidateArtifact(request, artifactContent, task.taskContent, context.context, ledger.stageStatus, digests);
+  if (artifactError) return artifactError;
+  return finalizeCandidateSummary(request, artifactContent, context.context, ledger.stageStatus);
 }
 
 function replaceCurrentArtifactAtomically(file: string, content: string): void {

@@ -1035,15 +1035,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/review-finalization.ts",
-      "ruleId": "complexity",
-      "stableId": "0762fe291e9745935411396c7ac06778c025f3015c563653900ac6e984ca52b1",
-      "displayName": "preflightReviewSummary",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "stableId": "e93ef3cd3d3deb52c363dcbec7d8623c57fc6ccdfbdbe96ff95869b373fa77a4",
@@ -1059,15 +1050,6 @@
       "displayName": "prepareCompletedReentry",
       "metric": 24,
       "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
-      "file": "lib/task/review-finalization.ts",
-      "ruleId": "complexity",
-      "stableId": "a3bab6069a9ffb915c88710f4561fe3cea929518b0dcbcf3341023f19b38faa0",
-      "displayName": "prepareReviewSummaryCandidate",
-      "metric": 30,
-      "normalizedMessage": "complexity=30",
       "count": 1
     },
     {
