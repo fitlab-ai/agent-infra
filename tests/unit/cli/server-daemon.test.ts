@@ -98,6 +98,36 @@ test('dispatcher sends builtin replies through text fallback when structured rep
   assert.match(replies[0] ?? '', /^pong /);
 });
 
+test('dispatcher handles ignored, invalid, help, and version plans without running ai commands', async () => {
+  let runnerCalls = 0;
+  const dispatch = createMessageDispatcher({
+    config,
+    logger: { info: () => {} },
+    runAi: async (): Promise<RunnerResult> => {
+      runnerCalls += 1;
+      return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+    }
+  });
+
+  const ignored = inbound('ordinary message');
+  await dispatch(ignored.message);
+  assert.equal(ignored.displayReplies.length, 0);
+  assert.equal(ignored.textReplies.length, 0);
+
+  const invalid = inbound('/unknown');
+  await dispatch(invalid.message);
+  assert.equal(outboundToText(invalid.displayReplies[0] ?? ''), 'Unknown command: /unknown');
+
+  const help = inbound('/help');
+  await dispatch(help.message);
+  assert.match(outboundToText(help.displayReplies[0] ?? ''), /Built-ins:/);
+
+  const version = inbound('/version');
+  await dispatch(version.message);
+  assert.match(outboundToText(version.displayReplies[0] ?? ''), /^agent-infra /);
+  assert.equal(runnerCalls, 0);
+});
+
 test('dispatcher sends ai command streams as structured messages', async () => {
   const { message, displayReplies } = inbound('/task ls');
   let runnerCwd: string | undefined;
