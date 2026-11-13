@@ -459,15 +459,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/issues.ts",
-      "ruleId": "complexity",
-      "stableId": "24b8af90580d7bf1252eef3dcc67c6b146d4fa0f6b0f8dca236079c1ab818d35",
-      "displayName": "createPlatformIssue",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/task/create-service.ts",
       "ruleId": "complexity",
       "stableId": "81992b1791fd7f7540abe9d74f7b0dce6b10ee90697ffbeedadca6138d9c69ab",
@@ -1392,33 +1383,6 @@
       "displayName": "syncPendingSummary",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/issues.ts",
-      "ruleId": "complexity",
-      "stableId": "2fc062bf1db98843c7eebe6b13b4b13e78eb7df8f56306aee295f2322348022a",
-      "displayName": "syncPlatformIssue",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/issues.ts",
-      "ruleId": "max-depth",
-      "stableId": "b8e276359452d22d7925af3765a962c0010a83c5501a04ba99e43f97fa191af4",
-      "displayName": "syncPlatformIssueImpl",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/issues.ts",
-      "ruleId": "complexity",
-      "stableId": "b8e276359452d22d7925af3765a962c0010a83c5501a04ba99e43f97fa191af4",
-      "displayName": "syncPlatformIssueImpl",
-      "metric": 55,
-      "normalizedMessage": "complexity=55",
       "count": 1
     },
     {
