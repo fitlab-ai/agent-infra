@@ -30,6 +30,8 @@ export type TaskOperationDescriptor = Readonly<{
   guardBeforeImport: true;
 }>;
 
+type TaskRefResolver = (command: string, args: readonly string[]) => string | null;
+
 const descriptor = (
   dispatcher: TaskOperationDispatcher,
   command: string,
@@ -270,35 +272,61 @@ function explicitTaskRefForOperation(
   if (command === 'sandbox-control' && args[0] === 'client') {
     return explicitTaskRefForOperation('internal', args[1] ?? '', args.slice(2), selected);
   }
-  if (dispatcher === 'public') {
-    if (command === 'decide' || command === 'run' || command === 'task') {
-      return optionValue(args, '--task') ?? optionValue(args, '-t') ?? null;
-    }
-    if (command === 'sandbox') {
-      const subcommand = first(args);
-      if (!['create', 'exec', 'show', 'rm', 'start'].includes(subcommand)) return null;
-      const targetIndex = (subcommand === 'exec' || subcommand === 'start') && args[1] === '--recreate' ? 2 : 1;
-      return args[targetIndex] ?? null;
-    }
-    return command === 'merge' ? null : first(args) || null;
+  return taskRefResolvers[dispatcher](command, args);
+}
+
+function publicTaskRefForOperation(command: string, args: readonly string[]): string | null {
+  if (command === 'decide' || command === 'run' || command === 'task') {
+    return optionValue(args, '--task') ?? optionValue(args, '-t') ?? null;
   }
+  if (command === 'sandbox') return publicSandboxTaskRef(args);
+  return command === 'merge' ? null : first(args) || null;
+}
+
+function publicSandboxTaskRef(args: readonly string[]): string | null {
+  const subcommand = first(args);
+  if (!['create', 'exec', 'show', 'rm', 'start'].includes(subcommand)) return null;
+  const targetIndex = (subcommand === 'exec' || subcommand === 'start') && args[1] === '--recreate' ? 2 : 1;
+  return args[targetIndex] ?? null;
+}
+
+function internalTaskRefForOperation(command: string, args: readonly string[]): string | null {
+  const platformTaskRef = internalPlatformTaskRef(command, args);
+  if (platformTaskRef !== undefined) return platformTaskRef;
+  const localTaskRef = internalLocalTaskRef(command, args);
+  if (localTaskRef !== undefined) return localTaskRef;
+  return first(args) || null;
+}
+
+function internalPlatformTaskRef(command: string, args: readonly string[]): string | null | undefined {
   if (command === 'platform-comment' || command === 'platform-issue') {
     return first(args) === 'list' ? null : args[1] ?? null;
   }
   if (command === 'platform-pr') return first(args) === 'sync-in-labels' ? null : args[1] ?? null;
   if (command === 'platform-pr-review') return optionValue(args, '--scope') ?? null;
   if (command === 'platform-checks') return args[1] ?? null;
-  if (command === 'task-context') {
-    const taskArgs = args.slice(1);
-    return optionValue(taskArgs, '--task')
-      ?? optionValue(taskArgs, '-t')
-      ?? taskArgs.find((arg) => !arg.startsWith('--'))
-      ?? null;
-  }
+  return undefined;
+}
+
+function internalLocalTaskRef(command: string, args: readonly string[]): string | null | undefined {
+  if (command === 'task-context') return internalTaskContextRef(args);
   if (command === 'task-create' || command === 'task-short-id' && first(args) === 'list') return null;
   if (command === 'task-short-id') return args[1] ?? null;
-  return first(args) || null;
+  return undefined;
 }
+
+function internalTaskContextRef(args: readonly string[]): string | null {
+  const taskArgs = args.slice(1);
+  return optionValue(taskArgs, '--task')
+    ?? optionValue(taskArgs, '-t')
+    ?? taskArgs.find((arg) => !arg.startsWith('--'))
+    ?? null;
+}
+
+const taskRefResolvers: Readonly<Record<TaskOperationDispatcher, TaskRefResolver>> = Object.freeze({
+  public: publicTaskRefForOperation,
+  internal: internalTaskRefForOperation
+});
 
 function inputTaskRefForOperation(args: readonly string[]): string | null {
   const inputPath = optionValue(args, '--input');
@@ -377,39 +405,67 @@ export class TaskViewOperationError extends Error {
   }
 }
 
-export function guardTaskOperation(
+function isHelpRequest(args: readonly string[]): boolean {
+  return args[0] === '--help' || args[0] === '-h' || args[0] === 'help';
+}
+
+function helpOperation(
   dispatcher: TaskOperationDispatcher,
   command: string,
-  args: readonly string[] = [],
-  options: Readonly<{ env?: NodeJS.ProcessEnv; taskView?: SandboxTaskView }> = {}
-): Readonly<{ descriptor: TaskOperationDescriptor; taskView: SandboxTaskView | null }> {
-  const env = options.env ?? process.env;
-  if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
-    return {
-      descriptor: resolveTaskOperation(dispatcher, command, args)
-        ?? descriptor(dispatcher, command, 'help', 'non-task', 'diagnostic', 'none'),
-      taskView: null
-    };
-  }
-  const markerState = sandboxTaskMarkerState(env);
-  if (markerState === 'incomplete' && !isSandboxExecutorRoute(dispatcher, command, args, env)) {
+  args: readonly string[]
+): TaskOperationDescriptor {
+  return resolveTaskOperation(dispatcher, command, args)
+    ?? descriptor(dispatcher, command, 'help', 'non-task', 'diagnostic', 'none');
+}
+
+function requireCompleteTaskMarkers(
+  dispatcher: TaskOperationDispatcher,
+  command: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  markerState: ReturnType<typeof sandboxTaskMarkerState>
+): void {
+  if (markerState !== 'incomplete' || isSandboxExecutorRoute(dispatcher, command, args, env)) return;
+  throw new TaskViewOperationError(
+    'SANDBOX_TASK_VIEW_MARKER_INVALID',
+    'sandbox task markers are incomplete; refusing to infer host-direct authority'
+  );
+}
+
+function operationForGuard(
+  dispatcher: TaskOperationDispatcher,
+  command: string,
+  args: readonly string[]
+): TaskOperationDescriptor | null {
+  if (command === 'sandbox-control' && first(args) === 'client') return resolveDelegatedTaskOperation(args);
+  return resolveTaskOperation(dispatcher, command, args);
+}
+
+function registeredOperation(
+  dispatcher: TaskOperationDispatcher,
+  command: string,
+  args: readonly string[],
+  markerState: ReturnType<typeof sandboxTaskMarkerState>
+): TaskOperationDescriptor {
+  const selected = operationForGuard(dispatcher, command, args);
+  if (selected) return selected;
+  if (markerState === 'task-bound') {
     throw new TaskViewOperationError(
-      'SANDBOX_TASK_VIEW_MARKER_INVALID',
-      'sandbox task markers are incomplete; refusing to infer host-direct authority'
+      'TASK_VIEW_OPERATION_UNREGISTERED',
+      `operation '${command} ${first(args)}' is not registered for a task-bound workspace`
     );
   }
-  const selected = command === 'sandbox-control'
-    ? first(args) === 'client'
-      ? resolveDelegatedTaskOperation(args)
-      : resolveTaskOperation(dispatcher, command, args)
-    : resolveTaskOperation(dispatcher, command, args);
-  if (!selected) {
-    if (markerState === 'task-bound') {
-      throw new TaskViewOperationError('TASK_VIEW_OPERATION_UNREGISTERED', `operation '${command} ${first(args)}' is not registered for a task-bound workspace`);
-    }
-    return { descriptor: descriptor(dispatcher, command, 'unregistered', 'non-task', 'diagnostic', 'none'), taskView: null };
-  }
-  if (selected.scope === 'non-task' || markerState !== 'task-bound') return { descriptor: selected, taskView: null };
+  return descriptor(dispatcher, command, 'unregistered', 'non-task', 'diagnostic', 'none');
+}
+
+function taskBoundOperation(
+  dispatcher: TaskOperationDispatcher,
+  command: string,
+  args: readonly string[],
+  selected: TaskOperationDescriptor,
+  env: NodeJS.ProcessEnv,
+  options: Readonly<{ env?: NodeJS.ProcessEnv; taskView?: SandboxTaskView }>
+): Readonly<{ descriptor: TaskOperationDescriptor; taskView: SandboxTaskView }> {
   const taskId = env.AGENT_INFRA_TASK_ID!;
   const taskView = options.taskView ?? viewFromEnvironment(env);
   if (taskView.state === 'not-applicable' && selected.effect !== 'cleanup') {
@@ -431,4 +487,24 @@ export function guardTaskOperation(
     );
   }
   return { descriptor: selected, taskView };
+}
+
+export function guardTaskOperation(
+  dispatcher: TaskOperationDispatcher,
+  command: string,
+  args: readonly string[] = [],
+  options: Readonly<{ env?: NodeJS.ProcessEnv; taskView?: SandboxTaskView }> = {}
+): Readonly<{ descriptor: TaskOperationDescriptor; taskView: SandboxTaskView | null }> {
+  const env = options.env ?? process.env;
+  if (isHelpRequest(args)) {
+    return {
+      descriptor: helpOperation(dispatcher, command, args),
+      taskView: null
+    };
+  }
+  const markerState = sandboxTaskMarkerState(env);
+  requireCompleteTaskMarkers(dispatcher, command, args, env, markerState);
+  const selected = registeredOperation(dispatcher, command, args, markerState);
+  if (selected.scope === 'non-task' || markerState !== 'task-bound') return { descriptor: selected, taskView: null };
+  return taskBoundOperation(dispatcher, command, args, selected, env, options);
 }
