@@ -127,23 +127,41 @@ function fail(code: string, message: string, retryable = false): never {
   throw new SandboxControlProtocolError(code, message, retryable);
 }
 
-export function parseSandboxControlResultEvidence(value: unknown): SandboxControlResultEvidence {
-  const evidence = value as Partial<SandboxControlResultEvidence> | null;
+function validResultEvidenceKeys(evidence: Partial<SandboxControlResultEvidence> | null): boolean {
   const keys = evidence && typeof evidence === 'object' ? Object.keys(evidence).sort().join(',') : '';
-  if (keys !== 'captureState,exitCode,generation,id,stderrBytes,stderrSha256,stdoutBytes,stdoutSha256,version'
-    || evidence?.version !== 1
-    || typeof evidence.id !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(evidence.id)
-    || typeof evidence.generation !== 'string' || evidence.generation.length === 0
-    || !Number.isSafeInteger(evidence.exitCode)
-    || !Number.isSafeInteger(evidence.stdoutBytes) || (evidence.stdoutBytes as number) < 0
-    || !Number.isSafeInteger(evidence.stderrBytes) || (evidence.stderrBytes as number) < 0
-    || (evidence.stdoutBytes as number) + (evidence.stderrBytes as number) > SANDBOX_CONTROL_MAX_RESPONSE_BYTES
-    || typeof evidence.stdoutSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(evidence.stdoutSha256)
-    || typeof evidence.stderrSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(evidence.stderrSha256)
-    || evidence.captureState !== 'metadata-only') {
-    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
-  }
-  return evidence as SandboxControlResultEvidence;
+  return keys === 'captureState,exitCode,generation,id,stderrBytes,stderrSha256,stdoutBytes,stdoutSha256,version';
+}
+
+function validResultEvidenceIdentity(evidence: Partial<SandboxControlResultEvidence> | null): boolean {
+  return evidence?.version === 1
+    && typeof evidence.id === 'string' && /^[a-f0-9-]{16,64}$/u.test(evidence.id)
+    && typeof evidence.generation === 'string' && evidence.generation.length > 0;
+}
+
+function validResultEvidenceOutputSize(evidence: Partial<SandboxControlResultEvidence> | null): boolean {
+  return Number.isSafeInteger(evidence?.exitCode)
+    && Number.isSafeInteger(evidence?.stdoutBytes) && (evidence?.stdoutBytes as number) >= 0
+    && Number.isSafeInteger(evidence?.stderrBytes) && (evidence?.stderrBytes as number) >= 0
+    && (evidence?.stdoutBytes as number) + (evidence?.stderrBytes as number) <= SANDBOX_CONTROL_MAX_RESPONSE_BYTES;
+}
+
+function validResultEvidenceDigests(evidence: Partial<SandboxControlResultEvidence> | null): boolean {
+  return typeof evidence?.stdoutSha256 === 'string' && /^[a-f0-9]{64}$/u.test(evidence.stdoutSha256)
+    && typeof evidence.stderrSha256 === 'string' && /^[a-f0-9]{64}$/u.test(evidence.stderrSha256);
+}
+
+function validResultEvidence(value: unknown): value is SandboxControlResultEvidence {
+  const evidence = value as Partial<SandboxControlResultEvidence> | null;
+  return validResultEvidenceKeys(evidence)
+    && validResultEvidenceIdentity(evidence)
+    && validResultEvidenceOutputSize(evidence)
+    && validResultEvidenceDigests(evidence)
+    && evidence?.captureState === 'metadata-only';
+}
+
+export function parseSandboxControlResultEvidence(value: unknown): SandboxControlResultEvidence {
+  if (!validResultEvidence(value)) throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  return value;
 }
 
 function validPayloadIdentity(
@@ -223,6 +241,27 @@ export function isSandboxControlFamily(value: string): value is SandboxControlFa
   return SANDBOX_CONTROL_FAMILIES.includes(value as SandboxControlFamily);
 }
 
+function hasRequestKeys(request: Record<string, unknown>, expected: readonly string[]): boolean {
+  return Object.keys(request).sort().join(',') === expected.join(',');
+}
+
+function validRequestHeader(request: Record<string, unknown>): boolean {
+  return request.version === 5 && typeof request.id === 'string'
+    && /^[a-f0-9-]{16,64}$/.test(request.id)
+    && typeof request.family === 'string' && isSandboxControlFamily(request.family);
+}
+
+function isTaskCreateRequestShape(request: Record<string, unknown>): boolean {
+  return hasRequestKeys(request, ['candidate', 'family', 'id', 'version']);
+}
+
+function isTaskCommandRequestShape(
+  request: Record<string, unknown>
+): request is Record<string, unknown> & { args: string[] } {
+  return hasRequestKeys(request, ['args', 'family', 'id', 'version'])
+    && Array.isArray(request.args) && request.args.every((arg) => typeof arg === 'string');
+}
+
 export function validateSandboxControlRequest(
   value: unknown,
   manifest: SandboxControlManifest
@@ -231,24 +270,17 @@ export function validateSandboxControlRequest(
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request must be an object');
   }
   const request = value as Record<string, unknown>;
-  if (
-    request.version !== 5 || typeof request.id !== 'string'
-    || !/^[a-f0-9-]{16,64}$/.test(request.id)
-    || typeof request.family !== 'string' || !isSandboxControlFamily(request.family)
-  ) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
+  if (!validRequestHeader(request)) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
   if (Buffer.byteLength(JSON.stringify(request), 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
     fail('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit');
   }
   if (request.family === 'task-create') {
-    const expected = ['candidate', 'family', 'id', 'version'];
-    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')) {
+    if (!isTaskCreateRequestShape(request)) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
     }
     return { ...request, candidate: validateTaskCreateCandidate(request.candidate) } as SandboxTaskCreateRequest;
   }
-  const expected = ['args', 'family', 'id', 'version'];
-  if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
-    || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
+  if (!isTaskCommandRequestShape(request)) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
   }
   if (request.args[1] === 'complete') {
