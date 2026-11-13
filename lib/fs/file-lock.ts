@@ -47,6 +47,13 @@ export function probeNativeLockCapability(): FileLockCapability {
 /** Hold a stable lock file; callers own its namespace and must never unlink it. */
 export function acquireFileLock(filePath: string): Readonly<{ release(): void }> {
   const native = loadNative();
+  assertExistingLockFile(filePath);
+  const fd = acquireDescriptor(filePath, native);
+  if (fd === undefined) throw new Error('FILE_LOCK_BUSY');
+  return createLockHandle(fd, native);
+}
+
+function assertExistingLockFile(filePath: string): void {
   if (fs.existsSync(filePath)) {
     const existing = fs.lstatSync(filePath);
     if (existing.isSymbolicLink() || !existing.isFile()) {
@@ -57,6 +64,9 @@ export function acquireFileLock(filePath: string): Readonly<{ release(): void }>
       throw new Error('FILE_LOCK_UNSUPPORTED: lock object owner mismatch');
     }
   }
+}
+
+function acquireDescriptor(filePath: string, native: NativeFsExtensions): number | undefined {
   let fd: number | undefined;
   try {
     const noFollow = process.platform !== 'win32' && typeof fs.constants.O_NOFOLLOW === 'number'
@@ -87,8 +97,10 @@ export function acquireFileLock(filePath: string): Readonly<{ release(): void }>
     }
     throw new Error(`FILE_LOCK_UNSUPPORTED: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (fd === undefined) throw new Error('FILE_LOCK_BUSY');
+  return fd;
+}
 
+function createLockHandle(fd: number, native: NativeFsExtensions): Readonly<{ release(): void }> {
   let released = false;
   return {
     release() {
@@ -96,13 +108,12 @@ export function acquireFileLock(filePath: string): Readonly<{ release(): void }>
       released = true;
       let failure: unknown = null;
       try {
-        if (fd === undefined) throw new Error('descriptor is missing');
         native.unlock(fd);
       } catch (error) {
         failure = error;
       } finally {
         try {
-          if (fd !== undefined) fs.closeSync(fd);
+          fs.closeSync(fd);
         } catch (error) {
           failure ??= error;
         }

@@ -33,6 +33,7 @@ test('native lock serializes same-carrier contenders and retains the lock object
   } finally {
     first.release();
   }
+  assert.doesNotThrow(() => first.release());
   assert.equal(fs.existsSync(first.path), true);
   const second = acquireSandboxResourceLock(carrier, { home, lockDomain: 'd'.repeat(64) });
   second.release();
