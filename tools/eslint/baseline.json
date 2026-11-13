@@ -1145,15 +1145,6 @@
     {
       "file": "lib/git/workflow.ts",
       "ruleId": "complexity",
-      "stableId": "54a5d6288c1540caede2e64493eae01a4e03cc1f829183070a810f2d038a87f4",
-      "displayName": "pushGitRefs",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
-      "file": "lib/git/workflow.ts",
-      "ruleId": "complexity",
       "stableId": "24ed948fc63457059853a37f8055eb1c7f13da062a680ba8e4270750a786b70a",
       "displayName": "pushRebasedBranch",
       "metric": 30,
