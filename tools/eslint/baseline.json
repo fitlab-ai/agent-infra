@@ -99,15 +99,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/workflow-warning-intents.ts",
-      "ruleId": "complexity",
-      "stableId": "fdb1322baf81d8cec484d10f41ce09cf6755819f3a68ed8fdc8619ea22e1b56a",
-      "displayName": "applyWorkflowWarningIntent",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/native-file-lock.ts",
       "ruleId": "complexity",
       "stableId": "9422a81d6ab7114b964b5b411b10140efb67a173b2b6077c04857a7d43ed93b2",
@@ -978,15 +969,6 @@
       "displayName": "prepareTaskFinalizationCore",
       "metric": 100,
       "normalizedMessage": "complexity=100",
-      "count": 1
-    },
-    {
-      "file": "lib/task/workflow-warning-intents.ts",
-      "ruleId": "complexity",
-      "stableId": "92d4ef5c50caf90d295168383bb09729752450f0d83d1901d0a005ecfbaba136",
-      "displayName": "projectFinalizationWarning",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
       "count": 1
     },
     {

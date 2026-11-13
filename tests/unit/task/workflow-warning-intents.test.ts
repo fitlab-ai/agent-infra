@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { applyWorkflowWarningIntent } from '../../../lib/task/workflow-warning-intents.ts';
+import { applyWorkflowWarningIntent, projectFinalizationWarning } from '../../../lib/task/workflow-warning-intents.ts';
+import { parseWorkflowWarnings } from '../../../lib/task/workflow-warnings.ts';
 import { createTaskWorkspaceFixture } from '../../helpers.ts';
 
 function fixture() {
@@ -43,5 +44,46 @@ test('resolved warnings are idempotent and a later event receives a fresh id', (
     assert.equal(applyWorkflowWarningIntent(resolved, options).status, 'no-op');
     const reopened = applyWorkflowWarningIntent(add, options);
     assert.equal(reopened.entityId, 'WW-2');
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+test('finalization warning projection requires a prepared task and replays without changing its resolution', () => {
+  const f = fixture();
+  try {
+    const options = {
+      repoRoot: f.repoRoot,
+      metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' })
+    };
+    const warning = {
+      code: 'VERIFY_FAILED', message: 'retry verification', retryable: true,
+      step: 'complete-task', target: 'verification', severity: 'ACTION_REQUIRED' as const,
+      status: 'resolved' as const, resolvedAt: '2026-07-19 11:59:00+00:00'
+    };
+    const initial = fs.readFileSync(f.taskMd, 'utf8');
+    const rejected = projectFinalizationWarning(f.taskId, warning, options);
+    assert.equal(rejected.status, 'failed');
+    assert.equal(rejected.error?.code, 'TASK_STATE_MISMATCH');
+    assert.equal(fs.readFileSync(f.taskMd, 'utf8'), initial);
+
+    const lifecyclePath = path.join(path.dirname(f.taskMd), '.task-lifecycle.json');
+    fs.writeFileSync(lifecyclePath, JSON.stringify({ taskId: f.taskId, intent: 'complete' }));
+    const projected = projectFinalizationWarning(f.taskId, warning, { ...options, resolution: 'superseded' });
+    assert.equal(projected.status, 'applied');
+    const afterProjection = fs.readFileSync(f.taskMd, 'utf8');
+    const [row] = parseWorkflowWarnings(afterProjection);
+    assert.equal(row?.id, 'WW-1');
+    assert.equal(row?.resolvedAt, warning.resolvedAt);
+    assert.equal(row?.resolution, 'Superseded by a later verification observation');
+
+    const replay = projectFinalizationWarning(f.taskId, warning, { ...options, resolution: 'superseded' });
+    assert.equal(replay.status, 'no-op');
+    assert.equal(fs.readFileSync(f.taskMd, 'utf8'), afterProjection);
+
+    const newResolvedWarning = { ...warning, code: 'VERIFY_RETRIED', target: 'verification-retry', resolvedAt: null };
+    const newProjection = projectFinalizationWarning(f.taskId, newResolvedWarning, options);
+    assert.equal(newProjection.status, 'applied');
+    const projectedLine = fs.readFileSync(f.taskMd, 'utf8').split('\n').find((line) => line.includes('| VERIFY_RETRIED |'));
+    const projectedCells = projectedLine?.split('|').slice(1, -1).map((cell) => cell.trim());
+    assert.equal(projectedCells?.[9], '');
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
