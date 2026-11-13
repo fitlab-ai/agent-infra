@@ -227,24 +227,6 @@
     {
       "file": "lib/task/verification-engine.ts",
       "ruleId": "complexity",
-      "stableId": "138c1e2a7cdf1222e4c7d83e17995a3ad97966e9cf2fb6e5bce6cdfa58200a20",
-      "displayName": "checkArtifact",
-      "metric": 35,
-      "normalizedMessage": "complexity=35",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "056a3e75445972a1eed3384f1893e4f9ef6b192647619cbdfac25f5268001009",
-      "displayName": "checkArtifactLifecycleActivityLog",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
       "stableId": "b6e104afe7e5b2aea67581521093c9d7215980be438a2ce63ef17e1e03a255d7",
       "displayName": "checkImplementationInput",
       "metric": 25,
