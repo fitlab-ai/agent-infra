@@ -176,97 +176,150 @@ function inspectArtifactDirectory(
   identity: { requestRef?: string; taskId?: string; taskState?: TaskWorkspaceState } = {}
 ): ArtifactInventoryResult {
   const requestRef = identity.requestRef ?? taskDir;
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(taskDir, { withFileTypes: true }); }
-  catch (error) {
-    return failure(requestRef, family, { code: 'ARTIFACT_DIRECTORY_READ_FAILED', message: String(error) }, {
-      taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
-    });
-  }
-  let taskContent: string;
-  try {
-    taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
-  } catch (error) {
-    return failure(requestRef, family, { code: 'ARTIFACT_DIRECTORY_READ_FAILED', message: String(error) }, {
+  const directory = readArtifactDirectory(taskDir);
+  if (!directory.ok) {
+    return failure(requestRef, family, { code: 'ARTIFACT_DIRECTORY_READ_FAILED', message: String(directory.error) }, {
       taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
     });
   }
   const artifacts: ArtifactIdentity[] = [];
-  const knownArtifacts: ArtifactIdentity[] = [];
   const diagnostics: ArtifactDiagnostic[] = [];
-  for (const entry of entries) {
-    const parsed = parseArtifactName(entry.name);
-    const reserved = entry.name.toLowerCase().startsWith(`${family.toLowerCase()}-r`) || entry.name.toLowerCase() === `${family.toLowerCase()}.md`;
-    if (!parsed || parsed.family !== family) {
-      if (reserved) {
-        const roundText = new RegExp(`^${escapeRegExp(family)}-r(.+)\\.md$`, 'i').exec(entry.name)?.[1];
-        const code = roundText && /^\d+$/.test(roundText) && !Number.isSafeInteger(Number(roundText))
-          ? 'ROUND_OUT_OF_RANGE' : 'NONCANONICAL_NAME';
-        diagnostics.push(diagnostic(code, family, entry.name, `noncanonical ${family} artifact candidate '${entry.name}' (verify whether this is an unrelated file with a reserved prefix)`));
-      }
-      continue;
-    }
-    const abs = path.join(taskDir, entry.name);
-    try {
-      const stat = fs.lstatSync(abs);
-      if (stat.isSymbolicLink()) {
-        diagnostics.push(diagnostic('SYMBOLIC_LINK', family, entry.name, `symbolic links are not workflow artifacts: ${entry.name}`));
-        continue;
-      }
-      if (!stat.isFile()) {
-        diagnostics.push(diagnostic('NON_REGULAR_FILE', family, entry.name, `artifact is not a regular file: ${entry.name}`));
-        continue;
-      }
-      try { fs.accessSync(abs, fs.constants.R_OK); }
-      catch {
-        diagnostics.push(diagnostic('FILESYSTEM_RACE', family, entry.name, `artifact is not readable: ${entry.name}`));
-        continue;
-      }
-      const identity = { ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
-      knownArtifacts.push(identity);
-      artifacts.push(identity);
-    } catch (error) {
-      diagnostics.push(diagnostic('FILESYSTEM_RACE', family, entry.name, String(error)));
-    }
+  for (const entry of directory.entries) {
+    const inspection = inspectArtifactEntry(taskDir, family, entry);
+    if (inspection.artifact) artifacts.push(inspection.artifact);
+    if (inspection.diagnostic) diagnostics.push(inspection.diagnostic);
   }
   artifacts.sort((left, right) => left.round - right.round);
-  knownArtifacts.sort((left, right) => left.round - right.round);
   let openRounds: number[];
-  try { openRounds = openArtifactRounds(taskDir, taskContent, family); }
+  try { openRounds = openArtifactRounds(taskDir, directory.taskContent, family); }
   catch (error) {
     return failure(requestRef, family, {
       code: 'ARTIFACT_SELECTION_INDETERMINATE',
       message: error instanceof Error ? error.message : String(error)
     }, { taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null });
   }
-  const knownRounds = new Set(knownArtifacts.map((item) => item.round));
-  for (const round of openRounds) knownRounds.add(round);
-  const max = Math.max(...knownRounds, 0);
-  if (max > 0 && !knownRounds.has(1)) diagnostics.push(diagnostic('MISSING_BASE', family, null, `${family}.md is missing`));
-  for (let round = 1; round <= max; round += 1) {
-    if (!knownRounds.has(round)) diagnostics.push(diagnostic('ROUND_GAP', family, null, `${artifactName(family, round)} is missing`));
+  const max = maxArtifactRound(family, artifacts, openRounds, diagnostics);
+  addMultipleOpenRoundDiagnostic(family, openRounds, diagnostics);
+  const completion = completedArtifactContext(taskDir, family, directory.taskContent, artifacts, diagnostics);
+  return {
+    status: 'ready', changed: false, requestRef, taskId: identity.taskId ?? null,
+    taskDir, taskState: identity.taskState ?? null, family, artifacts,
+    completed: completion.completed, latest: completion.latest,
+    next: { round: max + 1, name: artifactName(family, max + 1) },
+    openRounds, reviewedInput: completion.reviewedInput, diagnostics, error: null
+  };
+}
+
+function addMultipleOpenRoundDiagnostic(
+  family: ArtifactFamily,
+  openRounds: readonly number[],
+  diagnostics: ArtifactDiagnostic[]
+): void {
+  if (openRounds.length > 1) diagnostics.push(diagnostic('MULTIPLE_OPEN_ROUNDS', family, null, `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`));
+}
+
+function readArtifactDirectory(taskDir: string):
+  | { ok: true; entries: fs.Dirent[]; taskContent: string }
+  | { ok: false; error: unknown } {
+  try {
+    return {
+      ok: true,
+      entries: fs.readdirSync(taskDir, { withFileTypes: true }),
+      taskContent: fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8')
+    };
+  } catch (error) {
+    return { ok: false, error };
   }
+}
+
+function inspectArtifactEntry(
+  taskDir: string,
+  family: ArtifactFamily,
+  entry: fs.Dirent
+): { artifact: ArtifactIdentity | null; diagnostic: ArtifactDiagnostic | null } {
+  const parsed = parseArtifactName(entry.name);
+  const reserved = entry.name.toLowerCase().startsWith(family.toLowerCase() + '-r')
+    || entry.name.toLowerCase() === family.toLowerCase() + '.md';
+  if (!parsed || parsed.family !== family) {
+    return { artifact: null, diagnostic: reserved ? artifactNameDiagnostic(family, entry.name) : null };
+  }
+  return inspectArtifactFile(taskDir, family, entry.name, parsed);
+}
+
+function artifactNameDiagnostic(family: ArtifactFamily, name: string): ArtifactDiagnostic {
+  const roundText = new RegExp('^' + escapeRegExp(family) + '-r(.+)\\.md$', 'i').exec(name)?.[1];
+  const code = roundText && /^\d+$/.test(roundText) && !Number.isSafeInteger(Number(roundText))
+    ? 'ROUND_OUT_OF_RANGE' : 'NONCANONICAL_NAME';
+  const message = 'noncanonical ' + family + ' artifact candidate ' + "'" + name + "'"
+    + ' (verify whether this is an unrelated file with a reserved prefix)';
+  return diagnostic(code, family, name, message);
+}
+
+function inspectArtifactFile(
+  taskDir: string,
+  family: ArtifactFamily,
+  name: string,
+  parsed: NonNullable<ReturnType<typeof parseArtifactName>>
+): { artifact: ArtifactIdentity | null; diagnostic: ArtifactDiagnostic | null } {
+  const abs = path.join(taskDir, name);
+  try {
+    const stat = fs.lstatSync(abs);
+    if (stat.isSymbolicLink()) return { artifact: null, diagnostic: diagnostic('SYMBOLIC_LINK', family, name, 'symbolic links are not workflow artifacts: ' + name) };
+    if (!stat.isFile()) return { artifact: null, diagnostic: diagnostic('NON_REGULAR_FILE', family, name, 'artifact is not a regular file: ' + name) };
+    try { fs.accessSync(abs, fs.constants.R_OK); }
+    catch { return { artifact: null, diagnostic: diagnostic('FILESYSTEM_RACE', family, name, 'artifact is not readable: ' + name) }; }
+    return { artifact: { ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs }, diagnostic: null };
+  } catch (error) {
+    return { artifact: null, diagnostic: diagnostic('FILESYSTEM_RACE', family, name, String(error)) };
+  }
+}
+
+function maxArtifactRound(
+  family: ArtifactFamily,
+  artifacts: readonly ArtifactIdentity[],
+  openRounds: readonly number[],
+  diagnostics: ArtifactDiagnostic[]
+): number {
+  const rounds = new Set(artifacts.map((item) => item.round));
+  for (const round of openRounds) rounds.add(round);
+  const max = Math.max(...rounds, 0);
+  if (max > 0 && !rounds.has(1)) diagnostics.push(diagnostic('MISSING_BASE', family, null, family + '.md is missing'));
+  for (let round = 1; round <= max; round += 1) {
+    if (!rounds.has(round)) diagnostics.push(diagnostic('ROUND_GAP', family, null, artifactName(family, round) + ' is missing'));
+  }
+  return max;
+}
+
+function completedArtifactContext(
+  taskDir: string,
+  family: ArtifactFamily,
+  taskContent: string,
+  artifacts: readonly ArtifactIdentity[],
+  diagnostics: ArtifactDiagnostic[]
+): { completed: ArtifactIdentity[]; latest: ArtifactIdentity | null; reviewedInput: ArtifactIdentity | null } {
   const event = completionEvent(family);
   const completed = event
     ? artifacts.filter((artifact) => hasValidArtifactCompletion(taskContent, taskDir, artifact.name, event))
       .sort((left, right) => left.round - right.round)
     : [];
-  if (openRounds.length > 1) diagnostics.push(diagnostic('MULTIPLE_OPEN_ROUNDS', family, null, `multiple incomplete ${family} rounds are open: ${openRounds.join(', ')}`));
   const latest = completed.at(-1) ?? null;
-  let hasReviewCodeReceipt = false;
-  if (family === 'review-code' && latest) {
-    try { hasReviewCodeReceipt = Boolean(receiptForOutput(taskContent, latest.name)); }
-    catch { hasReviewCodeReceipt = false; }
-  }
-  const reviewedInput = family.startsWith('review-') && latest && (family !== 'review-code' || hasReviewCodeReceipt)
-    ? resolveReviewedInput(taskDir, latest, family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code', diagnostics)
+  const reviewedInput = latest && shouldResolveReviewedInput(family, taskContent, latest)
+    ? resolveReviewedInput(taskDir, latest, reviewedFamily(family), diagnostics)
     : null;
-  return {
-    status: 'ready', changed: false, requestRef, taskId: identity.taskId ?? null,
-    taskDir, taskState: identity.taskState ?? null, family, artifacts, completed, latest,
-    next: { round: max + 1, name: artifactName(family, max + 1) },
-    openRounds, reviewedInput, diagnostics, error: null
-  };
+  return { completed, latest, reviewedInput };
+}
+
+function shouldResolveReviewedInput(family: ArtifactFamily, taskContent: string, latest: ArtifactIdentity): boolean {
+  if (!family.startsWith('review-')) return false;
+  if (family !== 'review-code') return true;
+  try { return Boolean(receiptForOutput(taskContent, latest.name)); }
+  catch { return false; }
+}
+
+function reviewedFamily(family: ArtifactFamily): ArtifactFamily {
+  if (family === 'review-analysis') return 'analysis';
+  if (family === 'review-plan') return 'plan';
+  return 'code';
 }
 
 function resolveReviewedInput(
@@ -361,48 +414,79 @@ function hasSelectionEvidence(
   context: ArtifactContextResult,
   pathState: LifecyclePathState
 ): boolean {
-  if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) return true;
-  if (options.reasonCode === 'new-requirement' || options.reasonCode === 'upstream-fact-doubt'
-    || family === 'review-code' && options.reasonCode === 'manual-review-supplement') return true;
-  if ((family === 'plan' || family === 'code') && context.latest) {
-    const latestInputs = Object.fromEntries(context.inputs.map((input) => [input.family, input.name]));
-    const capturedInputs = receiptsForOutput(content, context.latest.name)
-      .filter((receipt) => receipt.event === `${family}.completed`)
-      .filter((receipt) => {
-        try { return sha256File(path.join(context.taskDir!, receipt.input)) === receipt.inputSha256; }
-        catch { return false; }
-      })
-      .map((receipt) => receipt.input);
-    if (!executionInputsMatchLatest(family, pathState, latestInputs, capturedInputs)) return true;
+  if (hasExplicitSelectionEvidence(options, family)
+    || hasExecutionInputChangeEvidence(content, family, context, pathState)) return true;
+  const reviewEvidence = hasReviewSelectionEvidence(content, family, options, context);
+  if (reviewEvidence !== null) return reviewEvidence;
+  return hasPendingTaskSelectionEvidence(content, family, context)
+    || hasUnresolvedReviewChanges(content, context);
+}
+
+function hasExplicitSelectionEvidence(options: InspectOptions, family: ArtifactFamily): boolean {
+  return Boolean(options.sourceFinding && options.sourceArtifact && options.sourceSha256)
+    || options.reasonCode === 'new-requirement'
+    || options.reasonCode === 'upstream-fact-doubt'
+    || family === 'review-code' && options.reasonCode === 'manual-review-supplement';
+}
+
+function hasExecutionInputChangeEvidence(
+  content: string,
+  family: ArtifactFamily,
+  context: ArtifactContextResult,
+  pathState: LifecyclePathState
+): boolean {
+  if ((family !== 'plan' && family !== 'code') || !context.latest) return false;
+  const latestInputs = Object.fromEntries(context.inputs.map((input) => [input.family, input.name]));
+  const capturedInputs = receiptsForOutput(content, context.latest.name)
+    .filter((receipt) => receipt.event === family + '.completed')
+    .filter((receipt) => {
+      try { return sha256File(path.join(context.taskDir!, receipt.input)) === receipt.inputSha256; }
+      catch { return false; }
+    })
+    .map((receipt) => receipt.input);
+  return !executionInputsMatchLatest(family, pathState, latestInputs, capturedInputs);
+}
+
+function hasReviewSelectionEvidence(
+  content: string,
+  family: ArtifactFamily,
+  options: InspectOptions,
+  context: ArtifactContextResult
+): boolean | null {
+  if (!family.startsWith('review-')) return null;
+  const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
+  const currentInput = context.inputs.find((input) => input.family === reviewedFamily);
+  if (family !== 'review-code') return currentInput && context.reviewedInput?.name !== currentInput.name ? true : null;
+  if (!context.latest) return false;
+  try {
+    const reportContent = fs.readFileSync(context.latest.path, 'utf8');
+    const identity = inspectReviewIdentity(context.taskDir!, reportContent, options.repoRoot);
+    return identity.status !== 'matched'
+      || !context.taskDir
+      || !hasValidArtifactCompletion(content, context.taskDir, context.latest.name, 'review-code.completed');
+  } catch {
+    return true;
   }
-  if (family.startsWith('review-')) {
-    const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
-    const currentInput = context.inputs.find((input) => input.family === reviewedFamily);
-    if (family === 'review-code') {
-      if (!context.latest) return false;
-      try {
-        const reportContent = fs.readFileSync(context.latest.path, 'utf8');
-        const identity = inspectReviewIdentity(context.taskDir!, reportContent, options.repoRoot);
-        return identity.status !== 'matched'
-          || !context.taskDir
-          || !hasValidArtifactCompletion(content, context.taskDir, context.latest.name, 'review-code.completed');
-      } catch {
-        return true;
-      }
-    }
-    if (currentInput && context.reviewedInput?.name !== currentInput.name) return true;
-  }
+}
+
+function hasPendingTaskSelectionEvidence(
+  content: string,
+  family: ArtifactFamily,
+  context: ArtifactContextResult
+): boolean {
   const target = family === 'analysis' ? 'analysis' : family === 'plan' ? 'plan' : family === 'code' ? 'code' : null;
   if (target) {
     const parsed = parseReworkIntentDocument(content);
-    if (!parsed.ok) throw new Error(`${parsed.code}: ${parsed.message}`);
+    if (!parsed.ok) throw new Error(parsed.code + ': ' + parsed.message);
     if (parsed.intents.some((intent) => intent.status === 'pending'
       && (intent.target === target || family === 'analysis' && intent.target === 'plan'))) return true;
   }
-  if (family === 'code') {
-    if (context.latest && context.codeMode?.mode === 'init') return true;
-    if (parseImplementationInputs(content).rows.some((input) => input.needsImplementation && input.status === 'pending')) return true;
-  }
+  if (family !== 'code') return false;
+  return Boolean(context.latest && context.codeMode?.mode === 'init')
+    || parseImplementationInputs(content).rows.some((input) => input.needsImplementation && input.status === 'pending');
+}
+
+function hasUnresolvedReviewChanges(content: string, context: ArtifactContextResult): boolean {
   return context.inputs.filter((candidate) => candidate.family.startsWith('review-')).some((input) => {
     const verdict = parseVerdict(input.path);
     if (!verdict.ok || verdict.verdict !== 'Changes Requested' || !context.latest) return false;
@@ -478,44 +562,61 @@ function resolveArtifactContextFromTask(
   if (inventory.family !== 'analysis' && pathState.status !== 'valid') {
     return contextFailure(inventory, 'LIFECYCLE_PATH_INVALID', pathState.message);
   }
-  if (inventory.family === 'code') {
-    const code = resolveCodeContext(inventory, options, resolvedTask);
-    const selected = attachArtifactSelection(code, pathState, options);
-    if (selected.status !== 'ready' || !selected.selection) return selected;
-    if (selected.selection.disposition === 'reuse') return selected;
-    if (selected.codeMode?.mode === 'error'
-      && selected.codeMode.message.includes('is not captured by the latest code input receipt')) {
-      return {
-        ...selected,
-        status: 'ready',
-        codeMode: {
-          ...selected.codeMode,
-          mode: 'init',
-          message: 'A new implementation round was requested.'
-        },
-        error: null
-      };
-    }
-    if (selected.codeMode?.mode === 'refused') {
-      return {
-        ...selected,
-        status: 'ready',
-        codeMode: {
-          ...selected.codeMode,
-          mode: 'init',
-          message: 'A new implementation round was requested.'
-        },
-        error: null
-      };
-    }
-    return selected;
+  if (inventory.family === 'code') return resolveCodeArtifactContext(inventory, options, pathState, resolvedTask);
+  return resolveNonCodeArtifactContext(taskRef, inventory, options, pathState, resolvedTask);
+}
+
+function resolveCodeArtifactContext(
+  inventory: ArtifactInventoryResult,
+  options: InspectOptions,
+  pathState: LifecyclePathState,
+  resolvedTask?: ResolvedTaskRef
+): ArtifactContextResult {
+  const code = resolveCodeContext(inventory, options, resolvedTask);
+  const selected = attachArtifactSelection(code, pathState, options);
+  if (selected.status !== 'ready' || !selected.selection) return selected;
+  if (selected.selection.disposition === 'reuse') return selected;
+  if (selected.codeMode?.mode === 'error'
+    && selected.codeMode.message.includes('is not captured by the latest code input receipt')) {
+    return {
+      ...selected,
+      status: 'ready',
+      codeMode: {
+        ...selected.codeMode,
+        mode: 'init',
+        message: 'A new implementation round was requested.'
+      },
+      error: null
+    };
   }
+  if (selected.codeMode?.mode === 'refused') {
+    return {
+      ...selected,
+      status: 'ready',
+      codeMode: {
+        ...selected.codeMode,
+        mode: 'init',
+        message: 'A new implementation round was requested.'
+      },
+      error: null
+    };
+  }
+  return selected;
+}
+
+function resolveNonCodeArtifactContext(
+  taskRef: string,
+  inventory: ArtifactInventoryResult,
+  options: InspectOptions,
+  pathState: LifecyclePathState,
+  resolvedTask?: ResolvedTaskRef
+): ArtifactContextResult {
   const required = REQUIRED_INPUT[inventory.family as ArtifactFamily];
   const inputs: ArtifactIdentity[] = [];
   if (required) {
     const input = inspectTaskArtifacts(taskRef, required, options, resolvedTask);
     if (input.status === 'failed' || !input.latest) {
-      return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_INPUT_MISSING', message: `latest ${required} artifact is required` } };
+      return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_INPUT_MISSING', message: 'latest ' + required + ' artifact is required' } };
     }
     inputs.push(input.latest);
   }

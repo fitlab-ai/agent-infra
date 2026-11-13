@@ -22,7 +22,7 @@ import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.
 import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
 import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
-import { createTempDir, recordArtifactCompletions } from '../../../helpers.ts';
+import { createTempDir, onPlatforms, recordArtifactCompletions } from '../../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
@@ -220,6 +220,27 @@ test('review-code reuses only a completed report bound to the current commit', (
   assert.equal(changed.selection?.artifact.name, 'review-code-r2.md');
 });
 
+test('review-code reuse does not parse unrelated review receipts after a matched completion', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
+  completedReviewFixture(f);
+  fs.writeFileSync(path.join(f.taskDir, 'review-plan.md'), [
+    '## 审查摘要', '',
+    '- **总体结论**：需要修改',
+    '- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0', ''
+  ].join('\n'));
+  recordArtifactCompletions(f.taskDir, [
+    { name: 'analysis.md', lifecycleInputs: [] },
+    { name: 'review-code.md', lifecycleInputs: [] },
+    { name: 'review-plan.md', lifecycleInputs: [] }
+  ]);
+  fs.appendFileSync(path.join(f.taskDir, 'task.md'), '\n## 产物生命周期收据\n\nmalformed receipt table\n');
+
+  const result = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready', JSON.stringify(result.error));
+  assert.equal(result.selection?.disposition, 'reuse');
+  assert.equal(result.selection?.reasonCode, 'history-matched');
+});
+
 test('review-code creates a new round when a completed report omits Reviewed Head', () => {
   const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
   completedReviewFixture(f, { includeReviewedHead: false });
@@ -271,6 +292,28 @@ test('read inventory returns canonical history plus topology diagnostics', () =>
   assert.equal(result.status, 'ready');
   assert.deepEqual(result.artifacts.map((item) => item.name), ['analysis.md', 'analysis-r3.md']);
   assert.deepEqual(result.diagnostics.map((item) => item.code).sort(), ['NONCANONICAL_NAME', 'ROUND_GAP']);
+});
+
+test('read inventory rejects artifact symlinks', onPlatforms('linux', 'darwin'), () => {
+  const f = fixture();
+  const target = path.join(f.taskDir, 'target.md');
+  fs.writeFileSync(target, '# target');
+  fs.symlinkSync(target, path.join(f.taskDir, 'analysis.md'));
+
+  const result = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.diagnostics.map((item) => item.code), ['SYMBOLIC_LINK']);
+});
+
+test('read inventory rejects artifact directories as non-regular files', () => {
+  const f = fixture();
+  fs.mkdirSync(path.join(f.taskDir, 'analysis.md'));
+
+  const result = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.diagnostics.map((item) => item.code), ['NON_REGULAR_FILE']);
 });
 
 test('legacy invalidation text is inert and does not filter the physical artifact inventory', () => {
