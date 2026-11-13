@@ -765,15 +765,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/provider-loader.ts",
-      "ruleId": "complexity",
-      "stableId": "0a599cc21017ee6ddc42cd8d4c553224292f0533fbd2e824d19a8731ffb97cae",
-      "displayName": "instantiateProvider",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/internal/cli-route-inventory.ts",
       "ruleId": "complexity",
       "stableId": "c5e2051a9c901d3c54bcdbb38c1b760f3c39b92d22b98d9f9d179993e9a873b4",
@@ -816,15 +807,6 @@
       "displayName": "loadConfig",
       "metric": 38,
       "normalizedMessage": "complexity=38",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/provider-loader.ts",
-      "ruleId": "complexity",
-      "stableId": "86e402293499966cd9dfc03807336d4ec8cf1fdcc3a00e2bfb1e48299ac16ab7",
-      "displayName": "loadPlatformProvider",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
       "count": 1
     },
     {
