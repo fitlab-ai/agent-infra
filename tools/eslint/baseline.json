@@ -1341,15 +1341,6 @@
       "count": 1
     },
     {
-      "file": "lib/run/host.ts",
-      "ruleId": "complexity",
-      "stableId": "fde96ad91612c638051e7ad3e062d683d79dc8e769fd6a1ad511181d9b275977",
-      "displayName": "resolveCommandDetails",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/platform/github-provider.ts",
       "ruleId": "complexity",
       "stableId": "ef13f6f65b60fb583a5194b7a0f46828de973c775a5977b589ac56423b95278a",
@@ -1921,15 +1912,6 @@
       "ruleId": "max-depth",
       "stableId": "207d28a7daf1ce697ce08e361e1129dc992473b8b234345db2ed19401ec9f170",
       "displayName": "acquireSandboxControlBrokerStartup",
-      "metric": 5,
-      "normalizedMessage": "depth=5",
-      "count": 2
-    },
-    {
-      "file": "lib/run/host.ts",
-      "ruleId": "max-depth",
-      "stableId": "fde96ad91612c638051e7ad3e062d683d79dc8e769fd6a1ad511181d9b275977",
-      "displayName": "resolveCommandDetails",
       "metric": 5,
       "normalizedMessage": "depth=5",
       "count": 2

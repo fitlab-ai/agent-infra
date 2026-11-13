@@ -131,6 +131,32 @@ test("POSIX command resolution preserves the current directory for an empty PATH
   }
 });
 
+test("Windows command resolution tries uppercase PATHEXT candidates", onPlatforms("linux"), () => {
+  const root = createTempDir("agent-infra-host-command-win-case-");
+  try {
+    const uppercase = path.join(root, "probe.CMD");
+    writeFile(uppercase);
+
+    assert.equal(
+      resolveCommand("probe", "win32", { Path: root, PATHEXT: ".CMD" }),
+      uppercase
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("unresolved command resolution preserves the original command name", () => {
+  const root = createTempDir("agent-infra-host-command-unresolved-");
+  try {
+    const command = "missing-agent-infra-command";
+
+    assert.equal(resolveCommand(command, "linux", { PATH: root }), command);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("self-update rejects a manager resolved from an empty POSIX PATH entry", onPlatforms("linux", "darwin"), () => {
   const root = createTempDir("agent-infra-self-update-empty-path-");
   const previousCwd = process.cwd();
