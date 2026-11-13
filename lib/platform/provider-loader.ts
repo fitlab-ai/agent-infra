@@ -10,7 +10,7 @@ import {
   isPlatformProviderFactory,
   validatePlatformProvider
 } from './provider-contract.ts';
-import type { JsonValue, PlatformProviderFactoryInput } from './provider-contract.ts';
+import type { JsonValue, PlatformProviderFactory, PlatformProviderFactoryInput } from './provider-contract.ts';
 import { createGitHubProvider } from './github-provider.ts';
 import { createNoneProvider } from './none-provider.ts';
 import { wrapProviderOperations } from './provider-validation.ts';
@@ -41,6 +41,26 @@ type ResolvedExternalSource = {
   importUrl: string;
 };
 
+type ProviderSelection = {
+  providerType: string;
+  providerConfig: Readonly<Record<string, JsonValue>>;
+  sourceIdentity: string;
+  importUrl: string | null;
+};
+
+type ProviderSelectionResult =
+  | { ok: true; value: ProviderSelection }
+  | { ok: false; error: PlatformError };
+
+type ProviderSource = {
+  sourceIdentity: string;
+  importUrl: string | null;
+};
+
+type ProviderSourceResult =
+  | { ok: true; value: ProviderSource }
+  | { ok: false; error: PlatformError };
+
 const sessions = new Map<string, Promise<LoadedRuntimeProvider>>();
 
 function findRepositoryRoot(cwd: string): string {
@@ -63,6 +83,36 @@ function failure(
     ok: false,
     error: { code, message, retryable: false, providerType, phase }
   };
+}
+
+function selectionFailure(providerType: string, phase: string, code: string, message: string): ProviderSelectionResult {
+  return {
+    ok: false,
+    error: { code, message, retryable: false, providerType, phase }
+  };
+}
+
+function resolveProviderSource(
+  repositoryRoot: string,
+  providerType: string,
+  entry: { source?: unknown }
+): ProviderSourceResult {
+  if (providerType === 'github' || providerType === 'none') {
+    return {
+      ok: true,
+      value: { sourceIdentity: 'builtin:' + providerType + '@' + PLATFORM_PROVIDER_CONTRACT_VERSION, importUrl: null }
+    };
+  }
+  if (typeof entry.source !== 'string' || !entry.source.trim()) {
+    return {
+      ok: false,
+      error: { code: 'PLATFORM_PROVIDER_SOURCE_MISSING', message: 'Selected provider source is required', retryable: false, providerType, phase: 'config' }
+    };
+  }
+  const resolved = resolveExternalSource(repositoryRoot, entry.source, providerType);
+  return resolved.ok
+    ? { ok: true, value: resolved.value }
+    : { ok: false, error: resolved.error };
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
@@ -158,130 +208,166 @@ async function instantiateProvider(
   if (providerType === 'github') return createGitHubProvider(input, client as never) as unknown as RuntimePlatformProvider;
   if (providerType === 'none') return createNoneProvider(input) as unknown as RuntimePlatformProvider;
 
-  let moduleValue: Record<string, unknown>;
+  return instantiateExternalProvider(importUrl!, input, providerType);
+}
+
+function providerException(message: string, code: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
+}
+
+async function importProviderModule(importUrl: string): Promise<Record<string, unknown>> {
   try {
-    moduleValue = await import(importUrl!);
+    return await import(importUrl);
   } catch {
-    throw Object.assign(new Error('Selected provider source could not be imported'), {
-      code: 'PLATFORM_PROVIDER_IMPORT_FAILED'
-    });
+    throw providerException('Selected provider source could not be imported', 'PLATFORM_PROVIDER_IMPORT_FAILED');
   }
-  const factory = moduleValue.default;
+}
+
+function requireProviderFactory(factory: unknown): PlatformProviderFactory {
   if (!isPlatformProviderFactory(factory)) {
-    throw Object.assign(new Error('Selected provider must default-export an async factory'), {
-      code: 'PLATFORM_PROVIDER_EXPORT_INVALID'
-    });
+    throw providerException('Selected provider must default-export an async factory', 'PLATFORM_PROVIDER_EXPORT_INVALID');
   }
-  let provider: unknown;
+  return factory;
+}
+
+async function invokeProviderFactory(
+  factory: PlatformProviderFactory,
+  input: PlatformProviderFactoryInput
+): Promise<unknown> {
   try {
     const candidate = factory(input);
     if (!candidate || typeof (candidate as PromiseLike<unknown>).then !== 'function') {
-      throw Object.assign(new Error('Provider factory must return a Promise'), {
-        code: 'PLATFORM_PROVIDER_EXPORT_INVALID'
-      });
+      throw providerException('Provider factory must return a Promise', 'PLATFORM_PROVIDER_EXPORT_INVALID');
     }
-    provider = await candidate;
+    return await candidate;
   } catch (cause) {
     if (cause && typeof cause === 'object' && 'code' in cause
       && cause.code === 'PLATFORM_PROVIDER_EXPORT_INVALID') throw cause;
-    throw Object.assign(new Error('Provider factory failed'), {
-      code: 'PLATFORM_PROVIDER_FACTORY_FAILED'
-    });
+    throw providerException('Provider factory failed', 'PLATFORM_PROVIDER_FACTORY_FAILED');
   }
+}
+
+function validateExternalProvider(provider: unknown, providerType: string): LoadedRuntimeProvider {
   if (provider && typeof provider === 'object' && 'type' in provider && provider.type !== providerType) {
-    throw Object.assign(new Error('Provider type does not match platform.type'), {
-      code: 'PLATFORM_PROVIDER_TYPE_MISMATCH'
-    });
+    throw providerException('Provider type does not match platform.type', 'PLATFORM_PROVIDER_TYPE_MISMATCH');
   }
   if (provider && typeof provider === 'object' && 'contractVersion' in provider
     && provider.contractVersion !== PLATFORM_PROVIDER_CONTRACT_VERSION) {
-    throw Object.assign(new Error('Provider contract version is unsupported'), {
-      code: 'PLATFORM_PROVIDER_VERSION_UNSUPPORTED'
-    });
+    throw providerException('Provider contract version is unsupported', 'PLATFORM_PROVIDER_VERSION_UNSUPPORTED');
   }
   const validated = validatePlatformProvider(provider, providerType);
-  if (!validated.ok) {
-    throw Object.assign(new Error(validated.error.message), {
-      code: validated.error.code
-    });
-  }
+  if (!validated.ok) throw providerException(validated.error.message, validated.error.code);
   return wrapProviderOperations(validated.value);
 }
 
-async function loadPlatformProvider(options: ProviderLoaderOptions = {}): Promise<ProviderLoadResult> {
-  const workingDirectory = path.resolve(options.cwd || process.cwd());
-  const repositoryRoot = path.resolve(findRepositoryRoot(workingDirectory));
+async function instantiateExternalProvider(
+  importUrl: string,
+  input: PlatformProviderFactoryInput,
+  providerType: string
+): Promise<LoadedRuntimeProvider> {
+  const moduleValue = await importProviderModule(importUrl);
+  const factory = moduleValue.default;
+  const validFactory = requireProviderFactory(factory);
+  const provider = await invokeProviderFactory(validFactory, input);
+  return validateExternalProvider(provider, providerType);
+}
+
+function resolveProviderSelection(
+  repositoryRoot: string,
+  options: ProviderLoaderOptions
+): ProviderSelectionResult {
   const config = readPlatformConfig(repositoryRoot);
   const platform = config.platform && typeof config.platform === 'object'
     ? config.platform as Record<string, unknown>
     : {};
   const providerType = options.platformType
     ?? (typeof platform.type === 'string' ? platform.type : '');
-  if (!providerType) return failure('', 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'platform.type must be a non-empty string');
+  if (!providerType) {
+    return selectionFailure('', 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'platform.type must be a non-empty string');
+  }
 
   const entry = selectedEntry(config, providerType);
   const rawConfig = entry.config === undefined ? {} : entry.config;
   if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig) || !isJsonValue(rawConfig)) {
-    return failure(providerType, 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'Selected provider config must be a JSON object');
+    return selectionFailure(providerType, 'config', 'PLATFORM_PROVIDER_CONFIG_INVALID', 'Selected provider config must be a JSON object');
   }
   const providerConfig = rawConfig as Record<string, JsonValue>;
-  let sourceIdentity: string;
-  let importUrl: string | null = null;
-  if (providerType === 'github' || providerType === 'none') {
-    sourceIdentity = 'builtin:' + providerType + '@' + PLATFORM_PROVIDER_CONTRACT_VERSION;
-  } else {
-    if (typeof entry.source !== 'string' || !entry.source.trim()) {
-      return failure(providerType, 'config', 'PLATFORM_PROVIDER_SOURCE_MISSING', 'Selected provider source is required');
-    }
-    const resolved = resolveExternalSource(repositoryRoot, entry.source, providerType);
-    if (!resolved.ok) return resolved;
-    sourceIdentity = resolved.value.sourceIdentity;
-    importUrl = resolved.value.importUrl;
-  }
+  const source = resolveProviderSource(repositoryRoot, providerType, entry);
+  if (!source.ok) return source;
+  return { ok: true, value: { providerType, providerConfig, ...source.value } };
+}
 
-  const key = [
+function providerSessionKey(repositoryRoot: string, selection: ProviderSelection): string {
+  return [
     repositoryRoot,
-    providerType,
-    sourceIdentity,
-    configFingerprint(providerConfig)
+    selection.providerType,
+    selection.sourceIdentity,
+    configFingerprint(selection.providerConfig)
   ].join('\u0000');
-  const reuseSession = !(providerType === 'github' && options.client);
-  let session = reuseSession ? sessions.get(key) : undefined;
-  if (!session) {
-    session = instantiateProvider(providerType, repositoryRoot, importUrl, providerConfig, options.client);
-    if (reuseSession) {
-      sessions.set(key, session);
-      session.catch(() => {
-        if (sessions.get(key) === session) sessions.delete(key);
-      });
-    }
+}
+
+function loadProviderSession(
+  key: string,
+  repositoryRoot: string,
+  selection: ProviderSelection,
+  client: PlatformClient | undefined
+): Promise<LoadedRuntimeProvider> {
+  const { providerType, providerConfig, importUrl } = selection;
+  const reuseSession = !(providerType === 'github' && client);
+  const cachedSession = reuseSession ? sessions.get(key) : undefined;
+  if (cachedSession) return cachedSession;
+  const session = instantiateProvider(providerType, repositoryRoot, importUrl, providerConfig, client);
+  if (reuseSession) {
+    sessions.set(key, session);
+    session.catch(() => {
+      if (sessions.get(key) === session) sessions.delete(key);
+    });
   }
+  return session;
+}
+
+function providerLoadFailure(providerType: string, cause: unknown): ProviderLoadResult {
+  const code = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+    ? cause.code
+    : 'PLATFORM_PROVIDER_FACTORY_FAILED';
+  const phase = code === 'PLATFORM_PROVIDER_IMPORT_FAILED'
+    ? 'import'
+    : code === 'PLATFORM_PROVIDER_EXPORT_INVALID'
+      ? 'export'
+      : code === 'PLATFORM_PROVIDER_TYPE_MISMATCH' || code === 'PLATFORM_PROVIDER_VERSION_UNSUPPORTED' || code === 'PLATFORM_PROVIDER_CONTRACT_INVALID'
+        ? 'validation'
+        : 'factory';
+  const messages: Record<string, string> = {
+    PLATFORM_PROVIDER_IMPORT_FAILED: 'Selected provider source could not be imported',
+    PLATFORM_PROVIDER_EXPORT_INVALID: 'Selected provider must default-export an async factory',
+    PLATFORM_PROVIDER_TYPE_MISMATCH: 'Provider type does not match platform.type',
+    PLATFORM_PROVIDER_VERSION_UNSUPPORTED: 'Provider contract version is unsupported',
+    PLATFORM_PROVIDER_CONTRACT_INVALID: 'Provider does not satisfy the platform provider contract',
+    PLATFORM_PROVIDER_FACTORY_FAILED: 'Selected provider factory failed'
+  };
+  return failure(providerType, phase, code, messages[code] ?? 'Selected provider failed to load');
+}
+
+async function loadPlatformProvider(options: ProviderLoaderOptions = {}): Promise<ProviderLoadResult> {
+  const workingDirectory = path.resolve(options.cwd || process.cwd());
+  const repositoryRoot = path.resolve(findRepositoryRoot(workingDirectory));
+  const selection = resolveProviderSelection(repositoryRoot, options);
+  if (!selection.ok) return selection;
+  const key = providerSessionKey(repositoryRoot, selection.value);
   try {
-    const provider = await session;
+    const provider = await loadProviderSession(key, repositoryRoot, selection.value, options.client);
     return {
       ok: true,
-      value: { provider, providerType, repositoryRoot, workingDirectory, sourceIdentity }
+      value: {
+        provider,
+        providerType: selection.value.providerType,
+        repositoryRoot,
+        workingDirectory,
+        sourceIdentity: selection.value.sourceIdentity
+      }
     };
   } catch (cause) {
-    const code = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
-      ? cause.code
-      : 'PLATFORM_PROVIDER_FACTORY_FAILED';
-    const phase = code === 'PLATFORM_PROVIDER_IMPORT_FAILED'
-      ? 'import'
-      : code === 'PLATFORM_PROVIDER_EXPORT_INVALID'
-        ? 'export'
-        : code === 'PLATFORM_PROVIDER_TYPE_MISMATCH' || code === 'PLATFORM_PROVIDER_VERSION_UNSUPPORTED' || code === 'PLATFORM_PROVIDER_CONTRACT_INVALID'
-          ? 'validation'
-          : 'factory';
-    const messages: Record<string, string> = {
-      PLATFORM_PROVIDER_IMPORT_FAILED: 'Selected provider source could not be imported',
-      PLATFORM_PROVIDER_EXPORT_INVALID: 'Selected provider must default-export an async factory',
-      PLATFORM_PROVIDER_TYPE_MISMATCH: 'Provider type does not match platform.type',
-      PLATFORM_PROVIDER_VERSION_UNSUPPORTED: 'Provider contract version is unsupported',
-      PLATFORM_PROVIDER_CONTRACT_INVALID: 'Provider does not satisfy the platform provider contract',
-      PLATFORM_PROVIDER_FACTORY_FAILED: 'Selected provider factory failed'
-    };
-    return failure(providerType, phase, code, messages[code] ?? 'Selected provider failed to load');
+    return providerLoadFailure(selection.value.providerType, cause);
   }
 }
 

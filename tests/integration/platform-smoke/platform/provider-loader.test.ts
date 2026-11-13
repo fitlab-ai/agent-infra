@@ -110,6 +110,39 @@ test('changes provider session when selected source changes', async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('changes provider session when selected provider config changes', async () => {
+  const root = repository();
+  const source = path.join(fixtureRoot, 'valid-provider.mjs');
+  configure(root, 'trae', source, { endpoint: 'https://first.example' });
+  const first = await loadPlatformProvider({ cwd: root });
+  configure(root, 'trae', source, { endpoint: 'https://second.example' });
+  const second = await loadPlatformProvider({ cwd: root });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  if (!first.ok || !second.ok) return;
+  assert.notEqual(first.value.provider, second.value.provider);
+  assert.equal((globalThis as typeof globalThis & { __agentInfraProviderFactoryCalls?: number }).__agentInfraProviderFactoryCalls, 2);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('clears a rejected provider session so a later load retries initialization', async () => {
+  const root = repository();
+  const source = path.join(root, 'throwing-provider.mjs');
+  fs.writeFileSync(source, [
+    'export default async function createPlatformProvider() {',
+    '  globalThis.__agentInfraProviderFactoryCalls = (globalThis.__agentInfraProviderFactoryCalls || 0) + 1;',
+    "  throw new Error('provider factory failed');",
+    '}'
+  ].join('\n'));
+  configure(root, 'trae', source);
+  const first = await loadPlatformProvider({ cwd: root });
+  const second = await loadPlatformProvider({ cwd: root });
+  assert.equal(first.ok, false);
+  assert.equal(second.ok, false);
+  assert.equal((globalThis as typeof globalThis & { __agentInfraProviderFactoryCalls?: number }).__agentInfraProviderFactoryCalls, 2);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('does not reuse an old provider when the selected source cannot resolve', async () => {
   const root = repository();
   configure(root, 'trae', path.join(fixtureRoot, 'source-a.mjs'));
