@@ -621,15 +621,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-operation-registry.ts",
-      "ruleId": "complexity",
-      "stableId": "756d8d9d4af2e73e6687a3fea1b5fa6e8a8c6f90e8a2dfc26c385a58ce057606",
-      "displayName": "explicitTaskRefForOperation",
-      "metric": 44,
-      "normalizedMessage": "complexity=44",
-      "count": 1
-    },
-    {
       "file": "lib/platform/github-release-notes.ts",
       "ruleId": "complexity",
       "stableId": "d624dc3ff44a49e19093e7a622e5e80baa1420baa75749405b90cf1de0af4c1c",
@@ -663,15 +654,6 @@
       "displayName": "grep",
       "metric": 35,
       "normalizedMessage": "complexity=35",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-operation-registry.ts",
-      "ruleId": "complexity",
-      "stableId": "d612a88a60cc927fbffe877c2106633819758276471350d809821d37a8aeb323",
-      "displayName": "guardTaskOperation",
-      "metric": 27,
-      "normalizedMessage": "complexity=27",
       "count": 1
     },
     {

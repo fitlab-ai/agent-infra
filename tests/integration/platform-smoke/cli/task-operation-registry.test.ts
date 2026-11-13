@@ -172,6 +172,47 @@ test('delegated control selectors reuse the same internal descriptors', () => {
   assert.equal(resolveDelegatedTaskOperation(['client', 'task-finalization', 'TASK-20260904-002344', 'complete'])?.command, 'task-finalization');
 });
 
+test('task-bound guard preserves public argv, input, and delegated reference checks', () => {
+  const taskId = staleView.taskId!;
+  const taskEnv = {
+    AGENT_INFRA_SANDBOX: '1',
+    AGENT_INFRA_TASK_ID: taskId,
+    AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+    AGENT_INFRA_CONTROL_DIR: '/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime'
+  };
+  const currentView: SandboxTaskView = { ...staleView, state: 'current', reasonCode: null };
+
+  for (const args of [['--task', taskId], ['-t', taskId]]) {
+    assert.equal(guardTaskOperation('public', 'decide', args, { env: taskEnv, taskView: currentView }).descriptor.selector, 'decide');
+  }
+  assert.throws(
+    () => guardTaskOperation('public', 'decide', ['--task', 'TASK-20990101-010101'], { env: taskEnv, taskView: currentView }),
+    (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_MISMATCH:')
+  );
+
+  const root = createTempDir('task-operation-reference-');
+  const inputPath = path.join(root, 'commit.json');
+  try {
+    fs.writeFileSync(inputPath, JSON.stringify({ taskRef: taskId }));
+    assert.equal(guardTaskOperation('internal', 'git-workflow', ['commit', '--input', inputPath], {
+      env: taskEnv,
+      taskView: currentView
+    }).descriptor.selector, 'commit');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  assert.throws(
+    () => guardTaskOperation('internal', 'sandbox-control', [
+      'client', 'task-event', 'TASK-20990101-010101', 'analyze.started'
+    ], { env: taskEnv, taskView: currentView }),
+    (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_MISMATCH:')
+  );
+});
+
 test('task-view guard refuses stale progress before a route can import its module', () => {
   const taskEnv = {
     AGENT_INFRA_SANDBOX: '1',
