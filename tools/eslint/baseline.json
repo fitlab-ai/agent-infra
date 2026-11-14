@@ -54,15 +54,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/activity-intent.ts",
-      "ruleId": "complexity",
-      "stableId": "dc5a6cbc97a4348b51a3ea5cc711fe5c0e0e613e297442742c8136b8a8b4668a",
-      "displayName": "applyActivityIntent",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
-      "count": 1
-    },
-    {
       "file": "lib/task/qualification-confirmation.ts",
       "ruleId": "complexity",
       "stableId": "20fc9ef4e608135b9c336e2e26b2b31fe2b88b4f8cebb1d727e3cb764962d5f2",
@@ -960,15 +951,6 @@
       "displayName": "readSandboxControlManifestValue",
       "metric": 46,
       "normalizedMessage": "complexity=46",
-      "count": 1
-    },
-    {
-      "file": "lib/task/activity-intent.ts",
-      "ruleId": "complexity",
-      "stableId": "7e378fd5974c214146cc3760859aee6a380a77db7dc4ac5be5280ae29d2fb7ca",
-      "displayName": "readSnapshot",
-      "metric": 47,
-      "normalizedMessage": "complexity=47",
       "count": 1
     },
     {
