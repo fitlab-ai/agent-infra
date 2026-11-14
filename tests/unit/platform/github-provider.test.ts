@@ -78,6 +78,108 @@ test('GitHub Issue creation converts milestone titles to numeric REST IDs', asyn
   });
 });
 
+test('GitHub Issue update preserves GraphQL field writes and REST patch payloads', async () => {
+  const calls: Array<{ args: string[]; method?: string; input?: string }> = [];
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args, options = {}) {
+      calls.push({ args, ...options });
+      if (args.some((arg) => arg.includes('/milestones?'))) return { ok: true, value: [[{ title: '0.9.x', number: 42 }]] } as never;
+      if (args.some((arg) => arg.startsWith('number='))) {
+        return { ok: true, value: { data: { repository: { issue: { id: 'ISSUE_NODE', issueType: { id: 'TYPE_OLD' } } } } } } as never;
+      }
+      const query = args.find((arg) => arg.startsWith('query=')) || '';
+      if (query.includes('issueTypes')) {
+        return { ok: true, value: { data: { organization: { issueTypes: { nodes: [{
+          id: 'TYPE_BUG', name: 'Bug', pinnedFields: [{ __typename: 'IssueFieldNumber', id: 'FIELD_ESTIMATE', name: 'Estimate' }]
+        }] } } } } } as never;
+      }
+      if (options.input?.includes('updateIssueIssueType')) return { ok: true, value: { data: { updateIssueIssueType: { issue: { id: 'ISSUE_NODE' } } } } } as never;
+      if (options.input?.includes('setIssueFieldValue')) return { ok: true, value: { data: { setIssueFieldValue: { issue: { id: 'ISSUE_NODE' } } } } } as never;
+      return { ok: true, value: { id: 'ISSUE_NODE' } } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+  const provider = createGitHubProvider({ providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {} }, client);
+  const context = { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' };
+
+  const result = await provider.issues!.update({
+    context,
+    target: { kind: 'number', value: 23 },
+    patch: { title: 'Updated issue', milestone: '0.9.x', issueType: 'Bug', fields: { Estimate: 3 } },
+    mutation: { idempotencyKey: 'issue:update:23' }
+  });
+
+  assert.deepEqual(result, { ok: true, value: { changed: true, remoteId: '23' } });
+  const typeMutation = calls.find((call) => call.input?.includes('updateIssueIssueType'));
+  const fieldMutation = calls.find((call) => call.input?.includes('setIssueFieldValue'));
+  const restPatch = calls.find((call) => call.method === 'PATCH' && call.args.some((arg) => arg.endsWith('/issues/23')));
+  assert.deepEqual(JSON.parse(typeMutation?.input || '{}').variables, { issueId: 'ISSUE_NODE', issueTypeId: 'TYPE_BUG' });
+  assert.deepEqual(JSON.parse(fieldMutation?.input || '{}').variables, {
+    issueId: 'ISSUE_NODE', issueFields: [{ fieldId: 'FIELD_ESTIMATE', numberValue: 3 }]
+  });
+  assert.deepEqual(JSON.parse(restPatch?.input || '{}'), { title: 'Updated issue', milestone: 42 });
+  assert.ok(calls.indexOf(typeMutation!) < calls.indexOf(fieldMutation!));
+  assert.ok(calls.indexOf(fieldMutation!) < calls.indexOf(restPatch!));
+});
+
+test('GitHub Pull Request update preserves endpoint order and explicit milestone clearing', async () => {
+  const calls: Array<{ args: string[]; method?: string; input?: string }> = [];
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args, options = {}) {
+      calls.push({ args, ...options });
+      return { ok: true, value: {} } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+  const provider = createGitHubProvider({ providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {} }, client);
+  const context = { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' };
+
+  const result = await provider.changeRequests!.update({
+    context,
+    target: { kind: 'number', value: 31 },
+    currentLabels: [],
+    patch: { title: 'Updated pull request', assignees: ['alice'], milestone: null },
+    mutation: { idempotencyKey: 'pull-request:update:31' }
+  });
+
+  assert.deepEqual(result, { ok: true, value: { changed: true, remoteId: '31' } });
+  assert.deepEqual(calls.map((call) => call.args.find((arg) => arg.endsWith('/pulls/31') || arg.endsWith('/issues/31'))), [
+    'repos/acme/project/pulls/31', 'repos/acme/project/issues/31'
+  ]);
+  assert.deepEqual(JSON.parse(calls[0]?.input || '{}'), { title: 'Updated pull request' });
+  assert.deepEqual(JSON.parse(calls[1]?.input || '{}'), { assignees: ['alice'], milestone: null });
+});
+
+test('GitHub provider paginates and de-duplicates closing Issue identities', async () => {
+  const calls: string[][] = [];
+  let page = 0;
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args) {
+      calls.push(args);
+      page += 1;
+      return { ok: true, value: { data: { repository: { pullRequest: { closingIssuesReferences: {
+        nodes: page === 1 ? [{ number: 5 }, { number: 6 }] : [{ number: 6 }, { number: 7 }],
+        pageInfo: page === 1 ? { hasNextPage: true, endCursor: 'cursor-1' } : { hasNextPage: false, endCursor: null }
+      } } } } } } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+  const provider = createGitHubProvider({ providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {} }, client);
+  const result = await provider.changeRequests!.listClosingIssues!({
+    context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' },
+    target: { kind: 'number', value: 31 }
+  });
+
+  assert.deepEqual(result, { ok: true, value: [
+    { kind: 'number', value: 5 }, { kind: 'number', value: 6 }, { kind: 'number', value: 7 }
+  ] });
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1]?.includes('cursor=cursor-1'));
+});
+
 test('release-note provider emits typed history and keeps commit and closing-issue facts linked', async () => {
   const client: GitHubClient = {
     version: () => ({ ok: true, value: '2.72.0' }),
