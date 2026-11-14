@@ -54,24 +54,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/qualification-confirmation.ts",
-      "ruleId": "complexity",
-      "stableId": "20fc9ef4e608135b9c336e2e26b2b31fe2b88b4f8cebb1d727e3cb764962d5f2",
-      "displayName": "applyQualificationConfirmation",
-      "metric": 49,
-      "normalizedMessage": "complexity=49",
-      "count": 1
-    },
-    {
-      "file": "lib/task/qualification-intents.ts",
-      "ruleId": "complexity",
-      "stableId": "3f9e9a0bed350b3425427675cdb6f2a4ad07eb59fb940bb449392188100c9c49",
-      "displayName": "applyQualificationProposal",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
       "file": "lib/task/events.ts",
       "ruleId": "complexity",
       "stableId": "bcab53c92ea4cee21a68902cd5051898e62ad1d0fd0c70405346d7a89c5e5f0e",

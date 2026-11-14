@@ -91,24 +91,50 @@ function proposalValues(request: QualificationProposalRequest): { constraints: Q
   };
 }
 
-function applyQualificationProposal(request: QualificationProposalRequest, options: TaskWriteOptions = {}): QualificationProposalResult {
-  if (!request || typeof request !== 'object' || !validSingleLine(request.taskRef)) return failed('QUALIFICATION_PROPOSAL_INVALID', 'taskRef is required');
+type ProposalValues = ReturnType<typeof proposalValues>;
+type ProposalQualification = Extract<ReturnType<typeof parseTaskQualification>, { ok: true }>['qualification'];
+type ProposalTaskLocation = Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+type ProposalTaskContext = { resolved: ProposalTaskLocation; content: string; qualification: ProposalQualification };
+type ProposalTaskResult = { ok: true; context: ProposalTaskContext } | { ok: false; result: QualificationProposalResult };
+
+function prepareProposal(request: QualificationProposalRequest): { ok: true; values: ProposalValues } | { ok: false; result: QualificationProposalResult } {
+  if (!request || typeof request !== 'object' || !validSingleLine(request.taskRef)) {
+    return { ok: false, result: failed('QUALIFICATION_PROPOSAL_INVALID', 'taskRef is required') };
+  }
   let values: ReturnType<typeof proposalValues>;
   try { values = proposalValues(request); }
-  catch (error) { return failed('QUALIFICATION_PROPOSAL_INVALID', error instanceof Error ? error.message : String(error)); }
-  if (values.constraints.length === 0 && values.candidates.length === 0) return failed('QUALIFICATION_PROPOSAL_INVALID', 'proposal must contain a constraint or candidate');
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active') return failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  catch (error) {
+    return { ok: false, result: failed('QUALIFICATION_PROPOSAL_INVALID', error instanceof Error ? error.message : String(error)) };
+  }
+  if (values.constraints.length === 0 && values.candidates.length === 0) {
+    return { ok: false, result: failed('QUALIFICATION_PROPOSAL_INVALID', 'proposal must contain a constraint or candidate') };
+  }
+  return { ok: true, values };
+}
+
+function loadProposalTask(taskRef: string, options: TaskWriteOptions): ProposalTaskResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return { ok: false, result: failed(resolved.code, resolved.message, resolved.taskId) };
+  if (resolved.state !== 'active') {
+    return { ok: false, result: failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId) };
+  }
   let content: string;
   try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
-  catch (error) { return failed('TASK_READ_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId); }
+  catch (error) {
+    return { ok: false, result: failed('TASK_READ_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId) };
+  }
   const parsed = parseTaskQualification(content);
-  if (!parsed.ok) return failed(parsed.code, parsed.message, resolved.taskId);
-  if (!parsed.qualification.present) return failed('QUALIFICATION_TASK_CONTRACT_MISSING', 'task qualification contract is missing', resolved.taskId);
-  const currentConstraintMap = new Map(parsed.qualification.constraints.map((row) => [row.constraintId, row]));
-  const currentCandidateMap = new Map(parsed.qualification.candidates.map((row) => [row.candidateId, row]));
-  const proposalAlreadyApplied = values.constraints.every((row) => {
+  if (!parsed.ok) return { ok: false, result: failed(parsed.code, parsed.message, resolved.taskId) };
+  if (!parsed.qualification.present) {
+    return { ok: false, result: failed('QUALIFICATION_TASK_CONTRACT_MISSING', 'task qualification contract is missing', resolved.taskId) };
+  }
+  return { ok: true, context: { resolved, content, qualification: parsed.qualification } };
+}
+
+function proposalAlreadyApplied(values: ProposalValues, qualification: ProposalQualification): boolean {
+  const currentConstraintMap = new Map(qualification.constraints.map((row) => [row.constraintId, row]));
+  const currentCandidateMap = new Map(qualification.candidates.map((row) => [row.candidateId, row]));
+  return values.constraints.every((row) => {
     const current = currentConstraintMap.get(row.constraintId);
     return current && current.statement === row.statement && current.status === row.status && current.authority === row.authority
       && current.source === row.source && current.evidence === row.evidence && current.derivedFrom.join(',') === row.derivedFrom.join(',') && current.approvalEvidence === '';
@@ -117,18 +143,37 @@ function applyQualificationProposal(request: QualificationProposalRequest, optio
     return current && current.statement === row.statement && current.status === row.status && current.constraintIds.join(',') === row.constraintIds.join(',')
       && current.impact === row.impact && current.evidence === row.evidence;
   });
-  if (parsed.qualification.taskInputDigest !== request.expectedTaskInputDigest) {
-    return proposalAlreadyApplied
-      ? { status: 'no-op', changed: false, taskId: resolved.taskId, operations: [], error: null }
-      : failed('QUALIFICATION_DIGEST_CONFLICT', 'task qualification input changed before proposal was applied', resolved.taskId);
-  }
+}
+
+function proposalDigestError(values: ProposalValues, taskId: string, qualification: ProposalQualification, expectedDigest: string): QualificationProposalResult | null {
+  if (qualification.taskInputDigest === expectedDigest) return null;
+  return proposalAlreadyApplied(values, qualification)
+    ? { status: 'no-op', changed: false, taskId, operations: [], error: null }
+    : failed('QUALIFICATION_DIGEST_CONFLICT', 'task qualification input changed before proposal was applied', taskId);
+}
+
+function proposalReferenceError(values: ProposalValues, taskId: string, qualification: ProposalQualification): QualificationProposalResult | null {
+  const currentConstraintMap = new Map(qualification.constraints.map((row) => [row.constraintId, row]));
   for (const row of values.constraints) {
-    const current = currentConstraintMap.get(row.constraintId);
-    if (current?.status === 'confirmed') return failed('QUALIFICATION_CONFIRMATION_REQUIRED', `confirmed constraint '${row.constraintId}' must be superseded or revoked through task-qualification`, resolved.taskId);
+    if (currentConstraintMap.get(row.constraintId)?.status === 'confirmed') {
+      return failed('QUALIFICATION_CONFIRMATION_REQUIRED', `confirmed constraint '${row.constraintId}' must be superseded or revoked through task-qualification`, taskId);
+    }
   }
-  const knownConstraintIds = new Set([...parsed.qualification.constraints.map((row) => row.constraintId), ...values.constraints.map((row) => row.constraintId)]);
-  for (const row of values.constraints) for (const parent of row.derivedFrom) if (!knownConstraintIds.has(parent)) return failed('QUALIFICATION_CONSTRAINT_UNKNOWN', `constraint proposal '${row.constraintId}' references unknown '${parent}'`, resolved.taskId);
-  for (const row of values.candidates) for (const id of row.constraintIds) if (!knownConstraintIds.has(id)) return failed('QUALIFICATION_CONSTRAINT_UNKNOWN', `candidate proposal '${row.candidateId}' references unknown '${id}'`, resolved.taskId);
+  const knownConstraintIds = new Set([...qualification.constraints.map((row) => row.constraintId), ...values.constraints.map((row) => row.constraintId)]);
+  for (const row of values.constraints) {
+    for (const parent of row.derivedFrom) {
+      if (!knownConstraintIds.has(parent)) return failed('QUALIFICATION_CONSTRAINT_UNKNOWN', `constraint proposal '${row.constraintId}' references unknown '${parent}'`, taskId);
+    }
+  }
+  for (const row of values.candidates) {
+    for (const id of row.constraintIds) {
+      if (!knownConstraintIds.has(id)) return failed('QUALIFICATION_CONSTRAINT_UNKNOWN', `candidate proposal '${row.candidateId}' references unknown '${id}'`, taskId);
+    }
+  }
+  return null;
+}
+
+function proposalMutations(values: ProposalValues): Parameters<typeof writeTask>[0]['mutations'] {
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [];
   for (const row of values.constraints) {
     mutations.push({ kind: 'table-row', action: 'upsert', sectionAliases: ['约束', 'Constraints'], columns: CONSTRAINT_COLUMNS, keyColumn: 'constraint_id', key: row.constraintId, values: { statement: row.statement, status: row.status, authority: row.authority, source: row.source, evidence: row.evidence, derived_from: row.derivedFrom.join(','), approval_evidence: '' } });
@@ -136,6 +181,20 @@ function applyQualificationProposal(request: QualificationProposalRequest, optio
   for (const row of values.candidates) {
     mutations.push({ kind: 'table-row', action: 'upsert', sectionAliases: ['候选与否决方案', 'Candidate and Rejected Options', 'Candidates and Rejected Options', 'Candidates and Rejected Alternatives'], columns: CANDIDATE_COLUMNS, keyColumn: 'candidate_id', key: row.candidateId, values: { statement: row.statement, status: row.status, constraint_ids: row.constraintIds.join(','), impact: row.impact, evidence: row.evidence } });
   }
+  return mutations;
+}
+
+function applyQualificationProposal(request: QualificationProposalRequest, options: TaskWriteOptions = {}): QualificationProposalResult {
+  const prepared = prepareProposal(request);
+  if (!prepared.ok) return prepared.result;
+  const loaded = loadProposalTask(request.taskRef, options);
+  if (!loaded.ok) return loaded.result;
+  const { resolved, qualification } = loaded.context;
+  const digestError = proposalDigestError(prepared.values, resolved.taskId, qualification, request.expectedTaskInputDigest);
+  if (digestError) return digestError;
+  const referenceError = proposalReferenceError(prepared.values, resolved.taskId, qualification);
+  if (referenceError) return referenceError;
+  const mutations = proposalMutations(prepared.values);
   // Only the submitted rows are mutated; no actor, confirmation, or QCR fields
   // can be smuggled into this internal proposal operation.
   let metadata;
