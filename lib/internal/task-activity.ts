@@ -41,9 +41,48 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-async function taskActivity(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('task-activity', args)) return;
-  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+type ActivityValues = Record<string, unknown> & { kind: string; taskRef: string };
+type ActivityArguments = { values: ActivityValues } | { error: string };
+
+function parseActivityOptions(args: string[], values: ActivityValues): string | null {
+  const seen = new Set<string>();
+  for (let index = 2; index < args.length; index += 1) {
+    const flag = args[index]!;
+    if (flag === '--dry-run') {
+      if (seen.has(flag)) return `duplicate option '${flag}'`;
+      seen.add(flag);
+      values.dryRun = true;
+      continue;
+    }
+    const key = FLAGS[flag];
+    if (!key) return `unknown option '${flag}'`;
+    if (seen.has(flag)) return `duplicate option '${flag}'`;
+    const value = args[++index];
+    if (value === undefined || value.startsWith('--')) return `option '${flag}' requires a value`;
+    seen.add(flag);
+    values[key] = ['blockers', 'major', 'minor'].includes(key) ? Number(value) : value;
+  }
+  return null;
+}
+
+function validateActivityValues(kind: string, values: ActivityValues): string | null {
+  const allowed = ALLOWED[kind]!;
+  const unexpected = Object.keys(values).find((key) => !allowed.has(key));
+  if (unexpected) return `${kind} does not accept '${unexpected}'`;
+  if (kind === 'pr-review-inspect') return null;
+  for (const key of COMMON) {
+    if (values[key] === undefined) return `${kind} requires '${key}'`;
+  }
+  const required = kind === 'pr-review-complete'
+    ? ['verdict', 'blockers', 'major', 'minor']
+    : kind === 'pr-review-terminate' ? ['outcome', 'reason'] : [];
+  for (const key of required) {
+    if (values[key] === undefined) return `${kind} requires '${key}'`;
+  }
+  return null;
+}
+
+function parseActivityArguments(args: string[]): ActivityArguments {
   const [taskRef, kind] = args;
   if (!taskRef || taskRef.startsWith('--') || !kind || !OPERATIONS.has(kind)
     || ![
@@ -51,48 +90,27 @@ async function taskActivity(args: string[] = []): Promise<void> {
       internalHandlerRoute('task-activity', 'pr-review-start', kind),
       internalHandlerRoute('task-activity', 'pr-review-complete', kind),
       internalHandlerRoute('task-activity', 'pr-review-terminate', kind)
-    ].some(Boolean)) {
-    usageFailure('task ref and a supported PR review intent are required');
-    return;
-  }
-  const values: Record<string, unknown> = { kind, taskRef };
-  const seen = new Set<string>();
-  for (let index = 2; index < args.length; index += 1) {
-    const flag = args[index]!;
-    if (flag === '--dry-run') {
-      if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
-      seen.add(flag);
-      values.dryRun = true;
-      continue;
-    }
-    const key = FLAGS[flag];
-    if (!key) { usageFailure(`unknown option '${flag}'`); return; }
-    if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
-    const value = args[++index];
-    if (value === undefined || value.startsWith('--')) { usageFailure(`option '${flag}' requires a value`); return; }
-    seen.add(flag);
-    values[key] = ['blockers', 'major', 'minor'].includes(key) ? Number(value) : value;
-  }
+    ].some(Boolean)) return { error: 'task ref and a supported PR review intent are required' };
+  const values: ActivityValues = { kind, taskRef };
+  const optionError = parseActivityOptions(args, values);
+  if (optionError) return { error: optionError };
+  const validationError = validateActivityValues(kind, values);
+  return validationError ? { error: validationError } : { values };
+}
 
-  const allowed = ALLOWED[kind]!;
-  const unexpected = Object.keys(values).find((key) => !allowed.has(key));
-  if (unexpected) { usageFailure(`${kind} does not accept '${unexpected}'`); return; }
-  if (internalHandlerRoute('task-activity', 'pr-review-inspect', kind)) {
+async function taskActivity(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-activity', args)) return;
+  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+  const parsed = parseActivityArguments(args);
+  if ('error' in parsed) { usageFailure(parsed.error); return; }
+  const { values } = parsed;
+  if (values.kind === 'pr-review-inspect') {
     const result = inspectPrReviewActivity(values as PrReviewInspectIntent);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.status === 'failed') process.exitCode = 1;
     return;
   }
-  for (const key of COMMON) {
-    if (values[key] === undefined) { usageFailure(`${kind} requires '${key}'`); return; }
-  }
-  const operationRequired = internalHandlerRoute('task-activity', 'pr-review-complete', kind)
-    ? ['verdict', 'blockers', 'major', 'minor']
-    : internalHandlerRoute('task-activity', 'pr-review-terminate', kind) ? ['outcome', 'reason'] : [];
-  for (const key of operationRequired) {
-    if (values[key] === undefined) { usageFailure(`${kind} requires '${key}'`); return; }
-  }
-  const resolved = resolveTaskRef(taskRef);
+  const resolved = resolveTaskRef(values.taskRef);
   if (!resolved.ok) { usageFailure(resolved.message); return; }
   const result = await applyPrReviewActivityIntent(values as PrReviewActivityIntent);
   process.stdout.write(`${JSON.stringify(result)}\n`);

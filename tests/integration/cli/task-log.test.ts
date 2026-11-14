@@ -142,6 +142,23 @@ test('typed task-activity intents produce a compact paired Review PR row', () =>
   assert.equal(JSON.parse(invalid.stdout).error.code, 'ACTIVITY_PAYLOAD_INVALID');
 });
 
+test('task-activity rejects duplicate options and missing option values at the CLI boundary', () => {
+  const { repoRoot } = mkFixture();
+  const taskId = 'TASK-20260101-000021';
+  const duplicate = runInternal([
+    'task-activity', taskId, 'pr-review-start', '--agent', 'claude', '--agent', 'codex',
+    '--artifact', 'pr-review.md', '--head', 'a'.repeat(40)
+  ], repoRoot);
+  assert.equal(duplicate.status, 1);
+  assert.equal(JSON.parse(duplicate.stdout).error.code, 'ACTIVITY_PAYLOAD_INVALID');
+
+  const missingValue = runInternal([
+    'task-activity', taskId, 'pr-review-start', '--agent', '--artifact', 'pr-review.md', '--head', 'a'.repeat(40)
+  ], repoRoot);
+  assert.equal(missingValue.status, 1);
+  assert.equal(JSON.parse(missingValue.stdout).error.code, 'ACTIVITY_PAYLOAD_INVALID');
+});
+
 test('typed task-activity terminate intents render paired aborted and superseded Review PR rows', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000020';
