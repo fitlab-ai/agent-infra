@@ -1035,15 +1035,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-activity.ts",
-      "ruleId": "complexity",
-      "stableId": "6f75d5f57d867c6b07ab201b550bb9fff5f04264dd018cc9ddd3218098d3d3ad",
-      "displayName": "taskActivity",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
       "file": "lib/internal/task-create.ts",
       "ruleId": "complexity",
       "stableId": "7c0948a3f02313b1beddcb5988061fdb9fefe34a7c329fe5e1185b6076025871",
@@ -1068,15 +1059,6 @@
       "displayName": "taskFinalization",
       "metric": 26,
       "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-ledger.ts",
-      "ruleId": "complexity",
-      "stableId": "23bb6b3a8183f6b959bf418b9b1ee12706c0b8d8a3e518b185d9b08c86d20ccc",
-      "displayName": "taskLedger",
-      "metric": 39,
-      "normalizedMessage": "complexity=39",
       "count": 1
     },
     {

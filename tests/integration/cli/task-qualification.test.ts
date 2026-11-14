@@ -90,3 +90,26 @@ test('internal task-qualification rejects unknown operations', () => {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test('internal task-qualification rejects duplicate or missing options', () => {
+  const f = fixture();
+  try {
+    const duplicateInput = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', TASK_ID, 'confirm',
+      '--input', f.taskPath, '--input', f.taskPath], { cwd: f.root, encoding: 'utf8' });
+    assert.equal(duplicateInput.status, 1);
+    assert.equal(JSON.parse(duplicateInput.stdout).error.code, 'QUALIFICATION_PROPOSAL_INVALID');
+
+    const missingInput = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', TASK_ID, 'confirm'], {
+      cwd: f.root, encoding: 'utf8'
+    });
+    assert.equal(missingInput.status, 1);
+    assert.equal(JSON.parse(missingInput.stdout).error.code, 'QUALIFICATION_PROPOSAL_INVALID');
+
+    const duplicateDryRun = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', TASK_ID, 'confirm',
+      '--input', f.taskPath, '--dry-run', '--dry-run'], { cwd: f.root, encoding: 'utf8' });
+    assert.equal(duplicateDryRun.status, 1);
+    assert.equal(JSON.parse(duplicateDryRun.stdout).error.code, 'QUALIFICATION_PROPOSAL_INVALID');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
