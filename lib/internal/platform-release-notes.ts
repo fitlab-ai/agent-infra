@@ -37,61 +37,73 @@ function finish(result: { status: string; [key: string]: unknown }): void {
   process.exitCode = result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0;
 }
 
+async function handleContext(args: string[]): Promise<void> {
+  const parsed = parseOptions(args, ['--cwd', '--history-limit', '--from-tag', '--to-tag', '--branch']);
+  if (!parsed) return finish(invalidInput('invalid context options'));
+  const cwd = path.resolve(parsed.values.get('--cwd') || process.cwd());
+  const historyRaw = parsed.values.get('--history-limit') ?? null;
+  finish(await releaseNoteContext({
+    fromTag: parsed.values.get('--from-tag') || '',
+    toTag: parsed.values.get('--to-tag') || '',
+    branch: parsed.values.get('--branch') || '',
+    historyLimit: historyRaw === null ? undefined : Number(historyRaw)
+  }, { cwd }));
+}
+
+function handleStage(args: string[]): void {
+  const parsed = parseOptions(args, ['--cwd', '--notes-file']);
+  if (!parsed) return finish(invalidInput('invalid stage options'));
+  const notesFile = parsed.values.get('--notes-file');
+  if (!notesFile) return finish(invalidInput('notes-file is required'));
+  finish(stageReleaseNotes(
+    { notesFile },
+    { cwd: path.resolve(parsed.values.get('--cwd') || process.cwd()) }
+  ));
+}
+
+async function handlePublish(args: string[]): Promise<void> {
+  const parsed = parseOptions(
+    args,
+    ['--cwd', '--notes-file', '--tag', '--title', '--expected-sha256'],
+    ['--dry-run']
+  );
+  if (!parsed) return finish(invalidInput('invalid publish options'));
+  const notesPath = parsed.values.get('--notes-file');
+  if (!notesPath) {
+    finish(invalidInput('notes-file is required'));
+    return;
+  }
+  let resolvedNotesPath = notesPath;
+  if (notesPath === '-') {
+    resolvedNotesPath = path.join(process.env.TMPDIR || '/tmp', `agent-infra-release-notes-${process.pid}.md`);
+    fs.writeFileSync(resolvedNotesPath, fs.readFileSync(0));
+  }
+  try {
+    finish(await publishReleaseNotes({
+      tag: parsed.values.get('--tag') || '',
+      title: parsed.values.get('--title') || parsed.values.get('--tag') || '',
+      notesFile: resolvedNotesPath,
+      expectedSha256: parsed.values.get('--expected-sha256') || '',
+      dryRun: parsed.switches.has('--dry-run')
+    }, { cwd: path.resolve(parsed.values.get('--cwd') || process.cwd()) }));
+  } finally {
+    if (notesPath === '-') fs.rmSync(resolvedNotesPath, { force: true });
+  }
+}
+
 async function platformReleaseNotes(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('platform-release-notes', args)) return;
   const [action, ...rest] = args;
   if (internalHandlerRoute('platform-release-notes', 'context', action ?? '')) {
-    const parsed = parseOptions(rest, ['--cwd', '--history-limit', '--from-tag', '--to-tag', '--branch']);
-    if (!parsed) return finish(invalidInput('invalid context options'));
-    const cwd = path.resolve(parsed.values.get('--cwd') || process.cwd());
-    const historyRaw = parsed.values.get('--history-limit') ?? null;
-    finish(await releaseNoteContext({
-      fromTag: parsed.values.get('--from-tag') || '',
-      toTag: parsed.values.get('--to-tag') || '',
-      branch: parsed.values.get('--branch') || '',
-      historyLimit: historyRaw === null ? undefined : Number(historyRaw)
-    }, { cwd }));
+    await handleContext(rest);
     return;
   }
   if (internalHandlerRoute('platform-release-notes', 'stage', action ?? '')) {
-    const parsed = parseOptions(rest, ['--cwd', '--notes-file']);
-    if (!parsed) return finish(invalidInput('invalid stage options'));
-    const notesFile = parsed.values.get('--notes-file');
-    if (!notesFile) return finish(invalidInput('notes-file is required'));
-    finish(stageReleaseNotes(
-      { notesFile },
-      { cwd: path.resolve(parsed.values.get('--cwd') || process.cwd()) }
-    ));
+    handleStage(rest);
     return;
   }
   if (internalHandlerRoute('platform-release-notes', 'publish', action ?? '')) {
-    const parsed = parseOptions(
-      rest,
-      ['--cwd', '--notes-file', '--tag', '--title', '--expected-sha256'],
-      ['--dry-run']
-    );
-    if (!parsed) return finish(invalidInput('invalid publish options'));
-    const notesPath = parsed.values.get('--notes-file');
-    if (!notesPath) {
-      finish(invalidInput('notes-file is required'));
-      return;
-    }
-    let resolvedNotesPath = notesPath;
-    if (notesPath === '-') {
-      resolvedNotesPath = path.join(process.env.TMPDIR || '/tmp', `agent-infra-release-notes-${process.pid}.md`);
-      fs.writeFileSync(resolvedNotesPath, fs.readFileSync(0));
-    }
-    try {
-      finish(await publishReleaseNotes({
-        tag: parsed.values.get('--tag') || '',
-        title: parsed.values.get('--title') || parsed.values.get('--tag') || '',
-        notesFile: resolvedNotesPath,
-        expectedSha256: parsed.values.get('--expected-sha256') || '',
-        dryRun: parsed.switches.has('--dry-run')
-      }, { cwd: path.resolve(parsed.values.get('--cwd') || process.cwd()) }));
-    } finally {
-      if (notesPath === '-') fs.rmSync(resolvedNotesPath, { force: true });
-    }
+    await handlePublish(rest);
     return;
   }
   finish(invalidInput('Usage: platform-release-notes context|stage|publish'));
