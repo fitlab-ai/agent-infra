@@ -135,24 +135,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "43b1f73047fc42f9b9445e7e6ffc0e5ede8551091adca197ba11077b54fa1e68",
-      "displayName": "checkPostReviewCommit",
-      "metric": 38,
-      "normalizedMessage": "complexity=38",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "5739c3795696f21df097f9143ac40f8e6b087c3e63ee7287a9cdc62af5453d66",
-      "displayName": "checkRequiredPrDelivery",
-      "metric": 45,
-      "normalizedMessage": "complexity=45",
-      "count": 1
-    },
-    {
       "file": "lib/task/control-recovery.ts",
       "ruleId": "complexity",
       "stableId": "725e57506cfe01eff9f830e229e459f69503e5a29a9a8f0a3d55b26b367f85cd",
@@ -1086,15 +1068,6 @@
       "displayName": "verifiedResponse",
       "metric": 56,
       "normalizedMessage": "complexity=56",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "e12a0a03477ca598d873f33be0d8faec988a07fabd91eea0ba8ba01790834ad8",
-      "displayName": "verifyInProcess",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
       "count": 1
     },
     {
