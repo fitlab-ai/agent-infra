@@ -16,6 +16,7 @@ import type {
   CheckLogSnapshot,
   CheckRunSnapshot,
   IssueSnapshot,
+  LabelDefinition,
   LabelReconciliation,
   MutationReceipt,
   MilestoneInitialization,
@@ -419,6 +420,188 @@ function syncLabels(
   return { status: changed ? 'applied' as const : 'no-op' as const, changed, error: null };
 }
 
+function resolveOpenMilestoneNumber(client: GitHubClient, repositoryName: string, cwd: string, title: string) {
+  const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repositoryName}/milestones?state=open&per_page=100`], { cwd });
+  if (!response.ok) return response;
+  const values = Array.isArray(response.value) ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
+  const selected = values.find((item: any) => item?.title === title);
+  if (!Number.isSafeInteger(selected?.number) || selected.number <= 0) {
+    return invalid('MILESTONE_IDENTITY_INVALID', 'Milestone title does not resolve to a positive number');
+  }
+  return { ok: true as const, value: selected.number };
+}
+
+function updateGitHubIssueTypeAndFields(
+  client: GitHubClient,
+  repositoryName: string,
+  cwd: string,
+  number: number,
+  issueType: string | null | undefined,
+  fields: Record<string, unknown> | undefined
+): ProviderResult<{ changed: boolean }> {
+  const [owner, name] = repositoryName.split('/');
+  const current = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_FIELDS_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`], { cwd });
+  if (!current.ok) return current;
+  const currentIssue = current.value?.data?.repository?.issue;
+  const issueId = currentIssue?.id;
+  if (!issueId) return invalid('ISSUE_GRAPH_IDENTITY_INVALID', 'Issue GraphQL response lacks issue identity');
+  const typeUpdate = updateGitHubIssueType(client, cwd, owner || '', issueId, currentIssue.issueType, issueType);
+  if (!typeUpdate.ok) return typeUpdate;
+  const fieldsUpdate = updateGitHubIssueFields(client, cwd, issueId, typeUpdate.value.issueType, fields);
+  if (!fieldsUpdate.ok) return fieldsUpdate;
+  return { ok: true, value: { changed: typeUpdate.value.changed || fieldsUpdate.value.changed } };
+}
+
+function updateGitHubIssueType(client: GitHubClient, cwd: string, owner: string, issueId: string, currentType: any, issueType: string | null | undefined): ProviderResult<{ issueType: any; changed: boolean }> {
+  if (issueType === undefined) return { ok: true, value: { issueType: currentType, changed: false } };
+  const types = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_TYPES_QUERY}`, '-F', `owner=${owner || ''}`], { cwd });
+  if (!types.ok) return types;
+  const targetType = (types.value?.data?.organization?.issueTypes?.nodes || []).find((item: any) => item?.name === issueType);
+  if (!targetType) return invalid('ISSUE_TYPE_NOT_FOUND', 'Issue type was not found');
+  if (targetType.id === currentType?.id) return { ok: true, value: { issueType: targetType, changed: false } };
+  const updated = client.json(['api', 'graphql', '--input', '-'], {
+    cwd, method: 'POST', input: JSON.stringify({
+      query: 'mutation($issueId:ID!,$issueTypeId:ID){updateIssueIssueType(input:{issueId:$issueId,issueTypeId:$issueTypeId}){issue{id}}}',
+      variables: { issueId, issueTypeId: targetType.id }
+    })
+  });
+  return updated.ok ? { ok: true, value: { issueType: targetType, changed: true } } : updated;
+}
+
+function githubIssueFieldInput(field: any, value: unknown): Record<string, unknown> | null {
+  if (field.__typename === 'IssueFieldSingleSelect') {
+    const option = (field.options || []).find((candidate: any) => candidate?.name === value);
+    return option?.id ? { fieldId: field.id, singleSelectOptionId: option.id } : null;
+  }
+  const key = field.__typename === 'IssueFieldDate' ? 'dateValue' : field.__typename === 'IssueFieldNumber' ? 'numberValue' : 'textValue';
+  return { fieldId: field.id, [key]: value };
+}
+
+function updateGitHubIssueFields(client: GitHubClient, cwd: string, issueId: string, issueType: any, fields: Record<string, unknown> | undefined): ProviderResult<{ changed: boolean }> {
+  if (fields === undefined) return { ok: true, value: { changed: false } };
+  const values = Object.entries(fields).flatMap(([name, value]) => {
+    const field = (issueType?.pinnedFields || []).find((candidate: any) => candidate?.name === name);
+    return field?.id ? [githubIssueFieldInput(field, value)].filter((item): item is Record<string, unknown> => item !== null) : [];
+  });
+  if (values.length === 0) return { ok: true, value: { changed: false } };
+  const updated = client.json(['api', 'graphql', '--input', '-'], {
+    cwd, method: 'POST', input: JSON.stringify({
+      query: 'mutation($issueId:ID!,$issueFields:[IssueFieldCreateOrUpdateInput!]!){setIssueFieldValue(input:{issueId:$issueId,issueFields:$issueFields}){issue{id}}}',
+      variables: { issueId, issueFields: values }
+    })
+  });
+  return updated.ok ? { ok: true, value: { changed: true } } : updated;
+}
+
+function parseClosingIssuePage(value: unknown): ProviderResult<{ identities: ResourceIdentity[]; hasNextPage: boolean; endCursor: string | null }> {
+  const connection = (value as {
+    data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
+      nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+    } } } };
+  })?.data?.repository?.pullRequest?.closingIssuesReferences;
+  if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue response is incomplete');
+  const identities: ResourceIdentity[] = [];
+  for (const node of connection.nodes) {
+    const issue = Number((node as { number?: unknown })?.number);
+    if (!Number.isSafeInteger(issue) || issue <= 0) return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue identity is invalid');
+    identities.push({ kind: 'number', value: issue });
+  }
+  return { ok: true, value: { identities, hasNextPage: Boolean(connection.pageInfo.hasNextPage), endCursor: connection.pageInfo.endCursor || null } };
+}
+
+function uniqueResourceIdentities(identities: ResourceIdentity[]): ResourceIdentity[] {
+  const seen = new Set<string>();
+  return identities.filter((identity) => {
+    const key = `${identity.kind}:${identity.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function fetchClosingIssues(client: GitHubClient, repositoryName: string, cwd: string, number: number): ProviderResult<ResourceIdentity[]> {
+  const [owner, name] = repositoryName.split('/');
+  if (!owner || !name) return invalid('IN_LABEL_SYNC_REPOSITORY_INVALID', 'Repository identity is invalid');
+  const identities: ResourceIdentity[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`];
+    if (cursor) args.push('-F', `cursor=${cursor}`);
+    const response = client.json<unknown>(args, { cwd });
+    if (!response.ok) return response;
+    const page = parseClosingIssuePage(response.value);
+    if (!page.ok) return { ok: false, error: page.error };
+    identities.push(...page.value.identities);
+    if (!page.value.hasNextPage) return { ok: true, value: uniqueResourceIdentities(identities) };
+    if (!page.value.endCursor || page.value.endCursor === cursor) {
+      return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue pagination cursor is invalid');
+    }
+    cursor = page.value.endCursor;
+  }
+}
+
+function updateDesiredGitHubLabel(client: GitHubClient, repositoryName: string, cwd: string, label: LabelDefinition, existing: any): ProviderResult<boolean> {
+  if (!existing) {
+    const created = client.json(['api', `repos/${repositoryName}/labels`, '-X', 'POST', '--input', '-'], {
+      cwd, method: 'POST', input: JSON.stringify({ name: label.name, color: label.color, description: label.description })
+    });
+    return created.ok ? { ok: true, value: true } : created;
+  }
+  const matches = typeof existing.color === 'string' && existing.color.toUpperCase() === label.color.toUpperCase()
+    && String(existing.description || '') === label.description;
+  if (matches) return { ok: true, value: false };
+  const updated = client.json(['api', `repos/${repositoryName}/labels/${encodeURIComponent(label.name)}`, '-X', 'PATCH', '--input', '-'], {
+    cwd, method: 'PATCH', input: JSON.stringify({ new_name: label.name, color: label.color, description: label.description })
+  });
+  return updated.ok ? { ok: true, value: true } : updated;
+}
+
+function removeStaleGitHubInLabels(client: GitHubClient, repositoryName: string, cwd: string, current: Map<string, any>, desiredNames: Set<string>): ProviderResult<string[]> {
+  const removed: string[] = [];
+  for (const name of current.keys()) {
+    if (!name.startsWith('in:') || desiredNames.has(name)) continue;
+    const response = client.text(['api', `repos/${repositoryName}/labels/${encodeURIComponent(name)}`, '-X', 'DELETE'], { cwd, method: 'DELETE' });
+    if (!response.ok) return partialFailure(response, removed);
+    removed.push(name);
+  }
+  return { ok: true, value: removed };
+}
+
+function reconcileGitHubLabels(
+  client: GitHubClient,
+  repositoryName: string,
+  cwd: string,
+  desired: LabelDefinition[],
+  cleanupStaleIn: boolean
+): ProviderResult<LabelReconciliation> {
+  const listed = client.json<any>(['api', '--paginate', '--slurp', `repos/${repositoryName}/labels?per_page=100`], { cwd });
+  if (!listed.ok) return listed;
+  if (!Array.isArray(listed.value)) return invalid('LABEL_RESPONSE_INVALID', 'The platform returned an invalid label list');
+  const values = listed.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]);
+  if (values.some((entry: any) => !entry || typeof entry.name !== 'string' || !entry.name)) {
+    return invalid('LABEL_RESPONSE_INVALID', 'The platform returned a label without a valid name');
+  }
+  const current = new Map<string, any>(values.map((entry: any) => [String(entry.name), entry]));
+  const created: string[] = [];
+  const updated: string[] = [];
+  const skipped: string[] = [];
+  const removed: string[] = [];
+  for (const label of desired) {
+    const result = updateDesiredGitHubLabel(client, repositoryName, cwd, label, current.get(label.name));
+    if (!result.ok) return partialFailure(result, labelReconciliation(created, updated, removed, skipped));
+    if (!result.value) skipped.push(label.name);
+    else if (current.has(label.name)) updated.push(label.name);
+    else created.push(label.name);
+  }
+  const desiredNames = new Set(desired.map((label) => label.name));
+  if (cleanupStaleIn) {
+    const cleanup = removeStaleGitHubInLabels(client, repositoryName, cwd, current, desiredNames);
+    removed.push(...(cleanup.value || []));
+    if (!cleanup.ok) return partialFailure(cleanup, labelReconciliation(created, updated, removed, skipped));
+  }
+  return { ok: true, value: labelReconciliation(created, updated, removed, skipped) };
+}
+
 function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'securityAlerts' | 'repositoryMetadata' | 'verification'> {
   const issues: NonNullable<PlatformProvider['issues']> = {
     async listLabels({ context }) {
@@ -541,67 +724,14 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         changed ||= synced.changed;
       }
       if (typeof patch.milestone === 'string') {
-        const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
-        if (!milestones.ok) return milestones;
-        const values = Array.isArray(milestones.value)
-          ? milestones.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
-          : [];
-        const selected = values.find((item: any) => item?.title === patch.milestone);
-        if (!Number.isSafeInteger(selected?.number) || selected.number <= 0) {
-          return invalid('MILESTONE_IDENTITY_INVALID', 'Milestone title does not resolve to a positive number');
-        }
-        requestPatch = { ...restPatch, milestone: selected.number } as typeof restPatch;
+        const milestone = resolveOpenMilestoneNumber(client, repository(context), context.workingDirectory, patch.milestone);
+        if (!milestone.ok) return milestone;
+        requestPatch = { ...restPatch, milestone: milestone.value } as typeof restPatch;
       }
       if (issueType !== undefined || fields !== undefined) {
-        const [owner, name] = repository(context).split('/');
-        const current = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_FIELDS_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`], { cwd: context.workingDirectory });
-        if (!current.ok) return current;
-        const currentIssue = current.value?.data?.repository?.issue;
-        const issueId = currentIssue?.id;
-        if (!issueId) return invalid('ISSUE_GRAPH_IDENTITY_INVALID', 'Issue GraphQL response lacks issue identity');
-        let targetType = currentIssue.issueType;
-        if (issueType !== undefined) {
-          const types = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_TYPES_QUERY}`, '-F', `owner=${owner}`], { cwd: context.workingDirectory });
-          if (!types.ok) return types;
-          targetType = (types.value?.data?.organization?.issueTypes?.nodes || []).find((item: any) => item?.name === issueType);
-          if (!targetType) return invalid('ISSUE_TYPE_NOT_FOUND', 'Issue type was not found');
-          if (targetType.id !== currentIssue.issueType?.id) {
-            const updatedType = client.json(['api', 'graphql', '--input', '-'], {
-              cwd: context.workingDirectory,
-              method: 'POST',
-              input: JSON.stringify({
-                query: 'mutation($issueId:ID!,$issueTypeId:ID){updateIssueIssueType(input:{issueId:$issueId,issueTypeId:$issueTypeId}){issue{id}}}',
-                variables: { issueId, issueTypeId: targetType.id }
-              })
-            });
-            if (!updatedType.ok) return updatedType;
-            changed = true;
-          }
-        }
-        if (fields !== undefined) {
-          const values = Object.entries(fields).flatMap(([name, value]) => {
-            const field = (targetType?.pinnedFields || []).find((candidate: any) => candidate?.name === name);
-            if (!field?.id) return [];
-            if (field.__typename === 'IssueFieldSingleSelect') {
-              const option = (field.options || []).find((candidate: any) => candidate?.name === value);
-              return option?.id ? [{ fieldId: field.id, singleSelectOptionId: option.id }] : [];
-            }
-            const key = field.__typename === 'IssueFieldDate' ? 'dateValue' : field.__typename === 'IssueFieldNumber' ? 'numberValue' : 'textValue';
-            return [{ fieldId: field.id, [key]: value }];
-          });
-          if (values.length > 0) {
-            const updatedFields = client.json(['api', 'graphql', '--input', '-'], {
-              cwd: context.workingDirectory,
-              method: 'POST',
-              input: JSON.stringify({
-                query: 'mutation($issueId:ID!,$issueFields:[IssueFieldCreateOrUpdateInput!]!){setIssueFieldValue(input:{issueId:$issueId,issueFields:$issueFields}){issue{id}}}',
-                variables: { issueId, issueFields: values }
-              })
-            });
-            if (!updatedFields.ok) return updatedFields;
-            changed = true;
-          }
-        }
+        const graphUpdate = updateGitHubIssueTypeAndFields(client, repository(context), context.workingDirectory, number, issueType, fields);
+        if (!graphUpdate.ok) return graphUpdate;
+        changed ||= graphUpdate.value.changed;
       }
       if (Object.keys(requestPatch).length > 0) {
         const response = client.json<any>(['api', `repos/${repository(context)}/issues/${number}`, '-X', 'PATCH', '--input', '-'], {
@@ -691,44 +821,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async listClosingIssues({ context, target }) {
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const [owner, name] = repository(context).split('/');
-      if (!owner || !name) return invalid('IN_LABEL_SYNC_REPOSITORY_INVALID', 'Repository identity is invalid');
-      const identities: ResourceIdentity[] = [];
-      let cursor: string | null = null;
-      for (;;) {
-        const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`];
-        if (cursor) args.push('-F', `cursor=${cursor}`);
-        const response = client.json<unknown>(args, { cwd: context.workingDirectory });
-        if (!response.ok) return response;
-        const connection = (response.value as {
-          data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
-            nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-          } } } };
-        })?.data?.repository?.pullRequest?.closingIssuesReferences;
-        if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) {
-          return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue response is incomplete');
-        }
-        for (const node of connection.nodes) {
-          const issue = Number((node as { number?: unknown })?.number);
-          if (!Number.isSafeInteger(issue) || issue <= 0) {
-            return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue identity is invalid');
-          }
-          identities.push({ kind: 'number', value: issue });
-        }
-        if (!connection.pageInfo.hasNextPage) {
-          const seen = new Set<string>();
-          return { ok: true, value: identities.filter((identity) => {
-            const key = `${identity.kind}:${identity.value}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          }) };
-        }
-        if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) {
-          return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue pagination cursor is invalid');
-        }
-        cursor = connection.pageInfo.endCursor;
-      }
+      return fetchClosingIssues(client, repository(context), context.workingDirectory, number);
     },
     async listClosing({ context, issue }) {
       const number = resourceIdentityNumber(issue);
@@ -782,12 +875,9 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (milestone !== undefined) {
         if (milestone === null) issuePatch.milestone = null;
         else {
-          const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
-          if (!milestones.ok) return milestones;
-          const values = Array.isArray(milestones.value) ? milestones.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
-          const selected = values.find((entry: any) => entry?.title === milestone);
-          if (!Number.isSafeInteger(selected?.number) || selected.number <= 0) return invalid('MILESTONE_IDENTITY_INVALID', 'Milestone title does not resolve to a positive number');
-          issuePatch.milestone = selected.number;
+          const resolved = resolveOpenMilestoneNumber(client, repository(context), context.workingDirectory, milestone);
+          if (!resolved.ok) return resolved;
+          issuePatch.milestone = resolved.value;
         }
       }
       if (Object.keys(issuePatch).length > 0) {
@@ -997,69 +1087,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
 
   const repositoryMetadata: NonNullable<PlatformProvider['repositoryMetadata']> = {
     async reconcileLabels({ context, desired, cleanupStaleIn }): Promise<ProviderResult<LabelReconciliation>> {
-      const endpoint = `repos/${repository(context)}/labels?per_page=100`;
-      const listed = client.json<any>(['api', '--paginate', '--slurp', endpoint], { cwd: context.workingDirectory });
-      if (!listed.ok) return listed;
-      if (!Array.isArray(listed.value)) return invalid('LABEL_RESPONSE_INVALID', 'The platform returned an invalid label list');
-      const values = Array.isArray(listed.value)
-        ? listed.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
-        : [];
-      if (values.some((entry: any) => !entry || typeof entry.name !== 'string' || !entry.name)) {
-        return invalid('LABEL_RESPONSE_INVALID', 'The platform returned a label without a valid name');
-      }
-      const current = new Map<string, any>(values.map((entry: any) => [String(entry.name), entry]));
-      const created: string[] = [];
-      const updated: string[] = [];
-      const skipped: string[] = [];
-      const removed: string[] = [];
-      for (const label of desired) {
-        const existing = current.get(label.name);
-        if (!existing) {
-          const response = client.json(['api', `repos/${repository(context)}/labels`, '-X', 'POST', '--input', '-'], {
-            cwd: context.workingDirectory,
-            method: 'POST',
-            input: JSON.stringify({ name: label.name, color: label.color, description: label.description })
-          });
-          if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
-          created.push(label.name);
-          continue;
-        }
-        const sameColor = typeof existing.color === 'string' && existing.color.toUpperCase() === label.color.toUpperCase();
-        const sameDescription = String(existing.description || '') === label.description;
-        if (sameColor && sameDescription) {
-          skipped.push(label.name);
-          continue;
-        }
-        const response = client.json(['api', `repos/${repository(context)}/labels/${encodeURIComponent(label.name)}`, '-X', 'PATCH', '--input', '-'], {
-          cwd: context.workingDirectory,
-          method: 'PATCH',
-          input: JSON.stringify({ new_name: label.name, color: label.color, description: label.description })
-        });
-        if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
-        updated.push(label.name);
-      }
-      const desiredNames = new Set(desired.map((label) => label.name));
-      if (cleanupStaleIn) {
-        for (const name of current.keys()) {
-          if (!name.startsWith('in:') || desiredNames.has(name)) continue;
-          const response = client.text(['api', `repos/${repository(context)}/labels/${encodeURIComponent(name)}`, '-X', 'DELETE'], {
-            cwd: context.workingDirectory,
-            method: 'DELETE'
-          });
-          if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
-          removed.push(name);
-        }
-      }
-      return {
-        ok: true,
-        value: {
-          changed: created.length > 0 || updated.length > 0 || removed.length > 0,
-          created,
-          updated,
-          removed,
-          skipped
-        }
-      };
+      return reconcileGitHubLabels(client, repository(context), context.workingDirectory, desired, cleanupStaleIn);
     },
     async reconcileMilestones({ context, desired }): Promise<ProviderResult<MilestoneInitialization>> {
       const listed = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=all&per_page=100`], { cwd: context.workingDirectory });

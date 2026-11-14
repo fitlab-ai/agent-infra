@@ -308,15 +308,6 @@
     {
       "file": "lib/platform/github-provider.ts",
       "ruleId": "complexity",
-      "stableId": "dace0d245da2d454f1af15b778d5c70105ce0fb131788c5022f5185076ab0458",
-      "displayName": "createGitHubOperations.changeRequests.method:listClosingIssues",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/github-provider.ts",
-      "ruleId": "complexity",
       "stableId": "0d841714384ca6892482631140d75f65ccd3089857d9a2883d7ce1b9a3a82673",
       "displayName": "createGitHubOperations.changeRequests.method:update",
       "metric": 24,
@@ -339,15 +330,6 @@
       "displayName": "createGitHubOperations.releases.method:inspect",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/github-provider.ts",
-      "ruleId": "complexity",
-      "stableId": "555048524a70c919af3cb2968512d7c006146693dba0afe443a7673931e4e3a8",
-      "displayName": "createGitHubOperations.repositoryMetadata.method:reconcileLabels",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
       "count": 1
     },
     {

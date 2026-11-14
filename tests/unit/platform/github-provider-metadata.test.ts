@@ -75,6 +75,42 @@ test('GitHub provider reconciles labels safely and creates missing milestones by
   assert.ok(calls.some((call) => call.method === 'POST' && call.input?.includes('"state":"closed"')));
 });
 
+test('GitHub provider updates changed labels and skips matching labels', async () => {
+  const calls: Array<{ args: string[]; method?: string; input?: string }> = [];
+  const client = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args: string[], options: { method?: string; input?: string } = {}) {
+      calls.push({ args, ...options });
+      if (args.some((value) => value.includes('/labels?'))) return { ok: true, value: [[
+        { name: 'in: keep', color: 'BFD4F2', description: 'same' },
+        { name: 'in: update', color: 'fff', description: 'old' }
+      ]] };
+      return { ok: true, value: {} };
+    },
+    text() { return { ok: true, value: '' }; }
+  } as GitHubClient;
+  const provider = createGitHubProvider({
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
+  }, client);
+
+  const result = await provider.repositoryMetadata!.reconcileLabels({
+    context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' },
+    desired: [
+      { name: 'in: keep', color: 'bfd4f2', description: 'same' },
+      { name: 'in: update', color: 'AABBCC', description: 'new' }
+    ],
+    cleanupStaleIn: false,
+    mutation: { idempotencyKey: 'labels-update-skip' }
+  });
+
+  assert.deepEqual(result, { ok: true, value: {
+    changed: true, created: [], updated: ['in: update'], removed: [], skipped: ['in: keep']
+  } });
+  const update = calls.find((call) => call.method === 'PATCH');
+  assert.ok(update?.args.some((arg) => arg.endsWith('/labels/in%3A%20update')));
+  assert.deepEqual(JSON.parse(update?.input || '{}'), { new_name: 'in: update', color: 'AABBCC', description: 'new' });
+});
+
 test('GitHub provider preserves confirmed label mutations when a later mutation fails', async () => {
   let posts = 0;
   const client = {
