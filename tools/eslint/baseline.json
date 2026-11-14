@@ -189,15 +189,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/state.ts",
-      "ruleId": "complexity",
-      "stableId": "c1cbd85ca3fa32979460952e2bbdc3830427d79a58a65750623fb764b3ba0229",
-      "displayName": "cleanupStaleSandboxControlLease",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
       "file": "lib/agent-client.ts",
       "ruleId": "complexity",
       "stableId": "c1bb5323a73ce862c4026020bff62094c2ae63d986967c1f0d803b58b44c2b56",
@@ -729,15 +720,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/state.ts",
-      "ruleId": "complexity",
-      "stableId": "98c7e6f385344c99610d1fd2129ced4cd26fda8603b0c00a208599f2a8932189",
-      "displayName": "readActiveLease",
-      "metric": 21,
-      "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "fb0d2f5f08c3e555377a8c37056110614f2be2550f9a68189db1febdddfccb38",
@@ -996,15 +978,6 @@
       "displayName": "sandboxControl",
       "metric": 36,
       "normalizedMessage": "complexity=36",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/control/state.ts",
-      "ruleId": "complexity",
-      "stableId": "7df4fb7b4d5ec30e5b52a063d60cd468d68484b9f039ca6d3643a7efbaf5d323",
-      "displayName": "sandboxControlGenerationUsage",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
       "count": 1
     },
     {

@@ -309,51 +309,96 @@ export function readSandboxControlReservation(filePath: string): SandboxControlR
   return parseSandboxControlReservation(readJsonFile(filePath));
 }
 
-export function sandboxControlGenerationUsage(manifest: SandboxControlManifest): { logicalRecords: number; bytes: number } {
-  const records = new Map<string, { baseBytes: number; payloadBytes: number; logical: boolean }>();
+type SandboxControlGenerationUsageRecord = { baseBytes: number; payloadBytes: number; logical: boolean };
+
+function getSandboxControlGenerationUsageRecord(
+  records: Map<string, SandboxControlGenerationUsageRecord>,
+  id: string
+): SandboxControlGenerationUsageRecord {
+  let record = records.get(id);
+  if (!record) {
+    record = { baseBytes: 0, payloadBytes: 0, logical: false };
+    records.set(id, record);
+  }
+  return record;
+}
+
+function addSandboxControlResponseUsage(
+  records: Map<string, SandboxControlGenerationUsageRecord>,
+  responsesDir: string,
+  entry: fs.Dirent
+): void {
+  const terminal = entry.name.match(/^([a-f0-9-]{16,64})\.json$/u);
+  const accepted = entry.name.match(/^([a-f0-9-]{16,64})\.accepted\.json$/u);
+  const payload = entry.name.match(/^([a-f0-9-]{16,64})\.payload\.json$/u);
+  const match = terminal ?? accepted ?? payload;
+  if (!match) return;
+  const record = getSandboxControlGenerationUsageRecord(records, match[1]!);
+  const fileBytes = fs.statSync(path.join(responsesDir, entry.name)).size;
+  if (payload) record.payloadBytes += fileBytes;
+  else record.baseBytes += fileBytes;
+  record.logical ||= Boolean(terminal || accepted);
+}
+
+function collectSandboxControlResponseUsage(
+  manifest: SandboxControlManifest,
+  records: Map<string, SandboxControlGenerationUsageRecord>
+): void {
   const responsesDir = path.join(manifest.channelDir, 'responses');
-  if (fs.existsSync(responsesDir)) {
-    for (const entry of fs.readdirSync(responsesDir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      const terminal = entry.name.match(/^([a-f0-9-]{16,64})\.json$/u);
-      const accepted = entry.name.match(/^([a-f0-9-]{16,64})\.accepted\.json$/u);
-      const payload = entry.name.match(/^([a-f0-9-]{16,64})\.payload\.json$/u);
-      if (!terminal && !accepted && !payload) continue;
-      const id = (terminal ?? accepted ?? payload)![1]!;
-      const previous = records.get(id) ?? { baseBytes: 0, payloadBytes: 0, logical: false };
-      const fileBytes = fs.statSync(path.join(responsesDir, entry.name)).size;
-      if (payload) previous.payloadBytes += fileBytes;
-      else previous.baseBytes += fileBytes;
-      previous.logical ||= Boolean(terminal || accepted);
-      records.set(id, previous);
+  if (!fs.existsSync(responsesDir)) return;
+  for (const entry of fs.readdirSync(responsesDir, { withFileTypes: true })) {
+    if (entry.isFile()) addSandboxControlResponseUsage(records, responsesDir, entry);
+  }
+}
+
+function addSandboxControlProcessingUsage(
+  manifest: SandboxControlManifest,
+  records: Map<string, SandboxControlGenerationUsageRecord>,
+  id: string
+): void {
+  const resultPath = resultEvidencePath(manifest, id);
+  const filePath = reservationPath(manifest, id);
+  const record = getSandboxControlGenerationUsageRecord(records, id);
+  if (fs.existsSync(resultPath)) {
+    const result = readSandboxControlResultEvidence(resultPath);
+    if (result.id !== id || result.generation !== manifest.generation) {
+      throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+    }
+    record.baseBytes += fs.statSync(resultPath).size;
+    record.logical = true;
+  }
+  if (!fs.existsSync(filePath)) return;
+  const reservation = readSandboxControlReservation(filePath);
+  record.baseBytes = Math.max(record.baseBytes, reservation.bytes);
+  record.logical = true;
+}
+
+function collectSandboxControlProcessingUsage(
+  manifest: SandboxControlManifest,
+  records: Map<string, SandboxControlGenerationUsageRecord>
+): void {
+  if (!fs.existsSync(manifest.processingDir)) return;
+  for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && /^[a-f0-9-]{16,64}$/u.test(entry.name)) {
+      addSandboxControlProcessingUsage(manifest, records, entry.name);
     }
   }
-  if (fs.existsSync(manifest.processingDir)) {
-    for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/u.test(entry.name)) continue;
-      const resultPath = resultEvidencePath(manifest, entry.name);
-      const filePath = reservationPath(manifest, entry.name);
-      const previous = records.get(entry.name) ?? { baseBytes: 0, payloadBytes: 0, logical: false };
-      if (fs.existsSync(resultPath)) {
-        const result = readSandboxControlResultEvidence(resultPath);
-        if (result.id !== entry.name || result.generation !== manifest.generation) {
-          throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
-        }
-        previous.baseBytes += fs.statSync(resultPath).size;
-        previous.logical = true;
-      }
-      if (fs.existsSync(filePath)) {
-        const reservation = readSandboxControlReservation(filePath);
-        previous.baseBytes = Math.max(previous.baseBytes, reservation.bytes);
-        previous.logical = true;
-      }
-      records.set(entry.name, previous);
-    }
-  }
+}
+
+function summarizeSandboxControlGenerationUsage(
+  records: Map<string, SandboxControlGenerationUsageRecord>
+): { logicalRecords: number; bytes: number } {
   return {
     logicalRecords: [...records.values()].filter((record) => record.logical).length,
     bytes: [...records.values()].reduce((total, record) => total + record.baseBytes + record.payloadBytes, 0)
   };
+}
+
+export function sandboxControlGenerationUsage(manifest: SandboxControlManifest): { logicalRecords: number; bytes: number } {
+  const records = new Map<string, SandboxControlGenerationUsageRecord>();
+  collectSandboxControlResponseUsage(manifest, records);
+  collectSandboxControlProcessingUsage(manifest, records);
+  return summarizeSandboxControlGenerationUsage(records);
 }
 
 export function statusPath(manifest: SandboxControlManifest): string {
@@ -398,10 +443,12 @@ export function readSandboxControlStatus(directory: string): SandboxControlStatu
   return parseSandboxControlStatus(readJsonFile(path.join(directory, 'status.json')));
 }
 
-export function readActiveLease(manifest: SandboxControlManifest, now = Date.now()): SandboxControlLease | null {
-  const filePath = path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
-  if (!fs.existsSync(filePath)) return null;
-  const lease = readJsonFile(filePath) as Partial<SandboxControlLease> | null;
+function sandboxControlLeasePath(manifest: SandboxControlManifest): string {
+  return path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
+}
+
+function parseSandboxControlLease(value: unknown): SandboxControlLease {
+  const lease = value as Partial<SandboxControlLease> | null;
   if (!lease || lease.version !== 2
     || typeof lease.nonce !== 'string' || !lease.owner || !Number.isSafeInteger(lease.owner.pid)
     || typeof lease.owner.startTime !== 'number' || !Number.isSafeInteger(lease.owner.startTime)
@@ -411,9 +458,21 @@ export function readActiveLease(manifest: SandboxControlManifest, now = Date.now
     || typeof lease.branch !== 'string' || typeof lease.reason !== 'string') {
     throw new Error('SANDBOX_CONTROL_LEASE_INVALID');
   }
-  if (lease.generation !== manifest.generation || lease.expiresAt! <= now
-    || lease.taskId !== manifest.taskId || lease.branch !== manifest.branch) return null;
   return lease as SandboxControlLease;
+}
+
+function leaseMatchesSandboxControlContext(lease: SandboxControlLease, manifest: SandboxControlManifest): boolean {
+  return lease.generation === manifest.generation
+    && lease.taskId === manifest.taskId
+    && lease.branch === manifest.branch;
+}
+
+export function readActiveLease(manifest: SandboxControlManifest, now = Date.now()): SandboxControlLease | null {
+  const filePath = sandboxControlLeasePath(manifest);
+  if (!fs.existsSync(filePath)) return null;
+  const lease = parseSandboxControlLease(readJsonFile(filePath));
+  if (!leaseMatchesSandboxControlContext(lease, manifest) || lease.expiresAt <= now) return null;
+  return lease;
 }
 
 export function cleanupStaleSandboxControlLease(
@@ -421,25 +480,15 @@ export function cleanupStaleSandboxControlLease(
   now = Date.now(),
   options: Readonly<{ identityProbe?: ProcessIdentityProbe }> = {}
 ): boolean {
-  const filePath = path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
+  const filePath = sandboxControlLeasePath(manifest);
   if (!fs.existsSync(filePath)) return false;
   const raw = fs.readFileSync(filePath, 'utf8');
-  const lease = JSON.parse(raw) as Partial<SandboxControlLease> | null;
-  if (!lease || lease.version !== 2
-    || typeof lease.nonce !== 'string' || !lease.owner || !Number.isSafeInteger(lease.owner.pid)
-    || typeof lease.owner.startTime !== 'number' || !Number.isSafeInteger(lease.owner.startTime)
-    || !Number.isSafeInteger(lease.issuedAt)
-    || !Number.isSafeInteger(lease.expiresAt) || typeof lease.generation !== 'string'
-    || (lease.taskId !== null && typeof lease.taskId !== 'string')
-    || typeof lease.branch !== 'string' || typeof lease.reason !== 'string') {
-    throw new Error('SANDBOX_CONTROL_LEASE_INVALID');
-  }
+  const lease = parseSandboxControlLease(JSON.parse(raw));
   const ownerState = (options.identityProbe ?? getProcessIdentityState)({
-    pid: lease.owner.pid!, startTime: lease.owner.startTime!
+    pid: lease.owner.pid, startTime: lease.owner.startTime
   });
   if (ownerState === 'unknown') throw new Error('SANDBOX_CONTROL_LEASE_OWNER_UNAVAILABLE');
-  const stale = lease.generation !== manifest.generation || lease.taskId !== manifest.taskId
-    || lease.branch !== manifest.branch || lease.expiresAt! <= now || ownerState === 'dead';
+  const stale = !leaseMatchesSandboxControlContext(lease, manifest) || lease.expiresAt <= now || ownerState === 'dead';
   if (!stale) return false;
   if (fs.readFileSync(filePath, 'utf8') !== raw) throw new Error('SANDBOX_CONTROL_LEASE_OWNERSHIP_LOST');
   fs.unlinkSync(filePath);
