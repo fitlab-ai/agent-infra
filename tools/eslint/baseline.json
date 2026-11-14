@@ -450,15 +450,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/verification-required.ts",
-      "ruleId": "complexity",
-      "stableId": "d20a865ec15775d8f3dfe19ebf690532a2dad08c441210c9ae0b5387b04e85eb",
-      "displayName": "evaluateRequiredChecks",
-      "metric": 45,
-      "normalizedMessage": "complexity=45",
-      "count": 1
-    },
-    {
       "file": "lib/internal/manual-validation.ts",
       "ruleId": "complexity",
       "stableId": "6624a961de8cc335287ff34b350a48db5429d70ee60fc13bc7063f3957478e7e",
@@ -672,15 +663,6 @@
       "displayName": "platformAuditPolicy",
       "metric": 27,
       "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/platform-checks.ts",
-      "ruleId": "complexity",
-      "stableId": "c9bfd04d110bf36a89bb237b7a0527920852b4bbb66625e0d72d4eeac148ec18",
-      "displayName": "platformChecks",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
       "count": 1
     },
     {

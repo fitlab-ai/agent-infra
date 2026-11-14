@@ -16,6 +16,7 @@ const USAGE = `Usage: agent-infra-internal platform-checks inspect <task-ref> [-
 `;
 
 const VALUE_FLAGS = new Set(['--cwd', '--interval-seconds', '--deadline-seconds', '--check-name', '--details-url', '--run', '--job']);
+type PlatformChecksOperation = 'inspect' | 'watch' | 'resolve-run' | 'logs';
 
 function key(flag: string): string {
   return flag.slice(2).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -53,30 +54,32 @@ function positive(value: string | undefined): number | null {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-async function platformChecks(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('platform-checks', args)) return;
-  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  const operation = args[0];
-  if (!operation || ![
+function isPlatformChecksOperation(operation: string | undefined): operation is PlatformChecksOperation {
+  return Boolean(operation && [
     internalHandlerRoute('platform-checks', 'inspect', operation),
     internalHandlerRoute('platform-checks', 'watch', operation),
     internalHandlerRoute('platform-checks', 'resolve-run', operation),
     internalHandlerRoute('platform-checks', 'logs', operation)
-  ].some(Boolean)) { fail('a valid operation is required'); return; }
-  const taskRef = args[1];
-  if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
-  const parsed = parse(args, 2);
-  if (parsed.error) { fail(parsed.error); return; }
-  const values = parsed.values;
-  const cwd = path.resolve(values.cwd || process.cwd());
-  const allowed: Record<string, string[]> = {
+  ].some(Boolean));
+}
+
+function operationOptionsError(operation: PlatformChecksOperation, values: Record<string, string>): string | undefined {
+  const allowed: Record<PlatformChecksOperation, string[]> = {
     inspect: ['cwd'],
     watch: ['cwd', 'intervalSeconds', 'deadlineSeconds'],
     'resolve-run': ['cwd', 'checkName', 'detailsUrl'],
     logs: ['cwd', 'run', 'job']
   };
-  const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
-  if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
+  const unexpected = Object.keys(values).find((name) => !allowed[operation].includes(name));
+  return unexpected ? `${operation} does not accept --${unexpected}` : undefined;
+}
+
+async function dispatchPlatformChecksOperation(
+  operation: PlatformChecksOperation,
+  taskRef: string,
+  values: Record<string, string>,
+  cwd: string
+): Promise<void> {
   if (internalHandlerRoute('platform-checks', 'inspect', operation)) { finish(await inspectPullRequestReadiness(taskRef, { cwd })); return; }
   if (internalHandlerRoute('platform-checks', 'resolve-run', operation)) {
     if (!values.checkName) { fail('resolve-run requires --check-name'); return; }
@@ -104,6 +107,22 @@ async function platformChecks(args: string[] = []): Promise<void> {
     process.removeListener('SIGINT', abort);
     process.removeListener('SIGTERM', abort);
   }
+}
+
+async function platformChecks(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-checks', args)) return;
+  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+  const operation = args[0];
+  if (!isPlatformChecksOperation(operation)) { fail('a valid operation is required'); return; }
+  const taskRef = args[1];
+  if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
+  const parsed = parse(args, 2);
+  if (parsed.error) { fail(parsed.error); return; }
+  const values = parsed.values;
+  const cwd = path.resolve(values.cwd || process.cwd());
+  const optionsError = operationOptionsError(operation, values);
+  if (optionsError) { fail(optionsError); return; }
+  await dispatchPlatformChecksOperation(operation, taskRef, values, cwd);
 }
 
 export { platformChecks };

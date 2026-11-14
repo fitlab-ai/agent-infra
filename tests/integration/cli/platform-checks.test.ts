@@ -20,6 +20,34 @@ function boundFactLine(number = 5) {
   })))}`;
 }
 
+function opaqueBoundFactLine() {
+  return `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
+    identity: { resource: { kind: 'id', value: 'pr-42' }, repository: 'opaque/project', url: 'https://opaque.example/changes/pr-42', head: { repository: 'opaque/project', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'opaque/project', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+  })))}`;
+}
+
+function createOpaqueChecksTask(root: string) {
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(taskWorkspaceRoot(root), 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    project: taskWorkspaceProject(root),
+    platform: {
+      type: 'trae',
+      providers: {
+        trae: {
+          source: filePath('tests/fixtures/platform-providers/opaque-identity-provider.mjs'),
+          config: { repository: 'opaque/project', runId: 42, jobId: 99, logText: 'build failed' }
+        }
+      }
+    }
+  }));
+  fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', opaqueBoundFactLine(), '---', ''].join('\n'));
+  return taskId;
+}
+
 test('platform-checks CLI advertises inspect, watch, run resolution and logs', () => {
   const output = run(['--help']);
   assert.equal(output.status, 0);
@@ -120,6 +148,34 @@ test('platform-checks CLI validates numeric bounds and required arguments before
     const output = run(args);
     assert.equal(output.status, 1, `${args.join(' ')}\n${output.stdout}\n${output.stderr}`);
     assert.equal(JSON.parse(output.stdout).error.code, 'CHECKS_PAYLOAD_INVALID');
+  }
+});
+
+test('platform-checks CLI resolves a named check run through the configured provider', () => {
+  const root = createTempDir('platform-check-run-dispatch-');
+  try {
+    const taskId = createOpaqueChecksTask(root);
+    const output = run(['resolve-run', taskId, '--check-name', 'build'], { cwd: root });
+    assert.equal(output.status, 0, `${output.stderr}\n${output.stdout}`);
+    const parsed = JSON.parse(output.stdout);
+    assert.equal(parsed.status, 'no-op');
+    assert.deepEqual(parsed.resolution, { status: 'resolved', runId: 42, jobId: 99 });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('platform-checks CLI fetches the requested run and job logs through the configured provider', () => {
+  const root = createTempDir('platform-check-logs-dispatch-');
+  try {
+    const taskId = createOpaqueChecksTask(root);
+    const output = run(['logs', taskId, '--run', '42', '--job', '99'], { cwd: root });
+    assert.equal(output.status, 0, `${output.stderr}\n${output.stdout}`);
+    const parsed = JSON.parse(output.stdout);
+    assert.equal(parsed.status, 'no-op');
+    assert.deepEqual(parsed.logs, { runId: 42, jobId: 99, text: 'build failed' });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
