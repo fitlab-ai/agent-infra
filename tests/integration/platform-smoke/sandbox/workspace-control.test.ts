@@ -846,6 +846,36 @@ test('control audit rotates at its fixed bound without recording manifest author
   }
 });
 
+test('active lease read returns a matching unexpired lease and rejects the expiry boundary', () => {
+  const root = createTempDir('agent-infra-control-active-lease-');
+  const leaseManifest = {
+    ...manifest,
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    channelDir: path.join(root, 'channel')
+  };
+  fs.mkdirSync(leaseManifest.publicStatusDir, { recursive: true });
+  const leasePath = path.join(root, 'lease.json');
+  const lease = {
+    version: 2,
+    generation: leaseManifest.generation,
+    nonce: 'active-lease-nonce',
+    owner: { pid: process.pid, startTime: 0 },
+    issuedAt: 1,
+    expiresAt: 10,
+    taskId: leaseManifest.taskId,
+    branch: leaseManifest.branch,
+    reason: 'manual-validation'
+  };
+  fs.writeFileSync(leasePath, `${JSON.stringify(lease)}\n`);
+  try {
+    assert.deepEqual(readActiveLease(leaseManifest, 4), lease);
+    assert.equal(readActiveLease(leaseManifest, 10), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('stale lease cleanup removes only a matching expired lease', () => {
   const root = createTempDir('agent-infra-control-lease-');
   const leaseManifest = {
