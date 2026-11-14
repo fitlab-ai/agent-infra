@@ -171,24 +171,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "b6e104afe7e5b2aea67581521093c9d7215980be438a2ce63ef17e1e03a255d7",
-      "displayName": "checkImplementationInput",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "4fcfe7039e91e9eb35532ec7497ec4bf58137652ae9e1f2f27d1a66ea4ee369b",
-      "displayName": "checkManualValidation",
-      "metric": 30,
-      "normalizedMessage": "complexity=30",
-      "count": 1
-    },
-    {
       "file": "lib/platform/issue-comments.ts",
       "ruleId": "complexity",
       "stableId": "c0f60845fa2c84cfb229c0e771c93c2c33c3351f928bf04c9a9f776214595ed7",
@@ -213,15 +195,6 @@
       "displayName": "checkRequiredPrDelivery",
       "metric": 45,
       "normalizedMessage": "complexity=45",
-      "count": 1
-    },
-    {
-      "file": "lib/task/verification-engine.ts",
-      "ruleId": "complexity",
-      "stableId": "42a0923eb2aa6883320e84f2b80c94880deca8df2c66c8c1d4e89a34cc878978",
-      "displayName": "checkTaskMeta",
-      "metric": 46,
-      "normalizedMessage": "complexity=46",
       "count": 1
     },
     {
