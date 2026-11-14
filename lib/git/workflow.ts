@@ -64,15 +64,9 @@ function validatePaths(paths: readonly string[]): string | null {
   return null;
 }
 
-function commitExplicitPaths(input: { cwd: string; paths: readonly string[]; message: string; expectedHead?: string; expectedTree?: string }, runner: GitRunner = defaultRunner) {
-  const invalid = validatePaths(input.paths);
-  if (invalid || !input.message.trim()) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [], error: { code: 'GIT_COMMIT_INPUT_INVALID', message: invalid ?? 'Commit message is required' } };
-  const before = inspectGitWorkflow(input.cwd, runner);
-  if (!before.snapshot) return before;
-  if (input.expectedHead && before.snapshot.head !== input.expectedHead) return { status: 'failed' as const, changed: false, snapshot: before.snapshot, operations: [], error: { code: 'GIT_HEAD_MISMATCH', message: `Expected HEAD ${input.expectedHead}, received ${before.snapshot.head}` } };
-  const selected = new Set(input.paths);
-  const unrelatedStaged = before.snapshot.staged.filter((candidate) => !selected.has(candidate));
-  if (unrelatedStaged.length > 0) return { status: 'failed' as const, changed: false, snapshot: before.snapshot, operations: [], error: { code: 'GIT_STAGED_SCOPE_MISMATCH', message: `Unrelated staged paths: ${unrelatedStaged.join(', ')}` } };
+type ExplicitCommitInput = { cwd: string; paths: readonly string[]; message: string; expectedHead?: string; expectedTree?: string };
+
+function stageExplicitPaths(input: Pick<ExplicitCommitInput, 'cwd' | 'paths' | 'expectedTree'>, runner: GitRunner) {
   const stageFailure = (message: string) => ({ status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'failed' as const, message }], error: { code: 'GIT_STAGE_FAILED', message } });
   const indexed = run(runner, input.cwd, ['ls-files', '-z', '--', ...input.paths]);
   if (indexed.status !== 0) return stageFailure(indexed.stderr.trim());
@@ -100,6 +94,20 @@ function commitExplicitPaths(input: { cwd: string; paths: readonly string[]; mes
     const tree = value(runner, input.cwd, ['write-tree']);
     if (tree !== input.expectedTree) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'applied' as const }], error: { code: 'GIT_TREE_MISMATCH', message: `Expected staged tree ${input.expectedTree}, received ${tree ?? 'unavailable'}` } };
   }
+  return { status: 'staged' as const };
+}
+
+function commitExplicitPaths(input: ExplicitCommitInput, runner: GitRunner = defaultRunner) {
+  const invalid = validatePaths(input.paths);
+  if (invalid || !input.message.trim()) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [], error: { code: 'GIT_COMMIT_INPUT_INVALID', message: invalid ?? 'Commit message is required' } };
+  const before = inspectGitWorkflow(input.cwd, runner);
+  if (!before.snapshot) return before;
+  if (input.expectedHead && before.snapshot.head !== input.expectedHead) return { status: 'failed' as const, changed: false, snapshot: before.snapshot, operations: [], error: { code: 'GIT_HEAD_MISMATCH', message: `Expected HEAD ${input.expectedHead}, received ${before.snapshot.head}` } };
+  const selected = new Set(input.paths);
+  const unrelatedStaged = before.snapshot.staged.filter((candidate) => !selected.has(candidate));
+  if (unrelatedStaged.length > 0) return { status: 'failed' as const, changed: false, snapshot: before.snapshot, operations: [], error: { code: 'GIT_STAGED_SCOPE_MISMATCH', message: `Unrelated staged paths: ${unrelatedStaged.join(', ')}` } };
+  const staged = stageExplicitPaths(input, runner);
+  if (staged.status !== 'staged') return staged;
   const commit = run(runner, input.cwd, ['commit', '--cleanup=verbatim', '-m', input.message]);
   const after = inspectGitWorkflow(input.cwd, runner);
   if (commit.status !== 0) return { status: 'failed' as const, changed: false, snapshot: after.snapshot, operations: [{ name: 'commit', status: 'failed' as const, message: commit.stderr.trim() }], error: { code: 'GIT_COMMIT_FAILED', message: commit.stderr.trim() } };
@@ -188,13 +196,14 @@ type PushRebasedInput = {
   expectedBaseHead: string;
 };
 
-function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultRunner) {
+function invalidPushRebasedInput(input: PushRebasedInput): boolean {
   const sha = /^[0-9a-f]{40}$/i;
   const refName = /^(?!-)(?!.*\.\.)(?!.*(?:^|\/)\.)(?!.*[~^:?*\[\\\s])(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
-  if (!input.remote || !refName.test(input.remote) || !refName.test(input.branch) || !refName.test(input.baseBranch) ||
-      !sha.test(input.expectedOldHead) || !sha.test(input.newHead) || !sha.test(input.expectedBaseHead)) {
-    return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_REBASED_INPUT_INVALID', message: 'Remote, branches, and full 40-character SHAs are required' } };
-  }
+  return !input.remote || !refName.test(input.remote) || !refName.test(input.branch) || !refName.test(input.baseBranch) ||
+    !sha.test(input.expectedOldHead) || !sha.test(input.newHead) || !sha.test(input.expectedBaseHead);
+}
+
+function inspectRebasedLocalState(input: PushRebasedInput, runner: GitRunner) {
   const snapshot = inspectGitWorkflow(input.cwd, runner).snapshot;
   if (!snapshot) return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_INSPECT_FAILED', message: 'Unable to inspect Git repository' } };
   if (snapshot.branch !== input.branch || snapshot.head !== input.newHead) {
@@ -207,19 +216,28 @@ function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultR
       rebasePaths.some((candidate) => fs.existsSync(path.isAbsolute(candidate) ? candidate : path.join(input.cwd, candidate)))) {
     return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_LOCAL_STATE_UNSAFE', message: 'Working tree must be clean with no rebase in progress' } };
   }
+  return { status: 'ready' as const, snapshot };
+}
+
+function validateRebasedRemoteFacts(input: PushRebasedInput, runner: GitRunner) {
   const remoteRef = `refs/heads/${input.branch}`;
   const baseRef = `refs/heads/${input.baseBranch}`;
   const remoteHead = value(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, remoteRef])?.split(/\s+/)[0] ?? null;
   if (remoteHead !== input.expectedOldHead) {
-    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_REMOTE_HEAD_MISMATCH', message: `Expected remote head ${input.expectedOldHead}, received ${remoteHead ?? 'unavailable'}` } };
+    return { code: 'GIT_REMOTE_HEAD_MISMATCH', message: `Expected remote head ${input.expectedOldHead}, received ${remoteHead ?? 'unavailable'}` };
   }
   const baseHead = value(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, baseRef])?.split(/\s+/)[0] ?? null;
   if (baseHead !== input.expectedBaseHead) {
-    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_REMOTE_BASE_MISMATCH', message: `Expected base head ${input.expectedBaseHead}, received ${baseHead ?? 'unavailable'}` } };
+    return { code: 'GIT_REMOTE_BASE_MISMATCH', message: `Expected base head ${input.expectedBaseHead}, received ${baseHead ?? 'unavailable'}` };
   }
   if (run(runner, input.cwd, ['merge-base', '--is-ancestor', input.expectedBaseHead, input.newHead]).status !== 0) {
-    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_REBASED_ANCESTOR_MISMATCH', message: 'Rebased head does not contain the expected base head' } };
+    return { code: 'GIT_REBASED_ANCESTOR_MISMATCH', message: 'Rebased head does not contain the expected base head' };
   }
+  return null;
+}
+
+function pushAndVerifyRebasedBranch(input: PushRebasedInput, runner: GitRunner) {
+  const remoteRef = `refs/heads/${input.branch}`;
   const pushed = run(runner, input.cwd, [
     'push', `--force-with-lease=${remoteRef}:${input.expectedOldHead}`,
     input.remote, `${input.newHead}:${remoteRef}`
@@ -233,6 +251,15 @@ function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultR
     return { status: 'failed' as const, changed: true, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'push-rebased', status: 'failed' as const, ref: input.branch, message: 'Remote ref verification failed' }], error: { code: 'GIT_REBASED_VERIFY_FAILED', message: `Expected pushed head ${input.newHead}, received ${verified ?? 'unavailable'}` } };
   }
   return { status: 'applied' as const, changed: true, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'push-rebased', status: 'applied' as const, ref: input.branch }], error: null };
+}
+
+function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultRunner) {
+  if (invalidPushRebasedInput(input)) return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_REBASED_INPUT_INVALID', message: 'Remote, branches, and full 40-character SHAs are required' } };
+  const local = inspectRebasedLocalState(input, runner);
+  if (local.status !== 'ready') return local;
+  const remoteError = validateRebasedRemoteFacts(input, runner);
+  if (remoteError) return { status: 'failed' as const, changed: false, snapshot: local.snapshot, operations: [], error: remoteError };
+  return pushAndVerifyRebasedBranch(input, runner);
 }
 
 export { commitExplicitPaths, inspectGitWorkflow, previewCommitTree, pushGitRefs, pushRebasedBranch };

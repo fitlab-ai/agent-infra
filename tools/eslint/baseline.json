@@ -333,15 +333,6 @@
       "count": 1
     },
     {
-      "file": "lib/git/workflow.ts",
-      "ruleId": "complexity",
-      "stableId": "fae35125558e8f72cce1c51afaa116b2b57ec1cfaf707bbe1638e8b196e0188a",
-      "displayName": "commitExplicitPaths",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
       "file": "lib/task/finalization.ts",
       "ruleId": "complexity",
       "stableId": "932c508688f8d114366f93b1bf4a7b67eb804f5524cd6d9aa7a0b72d6d9bc73f",
@@ -915,15 +906,6 @@
       "displayName": "publishPrReview",
       "metric": 37,
       "normalizedMessage": "complexity=37",
-      "count": 1
-    },
-    {
-      "file": "lib/git/workflow.ts",
-      "ruleId": "complexity",
-      "stableId": "24ed948fc63457059853a37f8055eb1c7f13da062a680ba8e4270750a786b70a",
-      "displayName": "pushRebasedBranch",
-      "metric": 30,
-      "normalizedMessage": "complexity=30",
       "count": 1
     },
     {
