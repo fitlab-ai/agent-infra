@@ -22,6 +22,14 @@ test('delivery target binding prefers explicit values only before a task is boun
 });
 
 test('delivery target binding rejects changes after a task is bound', () => {
+  const remoteConflict = bindDeliveryTarget({
+    defaults: { remote: 'origin', baseRef: 'main' },
+    existing: { remote: 'origin', baseRef: 'main' },
+    explicit: { remote: 'upstream', baseRef: 'main' }
+  });
+  assert.equal(remoteConflict.ok, false);
+  if (!remoteConflict.ok) assert.equal(remoteConflict.code, 'DELIVERY_TARGET_CONFLICT');
+
   const result = bindDeliveryTarget({
     defaults: { remote: 'origin', baseRef: 'main' },
     existing: { remote: 'origin', baseRef: 'main' },

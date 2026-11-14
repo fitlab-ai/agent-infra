@@ -108,15 +108,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/delivery-target.ts",
-      "ruleId": "complexity",
-      "stableId": "503c3982f14a74c7f80bade16fd95788f7566c66770f5a5f5d3a791366236c0f",
-      "displayName": "bindDeliveryTarget",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "tests/integration/platform-smoke/platform/pull-requests.test.ts",
       "ruleId": "complexity",
       "stableId": "608b7ab9684a84ec2cc8ec95044d5f27a3272f43756df6a92d257f9b0147b106",
@@ -384,15 +375,6 @@
       "displayName": "createGitHubOperations.repositoryMetadata.method:reconcileLabels",
       "metric": 20,
       "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
-      "file": "lib/task/delivery.ts",
-      "ruleId": "complexity",
-      "stableId": "a4d17bb7dcc6099c4579e0e52b14a5ac0d7527b038646f4ec0b1084a58d703ea",
-      "displayName": "deliverTaskBranchCore",
-      "metric": 35,
-      "normalizedMessage": "complexity=35",
       "count": 1
     },
     {
