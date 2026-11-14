@@ -133,66 +133,89 @@ async function backfillCompletionComments(
     error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
   }), [], []);
 
-  const artifacts: CompletionBackfillResult['artifacts'] = [];
+  const synchronized = await synchronizeCompletionArtifacts(resolved.taskId, resolved.repoRoot, inventory.artifacts, options);
+  if (synchronized.result) return synchronized.result;
+
+  const warnings = resolveBackfillWarnings(resolved.taskId, resolved.repoRoot, matching.matches, inventory.artifacts, synchronized);
+  if (warnings.result) return warnings.result;
+  const changed = synchronized.artifacts.some((item) => item.status === 'applied') || warnings.warnings.some((item) => item.status === 'applied');
+  return result(platformResult(changed ? 'applied' : 'no-op', {
+    platform: synchronized.latest.platform,
+    resource: synchronized.latest.resource,
+    capabilities: synchronized.latest.capabilities,
+    changed,
+    operations: synchronized.operations,
+    error: null
+  }), synchronized.artifacts, warnings.warnings);
+}
+
+type ArtifactSyncState = {
+  artifacts: CompletionBackfillResult['artifacts'];
+  operations: PlatformOperation[];
+  latest: PlatformResult;
+  result: CompletionBackfillResult | null;
+};
+
+async function synchronizeCompletionArtifacts(
+  taskId: string,
+  repoRoot: string,
+  inventory: ReturnType<typeof inspectCompletionArtifacts>['artifacts'],
+  options: CompletionBackfillOptions
+): Promise<ArtifactSyncState> {
+  const artifacts: ArtifactSyncState['artifacts'] = [];
   const operations: PlatformOperation[] = [];
   let latest = platformResult('no-op', { error: null });
-  for (const artifact of inventory.artifacts) {
-    latest = await syncPlatformComment(resolved.taskId, {
-      kind: 'artifact',
-      artifact: artifact.name,
-      agent: options.agent,
-      backfill: true,
-      dependency: 'required',
-      cwd: resolved.repoRoot,
-      client: options.client
+  for (const artifact of inventory) {
+    latest = await syncPlatformComment(taskId, {
+      kind: 'artifact', artifact: artifact.name, agent: options.agent, backfill: true,
+      dependency: 'required', cwd: repoRoot, client: options.client
     });
-    operations.push(...latest.operations.map((operation) => ({
-      ...operation,
-      name: `${artifact.name}:${operation.name}`
-    })));
+    operations.push(...latest.operations.map((operation) => ({ ...operation, name: `${artifact.name}:${operation.name}` })));
     artifacts.push({ artifact: artifact.name, status: latest.status });
-    if (latest.status === 'failed' || latest.status === 'blocked') return result({ ...latest, operations }, artifacts, []);
-    if (latest.error) return result(platformResult(latest.error.retryable || providerErrorRetryable(latest.error.code) ? 'blocked' : 'failed', {
-      platform: latest.platform,
-      resource: latest.resource,
-      capabilities: latest.capabilities,
-      operations,
-      error: latest.error
-    }), artifacts, []);
+    if (latest.status === 'failed' || latest.status === 'blocked') {
+      return { artifacts, operations, latest, result: result({ ...latest, operations }, artifacts, []) };
+    }
+    if (latest.error) {
+      const status = latest.error.retryable || providerErrorRetryable(latest.error.code) ? 'blocked' : 'failed';
+      return { artifacts, operations, latest, result: result(platformResult(status, {
+        platform: latest.platform, resource: latest.resource, capabilities: latest.capabilities, operations, error: latest.error
+      }), artifacts, []) };
+    }
   }
+  return { artifacts, operations, latest, result: null };
+}
 
+function resolveBackfillWarnings(
+  taskId: string,
+  repoRoot: string,
+  matches: BackfillWarningMatch[],
+  inventory: ReturnType<typeof inspectCompletionArtifacts>['artifacts'],
+  synchronized: ArtifactSyncState
+): { warnings: CompletionBackfillResult['warnings']; result: CompletionBackfillResult | null } {
   const warnings: CompletionBackfillResult['warnings'] = [];
   let metadata: ReturnType<typeof captureTaskWriteMetadata> | null = null;
-  for (const { warning, artifact } of matching.matches) {
+  for (const { warning, artifact } of matches) {
     metadata ??= captureTaskWriteMetadata();
     const resolution = [
       `artifact=${artifact}`,
       `completionFamilies=${COMPLETION_BACKFILL_FAMILIES.join(',')}`,
-      `synchronized=${inventory.artifacts.map((artifact) => artifact.name).join(',') || 'none'}`,
+      `synchronized=${inventory.map((item) => item.name).join(',') || 'none'}`,
       `completedAt=${metadata.timestamp}`
     ].join('; ');
     const updated = applyWorkflowWarningIntent({
-      kind: 'set-status', taskRef: resolved.taskId, id: warning.id, status: 'resolved', resolution
-    }, { repoRoot: resolved.repoRoot, metadataProvider: () => metadata! });
-    if (updated.status === 'failed') return result(platformResult('failed', {
-      platform: latest.platform,
-      resource: latest.resource,
-      capabilities: latest.capabilities,
-      operations,
-      changed: artifacts.some((item) => item.status === 'applied'),
+      kind: 'set-status', taskRef: taskId, id: warning.id, status: 'resolved', resolution
+    }, { repoRoot, metadataProvider: () => metadata! });
+    if (updated.status === 'failed') return { warnings, result: result(platformResult('failed', {
+      platform: synchronized.latest.platform,
+      resource: synchronized.latest.resource,
+      capabilities: synchronized.latest.capabilities,
+      operations: synchronized.operations,
+      changed: synchronized.artifacts.some((item) => item.status === 'applied'),
       error: { code: updated.error?.code || 'WARNING_UPDATE_FAILED', message: updated.error?.message || 'Unable to resolve workflow warning', retryable: false }
-    }), artifacts, warnings);
+    }), synchronized.artifacts, warnings) };
     warnings.push({ id: warning.id, status: updated.status });
   }
-  const changed = artifacts.some((item) => item.status === 'applied') || warnings.some((item) => item.status === 'applied');
-  return result(platformResult(changed ? 'applied' : 'no-op', {
-    platform: latest.platform,
-    resource: latest.resource,
-    capabilities: latest.capabilities,
-    changed,
-    operations,
-    error: null
-  }), artifacts, warnings);
+  return { warnings, result: null };
 }
 
 export { backfillCompletionComments, inspectCompletionBackfillEligibility };

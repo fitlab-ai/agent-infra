@@ -1013,6 +1013,27 @@ async function listPlatformComments(issue: string | number, cwd = process.cwd(),
   return { ...platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(identity), identity }, error: null }), comments: listed.value };
 }
 
+function checkCommentOwnership(
+  context: PlatformResult,
+  identity: ReturnType<typeof taskIssueIdentity> & {},
+  taskId: string,
+  comments: RemoteComment[]
+): PlatformResult {
+  const matches = findMarkerComments(comments, MARKERS.task(taskId));
+  if (matches.length > 1) return platformResult('failed', { ...contextFields(context), error: {
+    code: 'COMMENT_MARKER_CONFLICT', message: 'Multiple task comments use the registered marker', retryable: false
+  } });
+  const owner = matches[0]?.user?.login;
+  if (owner && owner !== context.platform?.currentUser && !context.capabilities?.triage) {
+    return platformResult('blocked', {
+      ...contextFields(context),
+      resource: { kind: 'issue', number: resourceIdentityNumber(identity), identity },
+      error: { code: 'COMMENT_OWNER_CONFLICT', message: `Task comment is owned by '${owner}'`, retryable: false }
+    });
+  }
+  return platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(identity), identity }, error: null });
+}
+
 async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: string; client?: PlatformClient; runtimeVersion?: string } = {}): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
@@ -1030,17 +1051,7 @@ async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: strin
         : response)
       : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
   if (!listed.ok) return platformResult(isRetryable(listed.error) ? 'blocked' : 'failed', { ...contextFields(context), error: listed.error });
-  const matches = findMarkerComments(listed.value, MARKERS.task(resolved.taskId));
-  if (matches.length > 1) return platformResult('failed', { ...contextFields(context), error: { code: 'COMMENT_MARKER_CONFLICT', message: 'Multiple task comments use the registered marker', retryable: false } });
-  const owner = matches[0]?.user?.login;
-  if (owner && owner !== context.platform.currentUser && !context.capabilities.triage) {
-    return platformResult('blocked', {
-      ...contextFields(context),
-      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentity), identity: issueIdentity },
-      error: { code: 'COMMENT_OWNER_CONFLICT', message: `Task comment is owned by '${owner}'`, retryable: false }
-    });
-  }
-  return platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentity), identity: issueIdentity }, error: null });
+  return checkCommentOwnership(context, issueIdentity, resolved.taskId, listed.value);
 }
 
 export {
