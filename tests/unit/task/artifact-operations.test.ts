@@ -115,6 +115,30 @@ test('structure inspection reports trailing punctuation for all registered famil
   }
 });
 
+test('structure inspection preserves mixed heading and marker diagnostic order and source lines', () => {
+  const planSchema = getArtifactSchema('plan')!;
+  const schema = { ...planSchema, sections: planSchema.sections.slice(0, 2) };
+  const content = [
+    '# Plan',
+    '## 问题理解：',
+    '<!-- artifact-section:plan:understanding --> body',
+    '<!-- artifact-section:plan:understanding -->',
+    '## 约束条件',
+    '<!-- artifact-section:plan:constraints -->',
+    'body',
+    '<!-- artifact-section:plan:unknown -->'
+  ].join('\n');
+
+  const result = inspectArtifactStructure(content, schema);
+
+  assert.deepEqual(result.diagnostics.map(({ code, sectionId, line }) => ({ code, sectionId, line })), [
+    { code: 'ARTIFACT_HEADING_TRAILING_PUNCTUATION', sectionId: 'understanding', line: 2 },
+    { code: 'ARTIFACT_MARKER_DUPLICATE', sectionId: 'understanding', line: 4 },
+    { code: 'ARTIFACT_MARKER_MISMATCH', sectionId: 'understanding', line: 3 },
+    { code: 'ARTIFACT_MARKER_MISMATCH', sectionId: null, line: 8 }
+  ]);
+});
+
 test('shared artifact contract enforces localized review patterns from the schema registry', () => {
   for (const locale of ['zh-CN', 'en'] as const) {
     const content = renderArtifactSkeleton({

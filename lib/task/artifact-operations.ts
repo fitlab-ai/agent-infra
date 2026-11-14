@@ -151,10 +151,36 @@ function inspectArtifactStructure(
   if (scanned.hasUnclosedFence) diagnostics.push(diagnostic('ARTIFACT_UNCLOSED_FENCE', 'artifact contains an unclosed Markdown fence', null, null));
 
   const headingsBySection = new Map<string, typeof scanned.headings>();
+  inspectSectionHeadings(content, schema, scanned.headings, headingsBySection, diagnostics);
+  const markers = markerEntries(content, scanned);
+  inspectSectionMarkers(content, schema, scanned, headingsBySection, markers, diagnostics);
+  inspectUnknownMarkers(schema, markers, diagnostics);
+  if (hasInvalidOrder(schema.sections.map((section) => headingsBySection.get(section.id)?.[0]?.start))) {
+    diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'required sections are not in schema order', null, null));
+  }
+  if (hasInvalidOrder(schema.sections.map((section) => markers.find((entry) => entry.marker === section.marker)?.start))) {
+    diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'section markers are not in schema order', null, null));
+  }
+
+  return {
+    ok: diagnostics.length === 0,
+    family: schema.family,
+    semanticDigest: canonicalSemanticDigest(content),
+    diagnostics
+  };
+}
+
+function inspectSectionHeadings(
+  content: string,
+  schema: ArtifactSchema,
+  headings: readonly VisibleHeading[],
+  headingsBySection: Map<string, typeof headings>,
+  diagnostics: ArtifactStructuralDiagnostic[]
+): void {
   for (const section of schema.sections) {
     const aliases = sectionHeadings(section);
-    const exact = scanned.headings.filter((heading) => heading.level === 2 && aliases.includes(heading.text));
-    const punctuated = scanned.headings.filter((heading) => heading.level === 2 && aliases.some((alias) => heading.text === `${alias}:` || heading.text === `${alias}：`));
+    const exact = headings.filter((heading) => heading.level === 2 && aliases.includes(heading.text));
+    const punctuated = headings.filter((heading) => heading.level === 2 && aliases.some((alias) => heading.text === `${alias}:` || heading.text === `${alias}：`));
     headingsBySection.set(section.id, exact.length > 0 ? exact : punctuated);
     if (exact.length > 1 || punctuated.length > 0 && exact.length > 0 || punctuated.length > 1) {
       const first = exact[1] ?? punctuated[0] ?? exact[0];
@@ -175,63 +201,79 @@ function inspectArtifactStructure(
       diagnostics.push(diagnostic('ARTIFACT_MISSING_SECTION', `required section '${aliases[0]}' is missing`, section.id, null));
     }
   }
+}
 
-  const markers = markerEntries(content, scanned);
-  for (const section of schema.sections) {
-    const matches = markers.filter((entry) => entry.marker === section.marker);
-    if (matches.length === 0) {
-      diagnostics.push(diagnostic('ARTIFACT_MARKER_MISSING', `section marker '${section.marker}' is missing`, section.id, null));
-    } else if (matches.length > 1) {
-      diagnostics.push(diagnostic('ARTIFACT_MARKER_DUPLICATE', `section marker '${section.marker}' is duplicated`, section.id, matches[1]!.line));
+function inspectSectionMarkers(
+  content: string,
+  schema: ArtifactSchema,
+  scanned: VisibleMarkdown,
+  headingsBySection: Map<string, typeof scanned.headings>,
+  markers: ReturnType<typeof markerEntries>,
+  diagnostics: ArtifactStructuralDiagnostic[]
+): void {
+  for (const section of schema.sections) inspectSectionMarker(content, section, scanned, headingsBySection, markers, diagnostics);
+}
+
+function inspectSectionMarker(
+  content: string,
+  section: ArtifactSection,
+  scanned: VisibleMarkdown,
+  headingsBySection: Map<string, typeof scanned.headings>,
+  markers: ReturnType<typeof markerEntries>,
+  diagnostics: ArtifactStructuralDiagnostic[]
+): void {
+  const matches = markers.filter((entry) => entry.marker === section.marker);
+  if (matches.length === 0) {
+    diagnostics.push(diagnostic('ARTIFACT_MARKER_MISSING', `section marker '${section.marker}' is missing`, section.id, null));
+  } else if (matches.length > 1) {
+    diagnostics.push(diagnostic('ARTIFACT_MARKER_DUPLICATE', `section marker '${section.marker}' is duplicated`, section.id, matches[1]!.line));
+  }
+  inspectSectionMarkerContent(content, section, scanned, headingsBySection.get(section.id)?.[0], matches[0], diagnostics);
+}
+
+function inspectSectionMarkerContent(
+  content: string,
+  section: ArtifactSection,
+  scanned: VisibleMarkdown,
+  heading: VisibleHeading | undefined,
+  marker: ReturnType<typeof markerEntries>[number] | undefined,
+  diagnostics: ArtifactStructuralDiagnostic[]
+): void {
+  if (marker && !marker.standalone) {
+    diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' must occupy its own visible line`, section.id, marker.line));
+  }
+  if (marker && heading) {
+    const bounds = sectionBodyBounds(content, heading, scanned);
+    if (marker.start < bounds.start || marker.start >= bounds.end) {
+      diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' is outside its section`, section.id, marker.line));
     }
-    const marker = matches[0];
-    const heading = headingsBySection.get(section.id)?.[0];
-    if (marker && !marker.standalone) {
-      diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' must occupy its own visible line`, section.id, marker.line));
-    }
-    if (marker && heading) {
-      const bounds = sectionBodyBounds(content, heading, scanned);
-      if (marker.start < bounds.start || marker.start >= bounds.end) {
-        diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' is outside its section`, section.id, marker.line));
-      }
-      const body = stripHtmlComments(content.slice(bounds.start, bounds.end)).trim();
-      if (!body) diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, lineNumber(content, heading.start)));
-    }
-    if (marker && !heading && marker.standalone) {
-      const nextHeading = scanned.headings.find((candidate) => candidate.start > marker.start && candidate.level <= 2);
-      const body = stripHtmlComments(content.slice(marker.end, nextHeading?.start ?? content.length)).trim();
-      if (!body) {
-        diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, marker.line));
-      }
+    const body = stripHtmlComments(content.slice(bounds.start, bounds.end)).trim();
+    if (!body) diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, lineNumber(content, heading.start)));
+  }
+  if (marker && !heading && marker.standalone) {
+    const nextHeading = scanned.headings.find((candidate) => candidate.start > marker.start && candidate.level <= 2);
+    const body = stripHtmlComments(content.slice(marker.end, nextHeading?.start ?? content.length)).trim();
+    if (!body) {
+      diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, marker.line));
     }
   }
+}
+
+function inspectUnknownMarkers(
+  schema: ArtifactSchema,
+  markers: ReturnType<typeof markerEntries>,
+  diagnostics: ArtifactStructuralDiagnostic[]
+): void {
   for (const marker of markers) {
     if (!schema.sections.some((section) => markerPattern(section.marker).test(`<!-- ${marker.marker} -->`))) {
       diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `unknown section marker '${marker.marker}'`, null, marker.line));
     }
   }
+}
 
-  const orderedHeadings = schema.sections.flatMap((section) => {
-    const heading = headingsBySection.get(section.id)?.[0];
-    return heading ? [{ section, start: heading.start }] : [];
-  });
-  if (orderedHeadings.some((item, index) => index > 0 && item.start <= orderedHeadings[index - 1]!.start)) {
-    diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'required sections are not in schema order', null, null));
-  }
-  const orderedMarkers = schema.sections.flatMap((section) => {
-    const marker = markers.find((entry) => entry.marker === section.marker);
-    return marker ? [{ section, start: marker.start }] : [];
-  });
-  if (orderedMarkers.some((item, index) => index > 0 && item.start <= orderedMarkers[index - 1]!.start)) {
-    diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'section markers are not in schema order', null, null));
-  }
-
-  return {
-    ok: diagnostics.length === 0,
-    family: schema.family,
-    semanticDigest: canonicalSemanticDigest(content),
-    diagnostics
-  };
+function hasInvalidOrder(starts: readonly (number | undefined)[]): boolean {
+  const ordered = starts.filter((start): start is number => start !== undefined);
+  return ordered.some((start, index) => index > 0 && start <= ordered[index - 1]!);
 }
 
 function inspectArtifactPatterns(

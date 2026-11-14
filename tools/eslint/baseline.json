@@ -486,15 +486,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/artifact-command.ts",
-      "ruleId": "complexity",
-      "stableId": "6066e47b088d92b012120757956f6ff731969948f98bb9bb21496528f3e5b0c6",
-      "displayName": "executeArtifactCommand",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
-      "count": 1
-    },
-    {
       "file": "lib/internal/manual-validation.ts",
       "ruleId": "complexity",
       "stableId": "6624a961de8cc335287ff34b350a48db5429d70ee60fc13bc7063f3957478e7e",
@@ -555,15 +546,6 @@
       "displayName": "inheritCodexHookTrustState",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/task/artifact-operations.ts",
-      "ruleId": "complexity",
-      "stableId": "4699b12b97c4f2754a5c16b28bde07161721a71be501f05d7ec3437b1df7bfd0",
-      "displayName": "inspectArtifactStructure",
-      "metric": 36,
-      "normalizedMessage": "complexity=36",
       "count": 1
     },
     {

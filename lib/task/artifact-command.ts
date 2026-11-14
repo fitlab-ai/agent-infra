@@ -62,56 +62,105 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
     sourceSha256: fields['--source-sha256']
   };
 }
+
+function artifactCommandFailure(code: string, message: string): Record<string, unknown> {
+  return { status: 'failed', changed: false, error: { code, message } };
+}
+
+function inspectArtifactCommand(
+  command: ArtifactCommand,
+  repoRoot: string | undefined
+): Record<string, unknown> {
+  const result = resolveArtifactContext(command.taskRef, command.family, {
+    repoRoot,
+    reasonCode: command.reasonCode,
+    sourceFinding: command.sourceFinding,
+    sourceArtifact: command.sourceArtifact,
+    sourceSha256: command.sourceSha256
+  });
+  if (command.family !== 'code' || !result.codeMode) return { ...result };
+  return {
+    ...result,
+    mode: result.codeMode.mode,
+    code_max: result.codeMode.codeMax,
+    rev_max: result.codeMode.reviewMax,
+    verdict: result.codeMode.verdict,
+    next_round: result.next?.round ?? null,
+    next_artifact: result.next?.name ?? null,
+    review_artifact: result.codeMode.reviewArtifact,
+    implementation_input: result.codeMode.implementationInput,
+    decision_id: result.codeMode.decisionId,
+    decision_evidence: result.codeMode.decisionEvidence,
+    message: result.codeMode.message
+  };
+}
+
+function initializeArtifactCommand(
+  command: ArtifactCommand,
+  resolved: ReturnType<typeof resolveTaskRef> & { ok: true },
+  schema: NonNullable<ReturnType<typeof getArtifactSchema>>,
+  parsed: NonNullable<ReturnType<typeof parseArtifactName>>,
+  taskDir: string
+): Record<string, unknown> {
+  const context = resolveArtifactContext(command.taskRef, command.family, { repoRoot: resolved.repoRoot });
+  const existingCandidate = path.join(taskDir, command.artifact);
+  let matchingInitializedSkeleton = false;
+  try {
+    const existing = fs.readFileSync(existingCandidate, 'utf8');
+    matchingInitializedSkeleton = existing.includes(`<!-- artifact-context:${resolved.taskId}:${command.family}:${parsed.round} -->`);
+  } catch { /* an absent candidate is created only for the selected identity */ }
+  if ((context.status !== 'ready' && !matchingInitializedSkeleton) || (context.next?.name !== command.artifact
+    && !hasOpenArtifactRound(taskDir, fs.readFileSync(resolved.taskMdPath, 'utf8'), schema.family, parsed.round)
+    && !matchingInitializedSkeleton)) {
+    return artifactCommandFailure('ARTIFACT_INIT_CONTEXT_INVALID', context.error?.message ?? `artifact '${command.artifact}' is not the next ${command.family} artifact`);
+  }
+  return {
+    ...initializeArtifactSkeleton({
+      repoRoot: resolved.repoRoot,
+      taskId: resolved.taskId,
+      taskDir,
+      family: schema.family,
+      artifact: command.artifact,
+      ...(command.locale ? { locale: command.locale } : {})
+    }),
+    taskId: resolved.taskId,
+    taskDir,
+    family: command.family,
+    artifact: command.artifact
+  };
+}
+
+function finalizeArtifactCommand(
+  command: ArtifactCommand,
+  resolved: ReturnType<typeof resolveTaskRef> & { ok: true }
+): Record<string, unknown> {
+  if (command.family !== 'analysis' && command.family !== 'plan' && command.family !== 'code') {
+    return artifactCommandFailure('ARTIFACT_PAYLOAD_INVALID', "preflight and finalize-local only support 'analysis', 'plan', and 'code'");
+  }
+  if (command.operation === 'preflight') {
+    return preflightLocalArtifact({
+      taskRef: command.taskRef, family: command.family, artifact: command.artifact, repoRoot: resolved.repoRoot
+    });
+  }
+  return finalizeLocalArtifact({
+    taskRef: command.taskRef, family: command.family, artifact: command.artifact, repoRoot: resolved.repoRoot
+  });
+}
+
 /** Resolve authoritative task metadata separately from a trusted candidate directory. */
 export function executeArtifactCommand(
   command: ArtifactCommand,
   options: Readonly<{ repoRoot?: string; artifactDir?: string }> = {}
 ): Record<string, unknown> {
-  const { taskRef, operation, family, artifact, locale } = command;
-  const fail = (code: string, message: string) => ({ status: 'failed', changed: false, error: { code, message } });
-  if (operation === 'inspect') {
-    const result = resolveArtifactContext(taskRef, family, {
-      repoRoot: options.repoRoot,
-      reasonCode: command.reasonCode,
-      sourceFinding: command.sourceFinding,
-      sourceArtifact: command.sourceArtifact,
-      sourceSha256: command.sourceSha256
-    });
-    return family === 'code' && result.codeMode ? {
-      ...result, mode: result.codeMode.mode, code_max: result.codeMode.codeMax, rev_max: result.codeMode.reviewMax,
-      verdict: result.codeMode.verdict, next_round: result.next?.round ?? null, next_artifact: result.next?.name ?? null,
-      review_artifact: result.codeMode.reviewArtifact, implementation_input: result.codeMode.implementationInput,
-      decision_id: result.codeMode.decisionId, decision_evidence: result.codeMode.decisionEvidence, message: result.codeMode.message
-    } : { ...result };
-  }
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return fail(resolved.code, resolved.message);
-  const schema = getArtifactSchema(family);
-  const parsed = parseArtifactName(artifact);
-  if (!schema || !parsed || parsed.family !== family) {
-    return fail('ARTIFACT_IDENTITY_INVALID', `artifact '${artifact}' does not match ${family}`);
+  if (command.operation === 'inspect') return inspectArtifactCommand(command, options.repoRoot);
+  const resolved = resolveTaskRef(command.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return artifactCommandFailure(resolved.code, resolved.message);
+  const schema = getArtifactSchema(command.family);
+  const parsed = parseArtifactName(command.artifact);
+  if (!schema || !parsed || parsed.family !== command.family) {
+    return artifactCommandFailure('ARTIFACT_IDENTITY_INVALID', `artifact '${command.artifact}' does not match ${command.family}`);
   }
   const taskDir = options.artifactDir ?? resolved.taskDir;
-  const identity = { taskId: resolved.taskId, taskDir, family, artifact };
-  const input = { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskDir, family: schema.family, artifact };
-  if (operation === 'init') {
-    const context = resolveArtifactContext(taskRef, family, { repoRoot: resolved.repoRoot });
-    const existingCandidate = path.join(taskDir, artifact);
-    let matchingInitializedSkeleton = false;
-    try {
-      const existing = fs.readFileSync(existingCandidate, 'utf8');
-      matchingInitializedSkeleton = existing.includes(`<!-- artifact-context:${resolved.taskId}:${family}:${parsed.round} -->`);
-    } catch { /* an absent candidate is created only for the selected identity */ }
-    if ((context.status !== 'ready' && !matchingInitializedSkeleton) || (context.next?.name !== artifact
-      && !hasOpenArtifactRound(taskDir, fs.readFileSync(resolved.taskMdPath, 'utf8'), family, parsed.round)
-      && !matchingInitializedSkeleton)) {
-      return fail('ARTIFACT_INIT_CONTEXT_INVALID', context.error?.message ?? `artifact '${artifact}' is not the next ${family} artifact`);
-    }
-    return { ...initializeArtifactSkeleton({ ...input, ...(locale ? { locale } : {}) }), ...identity };
-  }
-  if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
-    return fail('ARTIFACT_PAYLOAD_INVALID', "preflight and finalize-local only support 'analysis', 'plan', and 'code'");
-  }
-  if (operation === 'preflight') return { ...preflightLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot }) };
-  return { ...finalizeLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot }) };
+  if (command.operation === 'init') return initializeArtifactCommand(command, resolved, schema, parsed, taskDir);
+  return finalizeArtifactCommand(command, resolved);
 }
