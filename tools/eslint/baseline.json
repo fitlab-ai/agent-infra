@@ -441,15 +441,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/create-service.ts",
-      "ruleId": "complexity",
-      "stableId": "81992b1791fd7f7540abe9d74f7b0dce6b10ee90697ffbeedadca6138d9c69ab",
-      "displayName": "createTask",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
-      "count": 1
-    },
-    {
       "file": "lib/task/delivery.ts",
       "ruleId": "complexity",
       "stableId": "a4d17bb7dcc6099c4579e0e52b14a5ac0d7527b038646f4ec0b1084a58d703ea",
@@ -771,15 +762,6 @@
       "displayName": "parseTaskControlOperation",
       "metric": 57,
       "normalizedMessage": "complexity=57",
-      "count": 1
-    },
-    {
-      "file": "lib/task/create-service.ts",
-      "ruleId": "complexity",
-      "stableId": "bf08480f08f8bb9e7fbff67dcc255121b487d6aae08034fc0d0186726bd091fa",
-      "displayName": "parseTaskCreateResult",
-      "metric": 36,
-      "normalizedMessage": "complexity=36",
       "count": 1
     },
     {

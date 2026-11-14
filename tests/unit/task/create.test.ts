@@ -413,6 +413,72 @@ test('platform failure preserves the local task and records a warning intent', a
   }
 });
 
+test('task-create result parser keeps strict envelope and status invariants', () => {
+  const result = {
+    status: 'applied',
+    changed: true,
+    task: { id: 'TASK-20260813-010203', shortId: '01', state: 'active' },
+    issue: null,
+    operations: [],
+    warnings: [],
+    error: null
+  };
+  const controlled = {
+    ...result,
+    control: { requestId: '0123456789abcdef0123456789abcdef', accepted: true, recovery: 'none' }
+  };
+
+  assert.deepEqual(parseTaskCreateResult(result), result);
+  assert.deepEqual(parseTaskCreateResult(controlled), controlled);
+  assert.throws(() => parseTaskCreateResult({ ...result, extra: true }), /TASK_CREATE_RESULT_INVALID/);
+  assert.throws(() => parseTaskCreateResult({ ...result, task: { ...result.task, extra: true } }), /TASK_CREATE_RESULT_INVALID/);
+  assert.throws(() => parseTaskCreateResult({ ...result, control: null }), /TASK_CREATE_RESULT_INVALID/);
+  assert.throws(() => parseTaskCreateResult({ ...result, status: 'blocked', error: { code: 'NETWORK', message: 'offline', retryable: false } }), /TASK_CREATE_RESULT_INVALID/);
+  assert.throws(() => parseTaskCreateResult({ ...result, status: 'failed' }), /TASK_CREATE_RESULT_INVALID/);
+});
+
+test('task creation runs platform steps after local persistence and verifies last', async () => {
+  const root = fixture();
+  const calls: string[] = [];
+  try {
+    const result = await createTask(candidate, {
+      repoRoot: root,
+      agentInfraVersion: 'v0.9.5',
+      dependencies: {
+        createIssue: ((taskId: string) => {
+          calls.push('createIssue');
+          assert.equal(fs.existsSync(path.join(taskRoot(root), 'active', taskId, 'task.md')), true);
+          return {
+            status: 'applied', changed: true, operations: [{ name: 'issue:create', status: 'applied' }],
+            task: { id: taskId, issueNumber: 1 }, issue: { number: 1, url: 'https://example.test/issues/1' }
+          };
+        }) as never,
+        syncIssue: ((taskId: string) => {
+          calls.push('syncIssue');
+          return {
+            status: 'applied', changed: true, operations: [{ name: 'issue:sync', status: 'applied' }],
+            task: { id: taskId, issueNumber: 1 }, issue: { number: 1, url: 'https://example.test/issues/1' }
+          };
+        }) as never,
+        syncComment: (() => {
+          calls.push('syncComment');
+          return {
+            status: 'applied', changed: true, operations: [{ name: 'comment:sync', status: 'applied' }],
+            comment: null, issue: { number: 1, url: 'https://example.test/issues/1' }
+          };
+        }) as never,
+        addWarning: (() => assert.fail('successful platform steps must not add a warning')) as never
+      }
+    });
+
+    assert.deepEqual(calls, ['createIssue', 'syncIssue', 'syncComment']);
+    assert.equal(result.status, 'applied');
+    assert.deepEqual(result.operations.at(-1), { name: 'task:verify', status: 'pass', reasonCode: null });
+  } finally {
+    cleanupFixture(root);
+  }
+});
+
 test('non-active idempotent task-create replay returns its state without platform work', async () => {
   const root = fixture();
   try {
