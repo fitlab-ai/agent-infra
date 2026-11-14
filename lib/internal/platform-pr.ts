@@ -67,6 +67,178 @@ function readFile(value: string, cwd: string): string {
   return value === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(cwd, value), 'utf8');
 }
 
+type PrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
+type PrValues = Record<string, string | boolean>;
+
+async function handleMetadataOperation(
+  operation: string, taskRef: string, values: PrValues, cwd: string, agent: string, primaryResult: PrimaryResult | undefined
+): Promise<boolean> {
+  if (internalHandlerRoute('platform-pr', 'change-report', operation)) {
+    if (typeof values.mechanicalFile !== 'string' || typeof values.precheckFile !== 'string') { fail('change-report requires --mechanical-file and --precheck-file'); return true; }
+    finish(await reportWrite(taskRef, {
+      cwd, agent, mechanicalFile: values.mechanicalFile, precheckFile: values.precheckFile, dryRun: values.dryRun === true
+    }));
+    return true;
+  }
+  if (internalHandlerRoute('platform-pr', 'skip', operation)) {
+    finish(await skipPlatformPullRequestFact(taskRef, { cwd, agent, dryRun: values.dryRun === true }));
+    return true;
+  }
+  if (await handleBindingOperation(operation, taskRef, values, cwd, agent)) return true;
+  if (internalHandlerRoute('platform-pr', 'sync', operation)) {
+    if (values.metadata !== true && values.closingIssue !== true) { fail('sync requires --metadata or --closing-issue'); return true; }
+    if (!primaryResult) { fail('sync requires --result pr_created, pr_reused, or no_op'); return true; }
+    finish(await syncPlatformPullRequest(taskRef, {
+      cwd, agent, metadata: values.metadata === true, closingIssue: values.closingIssue === true,
+      primaryResult, dryRun: values.dryRun === true
+    }));
+    return true;
+  }
+  return false;
+}
+
+async function handleBindingOperation(
+  operation: string, taskRef: string, values: PrValues, cwd: string, agent: string
+): Promise<boolean> {
+  if (internalHandlerRoute('platform-pr', 'resolve-external', operation)) {
+    const pr = values.pr === undefined ? undefined : values.pr;
+    if (pr !== undefined && (typeof pr !== 'string' || !pr)) { fail('resolve-external requires --pr <token>'); return true; }
+    finish(await resolveExternalPullRequest(taskRef, { cwd, agent, pr, dryRun: values.dryRun === true }));
+    return true;
+  }
+  if (internalHandlerRoute('platform-pr', 'bind', operation)) {
+    const pr = values.pr;
+    if (typeof pr !== 'string' || !pr) { fail('bind requires --pr <token>'); return true; }
+    finish(await bindPlatformPullRequest(taskRef, { cwd, agent, pr, dryRun: values.dryRun === true }));
+    return true;
+  }
+  return false;
+}
+
+async function handleSummarySync(
+  operation: string, taskRef: string, values: PrValues, cwd: string, agent: string, primaryResult: PrimaryResult | undefined
+): Promise<boolean> {
+  if (!internalHandlerRoute('platform-pr', 'summary-sync', operation)) return false;
+  if (typeof values.bodyFile !== 'string') { fail('summary-sync requires --body-file'); return true; }
+  if (typeof values.changeReportFile !== 'string') { fail('summary-sync requires --change-report-file'); return true; }
+  if (!primaryResult) { fail('summary-sync requires --result pr_created, pr_reused, or no_op'); return true; }
+  try {
+    const manualPhase = values.manualPhase;
+    if (manualPhase !== undefined && manualPhase !== 'pending' && manualPhase !== 'final') { fail('--manual-phase must be pending or final'); return true; }
+    finish(await syncPullRequestSummary(taskRef, {
+      cwd, agent, body: readFile(values.bodyFile, cwd), changeReportFile: values.changeReportFile,
+      primaryResult, dryRun: values.dryRun === true, strict: values.strict === true,
+      ...(manualPhase ? { manualValidation: {
+        phase: manualPhase,
+        ...(typeof values.transactionId === 'string' ? { transactionId: values.transactionId } : {}),
+        ...(typeof values.receiptDigest === 'string' ? { receiptDigest: values.receiptDigest } : {}),
+        ...(typeof values.prHeadSha === 'string' ? { prHeadSha: values.prHeadSha } : {})
+      } } : {})
+    }));
+  } catch (error) {
+    fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return true;
+}
+
+async function handleCreate(
+  operation: string, taskRef: string, values: PrValues, cwd: string, agent: string
+): Promise<void> {
+  if (!internalHandlerRoute('platform-pr', 'create', operation)) return;
+  if (typeof values.base !== 'string' || typeof values.head !== 'string' || typeof values.titleFile !== 'string' || typeof values.bodyFile !== 'string') {
+    fail('create requires --base, --head, --title-file and --body-file');
+    return;
+  }
+  try {
+    finish(await createPlatformPullRequest(taskRef, {
+      cwd, agent, base: values.base, head: values.head,
+      title: readFile(values.titleFile, cwd), body: readFile(values.bodyFile, cwd),
+      draft: values.draft === true, dryRun: values.dryRun === true
+    }));
+  } catch (error) {
+    fail(`unable to read PR payload file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function handleSyncInLabels(args: string[]): Promise<void> {
+  const parsed = parse(args, 1);
+  if (parsed.error) { fail(parsed.error); return; }
+  const values = parsed.values;
+  const unexpected = Object.keys(values).find((name) => !['cwd', 'pr', 'dryRun'].includes(name));
+  if (unexpected) { fail(`sync-in-labels does not accept --${unexpected}`); return; }
+  if (typeof values.pr !== 'string' || !values.pr || values.pr.trim() !== values.pr) { fail('sync-in-labels requires a non-empty --pr token'); return; }
+  const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
+  finish(await syncPlatformPullRequestInLabels(values.pr, { cwd, dryRun: values.dryRun === true }));
+}
+
+async function handleReadOnlyOperation(operation: string, taskRef: string, cwd: string): Promise<boolean> {
+  if (internalHandlerRoute('platform-pr', 'inspect', operation)) {
+    finish(await inspectPlatformPullRequest(taskRef, { cwd }));
+    return true;
+  }
+  if (internalHandlerRoute('platform-pr', 'summary-context', operation)) {
+    finish(await summaryContext(taskRef, { cwd }));
+    return true;
+  }
+  return false;
+}
+
+type TaskOperationContext = { taskRef: string; values: PrValues; cwd: string };
+
+function parseTaskOperation(operation: string, args: string[]): TaskOperationContext | undefined {
+  const taskRef = args[1];
+  if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return undefined; }
+  const parsed = parse(args, 2);
+  if (parsed.error) { fail(parsed.error); return undefined; }
+  const values = parsed.values;
+  const allowed: Record<string, string[]> = {
+    inspect: ['cwd'],
+    'resolve-external': ['cwd', 'agent', 'pr', 'dryRun'],
+    create: ['cwd', 'agent', 'base', 'head', 'titleFile', 'bodyFile', 'draft', 'dryRun'],
+    bind: ['cwd', 'agent', 'pr', 'dryRun'],
+    skip: ['cwd', 'agent', 'dryRun'],
+    sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'result', 'dryRun'],
+    'sync-in-labels': ['cwd', 'pr', 'dryRun'],
+    'summary-context': ['cwd'],
+    'change-report': ['cwd', 'agent', 'mechanicalFile', 'precheckFile', 'dryRun'],
+    'summary-sync': ['cwd', 'agent', 'bodyFile', 'changeReportFile', 'result', 'manualPhase', 'transactionId', 'receiptDigest', 'prHeadSha', 'dryRun', 'strict']
+  };
+  const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
+  if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return undefined; }
+  return { taskRef, values, cwd: path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd()) };
+}
+
+function normalizeOperationAgent(operation: string, values: PrValues): string | undefined {
+  if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return undefined; }
+  const agent = normalizeAgentToken(values.agent);
+  if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return undefined; }
+  return agent;
+}
+
+function operationResult(values: PrValues): { valid: boolean; value: PrimaryResult | undefined } {
+  const primaryResult = values.result;
+  if (primaryResult === undefined) return { valid: true, value: undefined };
+  if (typeof primaryResult !== 'string' || !['pr_created', 'pr_reused', 'no_op'].includes(primaryResult)) {
+    fail('--result must be pr_created, pr_reused, or no_op');
+    return { valid: false, value: undefined };
+  }
+  return { valid: true, value: primaryResult as PrimaryResult };
+}
+
+async function handleTaskOperation(operation: string, args: string[]): Promise<void> {
+  const context = parseTaskOperation(operation, args);
+  if (!context) return;
+  const { taskRef, values, cwd } = context;
+  if (await handleReadOnlyOperation(operation, taskRef, cwd)) return;
+  const agent = normalizeOperationAgent(operation, values);
+  if (!agent) return;
+  const result = operationResult(values);
+  if (!result.valid) return;
+  if (await handleMetadataOperation(operation, taskRef, values, cwd, agent, result.value)) return;
+  if (await handleSummarySync(operation, taskRef, values, cwd, agent, result.value)) return;
+  await handleCreate(operation, taskRef, values, cwd, agent);
+}
+
 async function platformPr(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('platform-pr', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
@@ -83,112 +255,8 @@ async function platformPr(args: string[] = []): Promise<void> {
     internalHandlerRoute('platform-pr', 'change-report', operation),
     internalHandlerRoute('platform-pr', 'summary-sync', operation)
   ].some(Boolean)) { fail('a valid operation is required'); return; }
-  if (internalHandlerRoute('platform-pr', 'sync-in-labels', operation)) {
-    const parsed = parse(args, 1);
-    if (parsed.error) { fail(parsed.error); return; }
-    const values = parsed.values;
-    const unexpected = Object.keys(values).find((name) => !['cwd', 'pr', 'dryRun'].includes(name));
-    if (unexpected) { fail(`sync-in-labels does not accept --${unexpected}`); return; }
-    if (typeof values.pr !== 'string' || !values.pr || values.pr.trim() !== values.pr) { fail('sync-in-labels requires a non-empty --pr token'); return; }
-    const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
-    finish(await syncPlatformPullRequestInLabels(values.pr, { cwd, dryRun: values.dryRun === true }));
-    return;
-  }
-  const taskRef = args[1];
-  if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
-  const parsed = parse(args, 2);
-  if (parsed.error) { fail(parsed.error); return; }
-  const values = parsed.values;
-  const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
-  const allowed: Record<string, string[]> = {
-    inspect: ['cwd'],
-    'resolve-external': ['cwd', 'agent', 'pr', 'dryRun'],
-    create: ['cwd', 'agent', 'base', 'head', 'titleFile', 'bodyFile', 'draft', 'dryRun'],
-    bind: ['cwd', 'agent', 'pr', 'dryRun'],
-    skip: ['cwd', 'agent', 'dryRun'],
-    sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'result', 'dryRun'],
-    'sync-in-labels': ['cwd', 'pr', 'dryRun'],
-    'summary-context': ['cwd'],
-    'change-report': ['cwd', 'agent', 'mechanicalFile', 'precheckFile', 'dryRun'],
-    'summary-sync': ['cwd', 'agent', 'bodyFile', 'changeReportFile', 'result', 'manualPhase', 'transactionId', 'receiptDigest', 'prHeadSha', 'dryRun', 'strict']
-  };
-  const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
-  if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  if (internalHandlerRoute('platform-pr', 'inspect', operation)) { finish(await inspectPlatformPullRequest(taskRef, { cwd })); return; }
-  if (internalHandlerRoute('platform-pr', 'summary-context', operation)) { finish(await summaryContext(taskRef, { cwd })); return; }
-  if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
-  const agent = normalizeAgentToken(values.agent);
-  if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
-  values.agent = agent;
-  if (internalHandlerRoute('platform-pr', 'change-report', operation)) {
-    if (typeof values.mechanicalFile !== 'string' || typeof values.precheckFile !== 'string') { fail('change-report requires --mechanical-file and --precheck-file'); return; }
-    finish(await reportWrite(taskRef, {
-      cwd, agent: values.agent, mechanicalFile: values.mechanicalFile, precheckFile: values.precheckFile, dryRun: values.dryRun === true
-    }));
-    return;
-  }
-  if (internalHandlerRoute('platform-pr', 'skip', operation)) {
-    finish(await skipPlatformPullRequestFact(taskRef, { cwd, agent, dryRun: values.dryRun === true }));
-    return;
-  }
-  const primaryResult = values.result === undefined ? undefined : values.result;
-  if (primaryResult !== undefined && !['pr_created', 'pr_reused', 'no_op'].includes(primaryResult as string)) {
-    fail('--result must be pr_created, pr_reused, or no_op');
-    return;
-  }
-  if (internalHandlerRoute('platform-pr', 'resolve-external', operation)) {
-    const pr = values.pr === undefined ? undefined : values.pr;
-    if (pr !== undefined && (typeof pr !== 'string' || !pr)) { fail('resolve-external requires --pr <token>'); return; }
-    finish(await resolveExternalPullRequest(taskRef, { cwd, agent: values.agent, pr, dryRun: values.dryRun === true }));
-    return;
-  }
-  if (internalHandlerRoute('platform-pr', 'bind', operation)) {
-    const pr = values.pr;
-    if (typeof pr !== 'string' || !pr) { fail('bind requires --pr <token>'); return; }
-    finish(await bindPlatformPullRequest(taskRef, { cwd, agent: values.agent, pr, dryRun: values.dryRun === true }));
-    return;
-  }
-  if (internalHandlerRoute('platform-pr', 'sync', operation)) {
-    if (values.metadata !== true && values.closingIssue !== true) { fail('sync requires --metadata or --closing-issue'); return; }
-    if (!primaryResult) { fail('sync requires --result pr_created, pr_reused, or no_op'); return; }
-    finish(await syncPlatformPullRequest(taskRef, { cwd, agent: values.agent, metadata: values.metadata === true, closingIssue: values.closingIssue === true, primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', dryRun: values.dryRun === true }));
-    return;
-  }
-  if (internalHandlerRoute('platform-pr', 'summary-sync', operation)) {
-    if (typeof values.bodyFile !== 'string') { fail('summary-sync requires --body-file'); return; }
-    if (typeof values.changeReportFile !== 'string') { fail('summary-sync requires --change-report-file'); return; }
-    if (!primaryResult) { fail('summary-sync requires --result pr_created, pr_reused, or no_op'); return; }
-    try {
-      const manualPhase = values.manualPhase;
-      if (manualPhase !== undefined && manualPhase !== 'pending' && manualPhase !== 'final') { fail('--manual-phase must be pending or final'); return; }
-      finish(await syncPullRequestSummary(taskRef, {
-        cwd, agent: values.agent, body: readFile(values.bodyFile, cwd), changeReportFile: values.changeReportFile,
-        primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', dryRun: values.dryRun === true, strict: values.strict === true,
-        ...(manualPhase ? { manualValidation: {
-          phase: manualPhase,
-          ...(typeof values.transactionId === 'string' ? { transactionId: values.transactionId } : {}),
-          ...(typeof values.receiptDigest === 'string' ? { receiptDigest: values.receiptDigest } : {}),
-          ...(typeof values.prHeadSha === 'string' ? { prHeadSha: values.prHeadSha } : {})
-        } } : {})
-      }));
-    } catch (error) {
-      fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return;
-  }
-  if (typeof values.base !== 'string' || typeof values.head !== 'string' || typeof values.titleFile !== 'string' || typeof values.bodyFile !== 'string') {
-    fail('create requires --base, --head, --title-file and --body-file');
-    return;
-  }
-  try {
-    finish(await createPlatformPullRequest(taskRef, {
-      cwd, agent: values.agent, base: values.base, head: values.head,
-      title: readFile(values.titleFile, cwd), body: readFile(values.bodyFile, cwd),
-      draft: values.draft === true, dryRun: values.dryRun === true
-    }));
-  } catch (error) {
-    fail(`unable to read PR payload file: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  if (internalHandlerRoute('platform-pr', 'sync-in-labels', operation)) { await handleSyncInLabels(args); return; }
+  await handleTaskOperation(operation, args);
 }
 
 export { platformPr };

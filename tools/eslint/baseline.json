@@ -747,24 +747,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/platform-issue.ts",
-      "ruleId": "complexity",
-      "stableId": "0122d89fcf2b0033174103997fd3dd289f1b8e92e81f842dc0a96b60c4e775e6",
-      "displayName": "platformIssue",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/platform-pr.ts",
-      "ruleId": "complexity",
-      "stableId": "a1bc7b8dca98f0e54dfe8c5116258e0cc35a3f69c12427d466a3ba159b59f42b",
-      "displayName": "platformPr",
-      "metric": 62,
-      "normalizedMessage": "complexity=62",
-      "count": 1
-    },
-    {
       "file": "lib/internal/platform-pr-review.ts",
       "ruleId": "complexity",
       "stableId": "d6dd299e0b42ae131307c25123fa009178024b393e526940e0f0ac581fe80a65",
