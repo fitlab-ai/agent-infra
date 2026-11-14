@@ -124,7 +124,7 @@ export async function listPrReviews(prNumber: PrToken, options: { cwd?: string; 
   return { ...platformResult('failed', { platform: context.platform, capabilities: context.capabilities, error: context.error }), reviews: [] };
 }
 
-export async function publishPrReview(options: {
+type PublishPrReviewOptions = {
   cwd?: string;
   client?: PlatformClient;
   dryRun?: boolean;
@@ -137,105 +137,135 @@ export async function publishPrReview(options: {
   identity: PrReviewIdentity;
   event: PrReviewEvent;
   body: string;
-}): Promise<PlatformResult> {
+};
+
+type LoadedPlatformContext = Awaited<ReturnType<typeof resolvePlatformProviderContext>>;
+type ReviewTarget = {
+  loaded: LoadedPlatformContext;
+  context: PlatformResult;
+  providerScopeId: string | null;
+  identity: ResourceIdentity;
+  identityNumber: number | null;
+};
+type ReviewTargetResult = { target: ReviewTarget } | { result: PlatformResult };
+
+async function resolveReviewTarget(options: PublishPrReviewOptions): Promise<ReviewTargetResult> {
   const loaded = await resolvePlatformProviderContext({ cwd: options.cwd || process.cwd(), client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasUsableContext(context)) {
-    return platformResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error });
+    return { result: platformResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error }) };
   }
   const providerScopeId = loaded.ok ? loaded.value.snapshot.scope.id : null;
   if (options.expectedProviderScopeId && providerScopeId !== options.expectedProviderScopeId) {
-    return platformResult('failed', {
+    return { result: platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
       error: { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Current provider scope differs from the persisted operation target', retryable: false }
-    });
+    }) };
   }
   const identity = loaded.ok ? (() => { try { return providerResourceToken(loaded.value.provider, 'pull-request', String(options.prNumber)); } catch { return null; } })() : null;
   if (!identity) {
-    return platformResult('failed', {
+    return { result: platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
       error: { code: 'PLATFORM_IDENTITY_TOKEN_INVALID', message: 'Pull request token is invalid', retryable: false }
-    });
+    }) };
   }
   const identityNumber = resourceIdentityNumber(identity);
+  const resource = { kind: 'pull-request' as const, number: identityNumber, identity };
   if (options.expectedResource && !resourceIdentityEquals(identity, options.expectedResource)) {
-    return platformResult('failed', {
+    return { result: platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
+      resource,
       error: { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Current pull request identity differs from the persisted operation target', retryable: false }
-    });
+    }) };
   }
   if (!REVIEW_EVENTS.includes(options.event)) {
-    return platformResult('failed', {
+    return { result: platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
+      resource,
       error: { code: 'REVIEW_EVENT_INVALID', message: `review event must be one of ${REVIEW_EVENTS.join('|')}`, retryable: false }
-    });
+    }) };
   }
   if (!REVIEW_SCOPE_PATTERN.test(options.identity.scope) || !/^[0-9a-f]{7,40}$/i.test(options.identity.commitSha)) {
+    return { result: platformResult('failed', {
+      platform: context.platform, capabilities: context.capabilities,
+      resource,
+      error: { code: 'REVIEW_IDENTITY_INVALID', message: 'review scope must be a task id or pr{N}; commitSha is required', retryable: false }
+    }) };
+  }
+  return { target: { loaded, context, providerScopeId, identity, identityNumber } };
+}
+
+async function queueTaskScopedReview(
+  options: PublishPrReviewOptions,
+  context: PlatformResult,
+  providerScopeId: string | null,
+  identity: ResourceIdentity,
+  identityNumber: number | null
+): Promise<PlatformResult> {
+  const resource = { kind: 'pull-request' as const, number: identityNumber, identity };
+  if (!options.agent) return platformResult('failed', {
+    platform: context.platform, capabilities: context.capabilities,
+    resource,
+    error: { code: 'PR_REVIEW_AGENT_REQUIRED', message: 'task-scoped review publication requires an agent token', retryable: false }
+  });
+  if (!options.recoveryArtifact || !reviewArtifactName(options.identity.round, options.recoveryArtifact)) return platformResult('failed', {
+    platform: context.platform, capabilities: context.capabilities,
+    resource,
+    error: { code: 'PR_REVIEW_ARTIFACT_REQUIRED', message: 'task-scoped review publication requires its canonical review artifact', retryable: false }
+  });
+  const body = canonicalReviewBody(options.body);
+  const bodyDigest = createHash('sha256').update(body).digest('hex');
+  try {
+    if (readReviewBodyFile(options.identity.scope, options.identity.round, options.recoveryArtifact, bodyDigest, options.cwd) !== body) throw new Error('body mismatch');
+  } catch {
     return platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
-      error: { code: 'REVIEW_IDENTITY_INVALID', message: 'review scope must be a task id or pr{N}; commitSha is required', retryable: false }
+      resource,
+      error: { code: 'PR_REVIEW_ARTIFACT_MISMATCH', message: 'Review body must match the canonical review body file', retryable: false }
     });
   }
-
-  if (/^TASK-\d{8}-\d{6}$/u.test(options.identity.scope) && !options.skipQueue && !options.dryRun) {
-    if (!options.agent) return platformResult('failed', {
+  const pullRequestReview: PlatformPullRequestReviewIntent = {
+    prNumber: String(options.prNumber),
+    resource: identity,
+    providerScopeId: providerScopeId!,
+    scope: options.identity.scope,
+    round: options.identity.round,
+    commitSha: options.identity.commitSha,
+    event: options.event,
+    artifactFile: options.recoveryArtifact,
+    bodyDigest
+  };
+  return coordinatePlatformWrite({
+    operation: {
+      taskRef: options.identity.scope,
+      cwd: options.cwd || process.cwd(),
+      kind: 'pull-request-review',
+      target: JSON.stringify(identity),
+      expectedDigest: createHash('sha256').update(JSON.stringify(pullRequestReview)).digest('hex'),
+      dependency: 'deferred',
+      pullRequestReview
+    },
+    agent: options.agent,
+    execute: () => publishPrReview({ ...options, expectedProviderScopeId: providerScopeId!, skipQueue: true }),
+    block: (error) => platformResult('blocked', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
-      error: { code: 'PR_REVIEW_AGENT_REQUIRED', message: 'task-scoped review publication requires an agent token', retryable: false }
-    });
-    if (!options.recoveryArtifact || !reviewArtifactName(options.identity.round, options.recoveryArtifact)) return platformResult('failed', {
+      resource, error
+    }),
+    persistenceFailure: (error) => platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
-      error: { code: 'PR_REVIEW_ARTIFACT_REQUIRED', message: 'task-scoped review publication requires its canonical review artifact', retryable: false }
-    });
-    const body = canonicalReviewBody(options.body);
-    const bodyDigest = createHash('sha256').update(body).digest('hex');
-    try {
-      if (readReviewBodyFile(options.identity.scope, options.identity.round, options.recoveryArtifact, bodyDigest, options.cwd) !== body) throw new Error('body mismatch');
-    } catch {
-      return platformResult('failed', {
-        platform: context.platform, capabilities: context.capabilities,
-        resource: { kind: 'pull-request', number: identityNumber, identity },
-        error: { code: 'PR_REVIEW_ARTIFACT_MISMATCH', message: 'Review body must match the canonical review body file', retryable: false }
-      });
-    }
-    const pullRequestReview: PlatformPullRequestReviewIntent = {
-      prNumber: String(options.prNumber),
-      resource: identity,
-      providerScopeId: providerScopeId!,
-      scope: options.identity.scope,
-      round: options.identity.round,
-      commitSha: options.identity.commitSha,
-      event: options.event,
-      artifactFile: options.recoveryArtifact,
-      bodyDigest
-    };
-    return coordinatePlatformWrite({
-      operation: {
-        taskRef: options.identity.scope,
-        cwd: options.cwd || process.cwd(),
-        kind: 'pull-request-review',
-        target: JSON.stringify(identity),
-        expectedDigest: createHash('sha256').update(JSON.stringify(pullRequestReview)).digest('hex'),
-        dependency: 'deferred',
-        pullRequestReview
-      },
-      agent: options.agent,
-      execute: () => publishPrReview({ ...options, expectedProviderScopeId: providerScopeId!, skipQueue: true }),
-      block: (error) => platformResult('blocked', {
-        platform: context.platform, capabilities: context.capabilities,
-        resource: { kind: 'pull-request', number: identityNumber, identity }, error
-      }),
-      persistenceFailure: (error) => platformResult('failed', {
-        platform: context.platform, capabilities: context.capabilities,
-        resource: { kind: 'pull-request', number: identityNumber, identity }, error
-      })
-    });
-  }
+      resource, error
+    })
+  });
+}
 
+async function publishDirectReview(
+  options: PublishPrReviewOptions,
+  context: PlatformResult,
+  loaded: LoadedPlatformContext,
+  identity: ResourceIdentity,
+  identityNumber: number | null
+): Promise<PlatformResult> {
+  const resource = { kind: 'pull-request' as const, number: identityNumber, identity };
   const marker = reviewMarker({ ...options.identity, resource: identity });
   const listed = await listPrReviews(options.prNumber, { cwd: options.cwd, client: options.client });
   if (listed.status === 'failed' || listed.status === 'blocked') return listed;
@@ -244,13 +274,13 @@ export async function publishPrReview(options: {
     if (existing.commitId === options.identity.commitSha) {
       return platformResult('no-op', {
         platform: context.platform, capabilities: context.capabilities,
-        resource: { kind: 'pull-request', number: identityNumber, identity },
+        resource,
         operations: [{ name: 'review:publish', status: 'no-op', reasonCode: null }], error: null
       });
     }
     return platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
+      resource,
       operations: [{ name: 'review:publish', status: 'failed', reasonCode: 'REVIEW_MARKER_CONFLICT' }],
       error: { code: 'REVIEW_MARKER_CONFLICT', message: 'A review with the same marker targets a different commit; start a new round', retryable: false }
     });
@@ -263,55 +293,62 @@ export async function publishPrReview(options: {
     String(options.body || '').replace(/\r?\n/g, '\n').replace(/\n+$/, ''),
     ''
   ].join('\n');
-
   if (options.dryRun) {
     return platformResult('planned', {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
+      resource,
       operations: [{ name: 'review:publish', status: 'planned', reasonCode: null }], error: null
     });
   }
 
-  if (loaded.ok) {
-    const published = loaded.value.provider.reviews?.publish
-      ? await loaded.value.provider.reviews.publish({
-        context: providerOperationContext(loaded.value),
-        changeRequest: identity,
-        identity: options.identity,
-        event: options.event,
-        body: wrappedBody,
-        mutation: { idempotencyKey: `review:publish:${marker}` }
-      })
-      : unsupportedProviderOperation(loaded.value.provider, 'reviews.publish');
-    if (!published.ok) {
-      if (published.error.retryable || providerErrorRetryable(published.error.code)) {
-        const reconciled = await listPrReviews(options.prNumber, { cwd: options.cwd, client: options.client });
-        const found = reconciled.reviews.find((review) => firstLine(review.body) === marker);
-        if (found) return platformResult('applied', {
-          changed: true, platform: context.platform, capabilities: context.capabilities,
-          resource: { kind: 'pull-request', number: identityNumber, identity },
-          operations: [{ name: 'review:publish', status: 'applied', reasonCode: 'CREATE_RECONCILED' }], error: null
-        });
-        return platformResult('blocked', {
-          platform: context.platform, capabilities: context.capabilities,
-          resource: { kind: 'pull-request', number: identityNumber, identity },
-          operations: [{ name: 'review:publish', status: 'failed', reasonCode: 'REVIEW_CREATE_OUTCOME_UNKNOWN' }],
-          error: { code: 'REVIEW_CREATE_OUTCOME_UNKNOWN', message: published.error.message, retryable: true }
-        });
-      }
-      return platformResult(providerStatus(published.error), {
-        platform: context.platform, capabilities: context.capabilities,
-        resource: { kind: 'pull-request', number: identityNumber, identity },
-        operations: [{ name: 'review:publish', status: 'failed', reasonCode: published.error.code }],
-        error: providerError(published.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
-      });
-    }
+  if (!loaded.ok) return platformResult('failed', { platform: context.platform, capabilities: context.capabilities, error: context.error });
+  const published = loaded.value.provider.reviews?.publish
+    ? await loaded.value.provider.reviews.publish({
+      context: providerOperationContext(loaded.value),
+      changeRequest: identity,
+      identity: options.identity,
+      event: options.event,
+      body: wrappedBody,
+      mutation: { idempotencyKey: `review:publish:${marker}` }
+    })
+    : unsupportedProviderOperation(loaded.value.provider, 'reviews.publish');
+  if (published.ok) {
     return platformResult('applied', {
       changed: published.value.changed,
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: identityNumber, identity },
+      resource,
       operations: [{ name: 'review:publish', status: 'applied', reasonCode: null }], error: null
     });
   }
-  return platformResult('failed', { platform: context.platform, capabilities: context.capabilities, error: context.error });
+  if (published.error.retryable || providerErrorRetryable(published.error.code)) {
+    const reconciled = await listPrReviews(options.prNumber, { cwd: options.cwd, client: options.client });
+    const found = reconciled.reviews.find((review) => firstLine(review.body) === marker);
+    if (found) return platformResult('applied', {
+      changed: true, platform: context.platform, capabilities: context.capabilities,
+      resource,
+      operations: [{ name: 'review:publish', status: 'applied', reasonCode: 'CREATE_RECONCILED' }], error: null
+    });
+    return platformResult('blocked', {
+      platform: context.platform, capabilities: context.capabilities,
+      resource,
+      operations: [{ name: 'review:publish', status: 'failed', reasonCode: 'REVIEW_CREATE_OUTCOME_UNKNOWN' }],
+      error: { code: 'REVIEW_CREATE_OUTCOME_UNKNOWN', message: published.error.message, retryable: true }
+    });
+  }
+  return platformResult(providerStatus(published.error), {
+    platform: context.platform, capabilities: context.capabilities,
+    resource,
+    operations: [{ name: 'review:publish', status: 'failed', reasonCode: published.error.code }],
+    error: providerError(published.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+  });
+}
+
+export async function publishPrReview(options: PublishPrReviewOptions): Promise<PlatformResult> {
+  const resolved = await resolveReviewTarget(options);
+  if ('result' in resolved) return resolved.result;
+  const { loaded, context, providerScopeId, identity, identityNumber } = resolved.target;
+  if (/^TASK-\d{8}-\d{6}$/u.test(options.identity.scope) && !options.skipQueue && !options.dryRun) {
+    return queueTaskScopedReview(options, context, providerScopeId, identity, identityNumber);
+  }
+  return publishDirectReview(options, context, loaded, identity, identityNumber);
 }
