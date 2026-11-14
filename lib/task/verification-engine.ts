@@ -232,23 +232,76 @@ function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFil
   );
 }
 
-async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): Promise<any> {
+function loadRequiredPrDeliveryContext(taskDir: string, repositoryRoot: string): any {
   const task = loadTask(taskDir);
-  if (!task.ok) return failResult('required-pr-delivery', task.message);
+  if (!task.ok) return { error: failResult('required-pr-delivery', task.message) };
   let projectConfig: any = {};
   try {
     const file = path.join(repositoryRoot, '.agents', '.airc.json');
     if (safeStat(file)?.isFile()) projectConfig = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
   } catch {
-    return failResult('required-pr-delivery', 'Project configuration is invalid');
+    return { error: failResult('required-pr-delivery', 'Project configuration is invalid') };
   }
-  const flow = projectConfig.prFlow;
   const factRead = readPrDeliveryFact(task.metadata);
-  if (factRead.status === 'invalid') return failResult('required-pr-delivery', factRead.error.message);
+  if (factRead.status === 'invalid') return { error: failResult('required-pr-delivery', factRead.error.message) };
   const fact = factRead.status === 'valid' ? factRead.fact : null;
   const status = fact?.state || 'unbound';
   const prIdentity = fact?.state === 'bound' ? fact.identity.resource : null;
   const prNumber = prIdentity?.kind === 'number' ? prIdentity.value : null;
+  return { task, projectConfig, fact, status, prIdentity, prNumber };
+}
+
+async function inspectRequiredPrDelivery({ task, projectConfig, repositoryRoot, prNumber }: any): Promise<any> {
+  const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
+  if (inspected.status === 'blocked') {
+    return blockedResult(
+      'required-pr-delivery',
+      inspected.error?.message || 'Unable to inspect the required pull request',
+      inspected.error?.code || 'PR_INSPECTION_BLOCKED'
+    );
+  }
+  const identity = validateRequiredPrDeliveryIdentity(task, projectConfig, inspected);
+  if (identity.error) return identity.error;
+  const { pullRequest } = identity;
+  if (pullRequest.state !== 'closed' || !pullRequest.mergedAt || !pullRequest.mergeCommitSha) {
+    return failResult('required-pr-delivery', 'Project policy requires the bound pull request to be merged');
+  }
+  return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR ${prNumber === null ? 'identity' : `#${prNumber}`})`);
+}
+
+function validateRequiredPrDeliveryIdentity(task: any, projectConfig: any, inspected: any): any {
+  const pullRequest = inspected.pullRequest;
+  const repository = inspected.platform.repository?.toLowerCase() || '';
+  if (inspected.status !== 'no-op' || !pullRequest) {
+    return { error: failResult('required-pr-delivery', 'Bound pull request identity could not be verified') };
+  }
+  if (!repository) return { error: failResult('required-pr-delivery', 'Bound pull request identity does not match the task') };
+  if (!matchesRequiredPrRepositoryIdentity(pullRequest, repository)) {
+    return { error: failResult('required-pr-delivery', 'Bound pull request identity does not match the task') };
+  }
+  const taskBranch = String(task.metadata.branch || '').trim();
+  const deliveryBaseRef = String(task.metadata.delivery_base_ref || projectConfig.delivery?.baseRef || '').trim();
+  if (!matchesRequiredPrTaskRefs(pullRequest, taskBranch, deliveryBaseRef)) {
+    return { error: failResult('required-pr-delivery', 'Bound pull request identity does not match the task') };
+  }
+  return { pullRequest };
+}
+
+function matchesRequiredPrRepositoryIdentity(pullRequest: any, repository: string): boolean {
+  return pullRequest.repository.toLowerCase() === repository
+    && pullRequest.base.repository.toLowerCase() === repository;
+}
+
+function matchesRequiredPrTaskRefs(pullRequest: any, taskBranch: string, deliveryBaseRef: string): boolean {
+  return (!taskBranch || pullRequest.head.ref === taskBranch)
+    && (!deliveryBaseRef || pullRequest.base.ref === deliveryBaseRef);
+}
+
+async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): Promise<any> {
+  const context = loadRequiredPrDeliveryContext(taskDir, repositoryRoot);
+  if (context.error) return context.error;
+  const { task, projectConfig, status, prIdentity, prNumber } = context;
+  const flow = projectConfig.prFlow;
   if (flow === 'disabled') return passResult('required-pr-delivery', 'Pull request delivery is disabled by project policy');
   if (flow === 'required' && (status !== 'bound' || !prIdentity)) {
     return failResult('required-pr-delivery', 'Project policy requires a bound pull request before completion');
@@ -260,34 +313,7 @@ async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): 
     if (mode === 'gate') {
       return passResult('required-pr-delivery', 'Bound pull request shape is valid; merged-state inspection is reserved for hard preflight');
     }
-    const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
-    if (inspected.status === 'blocked') {
-      return blockedResult(
-        'required-pr-delivery',
-        inspected.error?.message || 'Unable to inspect the required pull request',
-        inspected.error?.code || 'PR_INSPECTION_BLOCKED'
-      );
-    }
-    const pullRequest = inspected.pullRequest;
-    const repository = inspected.platform.repository?.toLowerCase() || '';
-    const taskBranch = String(task.metadata.branch || '').trim();
-    const deliveryBaseRef = String(task.metadata.delivery_base_ref || projectConfig.delivery?.baseRef || '').trim();
-    if (inspected.status !== 'no-op' || !pullRequest) {
-      return failResult('required-pr-delivery', 'Bound pull request identity could not be verified');
-    }
-    if (
-      !repository
-      || pullRequest.repository.toLowerCase() !== repository
-      || pullRequest.base.repository.toLowerCase() !== repository
-      || (taskBranch && pullRequest.head.ref !== taskBranch)
-      || (deliveryBaseRef && pullRequest.base.ref !== deliveryBaseRef)
-    ) {
-      return failResult('required-pr-delivery', 'Bound pull request identity does not match the task');
-    }
-    if (pullRequest.state !== 'closed' || !pullRequest.mergedAt || !pullRequest.mergeCommitSha) {
-      return failResult('required-pr-delivery', 'Project policy requires the bound pull request to be merged');
-    }
-    return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR ${prNumber === null ? 'identity' : `#${prNumber}`})`);
+    return inspectRequiredPrDelivery({ task, projectConfig, repositoryRoot, prNumber });
   }
   return passResult('required-pr-delivery', `Pull request delivery policy satisfied (${status})`);
 }
@@ -783,7 +809,7 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }
 
-async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): Promise<any> {
+function preparePostReviewCheck({ taskDir, config, repositoryRoot }: any): any {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
     if (reviewArtifact.error) return failResult("post-review-commit", `Review-code artifact is unavailable: ${reviewArtifact.error}`);
@@ -802,73 +828,89 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
   const factRead = readPrDeliveryFact(task.metadata);
   if (factRead.status === 'invalid') return failResult("post-review-commit", factRead.error.message);
   const fact = factRead.status === 'valid' ? factRead.fact : null;
-  const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
-  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repositoryRoot));
-  const hasPullRequest = fact?.state === 'bound';
-  let inspected: Awaited<ReturnType<typeof inspectPlatformPullRequest>> | null = null;
-  if (hasPullRequest) {
-    inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
-    if (!inspected.pullRequest) {
-      const message = inspected.error?.message || "PR merge snapshot is unavailable";
-      const code = inspected.error?.code || "PR_INSPECTION_INVALID";
-      return inspected.status === "blocked"
-        ? blockedResult("post-review-commit", message, code)
-        : failResult("post-review-commit", message, code);
-    }
-    if (
-      inspected.pullRequest.state === "closed" &&
-      inspected.pullRequest.mergedAt &&
-      inspected.pullRequest.mergeCommitSha
-    ) {
-      const relation = await resolveMaterializedReviewedHeadRelation({
-        cwd: gitRoot,
-        platformType: inspected.platform.type,
-        lastReviewedCommit,
-        pullRequest: inspected.pullRequest
-      });
-      if (relation.status === "merged-equivalent") {
-        return passResult(
-          "post-review-commit",
-          `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)} on target ${relation.comparisonHead.slice(0, 8)}`
-        );
-      }
-      if (relation.status === "blocked") {
-        return blockedResult("post-review-commit", relation.message, relation.code);
-      }
-      if (relation.status === "strict") {
-        return resolvePostReviewIdentityFailure(task.content, {
-          code: "PR_MERGE_IDENTITY_INVALID",
-          message: "Merged PR evidence did not establish squash merge equivalence"
-        });
-      }
-      if (relation.code === "PR_MERGE_IDENTITY_INVALID") {
-        return resolvePostReviewIdentityFailure(task.content, relation);
-      }
-      return failResult("post-review-commit", relation.message, relation.code);
-    }
-  }
-
-  const baselineSource = resolvePostReviewBaseline({
+  return {
+    reviewArtifact,
     gitRoot,
-    lastReviewedCommit,
-    reviewArtifact: reviewArtifact.fileName
-  });
-  if (!baselineSource.ok) {
-    return baselineSource.result;
-  }
+    task,
+    fact,
+    lastReviewedCommit: (task.metadata.last_reviewed_commit || "").trim(),
+    globs: resolvePostReviewGlobs(config, loadPostReviewConfig(repositoryRoot))
+  };
+}
 
+async function inspectMergedReviewedPullRequest({ task, hasPullRequest, gitRoot, lastReviewedCommit }: any): Promise<any> {
+  if (!hasPullRequest) return { inspected: null };
+  const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
+  if (!inspected.pullRequest) {
+    const message = inspected.error?.message || "PR merge snapshot is unavailable";
+    const code = inspected.error?.code || "PR_INSPECTION_INVALID";
+    return { result: inspected.status === "blocked"
+      ? blockedResult("post-review-commit", message, code)
+      : failResult("post-review-commit", message, code) };
+  }
+  if (inspected.pullRequest.state !== "closed" || !inspected.pullRequest.mergedAt || !inspected.pullRequest.mergeCommitSha) {
+    return { inspected };
+  }
+  const relation = await resolveMaterializedReviewedHeadRelation({
+    cwd: gitRoot,
+    platformType: inspected.platform.type,
+    lastReviewedCommit,
+    pullRequest: inspected.pullRequest
+  });
+  if (relation.status === "merged-equivalent") {
+    return { result: passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)} on target ${relation.comparisonHead.slice(0, 8)}`) };
+  }
+  if (relation.status === "blocked") return { result: blockedResult("post-review-commit", relation.message, relation.code) };
+  if (relation.status === "strict") {
+    return { result: resolvePostReviewIdentityFailure(task.content, {
+      code: "PR_MERGE_IDENTITY_INVALID",
+      message: "Merged PR evidence did not establish squash merge equivalence"
+    }) };
+  }
+  if (relation.code === "PR_MERGE_IDENTITY_INVALID") return { result: resolvePostReviewIdentityFailure(task.content, relation) };
+  return { result: failResult("post-review-commit", relation.message, relation.code) };
+}
+
+function collectPostReviewCommits({ gitRoot, lastReviewedCommit, reviewArtifact, globs }: any): any {
+  const baselineSource = resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact: reviewArtifact.fileName });
+  if (!baselineSource.ok) return { result: baselineSource.result };
   const sha = baselineSource.sha;
   let commits;
   try {
     const out = execFileSync("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
     commits = out.split(/\r?\n/).filter((line) => line.trim() !== "");
   } catch {
-    return blockedResult("post-review-commit", `git rev-list failed for baseline ${sha}; manual inspection required`);
+    return { result: blockedResult("post-review-commit", `git rev-list failed for baseline ${sha}; manual inspection required`) };
   }
+  if (commits.length === 0) return { result: passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`) };
+  return { sha, commits };
+}
 
-  if (commits.length === 0) {
-    return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
+function resolvePostReviewCommitEquivalence({ hasPullRequest, inspected, gitRoot, localHead, sha, commits, globs }: any): any {
+  if (hasPullRequest && inspected?.pullRequest) {
+    const relation = resolveReviewedHeadRelation({ gitRoot, comparisonHead: localHead, lastReviewedCommit: sha, pullRequest: inspected.pullRequest });
+    if (relation.status === "merged-equivalent") return passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)}`);
+    if (relation.status === "blocked") return blockedResult("post-review-commit", relation.message, relation.code);
+  } else if (!hasPullRequest && commits.length === 1) {
+    const relation = resolveLocalReviewedCommitRelation({ gitRoot, localHead, lastReviewedCommit: sha, rewrittenCommit: commits[0]!, pathspecs: globs });
+    if (relation.status === "local-equivalent") {
+      return passResult("post-review-commit", `Reviewed commit is content-equivalent to local rewrite ${relation.rewrittenCommit.slice(0, 8)}`);
+    }
+    if (relation.status === "blocked") return blockedResult("post-review-commit", relation.message);
   }
+  return null;
+}
+
+async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): Promise<any> {
+  const prepared = preparePostReviewCheck({ taskDir, config, repositoryRoot });
+  if (prepared?.type) return prepared;
+  const { reviewArtifact, gitRoot, task, fact, lastReviewedCommit, globs } = prepared;
+  const hasPullRequest = fact?.state === 'bound';
+  const mergedReview = await inspectMergedReviewedPullRequest({ task, hasPullRequest, gitRoot, lastReviewedCommit });
+  if (mergedReview.result) return mergedReview.result;
+  const collected = collectPostReviewCommits({ gitRoot, lastReviewedCommit, reviewArtifact, globs });
+  if (collected.result) return collected.result;
+  const { sha, commits } = collected;
 
   let localHead: string;
   try {
@@ -877,39 +919,8 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
     return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
   }
 
-  if (hasPullRequest) {
-    if (inspected?.pullRequest) {
-      const relation = resolveReviewedHeadRelation({
-        gitRoot,
-        comparisonHead: localHead,
-        lastReviewedCommit: sha,
-        pullRequest: inspected.pullRequest
-      });
-      if (relation.status === "merged-equivalent") {
-        return passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)}`);
-      }
-      if (relation.status === "blocked") {
-        return blockedResult("post-review-commit", relation.message, relation.code);
-      }
-    }
-  } else if (commits.length === 1) {
-    const relation = resolveLocalReviewedCommitRelation({
-      gitRoot,
-      localHead,
-      lastReviewedCommit: sha,
-      rewrittenCommit: commits[0]!,
-      pathspecs: globs
-    });
-    if (relation.status === "local-equivalent") {
-      return passResult(
-        "post-review-commit",
-        `Reviewed commit is content-equivalent to local rewrite ${relation.rewrittenCommit.slice(0, 8)}`
-      );
-    }
-    if (relation.status === "blocked") {
-      return blockedResult("post-review-commit", relation.message);
-    }
-  }
+  const equivalent = resolvePostReviewCommitEquivalence({ hasPullRequest, inspected: mergedReview.inspected, gitRoot, localHead, sha, commits, globs });
+  if (equivalent) return equivalent;
 
   const exemption = resolvePostReviewExemption(task.content);
   if (!exemption.ok) return failResult("post-review-commit", exemption.message, exemption.code);
@@ -1268,42 +1279,45 @@ function isBlank(value: any): any {
   return value === undefined || value === null || String(value).trim() === "";
 }
 
-async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): Promise<any> {
+function resolveVerificationRepositoryRoot(repositoryRoot: string | undefined, taskDir: string): string {
   let repoRoot = repositoryRoot ? path.resolve(repositoryRoot) : defaultRepoRoot;
   if (!repositoryRoot) {
     let cursor = path.resolve(taskDir);
     while (path.dirname(cursor) !== cursor && !fs.existsSync(path.join(cursor, ".agents"))) cursor = path.dirname(cursor);
     if (fs.existsSync(path.join(cursor, ".agents"))) repoRoot = cursor;
   }
-  const verifyConfig = loadVerificationConfig(repoRoot, skillName);
-  const shared: VerificationShared = { ...sharedUtils, repoRoot };
-  if (mode === "gate") {
-    const checks = [];
-    for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
-      if (checkConfig === null) continue;
-      const result = normalizeVerificationRecord(await runCheck(type, {
-        mode,
-        skillName,
-        taskDir: path.resolve(taskDir),
-        artifactFile,
-        repositoryRoot: repoRoot,
-        config: checkConfig
-      }, shared));
-      checks.push(...(result.subchecks?.map(normalizeVerificationRecord) ?? [result]));
-      if (checks.at(-1)?.effectiveStatus === "blocked") break;
-    }
-    const gate = summarizeGate(checks);
-    return { gate, skill: skillName, checks, summary: summarizeChecks(checks), action: buildAction(gate, checks) };
+  return repoRoot;
+}
+
+async function runVerificationGate({ skillName, taskDir, artifactFile, repositoryRoot, checks: configuredChecks, shared }: any): Promise<any> {
+  const checks = [];
+  for (const [type, checkConfig] of Object.entries(configuredChecks || {})) {
+    if (checkConfig === null) continue;
+    const result = normalizeVerificationRecord(await runCheck(type, {
+      mode: "gate",
+      skillName,
+      taskDir: path.resolve(taskDir),
+      artifactFile,
+      repositoryRoot,
+      config: checkConfig
+    }, shared));
+    checks.push(...(result.subchecks?.map(normalizeVerificationRecord) ?? [result]));
+    if (checks.at(-1)?.effectiveStatus === "blocked") break;
   }
+  const gate = summarizeGate(checks);
+  return { gate, skill: skillName, checks, summary: summarizeChecks(checks), action: buildAction(gate, checks) };
+}
+
+async function runRequestedVerificationCheck({ skillName, taskDir, artifactFile, repositoryRoot, requestedChecks, configuredChecks, shared }: any): Promise<any> {
   const type = requestedChecks[0];
-  const config = (verifyConfig.checks || {})[type];
+  const config = (configuredChecks || {})[type];
   if (config === undefined) return { skill: skillName, ...failResult(type, `Unknown check type '${type}' for skill '${skillName}'.`) };
   if (config === null) return { skill: skillName, ...passResult(type, `Check '${type}' is disabled for skill '${skillName}'.`) };
   const result = normalizeVerificationRecord(await runCheck(type, {
       skillName,
       taskDir: path.resolve(taskDir),
       artifactFile,
-      repositoryRoot: repoRoot,
+      repositoryRoot,
       config
     }, shared));
   if (!result.subchecks?.length) return { skill: skillName, ...result };
@@ -1318,6 +1332,16 @@ async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks:
     action: buildAction(gate, checks),
     checks
   };
+}
+
+async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): Promise<any> {
+  const repoRoot = resolveVerificationRepositoryRoot(repositoryRoot, taskDir);
+  const verifyConfig = loadVerificationConfig(repoRoot, skillName);
+  const shared: VerificationShared = { ...sharedUtils, repoRoot };
+  const input = { skillName, taskDir, artifactFile, repositoryRoot: repoRoot, shared };
+  return mode === "gate"
+    ? runVerificationGate({ ...input, checks: verifyConfig.checks })
+    : runRequestedVerificationCheck({ ...input, requestedChecks, configuredChecks: verifyConfig.checks });
 }
 
 export { verifyInProcess };
