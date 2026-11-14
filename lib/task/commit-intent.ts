@@ -60,28 +60,47 @@ function checkpointIntentDigest(identity: IntentIdentity): string {
   })).digest('hex');
 }
 
-function isIntent(value: unknown): value is CheckpointIntent {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const intent = value as Record<string, unknown>;
+function isIntentRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasValidIntentOwner(intent: Record<string, unknown>): boolean {
+  return intent.version === 1
+    && typeof intent.taskId === 'string' && TASK_ID_PATTERN.test(intent.taskId)
+    && typeof intent.branch === 'string' && intent.branch.length > 0
+    && intent.mode === 'local';
+}
+
+function hasValidCommitIdentity(intent: Record<string, unknown>): boolean {
+  return typeof intent.expectedHead === 'string' && /^[a-f0-9]{40,64}$/.test(intent.expectedHead)
+    && typeof intent.expectedTree === 'string' && /^[a-f0-9]{40,64}$/.test(intent.expectedTree)
+    && Array.isArray(intent.paths) && intent.paths.every((item) => typeof item === 'string' && item.length > 0)
+    && typeof intent.message === 'string' && intent.message.length > 0
+    && Number.isSafeInteger(intent.round) && Number(intent.round) > 0;
+}
+
+function hasValidIntentState(intent: Record<string, unknown>): boolean {
   const validState = ['prepared', 'committed', 'synced'].includes(String(intent.state));
   const validHead = intent.committedHead === null
     ? intent.state === 'prepared'
     : typeof intent.committedHead === 'string' && /^[a-f0-9]{40,64}$/.test(intent.committedHead)
       && intent.state !== 'prepared';
-  return intent.version === 1
-    && typeof intent.taskId === 'string' && TASK_ID_PATTERN.test(intent.taskId)
-    && typeof intent.branch === 'string' && intent.branch.length > 0
-    && intent.mode === 'local'
-    && typeof intent.expectedHead === 'string' && /^[a-f0-9]{40,64}$/.test(intent.expectedHead)
-    && typeof intent.expectedTree === 'string' && /^[a-f0-9]{40,64}$/.test(intent.expectedTree)
-    && Array.isArray(intent.paths) && intent.paths.every((item) => typeof item === 'string' && item.length > 0)
-    && typeof intent.message === 'string' && intent.message.length > 0
-    && Number.isSafeInteger(intent.round) && Number(intent.round) > 0
-    && typeof intent.digest === 'string' && /^[a-f0-9]{64}$/.test(intent.digest)
-    && validState && validHead
+  return validState && validHead;
+}
+
+function hasValidIntentMetadata(intent: Record<string, unknown>): boolean {
+  return typeof intent.digest === 'string' && /^[a-f0-9]{64}$/.test(intent.digest)
     && typeof intent.createdAt === 'string' && intent.createdAt.length > 0
     && typeof intent.updatedAt === 'string' && intent.updatedAt.length > 0
     && intent.digest === checkpointIntentDigest(intent as unknown as IntentIdentity);
+}
+
+function isIntent(value: unknown): value is CheckpointIntent {
+  if (!isIntentRecord(value)) return false;
+  return hasValidIntentOwner(value)
+    && hasValidCommitIdentity(value)
+    && hasValidIntentState(value)
+    && hasValidIntentMetadata(value);
 }
 
 function invalidIntent(): never {

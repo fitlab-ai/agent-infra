@@ -450,15 +450,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/commit-operation.ts",
-      "ruleId": "complexity",
-      "stableId": "84757b01c47297f786b08e7499293ef28bd26a2887b186d030c4725296e6944c",
-      "displayName": "executeCommitOperationCore.<anonymous ArrowFunctionExpression#1>",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
       "file": "lib/platform/github-release-notes.ts",
       "ruleId": "complexity",
       "stableId": "d624dc3ff44a49e19093e7a622e5e80baa1420baa75749405b90cf1de0af4c1c",
@@ -528,15 +519,6 @@
       "displayName": "internalRouteSelector",
       "metric": 39,
       "normalizedMessage": "complexity=39",
-      "count": 1
-    },
-    {
-      "file": "lib/task/commit-intent.ts",
-      "ruleId": "complexity",
-      "stableId": "33ec343b8e613dedfc16a9455504da5fdfda09446db8c49726cac2f7714290e3",
-      "displayName": "isIntent",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
       "count": 1
     },
     {

@@ -19,6 +19,7 @@ import {
   updateCheckpointIntent,
   writeCheckpointIntent
 } from './commit-intent.ts';
+import type { CheckpointIntent } from './commit-intent.ts';
 
 type CommitExecutionMode = 'direct';
 
@@ -66,6 +67,22 @@ type BoundTask = Readonly<{
 
 const HEAD_REF = /^refs\/heads\/(.+)$/;
 type CommitDelivery = Readonly<{ mode: 'local' } | { mode: 'push'; remote: string; refs: readonly string[] }>;
+type CommitStepResult = ReturnType<typeof commitExplicitPaths>;
+type CommitDeliveryContext = Readonly<{
+  input: CommitOperationInput;
+  task: BoundTask | null;
+  snapshot: NonNullable<ReturnType<typeof inspectGitWorkflow>['snapshot']>;
+}>;
+type CheckpointCompletion = Readonly<{ taskDir: string; taskId: string; intent: CheckpointIntent; committedHead: string }>;
+type CommitDeliveryOutcome = Readonly<{
+  committed: CommitStepResult;
+  warnings: readonly OperationWarning[];
+  checkpoint: CheckpointCompletion | null;
+}>;
+type CommitDeliveryStrategy = Readonly<{
+  execute: (context: CommitDeliveryContext) => CommitDeliveryOutcome;
+  afterTaskSync?: (outcome: CommitDeliveryOutcome, taskWarning: OperationWarning | null) => void;
+}>;
 
 function isCommitExecutionMode(value: unknown): value is CommitExecutionMode {
   return value === 'direct';
@@ -275,6 +292,163 @@ function checkpointTimestamp(): string {
   return new Date().toISOString();
 }
 
+function commitStepFailure(
+  snapshot: NonNullable<ReturnType<typeof inspectGitWorkflow>['snapshot']>,
+  code: string,
+  message: string
+): CommitStepResult {
+  return { status: 'failed', changed: false, snapshot, operations: [], error: { code, message } };
+}
+
+function commitStepNoop(snapshot: NonNullable<ReturnType<typeof inspectGitWorkflow>['snapshot']>): CommitStepResult {
+  return { status: 'no-op', changed: false, snapshot, operations: [{ name: 'commit', status: 'no-op' }], error: null };
+}
+
+function deliveryOutcome(
+  committed: CommitStepResult,
+  warnings: readonly OperationWarning[] = [],
+  checkpoint: CheckpointCompletion | null = null
+): CommitDeliveryOutcome {
+  return { committed, warnings, checkpoint };
+}
+
+function preparedCheckpointIntent(identity: Parameters<typeof checkpointIntentDigest>[0]): CheckpointIntent {
+  const timestamp = checkpointTimestamp();
+  return {
+    version: 1, ...identity,
+    digest: checkpointIntentDigest(identity),
+    state: 'prepared', committedHead: null, createdAt: timestamp, updatedAt: timestamp
+  };
+}
+
+function intentReadFailure(snapshot: CommitDeliveryContext['snapshot'], error: unknown): CommitStepResult {
+  return commitStepFailure(snapshot, 'COMMIT_INTENT_INVALID', error instanceof Error ? error.message : String(error));
+}
+
+function intentWriteFailure(snapshot: CommitDeliveryContext['snapshot'], error: unknown): CommitStepResult {
+  return commitStepFailure(snapshot, 'COMMIT_INTENT_WRITE_FAILED', error instanceof Error ? error.message : String(error));
+}
+
+type CheckpointIntentPreparation = Readonly<
+  | { status: 'ready'; intent: CheckpointIntent }
+  | { status: 'failed'; result: CommitStepResult }
+>;
+
+function prepareCheckpointIntent(
+  task: BoundTask,
+  identity: Parameters<typeof checkpointIntentDigest>[0],
+  snapshot: CommitDeliveryContext['snapshot']
+): CheckpointIntentPreparation {
+  let intent: CheckpointIntent | null;
+  try { intent = readCheckpointIntent(task.taskDir, task.taskId); }
+  catch (error) { return { status: 'failed', result: intentReadFailure(snapshot, error) }; }
+  if (intent && !sameCheckpointIntent(intent, identity)) {
+    if (intent.state !== 'prepared') return {
+      status: 'failed',
+      result: commitStepFailure(snapshot, 'COMMIT_INTENT_INVALID', 'A committed checkpoint intent must be recovered with its original request')
+    };
+    intent = preparedCheckpointIntent(identity);
+    try { writeCheckpointIntent(task.taskDir, intent); }
+    catch (error) { return { status: 'failed', result: intentWriteFailure(snapshot, error) }; }
+  }
+  if (intent && intent.state !== 'prepared'
+    && !checkpointCommitMatches(task.repoRoot, intent, intent.committedHead!)) return {
+    status: 'failed',
+    result: commitStepFailure(snapshot, 'COMMIT_INTENT_INVALID', 'Committed checkpoint intent does not match its Git commit')
+  };
+  if (!intent) {
+    intent = preparedCheckpointIntent(identity);
+    try { writeCheckpointIntent(task.taskDir, intent); }
+    catch (error) { return { status: 'failed', result: intentWriteFailure(snapshot, error) }; }
+  }
+  return { status: 'ready', intent };
+}
+
+function executeLocalCheckpoint(context: CommitDeliveryContext): CommitDeliveryOutcome {
+  const { input, task, snapshot } = context;
+  if (!task) return deliveryOutcome(commitStepFailure(snapshot, 'CHECKPOINT_TASK_REQUIRED', 'local checkpoint delivery requires a task context'));
+  const identity = checkpointIdentity(input, task, { mode: 'local' });
+  const prepared = prepareCheckpointIntent(task, identity, snapshot);
+  if (prepared.status === 'failed') return deliveryOutcome(prepared.result);
+  let intent = prepared.intent;
+  if (intent.state !== 'prepared') {
+    return deliveryOutcome(commitStepNoop(snapshot), [], {
+      taskDir: task.taskDir, taskId: task.taskId, intent, committedHead: intent.committedHead!
+    });
+  }
+  if (snapshot.head !== identity.expectedHead && !checkpointCommitMatches(task.repoRoot, intent, snapshot.head)) {
+    return deliveryOutcome(commitStepFailure(snapshot, 'COMMIT_INTENT_HEAD_CONFLICT', 'Current HEAD does not match the pending checkpoint intent'));
+  }
+  if (snapshot.head !== identity.expectedHead) {
+    const committedHead = snapshot.head;
+    intent = updateCheckpointIntent(intent, { state: 'committed', committedHead, updatedAt: checkpointTimestamp() });
+    writeCheckpointIntent(task.taskDir, intent);
+    return deliveryOutcome(commitStepNoop(snapshot), [], { taskDir: task.taskDir, taskId: task.taskId, intent, committedHead });
+  }
+  if (input.paths.length === 0) return deliveryOutcome(commitStepFailure(snapshot, 'GIT_COMMIT_INPUT_INVALID', 'Local checkpoint requires explicit paths'));
+  const committed = commitExplicitPaths({
+    cwd: input.cwd, paths: input.paths, message: input.message,
+    expectedHead: identity.expectedHead, expectedTree: identity.expectedTree
+  });
+  if (committed.status === 'applied' && committed.snapshot?.head) {
+    const committedHead = committed.snapshot.head;
+    intent = updateCheckpointIntent(intent, { state: 'committed', committedHead, updatedAt: checkpointTimestamp() });
+    writeCheckpointIntent(task.taskDir, intent);
+    return deliveryOutcome(committed, [], { taskDir: task.taskDir, taskId: task.taskId, intent, committedHead });
+  }
+  if (committed.status === 'no-op') removeCheckpointIntent(task.taskDir, task.taskId);
+  return deliveryOutcome(committed);
+}
+
+function completeLocalCheckpoint(outcome: CommitDeliveryOutcome, taskWarning: OperationWarning | null): void {
+  if (taskWarning?.code === 'TASK_STATUS_SYNC_FAILED' || !outcome.checkpoint) return;
+  const { taskDir, taskId, intent, committedHead } = outcome.checkpoint;
+  const synced = updateCheckpointIntent(intent, { state: 'synced', committedHead, updatedAt: checkpointTimestamp() });
+  writeCheckpointIntent(taskDir, synced);
+  removeCheckpointIntent(taskDir, taskId);
+}
+
+function pushOnlyRetry(input: CommitOperationInput, snapshot: CommitDeliveryContext['snapshot']): CommitStepResult {
+  if (snapshot.worktree.length > 0 || snapshot.staged.length > 0) {
+    return commitStepFailure(snapshot, 'GIT_COMMIT_INPUT_INVALID', 'Push-only retry requires a clean working tree');
+  }
+  if (snapshot.head !== input.expectedHead) {
+    return commitStepFailure(snapshot, 'GIT_HEAD_MISMATCH', `Expected HEAD ${input.expectedHead}, received ${snapshot.head}`);
+  }
+  const currentTree = gitText(input.cwd, ['rev-parse', 'HEAD^{tree}']);
+  if (currentTree !== input.expectedTree) {
+    return commitStepFailure(snapshot, 'GIT_TREE_MISMATCH', `Expected current tree ${input.expectedTree}, received ${currentTree}`);
+  }
+  return commitStepNoop(snapshot);
+}
+
+function executePushDelivery(context: CommitDeliveryContext, delivery: Extract<CommitDelivery, { mode: 'push' }>): CommitDeliveryOutcome {
+  const { input, snapshot } = context;
+  const committed = input.paths.length === 0
+    ? pushOnlyRetry(input, snapshot)
+    : commitExplicitPaths({
+      cwd: input.cwd, paths: input.paths, message: input.message,
+      expectedHead: input.expectedHead, expectedTree: input.expectedTree
+    });
+  if (committed.status === 'failed') return deliveryOutcome(committed);
+  const target = `${delivery.remote}:${delivery.refs[0]}`;
+  const decision = commitPushDecision({ branch: snapshot.branch }, target);
+  if (!decision.shouldPush) return deliveryOutcome(committed, [decision.warning!]);
+  const pushed = pushGitRefs({
+    cwd: input.cwd, remote: delivery.remote, refs: delivery.refs,
+    expectedSha: committed.snapshot?.head ?? gitText(input.cwd, ['rev-parse', 'HEAD'])
+  });
+  const warnings = pushed.status === 'applied' ? [] : [warning(
+    'COMMIT_PUSH_FAILED', pushed.error?.message ?? 'Git push failed', true, 'push', target, 'ACTION_REQUIRED'
+  )];
+  return deliveryOutcome(committed, warnings);
+}
+
+function selectCommitDeliveryStrategy(delivery: CommitDelivery): CommitDeliveryStrategy {
+  if (delivery.mode === 'local') return { execute: executeLocalCheckpoint, afterTaskSync: completeLocalCheckpoint };
+  return { execute: (context) => executePushDelivery(context, delivery) };
+}
+
 function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode, writeOptions: TaskWriteOptions): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
@@ -286,138 +460,9 @@ function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask
   if (task && !input.agent) return failure(input, mode, task.taskId, 'COMMIT_AGENT_REQUIRED', 'task-bound commit requires an agent', 'blocked', inspected.snapshot);
   const delivery = effectiveDelivery(input)!;
   if (delivery.mode === 'local' && !task) return failure(input, mode, null, 'CHECKPOINT_TASK_REQUIRED', 'local checkpoint delivery requires a task context', 'blocked', inspected.snapshot);
-  let pendingIntent: NonNullable<ReturnType<typeof readCheckpointIntent>> | null = null;
-  let checkpointCommittedHead: string | null = null;
-  const committed = delivery.mode === 'local'
-    ? (() => {
-      const identity = checkpointIdentity(input, task!, delivery);
-      try {
-        pendingIntent = readCheckpointIntent(task!.taskDir, task!.taskId);
-      } catch (error) {
-        return {
-          status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-          error: { code: 'COMMIT_INTENT_INVALID', message: error instanceof Error ? error.message : String(error) }
-        };
-      }
-      if (pendingIntent && !sameCheckpointIntent(pendingIntent, identity)) {
-        if (pendingIntent.state !== 'prepared') return {
-          status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-          error: { code: 'COMMIT_INTENT_INVALID', message: 'A committed checkpoint intent must be recovered with its original request' }
-        };
-        const timestamp = checkpointTimestamp();
-        pendingIntent = {
-          version: 1, ...identity,
-          digest: checkpointIntentDigest(identity),
-          state: 'prepared', committedHead: null, createdAt: timestamp, updatedAt: timestamp
-        };
-        try { writeCheckpointIntent(task!.taskDir, pendingIntent); }
-        catch (error) {
-          return {
-            status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-            error: { code: 'COMMIT_INTENT_WRITE_FAILED', message: error instanceof Error ? error.message : String(error) }
-          };
-        }
-      }
-      if (pendingIntent && pendingIntent.state !== 'prepared'
-        && !checkpointCommitMatches(task!.repoRoot, pendingIntent, pendingIntent.committedHead!)) return {
-        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-        error: { code: 'COMMIT_INTENT_INVALID', message: 'Committed checkpoint intent does not match its Git commit' }
-      };
-      if (!pendingIntent) {
-        const timestamp = checkpointTimestamp();
-        pendingIntent = {
-          version: 1, ...identity, digest: checkpointIntentDigest(identity), state: 'prepared',
-          committedHead: null, createdAt: timestamp, updatedAt: timestamp
-        };
-        try { writeCheckpointIntent(task!.taskDir, pendingIntent); }
-        catch (error) {
-          return {
-            status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-            error: { code: 'COMMIT_INTENT_WRITE_FAILED', message: error instanceof Error ? error.message : String(error) }
-          };
-        }
-      }
-      if (pendingIntent.state !== 'prepared') {
-        checkpointCommittedHead = pendingIntent.committedHead;
-        return {
-          status: 'no-op' as const, changed: false, snapshot: inspected.snapshot,
-          operations: [{ name: 'commit', status: 'no-op' as const }], error: null
-        };
-      }
-      if (inspected.snapshot.head !== identity.expectedHead && !checkpointCommitMatches(task!.repoRoot, pendingIntent, inspected.snapshot.head)) return {
-        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-        error: { code: 'COMMIT_INTENT_HEAD_CONFLICT', message: 'Current HEAD does not match the pending checkpoint intent' }
-      };
-      if (inspected.snapshot.head !== identity.expectedHead) {
-        checkpointCommittedHead = inspected.snapshot.head;
-        pendingIntent = updateCheckpointIntent(pendingIntent, {
-          state: 'committed', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
-        });
-        writeCheckpointIntent(task!.taskDir, pendingIntent);
-        return {
-          status: 'no-op' as const, changed: false, snapshot: inspected.snapshot,
-          operations: [{ name: 'commit', status: 'no-op' as const }], error: null
-        };
-      }
-      if (input.paths.length === 0) return {
-        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-        error: { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Local checkpoint requires explicit paths' }
-      };
-      const created = commitExplicitPaths({
-        cwd: input.cwd, paths: input.paths, message: input.message,
-        expectedHead: identity.expectedHead, expectedTree: identity.expectedTree
-      });
-      if (created.status === 'applied' && created.snapshot?.head) {
-        checkpointCommittedHead = created.snapshot.head;
-        pendingIntent = updateCheckpointIntent(pendingIntent, {
-          state: 'committed', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
-        });
-        writeCheckpointIntent(task!.taskDir, pendingIntent);
-      } else if (created.status === 'no-op') {
-        removeCheckpointIntent(task!.taskDir, task!.taskId);
-        pendingIntent = null;
-      }
-      return created;
-    })()
-    : input.paths.length === 0
-    ? (() => {
-      if (inspected.snapshot.worktree.length > 0 || inspected.snapshot.staged.length > 0) return {
-        status: 'failed' as const,
-        changed: false,
-        snapshot: inspected.snapshot,
-        operations: [],
-        error: { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Push-only retry requires a clean working tree' }
-      };
-      if (inspected.snapshot.head !== input.expectedHead) return {
-        status: 'failed' as const,
-        changed: false,
-        snapshot: inspected.snapshot,
-        operations: [],
-        error: { code: 'GIT_HEAD_MISMATCH', message: `Expected HEAD ${input.expectedHead}, received ${inspected.snapshot.head}` }
-      };
-      const currentTree = gitText(input.cwd, ['rev-parse', 'HEAD^{tree}']);
-      if (currentTree !== input.expectedTree) return {
-        status: 'failed' as const,
-        changed: false,
-        snapshot: inspected.snapshot,
-        operations: [],
-        error: { code: 'GIT_TREE_MISMATCH', message: `Expected current tree ${input.expectedTree}, received ${currentTree}` }
-      };
-      return {
-        status: 'no-op' as const,
-        changed: false,
-        snapshot: inspected.snapshot,
-        operations: [{ name: 'commit', status: 'no-op' as const }],
-        error: null
-      };
-    })()
-    : commitExplicitPaths({
-      cwd: input.cwd,
-      paths: input.paths,
-      message: input.message,
-      expectedHead: input.expectedHead,
-      expectedTree: input.expectedTree
-    });
+  const strategy = selectCommitDeliveryStrategy(delivery);
+  const outcome = strategy.execute({ input, task, snapshot: inspected.snapshot });
+  const committed = outcome.committed;
   if (committed.status === 'failed') return {
     ...committed,
     result: 'failed',
@@ -427,43 +472,22 @@ function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask
     snapshot: committed.snapshot
   };
 
-  const warnings: OperationWarning[] = [];
+  const warnings = [...outcome.warnings];
   let status: CommitOperationResult['status'] = committed.status;
   let result: CommitOperationResult['result'] = committed.status === 'applied' ? 'committed' : 'no_op';
-  if (delivery.mode === 'push') {
-    const target = `${delivery.remote}:${delivery.refs[0]}`;
-    const decision = commitPushDecision({ branch }, target);
-    if (!decision.shouldPush) {
-      warnings.push(decision.warning!);
-    } else {
-      const pushed = pushGitRefs({
-        cwd: input.cwd, remote: delivery.remote, refs: delivery.refs,
-        expectedSha: committed.snapshot?.head ?? gitText(input.cwd, ['rev-parse', 'HEAD'])
-      });
-      if (pushed.status !== 'applied') warnings.push(warning(
-        'COMMIT_PUSH_FAILED', pushed.error?.message ?? 'Git push failed', true, 'push', target, 'ACTION_REQUIRED'
-      ));
-    }
-  }
   if (warnings.length > 0) {
     status = 'applied';
     result = 'committed_with_warnings';
   }
   if (task && (committed.status === 'applied' || committed.status === 'no-op')) {
-    const committedHead = checkpointCommittedHead ?? committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']);
+    const committedHead = outcome.checkpoint?.committedHead ?? committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']);
     const taskWarning = syncTaskCommit(input, task, committedHead, writeOptions);
     if (taskWarning) {
       warnings.push(taskWarning);
       status = 'applied';
       result = 'committed_with_warnings';
     }
-    if (delivery.mode === 'local' && taskWarning?.code !== 'TASK_STATUS_SYNC_FAILED' && pendingIntent && checkpointCommittedHead) {
-      const synced = updateCheckpointIntent(pendingIntent, {
-        state: 'synced', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
-      });
-      writeCheckpointIntent(task.taskDir, synced);
-      removeCheckpointIntent(task.taskDir, task.taskId);
-    }
+    strategy.afterTaskSync?.(outcome, taskWarning);
   }
   return {
     status,
