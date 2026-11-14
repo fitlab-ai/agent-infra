@@ -140,6 +140,38 @@ test('proposal rejects confirmation authority and stale digest without changing 
   }
 });
 
+test('proposal cannot overwrite a confirmed constraint', () => {
+  const { repoRoot, taskMd } = fixture();
+  try {
+    const initial = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
+    assert.equal(initial.ok, true);
+    if (!initial.ok) return;
+    assert.equal(applyQualificationConfirmation({
+      taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: initial.qualification.constraintDigest,
+      rationale: 'Confirm before proposing an update.'
+    }, { repoRoot, metadataProvider: metadata }).status, 'applied');
+
+    const beforeProposal = fs.readFileSync(taskMd, 'utf8');
+    const current = parseTaskQualification(beforeProposal);
+    assert.equal(current.ok, true);
+    if (!current.ok) return;
+    const result = applyQualificationProposal({
+      taskRef: TASK_ID,
+      expectedTaskInputDigest: current.qualification.taskInputDigest,
+      constraints: [{
+        constraintId: 'C-1', statement: 'Change the confirmed constraint', status: 'assumption',
+        authority: 'model', source: 'plan.md', evidence: 'plan.md#constraints', derivedFrom: [], approvalEvidence: ''
+      }]
+    }, { repoRoot, metadataProvider: metadata });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'QUALIFICATION_CONFIRMATION_REQUIRED');
+    assert.equal(fs.readFileSync(taskMd, 'utf8'), beforeProposal);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('internal qualification confirms the current digest and creates a core-owned QCR', () => {
   const { repoRoot, taskMd } = fixture();
   try {
@@ -176,6 +208,41 @@ test('internal qualification confirms the current digest and creates a core-owne
       assert.equal(stale.ok, false);
       if (!stale.ok) assert.equal(stale.code, 'QUALIFICATION_CONFIRMATION_DIGEST_MISMATCH');
     }
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('confirmation rejects stale digests and conflicting repeat evidence without writing', () => {
+  const { repoRoot, taskMd } = fixture();
+  try {
+    const initial = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
+    assert.equal(initial.ok, true);
+    if (!initial.ok) return;
+    const staleDigest = `${initial.qualification.constraintDigest[0] === '0' ? '1' : '0'}${initial.qualification.constraintDigest.slice(1)}`;
+    const beforeStaleRequest = fs.readFileSync(taskMd, 'utf8');
+    const stale = applyQualificationConfirmation({
+      taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: staleDigest, rationale: 'Confirm with a stale digest.'
+    }, { repoRoot, metadataProvider: metadata });
+    assert.equal(stale.status, 'failed');
+    assert.equal(stale.error?.code, 'QUALIFICATION_DIGEST_CONFLICT');
+    assert.equal(fs.readFileSync(taskMd, 'utf8'), beforeStaleRequest);
+
+    assert.equal(applyQualificationConfirmation({
+      taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: initial.qualification.constraintDigest,
+      rationale: 'Confirm once.'
+    }, { repoRoot, metadataProvider: metadata }).status, 'applied');
+    const confirmedContent = fs.readFileSync(taskMd, 'utf8');
+    const confirmed = parseTaskQualification(confirmedContent);
+    assert.equal(confirmed.ok, true);
+    if (!confirmed.ok) return;
+    const conflict = applyQualificationConfirmation({
+      taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: confirmed.qualification.constraintDigest,
+      rationale: 'Confirm with different evidence.'
+    }, { repoRoot, metadataProvider: metadata });
+    assert.equal(conflict.status, 'failed');
+    assert.equal(conflict.error?.code, 'QUALIFICATION_CONFIRMATION_CONFLICT');
+    assert.equal(fs.readFileSync(taskMd, 'utf8'), confirmedContent);
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }
