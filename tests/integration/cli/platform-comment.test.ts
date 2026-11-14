@@ -291,6 +291,22 @@ test('stage-summary stores the canonical body and digest used for delivery comme
   }
 });
 
+test('stage-summary reports inactive tasks before parsing the supplied JSON body', () => {
+  const f = fixture();
+  try {
+    const bodyPath = path.join(f.root, 'invalid-summary.json');
+    fs.writeFileSync(bodyPath, '{');
+
+    const result = runComment(['stage-summary', 'TASK-20260101-000002', '--body-file', bodyPath], f);
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).error.message, 'stage-summary requires an active task');
+    assert.deepEqual(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')), []);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('summary and cancellation journal entries replay from durable typed task facts', () => {
   const f = fixture();
   const taskDir = path.join(taskWorkspaceRoot(f.root), 'active', f.taskId);

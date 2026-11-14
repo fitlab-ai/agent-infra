@@ -136,9 +136,9 @@ async function runBackfill(taskRef: string, values: Record<string, string | bool
 }
 
 function stageSummaryBody(body: string, taskRef: string, cwd: string): { taskId: string; target: string; content: unknown } | null {
-  const supplied = JSON.parse(body) as Record<string, unknown>;
   const resolved = resolveTaskRef(taskRef, { repoRoot: cwd });
   if (!resolved.ok || resolved.state !== 'active') return null;
+  const supplied = JSON.parse(body) as Record<string, unknown>;
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const title = /^#\s+(.+)$/mu.exec(taskContent)?.[1]?.trim();
   const prepared = prepareAndRenderDeliverySummaryContent(supplied, {
