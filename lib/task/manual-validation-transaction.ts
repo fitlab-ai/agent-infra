@@ -66,36 +66,76 @@ function summaryPreimageDigest(body: string): string {
   return createHash('sha256').update(body, 'utf8').digest('hex');
 }
 
-function validateManualValidationTransaction(value: unknown, expected?: Partial<Pick<ManualValidationTransaction, 'transactionId' | 'taskId' | 'prNumber' | 'prHeadSha' | 'evidenceDigest' | 'artifact'>>): ManualValidationTransactionResult {
-  if (!isRecord(value)) return invalid('transaction must be a JSON object');
+function validateTransactionEnvelope(value: Record<string, unknown>): string | null {
   const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'summaryPreimage', 'pendingSummaryDigest', 'finalSummaryDigest', 'artifact', 'phase', 'committedReceipt', 'eventAppended', 'attempt', 'postWriteVerified', 'createdAt', 'updatedAt', 'error'];
   const keyError = exactKeys(value, keys, 'transaction');
-  if (keyError) return invalid(keyError);
-  if (value.schema !== MANUAL_VALIDATION_TRANSACTION_SCHEMA || value.version !== MANUAL_VALIDATION_TRANSACTION_VERSION) return invalid('transaction schema or version is unsupported');
-  if (typeof value.transactionId !== 'string' || !TRANSACTION_ID.test(value.transactionId)) return invalid('transactionId is invalid');
-  if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) return invalid('taskId is invalid');
+  if (keyError) return keyError;
+  if (value.schema !== MANUAL_VALIDATION_TRANSACTION_SCHEMA || value.version !== MANUAL_VALIDATION_TRANSACTION_VERSION) return 'transaction schema or version is unsupported';
+  return null;
+}
+
+function validateTransactionIdentity(value: Record<string, unknown>): string | null {
+  if (typeof value.transactionId !== 'string' || !TRANSACTION_ID.test(value.transactionId)) return 'transactionId is invalid';
+  if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) return 'taskId is invalid';
   const prNumber = value.prNumber;
-  if (!Number.isSafeInteger(prNumber) || (prNumber as number) <= 0) return invalid('prNumber is invalid');
-  if (typeof value.prHeadSha !== 'string' || !SHA40.test(value.prHeadSha)) return invalid('prHeadSha is invalid');
-  if (typeof value.evidenceDigest !== 'string' || !SHA64.test(value.evidenceDigest)) return invalid('evidenceDigest is invalid');
-  if (!isRecord(value.summaryPreimage)) return invalid('summaryPreimage is invalid');
+  if (!Number.isSafeInteger(prNumber) || (prNumber as number) <= 0) return 'prNumber is invalid';
+  if (typeof value.prHeadSha !== 'string' || !SHA40.test(value.prHeadSha)) return 'prHeadSha is invalid';
+  if (typeof value.evidenceDigest !== 'string' || !SHA64.test(value.evidenceDigest)) return 'evidenceDigest is invalid';
+  return null;
+}
+
+function validateTransactionSummaryPreimage(value: Record<string, unknown>): string | null {
+  if (!isRecord(value.summaryPreimage)) return 'summaryPreimage is invalid';
   const preimage = value.summaryPreimage;
   const preimageKeyError = exactKeys(preimage, ['commentId', 'body', 'digest'], 'summaryPreimage');
-  if (preimageKeyError) return invalid(preimageKeyError);
-  if (preimage.commentId !== null && typeof preimage.commentId !== 'number' && typeof preimage.commentId !== 'string') return invalid('summaryPreimage.commentId is invalid');
-  if (typeof preimage.body !== 'string' || typeof preimage.digest !== 'string' || !SHA64.test(preimage.digest) || summaryPreimageDigest(preimage.body) !== preimage.digest) return invalid('summaryPreimage digest is invalid');
-  for (const field of ['pendingSummaryDigest', 'finalSummaryDigest'] as const) if (typeof value[field] !== 'string' || !SHA64.test(value[field])) return invalid(`${field} is invalid`);
-  if (typeof value.artifact !== 'string' || !ARTIFACT.test(value.artifact)) return invalid('artifact is invalid');
-  if (!['prepared', 'summary-staged', 'receipt-committed', 'final-promotion-in-progress', 'committed', 'aborted', 'recovery-required'].includes(value.phase as string)) return invalid('phase is invalid');
-  if (value.committedReceipt !== null && (typeof value.committedReceipt !== 'string' || !SHA64.test(value.committedReceipt))) return invalid('committedReceipt is invalid');
-  if (typeof value.eventAppended !== 'boolean' || typeof value.postWriteVerified !== 'boolean') return invalid('transaction completion flags are invalid');
+  if (preimageKeyError) return preimageKeyError;
+  if (preimage.commentId !== null && typeof preimage.commentId !== 'number' && typeof preimage.commentId !== 'string') return 'summaryPreimage.commentId is invalid';
+  if (typeof preimage.body !== 'string' || typeof preimage.digest !== 'string' || !SHA64.test(preimage.digest) || summaryPreimageDigest(preimage.body) !== preimage.digest) return 'summaryPreimage digest is invalid';
+  return null;
+}
+
+function validateTransactionPhaseFields(value: Record<string, unknown>): string | null {
+  for (const field of ['pendingSummaryDigest', 'finalSummaryDigest'] as const) if (typeof value[field] !== 'string' || !SHA64.test(value[field])) return `${field} is invalid`;
+  if (typeof value.artifact !== 'string' || !ARTIFACT.test(value.artifact)) return 'artifact is invalid';
+  if (!['prepared', 'summary-staged', 'receipt-committed', 'final-promotion-in-progress', 'committed', 'aborted', 'recovery-required'].includes(value.phase as string)) return 'phase is invalid';
+  return null;
+}
+
+function validateTransactionCompletionFields(value: Record<string, unknown>): string | null {
+  if (value.committedReceipt !== null && (typeof value.committedReceipt !== 'string' || !SHA64.test(value.committedReceipt))) return 'committedReceipt is invalid';
+  if (typeof value.eventAppended !== 'boolean' || typeof value.postWriteVerified !== 'boolean') return 'transaction completion flags are invalid';
   const attempt = value.attempt;
-  if (!Number.isSafeInteger(attempt) || (attempt as number) < 1) return invalid('attempt is invalid');
-  if (!validTimestamp(value.createdAt) || !validTimestamp(value.updatedAt)) return invalid('transaction timestamps are invalid');
-  if (value.error !== null && (typeof value.error !== 'string' || !value.error || /[\r\n]/u.test(value.error))) return invalid('transaction error is invalid');
-  if (['receipt-committed', 'final-promotion-in-progress', 'committed'].includes(value.phase as string) && value.committedReceipt === null) return invalid('receipt-backed phases require committedReceipt');
-  if (['final-promotion-in-progress', 'committed'].includes(value.phase as string) && !value.eventAppended) return invalid('final promotion requires an appended completion event');
-  if (value.phase === 'committed' && !value.postWriteVerified) return invalid('committed phase requires post-write verification');
+  if (!Number.isSafeInteger(attempt) || (attempt as number) < 1) return 'attempt is invalid';
+  if (!validTimestamp(value.createdAt) || !validTimestamp(value.updatedAt)) return 'transaction timestamps are invalid';
+  if (value.error !== null && (typeof value.error !== 'string' || !value.error || /[\r\n]/u.test(value.error))) return 'transaction error is invalid';
+  return null;
+}
+
+function validateTransactionFields(value: Record<string, unknown>): string | null {
+  const phaseError = validateTransactionPhaseFields(value);
+  if (phaseError) return phaseError;
+  return validateTransactionCompletionFields(value);
+}
+
+function validateTransactionPhaseState(value: Record<string, unknown>): string | null {
+  if (['receipt-committed', 'final-promotion-in-progress', 'committed'].includes(value.phase as string) && value.committedReceipt === null) return 'receipt-backed phases require committedReceipt';
+  if (['final-promotion-in-progress', 'committed'].includes(value.phase as string) && !value.eventAppended) return 'final promotion requires an appended completion event';
+  if (value.phase === 'committed' && !value.postWriteVerified) return 'committed phase requires post-write verification';
+  return null;
+}
+
+function validateManualValidationTransaction(value: unknown, expected?: Partial<Pick<ManualValidationTransaction, 'transactionId' | 'taskId' | 'prNumber' | 'prHeadSha' | 'evidenceDigest' | 'artifact'>>): ManualValidationTransactionResult {
+  if (!isRecord(value)) return invalid('transaction must be a JSON object');
+  const envelopeError = validateTransactionEnvelope(value);
+  if (envelopeError) return invalid(envelopeError);
+  const identityError = validateTransactionIdentity(value);
+  if (identityError) return invalid(identityError);
+  const preimageError = validateTransactionSummaryPreimage(value);
+  if (preimageError) return invalid(preimageError);
+  const fieldsError = validateTransactionFields(value);
+  if (fieldsError) return invalid(fieldsError);
+  const phaseError = validateTransactionPhaseState(value);
+  if (phaseError) return invalid(phaseError);
   const transaction = value as unknown as ManualValidationTransaction;
   if (expected && Object.entries(expected).some(([key, expectedValue]) => expectedValue !== undefined && transaction[key as keyof ManualValidationTransaction] !== expectedValue)) {
     return { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH', message: 'transaction identity does not match the expected operation' } };
