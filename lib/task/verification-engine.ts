@@ -137,53 +137,42 @@ async function runCheck(type: any, context: any, shared: any): Promise<any> {
 
 // === Check Functions ===
 
-function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFile }: any): any {
-  const task = loadTask(taskDir);
-  if (!task.ok) {
-    return failResult("task-meta", task.message);
-  }
-
-  const metadata = task.metadata;
-  const requiredFields = config.required_fields || DEFAULT_REQUIRED_FIELDS;
+function validateTaskMetaRequiredFields(metadata: any, requiredFields: any[]): { error: string | null; warnings: string[] } {
   const missingFields = requiredFields.filter((field: any) => isBlank(metadata[field]));
   const currentTask = metadata.status === 'active';
   const blockingMissingFields = missingFields.filter((field: any) => field !== "agent_infra_version" || currentTask);
-  const warnings = [];
+  const warnings: string[] = [];
   if (missingFields.includes("agent_infra_version") && !currentTask) {
     warnings.push("field 'agent_infra_version' missing — historical task or skipped version stamp");
   }
   if (blockingMissingFields.length > 0) {
-    return failResult("task-meta", `Missing required fields: ${blockingMissingFields.join(", ")}`);
+    return { error: `Missing required fields: ${blockingMissingFields.join(", ")}`, warnings };
   }
-
   if (currentTask && !isValidAgentInfraVersion(metadata.agent_infra_version)) {
-    return failResult(
-      "task-meta",
-      `Invalid agent_infra_version: ${String(metadata.agent_infra_version ?? 'missing')}`
-    );
+    return { error: `Invalid agent_infra_version: ${String(metadata.agent_infra_version ?? 'missing')}`, warnings };
   }
-
   const invalidDates = ["created_at", "updated_at", "completed_at", "blocked_at", "cancelled_at"]
     .filter((field) => !isBlank(metadata[field]) && !DATE_TIME_PATTERN.test(metadata[field]));
   if (invalidDates.length > 0) {
-    return failResult("task-meta", `Invalid date format in: ${invalidDates.join(", ")}`);
+    return { error: `Invalid date format in: ${invalidDates.join(", ")}`, warnings };
   }
-
   for (const [field, allowedValues] of Object.entries(TASK_ENUMS)) {
     if (!isBlank(metadata[field]) && !allowedValues.includes(metadata[field])) {
-      return failResult("task-meta", `Invalid ${field}: ${metadata[field]}`);
+      return { error: `Invalid ${field}: ${metadata[field]}`, warnings };
     }
   }
+  return { error: null, warnings };
+}
 
-  const branchValidationError = validateTaskBranch(metadata, repositoryRoot);
-  if (branchValidationError) {
-    return failResult("task-meta", branchValidationError);
-  }
+function validateTaskMetaBranch(metadata: any, repositoryRoot: string): string | null {
+  return validateTaskBranch(metadata, repositoryRoot);
+}
 
+function validateTaskMetaExpectations({ taskDir, config, skillName, artifactFile, task, metadata, currentTask }: any): string | null {
   try {
     parseWorkflowWarnings(task.content);
   } catch (error) {
-    return failResult("task-meta", `Invalid Workflow Warnings: ${error instanceof Error ? error.message : String(error)}`);
+    return `Invalid Workflow Warnings: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   const expectedStep = config.expected_step;
@@ -195,57 +184,51 @@ function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFil
       )?.status === "pass";
     }
     if (!validLifecycleArtifact) {
-      return failResult(
-        "task-meta",
-        `Expected current_step '${expectedStep}', got '${metadata.current_step || "(empty)"}'`
-      );
+      return `Expected current_step '${expectedStep}', got '${metadata.current_step || "(empty)"}'`;
     }
   }
 
   const expectedStatus = config.expected_status;
   if (expectedStatus && metadata.status !== expectedStatus) {
-    return failResult(
-      "task-meta",
-      `Expected status '${expectedStatus}', got '${metadata.status || "(empty)"}'`
-    );
+    return `Expected status '${expectedStatus}', got '${metadata.status || "(empty)"}'`;
   }
 
-  if (config.require_platform_issue_identity && !taskIssueIdentity(metadata)) {
-    return failResult("task-meta", "Expected a valid platform_issue_identity in task metadata");
+  const requiredMetadata: Array<[string, string, (metadata: any) => boolean]> = [
+    ["require_platform_issue_identity", "Expected a valid platform_issue_identity in task metadata", (value) => Boolean(taskIssueIdentity(value))],
+    ["require_completed_at", "Expected completed_at to be present", (value) => !isBlank(value.completed_at)],
+    ["require_blocked_at", "Expected blocked_at to be present", (value) => !isBlank(value.blocked_at)],
+    ["require_cancelled_at", "Expected cancelled_at to be present", (value) => !isBlank(value.cancelled_at)],
+    ["require_start_date", "Expected start_date to be present", (value) => !isBlank(value.start_date)],
+    ["require_target_date", "Expected target_date to be present", (value) => !isBlank(value.target_date)]
+  ];
+  for (const [key, message, check] of requiredMetadata) {
+    if (config[key] && !check(metadata)) return message;
   }
+  return null;
+}
 
-  if (config.require_completed_at && isBlank(metadata.completed_at)) {
-    return failResult("task-meta", "Expected completed_at to be present");
-  }
-
-  if (config.require_blocked_at && isBlank(metadata.blocked_at)) {
-    return failResult("task-meta", "Expected blocked_at to be present");
-  }
-
-  if (config.require_cancelled_at && isBlank(metadata.cancelled_at)) {
-    return failResult("task-meta", "Expected cancelled_at to be present");
-  }
-
-  if (config.require_start_date && isBlank(metadata.start_date)) {
-    return failResult("task-meta", "Expected start_date to be present");
-  }
-
-  if (config.require_target_date && isBlank(metadata.target_date)) {
-    return failResult("task-meta", "Expected target_date to be present");
-  }
-
+function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFile }: any): any {
+  const task = loadTask(taskDir);
+  if (!task.ok) return failResult("task-meta", task.message);
+  const metadata = task.metadata;
+  const requiredFields = config.required_fields || DEFAULT_REQUIRED_FIELDS;
+  const currentTask = metadata.status === 'active';
+  const base = validateTaskMetaRequiredFields(metadata, requiredFields);
+  if (base.error) return failResult("task-meta", base.error);
+  const contextError = validateTaskMetaBranch(metadata, repositoryRoot);
+  if (contextError) return failResult("task-meta", contextError);
+  const expectationError = validateTaskMetaExpectations({ taskDir, config, skillName, artifactFile, task, metadata, currentTask });
+  if (expectationError) return failResult("task-meta", expectationError);
   if (config.match_task_dir !== false) {
     const expectedTaskId = path.basename(taskDir);
-    if (metadata.id !== expectedTaskId) {
-      return failResult("task-meta", `Task id '${metadata.id}' does not match directory '${expectedTaskId}'`);
-    }
+    if (metadata.id !== expectedTaskId) return failResult("task-meta", `Task id '${metadata.id}' does not match directory '${expectedTaskId}'`);
   }
 
-  const warningSuffix = warnings.length > 0 ? `; warnings: ${warnings.join("; ")}` : "";
+  const warningSuffix = base.warnings.length > 0 ? `; warnings: ${base.warnings.join("; ")}` : "";
   return passResult(
     "task-meta",
     `Task metadata valid (${requiredFields.length} required fields checked${warningSuffix})`,
-    warnings as string[]
+    base.warnings
   );
 }
 
@@ -508,45 +491,47 @@ function checkReviewSummary({ taskDir, config, artifactFile }: any): any {
   );
 }
 
+function readImplementationInputReportIdentity(reportSection: string): { input: string; ledger: string; evidence: string } {
+  const field = (zh: any, en: any) => {
+    const pattern = "^- \\*\\*(?:" + escapeRegExp(zh) + "|" + escapeRegExp(en) + ")\\*\\*[:：]\\s*`?([^`\\n]+)`?\\s*$";
+    const match = new RegExp(pattern, "m").exec(reportSection);
+    return match?.[1]?.trim() || "";
+  };
+  return { input: field("裁决输入", "Decision Input"), ledger: field("账本 ID", "Ledger ID"), evidence: field("裁决证据", "Decision Evidence") };
+}
+
+function checkImplementationInputIdentity(rows: ImplementationInput[], artifactFile: string, report: { input: string; ledger: string; evidence: string }): any {
+  if (!report.input || report.input === "N/A") {
+    return passResult("implementation-input", "Non-decision implementation input identity is consistent");
+  }
+  const matches = rows.filter((row) => row.id === report.input);
+  if (matches.length !== 1) return failResult("implementation-input", `${report.input} is missing or duplicated in task table`);
+  const row = matches[0]!;
+  if (row.stage !== "code" || !row.needsImplementation || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.decisionEvidence) {
+    return failResult("implementation-input", `${report.input} is not a consumed input for ${artifactFile}`);
+  }
+  if (report.ledger !== row.ledgerId || report.evidence !== row.decisionEvidence) {
+    return failResult("implementation-input", `${report.input} report identity does not match task table evidence`);
+  }
+  return passResult("implementation-input", `${report.input} matches report and task table`);
+}
+
 function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) return failResult("implementation-input", task.message);
   if (!artifactFile) return failResult("implementation-input", "Artifact file is required");
   const artifactPath = path.join(taskDir, artifactFile);
   if (!safeStat(artifactPath)?.isFile()) return failResult("implementation-input", `Artifact not found: ${artifactFile}`);
-
   let rows: ImplementationInput[];
   try {
     rows = parseImplementationInputs(task.content).rows;
   } catch (error) {
     return failResult("implementation-input", `Invalid Implementation Inputs: ${error instanceof Error ? error.message : String(error)}`);
   }
-
   const report = fs.readFileSync(artifactPath, "utf8");
   const reportSection = getSectionContent(report, ["实现输入", "Implementation Input"]);
   if (!reportSection) return failResult("implementation-input", "Implementation Input report section not found");
-  const field = (zh: any, en: any) => {
-    const pattern = "^- \\*\\*(?:" + escapeRegExp(zh) + "|" + escapeRegExp(en) + ")\\*\\*[:：]\\s*`?([^`\\n]+)`?\\s*$";
-    const match = new RegExp(pattern, "m").exec(reportSection);
-    return match?.[1]?.trim() || "";
-  };
-  const reportInput = field("裁决输入", "Decision Input");
-  const reportLedger = field("账本 ID", "Ledger ID");
-  const reportEvidence = field("裁决证据", "Decision Evidence");
-
-  if (!reportInput || reportInput === "N/A") {
-    return passResult("implementation-input", "Non-decision implementation input identity is consistent");
-  }
-  const matches = rows.filter((row) => row.id === reportInput);
-  if (matches.length !== 1) return failResult("implementation-input", `${reportInput} is missing or duplicated in task table`);
-  const row = matches[0]!;
-  if (row.stage !== "code" || !row.needsImplementation || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.decisionEvidence) {
-    return failResult("implementation-input", `${reportInput} is not a consumed input for ${artifactFile}`);
-  }
-  if (reportLedger !== row.ledgerId || reportEvidence !== row.decisionEvidence) {
-    return failResult("implementation-input", `${reportInput} report identity does not match task table evidence`);
-  }
-  return passResult("implementation-input", `${reportInput} matches report and task table`);
+  return checkImplementationInputIdentity(rows, artifactFile, readImplementationInputReportIdentity(reportSection));
 }
 
 const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
@@ -708,6 +693,60 @@ function checkReviewLedger({ taskDir, config }: any): any {
   return passResult("review-ledger", `Disagreement ledger clean (${inScopeRows.length} in-scope entries terminal${scopeLabel})`);
 }
 
+function validateManualValidationReviewTime(task: any, review: any, receipt: any): any | null {
+  let reviewReceipt;
+  try {
+    reviewReceipt = receiptForOutput(task.content, review.fileName!);
+  } catch (error) {
+    return failResult("manual-validation", `Review-code receipt is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!reviewReceipt || reviewReceipt.event !== "review-code.completed") {
+    return failResult("manual-validation", `Review-code completion time is unavailable for ${review.fileName}`);
+  }
+  const reviewTime = Date.parse(reviewReceipt.completedAt.replace(' ', 'T'));
+  const validationTime = Date.parse(receipt.committedAt);
+  if (!Number.isFinite(reviewTime) || !Number.isFinite(validationTime) || validationTime <= reviewTime) {
+    return failResult("manual-validation", `Manual validation must be completed after review-code ${review.fileName}`);
+  }
+  return null;
+}
+
+function validateManualValidationReceipt(taskDir: string, artifactName: string, review: any): { task: any; receipt: any; error: any | null } {
+  const task = loadTask(taskDir);
+  if (!task.ok) return { task, receipt: null, error: failResult("manual-validation", task.message) };
+  const completion = readManualValidationCompletion(taskDir, { taskId: task.metadata.id, artifact: artifactName });
+  if (!completion.ok) {
+    const source = completion.error.code.startsWith('MANUAL_VALIDATION_RECEIPT_') ? 'receipt' : 'transaction';
+    return { task, receipt: null, error: failResult("manual-validation", `Manual validation ${source} is unavailable: ${completion.error.message}`) };
+  }
+  const { receipt, transaction } = completion.value;
+  if (transaction.phase !== "committed" || !transaction.eventAppended || !transaction.postWriteVerified) {
+    return { task, receipt: null, error: failResult("manual-validation", "Manual validation transaction has not reached the committed post-write-verified state") };
+  }
+  if (transaction.pendingSummaryDigest !== receipt.pendingSummaryDigest || transaction.finalSummaryDigest !== receipt.finalSummaryDigest) {
+    return { task, receipt: null, error: failResult("manual-validation", "Manual validation summary digests do not match the committed receipt") };
+  }
+  if (sha256File(path.join(taskDir, artifactName)) !== receipt.artifactSha256) {
+    return { task, receipt: null, error: failResult("manual-validation", `Manual validation artifact digest does not match the receipt for ${artifactName}`) };
+  }
+  const timeError = validateManualValidationReviewTime(task, review, receipt);
+  if (timeError) return { task, receipt: null, error: timeError };
+  return { task, receipt, error: null };
+}
+
+async function checkBoundManualValidationPullRequest(task: any, repositoryRoot: string, receipt: any): Promise<any | null> {
+  const fact = readPrDeliveryFact(task.metadata);
+  if (fact.status === "invalid") return failResult("manual-validation", fact.error.message);
+  if (fact.status !== "valid" || fact.fact.state !== "bound") return null;
+  const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
+  if (!inspected.pullRequest) return failResult("manual-validation", inspected.error?.message ?? "canonical pull-request head is unavailable");
+  if (inspected.pullRequest.head.sha !== receipt.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
+  const summary = await summaryCommentState(task.metadata.id, { cwd: repositoryRoot });
+  if (!summary.comment) return failResult("manual-validation", "canonical pull-request summary comment is unavailable");
+  if (!manualValidationFinalSummaryProjectionMatches(summary.comment.body, receipt)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation projection");
+  return null;
+}
+
 async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<any> {
   // 1. Latest review-code artifact; none -> pass (no review, check not applicable).
   const review = findAuthoritativeReviewCodeArtifact(taskDir);
@@ -737,52 +776,10 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   }
   // 5. Validate the committed receipt, transaction, and artifact.
   const artifactName = path.basename(resolved.path);
-  const task = loadTask(taskDir);
-  if (!task.ok) return failResult("manual-validation", task.message);
-  const completion = readManualValidationCompletion(taskDir, {
-    taskId: task.metadata.id,
-    artifact: artifactName
-  });
-  if (!completion.ok) {
-    const source = completion.error.code.startsWith('MANUAL_VALIDATION_RECEIPT_') ? 'receipt' : 'transaction';
-    return failResult("manual-validation", `Manual validation ${source} is unavailable: ${completion.error.message}`);
-  }
-  const { receipt, transaction } = completion.value;
-  if (transaction.phase !== "committed" || !transaction.eventAppended || !transaction.postWriteVerified) {
-    return failResult("manual-validation", "Manual validation transaction has not reached the committed post-write-verified state");
-  }
-  if (transaction.pendingSummaryDigest !== receipt.pendingSummaryDigest || transaction.finalSummaryDigest !== receipt.finalSummaryDigest) {
-    return failResult("manual-validation", "Manual validation summary digests do not match the committed receipt");
-  }
-  if (sha256File(resolved.path) !== receipt.artifactSha256) {
-    return failResult("manual-validation", `Manual validation artifact digest does not match the receipt for ${artifactName}`);
-  }
-  // 6. Compare the review completion and committed manual-validation times.
-  let reviewReceipt;
-  try {
-    reviewReceipt = receiptForOutput(task.content, review.fileName!);
-  } catch (error) {
-    return failResult("manual-validation", `Review-code receipt is invalid: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!reviewReceipt || reviewReceipt.event !== "review-code.completed") {
-    return failResult("manual-validation", `Review-code completion time is unavailable for ${review.fileName}`);
-  }
-  const reviewTime = Date.parse(reviewReceipt.completedAt.replace(' ', 'T'));
-  const validationTime = Date.parse(receipt.committedAt);
-  if (!Number.isFinite(reviewTime) || !Number.isFinite(validationTime) || validationTime <= reviewTime) {
-    return failResult("manual-validation", `Manual validation must be completed after review-code ${review.fileName}`);
-  }
-
-  const fact = readPrDeliveryFact(task.metadata);
-  if (fact.status === "invalid") return failResult("manual-validation", fact.error.message);
-  if (fact.status === "valid" && fact.fact.state === "bound") {
-    const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
-    if (!inspected.pullRequest) return failResult("manual-validation", inspected.error?.message ?? "canonical pull-request head is unavailable");
-    if (inspected.pullRequest.head.sha !== receipt.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
-    const summary = await summaryCommentState(task.metadata.id, { cwd: repositoryRoot });
-    if (!summary.comment) return failResult("manual-validation", "canonical pull-request summary comment is unavailable");
-    if (!manualValidationFinalSummaryProjectionMatches(summary.comment.body, receipt)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation projection");
-  }
+  const validated = validateManualValidationReceipt(taskDir, artifactName, review);
+  if (validated.error) return validated.error;
+  const pullRequestError = await checkBoundManualValidationPullRequest(validated.task, repositoryRoot, validated.receipt);
+  if (pullRequestError) return pullRequestError;
   return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }
 
