@@ -420,6 +420,31 @@ function syncLabels(
   return { status: changed ? 'applied' as const : 'no-op' as const, changed, error: null };
 }
 
+function syncGitHubUpdateLabels(
+  client: GitHubClient,
+  repositoryName: string,
+  number: number,
+  cwd: string,
+  resource: 'issues' | 'pulls',
+  currentLabels: readonly string[] | undefined,
+  labels: readonly string[],
+  prefixes: readonly string[]
+): ProviderResult<{ changed: boolean }> {
+  let before = currentLabels;
+  if (!before) {
+    const current = client.json<any>(['api', `repos/${repositoryName}/${resource}/${number}`], { cwd });
+    if (!current.ok) return current;
+    before = Array.isArray(current.value?.labels)
+      ? current.value.labels.map((label: any) => typeof label === 'string' ? label : label?.name).filter((label: any): label is string => typeof label === 'string')
+      : [];
+  }
+  const synced = syncLabels(client, repositoryName, number, cwd, before || [], labels, prefixes);
+  if (synced.status === 'failed' || synced.status === 'blocked') return synced.error
+    ? { ok: false, error: synced.error }
+    : invalid('IN_LABEL_SYNC_FAILED', `${resource === 'issues' ? 'Issue' : 'Pull request'} label synchronization failed`);
+  return { ok: true, value: { changed: synced.changed } };
+}
+
 function resolveOpenMilestoneNumber(client: GitHubClient, repositoryName: string, cwd: string, title: string) {
   const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repositoryName}/milestones?state=open&per_page=100`], { cwd });
   if (!response.ok) return response;
@@ -709,19 +734,9 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       let requestPatch = restPatch;
       let changed = false;
       if (labels !== undefined) {
-        let before = currentLabels;
-        if (!before) {
-          const current = client.json<any>(['api', `repos/${repository(context)}/issues/${number}`], { cwd: context.workingDirectory });
-          if (!current.ok) return current;
-          before = Array.isArray(current.value?.labels)
-            ? current.value.labels.map((label: any) => typeof label === 'string' ? label : label?.name).filter((label: any): label is string => typeof label === 'string')
-            : [];
-        }
-        const synced = syncLabels(client, repository(context), number, context.workingDirectory, before || [], labels!, ['status:', 'in:']);
-        if (synced.status === 'failed' || synced.status === 'blocked') return synced.error
-          ? { ok: false, error: synced.error }
-          : invalid('IN_LABEL_SYNC_FAILED', 'Issue label synchronization failed');
-        changed ||= synced.changed;
+        const synced = syncGitHubUpdateLabels(client, repository(context), number, context.workingDirectory, 'issues', currentLabels, labels, ['status:', 'in:']);
+        if (!synced.ok) return synced;
+        changed ||= synced.value.changed;
       }
       if (typeof patch.milestone === 'string') {
         const milestone = resolveOpenMilestoneNumber(client, repository(context), context.workingDirectory, patch.milestone);
@@ -847,19 +862,9 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const { labels, assignees, milestone, ...pullRequestPatch } = patch;
       let changed = false;
       if (labels !== undefined) {
-        let before = currentLabels;
-        if (!before) {
-          const current = client.json<any>(['api', `repos/${repository(context)}/pulls/${number}`], { cwd: context.workingDirectory });
-          if (!current.ok) return current;
-          before = Array.isArray(current.value?.labels)
-            ? current.value.labels.map((label: any) => typeof label === 'string' ? label : label?.name).filter((label: any): label is string => typeof label === 'string')
-            : [];
-        }
-        const synced = syncLabels(client, repository(context), number, context.workingDirectory, before || [], labels!, ['in:', 'type:']);
-        if (synced.status === 'failed' || synced.status === 'blocked') return synced.error
-          ? { ok: false, error: synced.error }
-          : invalid('IN_LABEL_SYNC_FAILED', 'Pull request label synchronization failed');
-        changed ||= synced.changed;
+        const synced = syncGitHubUpdateLabels(client, repository(context), number, context.workingDirectory, 'pulls', currentLabels, labels, ['in:', 'type:']);
+        if (!synced.ok) return synced;
+        changed ||= synced.value.changed;
       }
       if (Object.keys(pullRequestPatch).length > 0) {
         const response = client.json<any>(['api', `repos/${repository(context)}/pulls/${number}`, '-X', 'PATCH', '--input', '-'], {
