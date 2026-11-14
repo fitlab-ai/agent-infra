@@ -129,8 +129,17 @@ export default async function createPlatformProvider(input) {
     },
     checks: {
       async inspectRequired() { return { ok: true, value: [] }; },
-      async resolveRun() { return { ok: true, value: { name: 'check', status: 'completed', runId: 'run-1' } }; },
-      async fetchLogs() { return { ok: true, value: { runId: 'run-1', text: '' } }; }
+      async resolveRun({ checkName }) { return { ok: true, value: {
+        name: checkName,
+        status: 'completed',
+        runId: String(config.runId || 'run-1'),
+        ...(config.jobId ? { jobId: String(config.jobId) } : {})
+      } }; },
+      async fetchLogs({ runId, jobId }) { return { ok: true, value: {
+        runId,
+        ...(jobId ? { jobId } : {}),
+        text: config.logText || ''
+      } }; }
     },
     reviews: {
       async list() { return { ok: true, value: [] }; },

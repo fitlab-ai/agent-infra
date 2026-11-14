@@ -27,8 +27,8 @@ function readHead(repoRoot: any): any {
   }
 }
 
-export function evaluateRequiredChecks(context: any, shared: any): any {
-  const { metadata, localHead, inspection, prFlow } = context;
+function requiredChecksApplicabilityResult(context: any, shared: any): any | null {
+  const { metadata, prFlow } = context;
   const factRead = readPrDeliveryFact(metadata);
   if (factRead.status === "invalid") {
     return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
@@ -38,7 +38,11 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   if (prFlow === "disabled" || fact?.state === "skipped" || !prIdentity) {
     return shared.passResult(CHECK_TYPE, "Skipped: required checks are not applicable to this task");
   }
+  return null;
+}
 
+function requiredChecksHeadResult(context: any, shared: any): any | null {
+  const { metadata, localHead } = context;
   const reviewedHead = String(metadata.last_reviewed_commit || "");
   if (!localHead || !SHA_PATTERN.test(localHead)) {
     return shared.blockedResult(CHECK_TYPE, "Unable to resolve the local HEAD", "dependency_error");
@@ -46,13 +50,22 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   if (!SHA_PATTERN.test(reviewedHead)) {
     return shared.failResult(CHECK_TYPE, "Task has no valid last_reviewed_commit", "check_failed");
   }
+  return null;
+}
+
+function requiredChecksInspectionResult(inspection: any, shared: any): any | null {
   if (!inspection || inspection.status === "blocked") {
     return shared.blockedResult(CHECK_TYPE, inspection?.error?.message || "Required checks are unavailable", "network_error");
   }
   if (inspection.status === "failed") {
     return shared.failResult(CHECK_TYPE, inspection.error?.message || "Required checks are unavailable", "check_failed");
   }
+  return null;
+}
 
+function resolveRequiredChecksHeadRelation(context: any): { prHead: any; relation: any } {
+  const { metadata, localHead, inspection } = context;
+  const reviewedHead = String(metadata.last_reviewed_commit || "");
   const prHead = inspection.pullRequest?.head?.sha || inspection.pullRequest?.headSha;
   const relation = context.relation || (
     context.gitRoot && inspection.pullRequest?.head
@@ -66,13 +79,20 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
         ? { status: "strict" }
         : { status: "failed" }
   );
+  return { prHead, relation };
+}
+
+function requiredChecksRelationResult(relation: any, shared: any): any | null {
   if (relation.status !== "strict" && relation.status !== "merged-equivalent") {
     const message = relation.message || "Local HEAD, last reviewed commit, and PR head must match";
     return relation.status === "blocked"
       ? shared.blockedResult(CHECK_TYPE, message, "dependency_error")
       : shared.failResult(CHECK_TYPE, message, "check_failed");
   }
+  return null;
+}
 
+function requiredChecksSnapshotResult(inspection: any, relation: any, prHead: any, shared: any): any {
   const state = inspection.checks?.state;
   if (state === "passed" || state === "no-required") {
     const suffix = relation.status === "merged-equivalent" ? " via verified squash merge equivalence" : "";
@@ -82,6 +102,23 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
     return shared.blockedResult(CHECK_TYPE, inspection.error?.message || "Required checks are pending", "check_pending");
   }
   return shared.failResult(CHECK_TYPE, inspection.error?.message || `Required checks are ${state || "unavailable"}`, "check_failed");
+}
+
+export function evaluateRequiredChecks(context: any, shared: any): any {
+  const applicability = requiredChecksApplicabilityResult(context, shared);
+  if (applicability) return applicability;
+
+  const headError = requiredChecksHeadResult(context, shared);
+  if (headError) return headError;
+
+  const inspectionError = requiredChecksInspectionResult(context.inspection, shared);
+  if (inspectionError) return inspectionError;
+
+  const { prHead, relation } = resolveRequiredChecksHeadRelation(context);
+  const relationError = requiredChecksRelationResult(relation, shared);
+  if (relationError) return relationError;
+
+  return requiredChecksSnapshotResult(context.inspection, relation, prHead, shared);
 }
 
 export async function check({ taskDir }: any, shared: any): Promise<any> {
