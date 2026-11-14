@@ -117,15 +117,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "499ff42a8b3600da3799c86977c192b0777809989aa856065e598b7a90dd3f3c",
-      "displayName": "bindPlatformPullRequestImpl",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "tests/integration/platform-smoke/platform/pull-requests.test.ts",
       "ruleId": "complexity",
       "stableId": "608b7ab9684a84ec2cc8ec95044d5f27a3272f43756df6a92d257f9b0147b106",
@@ -684,15 +675,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "cc85dee9088ceac512966030d3cf60f7331f8022dead46196f678ac7b6a1230b",
-      "displayName": "normalizeProviderPullRequest",
-      "metric": 42,
-      "normalizedMessage": "complexity=42",
-      "count": 1
-    },
-    {
       "file": "lib/task/events.ts",
       "ruleId": "complexity",
       "stableId": "1339308d9f11e395dba73f210ae6f12a01531c74d386e6c6004d0472fae0cc86",
@@ -1086,15 +1068,6 @@
       "displayName": "resolveContext",
       "metric": 28,
       "normalizedMessage": "complexity=28",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "4533240ceed2823b477e215ecdb7c719f54dc099d80efc9d71ef635e6dc4af6b",
-      "displayName": "resolveExternalPullRequest",
-      "metric": 48,
-      "normalizedMessage": "complexity=48",
       "count": 1
     },
     {
