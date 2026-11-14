@@ -50,27 +50,24 @@ function clientError(
   throw new SandboxControlClientError({ code, message: `${code}: ${message}`, retryable }, accepted, requestId);
 }
 
-function preflight(
-  statusDir: string,
-  taskViewEffect: TaskViewAccessEffect | null = null,
-  now = Date.now(),
-  env: NodeJS.ProcessEnv = process.env
-): string {
-  if (fs.existsSync(statusDir)) {
-    let identity;
-    try {
-      identity = readSandboxControlIdentitySentinel(statusDir);
-    } catch (error) {
-      const code = error instanceof Error && error.message.endsWith('MISSING')
-        ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
-        : 'SANDBOX_CONTROL_IDENTITY_MALFORMED';
-      clientError(code, 'sandbox control identity is missing or invalid', false);
-    }
-    if (env.AGENT_INFRA_CONTROL_ROOT_ID && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
-      clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
-    }
+function assertSandboxControlIdentity(statusDir: string, env: NodeJS.ProcessEnv): void {
+  if (!fs.existsSync(statusDir)) return;
+  let identity: ReturnType<typeof readSandboxControlIdentitySentinel>;
+  try {
+    identity = readSandboxControlIdentitySentinel(statusDir);
+  } catch (error) {
+    const code = error instanceof Error && error.message.endsWith('MISSING')
+      ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
+      : 'SANDBOX_CONTROL_IDENTITY_MALFORMED';
+    clientError(code, 'sandbox control identity is missing or invalid', false);
   }
-  let status;
+  if (env.AGENT_INFRA_CONTROL_ROOT_ID && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
+    clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
+  }
+}
+
+function readHealthySandboxControlStatus(statusDir: string, now: number): ReturnType<typeof readSandboxControlStatus> {
+  let status: ReturnType<typeof readSandboxControlStatus>;
   try {
     status = readSandboxControlStatus(statusDir);
   } catch {
@@ -85,20 +82,38 @@ function preflight(
     clientError(code, 'broker is parked until the host restores a valid binding', true);
   }
   if (status.state !== 'healthy') clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', 'broker is not ready', true);
-  if (taskViewEffect && hasTaskBoundMarker(env)) {
-    const view = taskViewFromStatus(status);
-    if (view.taskId !== env.AGENT_INFRA_TASK_ID) {
-      clientError('SANDBOX_TASK_VIEW_TASK_ID_MISMATCH', 'task view task id does not match the sandbox task marker', false);
-    }
-    const access = accessSandboxTaskView(view, taskViewEffect);
-    if (!access.allowed) {
-      clientError(
-        access.reasonCode ?? 'SANDBOX_TASK_VIEW_DENIED',
-        access.message ?? 'task view denied',
-        false
-      );
-    }
+  return status;
+}
+
+function assertSandboxTaskViewAccess(
+  status: ReturnType<typeof readSandboxControlStatus>,
+  taskViewEffect: TaskViewAccessEffect | null,
+  env: NodeJS.ProcessEnv
+): void {
+  if (!taskViewEffect || !hasTaskBoundMarker(env)) return;
+  const view = taskViewFromStatus(status);
+  if (view.taskId !== env.AGENT_INFRA_TASK_ID) {
+    clientError('SANDBOX_TASK_VIEW_TASK_ID_MISMATCH', 'task view task id does not match the sandbox task marker', false);
   }
+  const access = accessSandboxTaskView(view, taskViewEffect);
+  if (!access.allowed) {
+    clientError(
+      access.reasonCode ?? 'SANDBOX_TASK_VIEW_DENIED',
+      access.message ?? 'task view denied',
+      false
+    );
+  }
+}
+
+function preflight(
+  statusDir: string,
+  taskViewEffect: TaskViewAccessEffect | null = null,
+  now = Date.now(),
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  assertSandboxControlIdentity(statusDir, env);
+  const status = readHealthySandboxControlStatus(statusDir, now);
+  assertSandboxTaskViewAccess(status, taskViewEffect, env);
   return status.generation;
 }
 
@@ -140,6 +155,32 @@ function readPublishedResponse(raw: string, id: string, channelDir: string, acce
   return { ...response, stdout: payload.stdout, stderr: payload.stderr };
 }
 
+type MalformedResponseState = { raw: string | null; observedAt: number };
+
+function observeSandboxControlResponse(
+  raw: string,
+  id: string,
+  channelDir: string,
+  generation: string,
+  malformed: MalformedResponseState
+): SandboxControlResponse | null {
+  try {
+    const response = readPublishedResponse(raw, id, channelDir, true, generation);
+    malformed.raw = null;
+    return response;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    const now = Date.now();
+    if (malformed.raw !== raw) {
+      malformed.raw = raw;
+      malformed.observedAt = now;
+    } else if (now - malformed.observedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
+      clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, true, id);
+    }
+    return null;
+  }
+}
+
 function cancelPendingRequest(requestPath: string): boolean {
   try {
     fs.unlinkSync(requestPath);
@@ -179,25 +220,25 @@ function canonicalRequestTask(request: SandboxControlRequest): CanonicalRequestT
   return resolved ? { kind: 'task', taskId: resolved } : { kind: 'unresolved' };
 }
 
-function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly<{
-  channelDir?: string;
-  statusDir?: string;
-  timeoutMs?: number;
-}>): SandboxControlResponse {
-  const channelDir = params.channelDir ?? process.env.AGENT_INFRA_CONTROL_DIR ?? '/run/agent-infra/control';
-  const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
-  const taskViewEffect = taskViewEffectForRequest(request);
-  const hostGeneration = preflight(statusDir, taskViewEffect);
-  if (fs.existsSync(statusDir)) {
-    const identity = readSandboxControlIdentitySentinel(statusDir);
-    const requestTask = canonicalRequestTask(request);
-    if (identity.mode === 'task-bound'
-      && ((process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== identity.taskId)
-        || requestTask.kind === 'unresolved'
-        || (requestTask.kind === 'task' && requestTask.taskId !== identity.taskId))) {
-      clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
-    }
+function assertSandboxControlRequestIdentity(statusDir: string, request: SandboxControlRequest): void {
+  if (!fs.existsSync(statusDir)) return;
+  const identity = readSandboxControlIdentitySentinel(statusDir);
+  const requestTask = canonicalRequestTask(request);
+  if (identity.mode === 'task-bound'
+    && ((process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== identity.taskId)
+      || requestTask.kind === 'unresolved'
+      || (requestTask.kind === 'task' && requestTask.taskId !== identity.taskId))) {
+    clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
   }
+}
+
+type PublishedSandboxControlRequest = Readonly<{
+  responsesDir: string;
+  requestPath: string;
+  responsePath: string;
+}>;
+
+function publishSandboxControlRequest(channelDir: string, request: SandboxControlRequest): PublishedSandboxControlRequest {
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
     clientError('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit', false, false, request.id);
@@ -212,61 +253,35 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   }
   fs.writeFileSync(temporary, encoded, { mode: 0o600, flag: 'wx' });
   fs.renameSync(temporary, requestPath);
-  const deadline = Date.now() + (params.timeoutMs ?? 30_000);
-  let accepted = false;
-  let malformedResponseRaw: string | null = null;
-  let malformedResponseObservedAt = 0;
-  while (Date.now() < deadline) {
-    const acceptedPath = path.join(responsesDir, `${request.id}.accepted.json`);
-    if (fs.existsSync(acceptedPath)) accepted = true;
-    if (fs.existsSync(responsePath)) {
-      let raw: string;
-      try {
-        raw = fs.readFileSync(responsePath, 'utf8');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw error;
-      }
-      let response: SandboxControlResponse;
-      try {
-        // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
-        accepted = true;
-        response = readPublishedResponse(raw, request.id, channelDir, accepted, hostGeneration);
-        malformedResponseRaw = null;
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-        const now = Date.now();
-        if (malformedResponseRaw !== raw) {
-          malformedResponseRaw = raw;
-          malformedResponseObservedAt = now;
-        } else if (now - malformedResponseObservedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
-          clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted, request.id);
-        }
-        sleep(25);
-        continue;
-      }
-      if (response.phase === 'accepted') {
-        accepted = true;
-      } else {
-        return response;
-      }
-    }
-    if (!accepted) {
-      try {
-        preflight(statusDir, taskViewEffect);
-      } catch (error) {
-        if (cancelPendingRequest(requestPath)) throw error;
-        clientError(
-          'SANDBOX_CONTROL_RESULT_UNKNOWN',
-          'request was claimed before broker availability was lost; inspect domain state before retrying',
-          false,
-          true,
-          request.id
-        );
-      }
-    }
-    sleep(25);
+  return { responsesDir, requestPath, responsePath };
+}
+
+function recheckSandboxControlBeforeAcceptance(
+  statusDir: string,
+  taskViewEffect: TaskViewAccessEffect | null,
+  request: SandboxControlRequest,
+  requestPath: string
+): void {
+  try {
+    preflight(statusDir, taskViewEffect);
+  } catch (error) {
+    if (cancelPendingRequest(requestPath)) throw error;
+    clientError(
+      'SANDBOX_CONTROL_RESULT_UNKNOWN',
+      'request was claimed before broker availability was lost; inspect domain state before retrying',
+      false,
+      true,
+      request.id
+    );
   }
+}
+
+function finishSandboxControlExchange(
+  request: SandboxControlRequest,
+  timeoutMs: number,
+  accepted: boolean,
+  requestPath: string
+): never {
   if (accepted) {
     clientError(
       'SANDBOX_CONTROL_RESULT_UNKNOWN',
@@ -285,7 +300,54 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       request.id
     );
   }
-  clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', `broker did not accept the request within ${params.timeoutMs ?? 30_000}ms`, true, false, request.id);
+  clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', `broker did not accept the request within ${timeoutMs}ms`, true, false, request.id);
+}
+
+function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly<{
+  channelDir?: string;
+  statusDir?: string;
+  timeoutMs?: number;
+}>): SandboxControlResponse {
+  const channelDir = params.channelDir ?? process.env.AGENT_INFRA_CONTROL_DIR ?? '/run/agent-infra/control';
+  const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
+  const taskViewEffect = taskViewEffectForRequest(request);
+  const hostGeneration = preflight(statusDir, taskViewEffect);
+  assertSandboxControlRequestIdentity(statusDir, request);
+  const { responsesDir, requestPath, responsePath } = publishSandboxControlRequest(channelDir, request);
+  const timeoutMs = params.timeoutMs ?? 30_000;
+  const deadline = Date.now() + timeoutMs;
+  let accepted = false;
+  const malformed: MalformedResponseState = { raw: null, observedAt: 0 };
+  while (Date.now() < deadline) {
+    const acceptedPath = path.join(responsesDir, `${request.id}.accepted.json`);
+    if (fs.existsSync(acceptedPath)) accepted = true;
+    if (fs.existsSync(responsePath)) {
+      let raw: string;
+      try {
+        raw = fs.readFileSync(responsePath, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
+      accepted = true;
+      const response = observeSandboxControlResponse(raw, request.id, channelDir, hostGeneration, malformed);
+      if (!response) {
+        sleep(25);
+        continue;
+      }
+      if (response.phase === 'accepted') {
+        accepted = true;
+      } else {
+        return response;
+      }
+    }
+    if (!accepted) {
+      recheckSandboxControlBeforeAcceptance(statusDir, taskViewEffect, request, requestPath);
+    }
+    sleep(25);
+  }
+  return finishSandboxControlExchange(request, timeoutMs, accepted, requestPath);
 }
 
 export function recoverSandboxControl(requestId: string, params: Readonly<{
@@ -339,8 +401,7 @@ export function recoverSandboxControlFromChannel(requestId: string, params: Read
   const responsePath = path.join(channelDir, 'responses', `${requestId}.json`);
   const deadline = Date.now() + (params.timeoutMs ?? 30_000);
   let accepted = false;
-  let malformedResponseRaw: string | null = null;
-  let malformedResponseObservedAt = 0;
+  const malformed: MalformedResponseState = { raw: null, observedAt: 0 };
   while (Date.now() < deadline) {
     if (fs.existsSync(path.join(channelDir, 'responses', `${requestId}.accepted.json`))) accepted = true;
     if (fs.existsSync(responsePath)) {
@@ -351,21 +412,10 @@ export function recoverSandboxControlFromChannel(requestId: string, params: Read
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
         throw error;
       }
-      let response: SandboxControlResponse;
-      try {
-        // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
-        accepted = true;
-        response = readPublishedResponse(raw, requestId, channelDir, accepted, params.generation);
-        malformedResponseRaw = null;
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-        const now = Date.now();
-        if (malformedResponseRaw !== raw) {
-          malformedResponseRaw = raw;
-          malformedResponseObservedAt = now;
-        } else if (now - malformedResponseObservedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
-          clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted, requestId);
-        }
+      // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
+      accepted = true;
+      const response = observeSandboxControlResponse(raw, requestId, channelDir, params.generation, malformed);
+      if (!response) {
         const remainingMs = deadline - Date.now();
         if (remainingMs > 0) sleep(Math.min(25, Math.ceil(remainingMs)));
         continue;
