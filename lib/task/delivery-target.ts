@@ -31,18 +31,35 @@ function invalid(field: string, value: unknown): DeliveryTargetResult {
   return { ok: false, code: 'DELIVERY_TARGET_INVALID', message: `${field} is invalid: ${String(value ?? '')}` };
 }
 
-function bindDeliveryTarget(input: DeliveryTargetBindingInput): DeliveryTargetResult {
-  const remote = input.existing?.remote ?? input.explicit?.remote ?? input.defaults?.remote;
-  const baseRef = input.existing?.baseRef ?? input.explicit?.baseRef ?? input.defaults?.baseRef;
+function selectDeliveryTarget(input: DeliveryTargetBindingInput): { remote: unknown; baseRef: unknown } {
+  return {
+    remote: input.existing?.remote ?? input.explicit?.remote ?? input.defaults?.remote,
+    baseRef: input.existing?.baseRef ?? input.explicit?.baseRef ?? input.defaults?.baseRef
+  };
+}
+
+function deliveryTargetConflict(input: DeliveryTargetBindingInput): DeliveryTargetResult | null {
   if (input.existing?.remote !== undefined && input.explicit?.remote !== undefined && input.existing.remote !== input.explicit.remote) {
     return { ok: false, code: 'DELIVERY_TARGET_CONFLICT', message: 'Explicit delivery remote does not match the task binding' };
   }
   if (input.existing?.baseRef !== undefined && input.explicit?.baseRef !== undefined && input.existing.baseRef !== input.explicit.baseRef) {
     return { ok: false, code: 'DELIVERY_TARGET_CONFLICT', message: 'Explicit delivery base ref does not match the task binding' };
   }
+  return null;
+}
+
+function validateSelectedDeliveryTarget(selected: { remote: unknown; baseRef: unknown }): DeliveryTargetResult {
+  const { remote, baseRef } = selected;
   if (!validateRemote(remote)) return invalid('delivery remote', remote);
   if (!validateBaseRef(baseRef)) return invalid('delivery base ref', baseRef);
   return { ok: true, value: { remote, baseRef } };
+}
+
+function bindDeliveryTarget(input: DeliveryTargetBindingInput): DeliveryTargetResult {
+  const selected = selectDeliveryTarget(input);
+  const conflict = deliveryTargetConflict(input);
+  if (conflict) return conflict;
+  return validateSelectedDeliveryTarget(selected);
 }
 
 function readDeliveryDefaults(repoRoot: string): DeliveryTargetResult {
