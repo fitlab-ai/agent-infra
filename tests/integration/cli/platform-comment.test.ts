@@ -101,6 +101,35 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.match(restored, /# Task/);
 });
 
+test('platform-comment owner reports ownership conflicts and duplicate task markers without writes', () => {
+  const f = fixture();
+  try {
+    const synced = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
+    assert.equal(synced.status, 0, synced.stderr || synced.stdout);
+    const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ id: number; body: string; user: { login: string } }>;
+    assert.equal(comments.length, 1);
+
+    const noOp = runComment(['owner', f.taskId], f);
+    assert.equal(noOp.status, 0, noOp.stderr || noOp.stdout);
+    assert.equal(JSON.parse(noOp.stdout).status, 'no-op');
+
+    f.env.GH_FAKE_USER = 'antigravity';
+    f.env.GH_FAKE_PERMISSIONS = JSON.stringify({ triage: false, push: false, admin: false });
+    const conflict = runComment(['owner', f.taskId], f);
+    assert.equal(conflict.status, 2, conflict.stderr || conflict.stdout);
+    assert.equal(JSON.parse(conflict.stdout).error.code, 'COMMENT_OWNER_CONFLICT');
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+
+    fs.writeFileSync(f.commentsPath, JSON.stringify([...comments, { ...comments[0]!, id: 2 }]));
+    const duplicate = runComment(['owner', f.taskId], f);
+    assert.equal(duplicate.status, 1, duplicate.stderr || duplicate.stdout);
+    assert.equal(JSON.parse(duplicate.stdout).error.code, 'COMMENT_MARKER_CONFLICT');
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 2);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('platform-comment preserves source content including local-looking artifact links', () => {
   const taskFixture = fixture();
   try {
