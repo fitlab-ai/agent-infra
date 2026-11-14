@@ -513,15 +513,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/client.ts",
-      "ruleId": "complexity",
-      "stableId": "ce723c6bf066cc2c33cf9542f0fd2cd1d60d406c2f6e8feeeecf6d136265c483",
-      "displayName": "exchangeSandboxControl",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
       "file": "lib/task/artifact-command.ts",
       "ruleId": "complexity",
       "stableId": "6066e47b088d92b012120757956f6ff731969948f98bb9bb21496528f3e5b0c6",
@@ -855,15 +846,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/client.ts",
-      "ruleId": "complexity",
-      "stableId": "94dc295c317a3bcae87ec7fb011669d8a2aa131a24840df5c0259cffc249023a",
-      "displayName": "preflight",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "stableId": "e93ef3cd3d3deb52c363dcbec7d8623c57fc6ccdfbdbe96ff95869b373fa77a4",
@@ -1050,15 +1032,6 @@
       "displayName": "recoverProcessing",
       "metric": 92,
       "normalizedMessage": "complexity=92",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/control/client.ts",
-      "ruleId": "complexity",
-      "stableId": "0acdb352c43425b03e7fe40b8e7ee51d06611eaed6a8731a087bd0bb2cde201c",
-      "displayName": "recoverSandboxControlFromChannel",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
       "count": 1
     },
     {
