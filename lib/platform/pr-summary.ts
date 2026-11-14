@@ -36,6 +36,7 @@ import {
 } from './pr-change-report.ts';
 import type {
   MechanicalChangeReport,
+  PrecheckCandidate,
   PrChangeReport
 } from './pr-change-report.ts';
 import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
@@ -478,46 +479,72 @@ async function inspectBoundPullRequest(
     const error = providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED');
     return { ok: false, status: inspectionError(error), error };
   }
-  const remote: ChangeRequestSnapshot = inspected.value;
+  return normalizeBoundPullRequestSnapshot(context.platform.repository, prIdentity, inspected.value);
+}
+
+function normalizeBoundPullRequestSnapshot(
+  repository: string,
+  prIdentity: ResourceIdentity,
+  remote: ChangeRequestSnapshot
+): { ok: true; value: PlatformChangeRequestSnapshot } | { ok: false; error: PlatformResult['error']; status: PlatformResult['status'] } {
+  const identityError = boundPullRequestIdentityError(prIdentity, remote);
+  if (identityError) return { ok: false, status: 'failed', error: identityError };
+  return { ok: true, value: mapBoundPullRequestSnapshot(repository, prIdentity, remote) };
+}
+
+function boundPullRequestIdentityError(
+  prIdentity: ResourceIdentity,
+  remote: ChangeRequestSnapshot
+): PlatformResult['error'] | null {
   if (!remote.identity) {
-    return {
-      ok: false,
-      status: 'failed',
-      error: { code: 'PR_IDENTITY_MISSING', message: 'Provider pull-request inspection did not return a canonical identity', retryable: false }
-    };
+    return { code: 'PR_IDENTITY_MISSING', message: 'Provider pull-request inspection did not return a canonical identity', retryable: false };
   }
   if (!resourceIdentityEquals(remote.identity, prIdentity)) {
-    return {
-      ok: false,
-      status: 'failed',
-      error: { code: 'PR_IDENTITY_MISMATCH', message: 'Provider returned a different pull request identity than requested', retryable: false }
-    };
+    return { code: 'PR_IDENTITY_MISMATCH', message: 'Provider returned a different pull request identity than requested', retryable: false };
   }
+  return null;
+}
+
+function mapBoundPullRequestSnapshot(
+  repository: string,
+  prIdentity: ResourceIdentity,
+  remote: ChangeRequestSnapshot
+): PlatformChangeRequestSnapshot {
   const number = remote.number ?? resourceIdentityNumber(remote.identity) ?? resourceIdentityNumber(prIdentity) ?? 0;
-  const head = remote.head || { repository: context.platform.repository, ref: '', sha: remote.headSha || '' };
-  const base = remote.base || { repository: context.platform.repository, ref: '', sha: remote.baseSha || '' };
+  const { head, base } = boundPullRequestBranches(repository, remote);
   return {
-    ok: true,
-    value: {
-      repository: context.platform.repository,
-      number,
-      identity: remote.identity,
-      nodeId: remote.id,
-      url: remote.displayUrl || '',
-      state: remote.state === 'closed' ? 'closed' : 'open',
-      title: remote.title,
-      body: remote.body,
-      draft: remote.draft ?? false,
-      head: { ...head, sha: remote.headSha || head.sha },
-      base: { ...base, sha: remote.baseSha || base.sha },
-      mergedAt: remote.mergedAt ?? null,
-      mergeCommitSha: remote.mergeCommitSha ?? null,
-      labels: [...(remote.labels || [])].sort(),
-      assignees: [...(remote.assignees || [])].sort(),
-      milestone: remote.milestone ?? null,
-      mergeability: remote.mergeability || { state: 'unknown', detail: null }
-    }
+    repository,
+    number,
+    identity: remote.identity,
+    nodeId: remote.id,
+    url: remote.displayUrl || '',
+    state: remote.state === 'closed' ? 'closed' : 'open',
+    title: remote.title,
+    body: remote.body,
+    draft: remote.draft ?? false,
+    head: { ...head, sha: remote.headSha || head.sha },
+    base: { ...base, sha: remote.baseSha || base.sha },
+    mergedAt: remote.mergedAt ?? null,
+    mergeCommitSha: remote.mergeCommitSha ?? null,
+    labels: sortedSnapshotValues(remote.labels),
+    assignees: sortedSnapshotValues(remote.assignees),
+    milestone: remote.milestone ?? null,
+    mergeability: remote.mergeability || { state: 'unknown', detail: null }
   };
+}
+
+function boundPullRequestBranches(
+  repository: string,
+  remote: ChangeRequestSnapshot
+): { head: NonNullable<ChangeRequestSnapshot['head']>; base: NonNullable<ChangeRequestSnapshot['base']> } {
+  return {
+    head: remote.head || { repository, ref: '', sha: remote.headSha || '' },
+    base: remote.base || { repository, ref: '', sha: remote.baseSha || '' }
+  };
+}
+
+function sortedSnapshotValues(values: string[] | undefined): string[] {
+  return [...(values || [])].sort();
 }
 
 async function summaryPullRequestContext(
@@ -704,6 +731,113 @@ type ReportWriteOptions = {
   dryRun?: boolean;
 };
 
+type BoundReportWriteTask = {
+  taskContent: string;
+  identity: ResourceIdentity;
+  prNumber: number | null;
+};
+
+type ReportWritePreparation =
+  | { ok: true; initial: PlatformChangeRequestSnapshot; report: PrChangeReport }
+  | { ok: false; status: PlatformResult['status']; error: NonNullable<PlatformResult['error']> };
+
+type ReportWriteInputs =
+  | { ok: true; mechanical: MechanicalChangeReport; candidate: PrecheckCandidate }
+  | { ok: false; error: NonNullable<PlatformResult['error']> };
+
+function readReportWriteInputs(repoRoot: string, options: ReportWriteOptions): ReportWriteInputs {
+  const mechanicalInput = readJsonInput(path.resolve(repoRoot, options.mechanicalFile));
+  if (!mechanicalInput.ok) return mechanicalInput;
+  const mechanical = validateMechanicalReport(mechanicalInput.value);
+  if (!mechanical.ok) return { ok: false, error: platformError(mechanical.error) };
+  const candidateInput = readJsonInput(path.resolve(repoRoot, options.precheckFile));
+  if (!candidateInput.ok) return candidateInput;
+  const candidate = validatePrecheckCandidate(candidateInput.value);
+  if (!candidate.ok) return { ok: false, error: platformError(candidate.error) };
+  return { ok: true, mechanical: mechanical.value, candidate: candidate.value };
+}
+
+async function prepareReportWrite(
+  resolved: ResolvedTaskRef,
+  options: ReportWriteOptions,
+  context: PlatformResult,
+  loaded: LoadedContext,
+  task: BoundReportWriteTask
+): Promise<ReportWritePreparation> {
+  const initial = await inspectBoundPullRequest(context, resolved.repoRoot, task.identity, loaded);
+  if (!initial.ok) return { ok: false, status: initial.status, error: initial.error! };
+  const digest = taskIntentDigest(task.taskContent);
+  if (!digest.ok) return { ok: false, status: 'failed', error: platformError(digest.error) };
+  const inputs = readReportWriteInputs(resolved.repoRoot, options);
+  if (!inputs.ok) return { ok: false, status: 'failed', error: inputs.error };
+  let recomputed: MechanicalChangeReport;
+  try {
+    recomputed = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha);
+  } catch (error) {
+    return {
+      ok: false,
+      status: 'failed',
+      error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
+    };
+  }
+  if (!sameMechanical(inputs.mechanical, recomputed)) return {
+    ok: false,
+    status: 'failed',
+    error: { code: 'PR_CHANGE_REPORT_MECHANICAL_MISMATCH', message: 'Mechanical report input does not match the current complete diff', retryable: false }
+  };
+  const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
+  if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
+  return { ok: true, initial: initial.value, report: built.value };
+}
+
+async function finishReportWrite(
+  resolved: ResolvedTaskRef,
+  options: ReportWriteOptions,
+  context: PlatformResult,
+  loaded: LoadedContext,
+  task: BoundReportWriteTask,
+  prepared: Extract<ReportWritePreparation, { ok: true }>
+): Promise<ReportWriteResult> {
+  const final = await inspectBoundPullRequest(context, resolved.repoRoot, task.identity, loaded);
+  if (!final.ok) return {
+    ...basePlatformResult(final.status, context, resolved.taskId, task.prNumber, final.error),
+    report: null
+  };
+  if (!sameIdentity(prepared.initial, final.value)) return {
+    ...basePlatformResult('blocked', context, resolved.taskId, task.prNumber, {
+      code: 'PR_CHANGE_REPORT_HEAD_RACE', message: 'Pull request identity changed while generating the change report', retryable: true
+    }),
+    report: null
+  };
+  const target = taskReportPath(resolved.taskDir);
+  const reportInfo = { path: target, precheckVerdict: prepared.report.precheck.verdict, nextAction: prepared.report.precheck.route } as const;
+  const existing = readPrChangeReport(target);
+  if (existing.ok && JSON.stringify(existing.value) === JSON.stringify(prepared.report)) return {
+    ...basePlatformResult('no-op', context, resolved.taskId, task.prNumber),
+    report: { ...reportInfo, status: 'no-op' }
+  };
+  if (options.dryRun) return {
+    ...basePlatformResult('planned', context, resolved.taskId, task.prNumber),
+    operations: [{ name: 'change-report:write', status: 'planned', reasonCode: null }],
+    report: { ...reportInfo, status: 'planned' }
+  };
+  try {
+    writePrChangeReportAtomic(target, prepared.report);
+  } catch (error) {
+    return {
+      ...basePlatformResult('failed', context, resolved.taskId, task.prNumber, {
+        code: 'PR_CHANGE_REPORT_WRITE_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false
+      }),
+      report: null
+    };
+  }
+  return {
+    ...basePlatformResult('applied', context, resolved.taskId, task.prNumber),
+    operations: [{ name: 'change-report:write', status: 'applied', reasonCode: null }],
+    report: { ...reportInfo, status: 'written' }
+  };
+}
+
 async function reportWrite(taskRef: string, options: ReportWriteOptions): Promise<ReportWriteResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ...platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }), report: null };
@@ -725,76 +859,27 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ...context, report: null };
   let knownPrNumber: number | null = null;
   try {
-    return await (async () => {
-      const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
-      if (factError) return {
-        ...basePlatformResult('failed', context, resolved.taskId, null, { code: factError.code, message: factError.message, retryable: false }),
-        report: null
-      };
-      if (!boundFact) return {
-        ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }),
-        report: null
-      };
-      const boundPrIdentity = boundFact.identity.resource;
-      const boundPrNumber = resourceIdentityNumber(boundPrIdentity);
-      knownPrNumber = boundPrNumber;
-      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrIdentity, loaded.value);
-      if (!initial.ok) return { ...basePlatformResult(initial.status, context, resolved.taskId, boundPrNumber, initial.error), report: null };
-      const digest = taskIntentDigest(taskContent);
-      if (!digest.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(digest.error)), report: null };
-      const mechanicalInput = readJsonInput(path.resolve(resolved.repoRoot, options.mechanicalFile));
-      if (!mechanicalInput.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, mechanicalInput.error), report: null };
-      const mechanical = validateMechanicalReport(mechanicalInput.value);
-      if (!mechanical.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(mechanical.error)), report: null };
-      const candidateInput = readJsonInput(path.resolve(resolved.repoRoot, options.precheckFile));
-      if (!candidateInput.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, candidateInput.error), report: null };
-      const candidate = validatePrecheckCandidate(candidateInput.value);
-      if (!candidate.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(candidate.error)), report: null };
-      let recomputed: MechanicalChangeReport;
-      try {
-        recomputed = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha);
-      } catch (error) {
-        return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }), report: null };
-      }
-      if (!sameMechanical(mechanical.value, recomputed)) return {
-        ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, { code: 'PR_CHANGE_REPORT_MECHANICAL_MISMATCH', message: 'Mechanical report input does not match the current complete diff', retryable: false }),
-        report: null
-      };
-      const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, mechanical.value, candidate.value);
-      if (!built.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(built.error)), report: null };
-      const final = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrIdentity, loaded.value);
-      if (!final.ok) return { ...basePlatformResult(final.status, context, resolved.taskId, boundPrNumber, final.error), report: null };
-      if (!sameIdentity(initial.value, final.value)) return {
-        ...basePlatformResult('blocked', context, resolved.taskId, boundPrNumber, { code: 'PR_CHANGE_REPORT_HEAD_RACE', message: 'Pull request identity changed while generating the change report', retryable: true }),
-        report: null
-      };
-      const target = taskReportPath(resolved.taskDir);
-      const existing = readPrChangeReport(target);
-      const reportInfo = {
-        path: target,
-        precheckVerdict: built.value.precheck.verdict,
-        nextAction: built.value.precheck.route
-      } as const;
-      if (existing.ok && JSON.stringify(existing.value) === JSON.stringify(built.value)) return {
-        ...basePlatformResult('no-op', context, resolved.taskId, boundPrNumber),
-        report: { ...reportInfo, status: 'no-op' }
-      };
-      if (options.dryRun) return {
-        ...basePlatformResult('planned', context, resolved.taskId, boundPrNumber),
-        operations: [{ name: 'change-report:write', status: 'planned', reasonCode: null }],
-        report: { ...reportInfo, status: 'planned' }
-      };
-      try {
-        writePrChangeReportAtomic(target, built.value);
-      } catch (error) {
-        return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, { code: 'PR_CHANGE_REPORT_WRITE_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }), report: null };
-      }
-      return {
-        ...basePlatformResult('applied', context, resolved.taskId, boundPrNumber),
-        operations: [{ name: 'change-report:write', status: 'applied', reasonCode: null }],
-        report: { ...reportInfo, status: 'written' }
-      };
-    })();
+    const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
+    if (factError) return {
+      ...basePlatformResult('failed', context, resolved.taskId, null, { code: factError.code, message: factError.message, retryable: false }),
+      report: null
+    };
+    if (!boundFact) return {
+      ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }),
+      report: null
+    };
+    const task: BoundReportWriteTask = {
+      taskContent,
+      identity: boundFact.identity.resource,
+      prNumber: resourceIdentityNumber(boundFact.identity.resource)
+    };
+    knownPrNumber = task.prNumber;
+    const prepared = await prepareReportWrite(resolved, options, context, loaded.value, task);
+    if (!prepared.ok) return {
+      ...basePlatformResult(prepared.status, context, resolved.taskId, task.prNumber, prepared.error),
+      report: null
+    };
+    return await finishReportWrite(resolved, options, context, loaded.value, task, prepared);
   } catch (error) {
     return { ...basePlatformResult('failed', context, resolved.taskId, knownPrNumber, { code: 'PR_CHANGE_REPORT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }), report: null };
   }

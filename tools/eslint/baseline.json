@@ -549,15 +549,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pr-summary.ts",
-      "ruleId": "complexity",
-      "stableId": "3dd5220037fa1085c84a1a4c6c5eb6d13b364d0abd0a317e59d183ca9a9408f5",
-      "displayName": "inspectBoundPullRequest",
-      "metric": 27,
-      "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
       "file": "lib/platform/github-data.ts",
       "ruleId": "complexity",
       "stableId": "d5c37bb20edb2cbf5cf106d97794a174ff7262d5a144a139ace34cc34a94d393",
@@ -978,15 +969,6 @@
       "displayName": "replayIssueMetadata",
       "metric": 26,
       "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pr-summary.ts",
-      "ruleId": "complexity",
-      "stableId": "8cf638f301a90033027f383fef6bcc662d3c1c7869e4afde3b30b96f1f79fbc3",
-      "displayName": "reportWrite.<anonymous ArrowFunctionExpression#1>",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
       "count": 1
     },
     {
