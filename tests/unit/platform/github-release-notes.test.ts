@@ -127,6 +127,77 @@ test('collector uses the merged commit association when a PR commit SHA was rewr
   assert.deepEqual(result.commits[0]?.pullRequestNumbers, [17]);
 });
 
+test('collector filters release history and follows closing issue cursors', () => {
+  const closingIssueCalls: string[][] = [];
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args) {
+      if (args[0] === 'release' && args[1] === 'list') {
+        return { ok: true, value: [
+          { tagName: 'draft', isDraft: true, isPrerelease: false },
+          { tagName: 'preview', isDraft: false, isPrerelease: true },
+          { tagName: 'v1.2.0', isDraft: false, isPrerelease: false },
+          { tagName: 'v1.1.0', isDraft: false, isPrerelease: false }
+        ] } as never;
+      }
+      if (args[0] === 'release' && args[1] === 'view') {
+        return { ok: true, value: { body: args[2], url: `https://example/releases/${args[2]}` } } as never;
+      }
+      if (args[0] === 'pr') {
+        return { ok: true, value: [{
+          number: 17, title: 'fix: keep pagination', body: '', url: 'https://example/pull/17',
+          mergedAt: '2026-09-01T12:00:00Z', labels: [], author: { login: 'author' }
+        }] } as never;
+      }
+      closingIssueCalls.push(args);
+      const hasCursor = args.includes('cursor=cursor-1');
+      return {
+        ok: true,
+        value: { data: { repository: { pullRequest: { closingIssuesReferences: {
+          nodes: [hasCursor
+            ? { number: 9, title: 'Second issue', url: 'https://example/issues/9', author: { login: 'second' } }
+            : { number: 8, title: 'First issue', url: 'https://example/issues/8', author: { login: 'first' } }
+          ],
+          pageInfo: hasCursor
+            ? { hasNextPage: false, endCursor: null }
+            : { hasNextPage: true, endCursor: 'cursor-1' }
+        } } } } }
+      } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+
+  const result = fetchGitHubReleaseNoteData({
+    repository: 'example/project', commitOids: [], branch: 'main', historyLimit: 1,
+    fromTime: '2026-09-01T00:00:00Z', toTime: '2026-09-02T00:00:00Z'
+  }, { client });
+
+  assert.equal(result.status, 'no-op', JSON.stringify(result));
+  if (result.status !== 'no-op') return;
+  assert.deepEqual(result.history, [{
+    tag: 'v1.2.0', body: 'v1.2.0', url: 'https://example/releases/v1.2.0'
+  }]);
+  assert.equal(closingIssueCalls.length, 2);
+  assert.ok(closingIssueCalls[1]?.includes('cursor=cursor-1'));
+  assert.deepEqual(result.pullRequests[0]?.closingIssues.map((issue) => issue.number), [8, 9]);
+});
+
+test('collector maps retryable platform failures to blocked results', () => {
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json: () => ({ ok: false, error: { code: 'PLATFORM_UNAVAILABLE', message: 'temporary failure', retryable: true } }) as never,
+    text: () => ({ ok: true, value: '' })
+  };
+
+  const result = fetchGitHubReleaseNoteData({
+    repository: 'example/project', commitOids: [], branch: 'main', historyLimit: 1,
+    fromTime: '2026-09-01T00:00:00Z', toTime: '2026-09-02T00:00:00Z'
+  }, { client });
+
+  assert.equal(result.status, 'blocked');
+  assert.deepEqual(result.error, { code: 'PLATFORM_UNAVAILABLE', message: 'temporary failure' });
+});
+
 test('publishing edits an existing published release and creates a missing release', () => {
   const calls: string[][] = [];
   const existing: GitHubClient = {
