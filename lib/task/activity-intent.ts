@@ -102,6 +102,21 @@ type RoundState = ArtifactRecord & {
   terminalAgent: string | null;
   terminalNote: string | null;
 };
+type SnapshotFailure = { ok: false; code: string; message: string; taskId: string | null };
+type SnapshotInput = {
+  ok: true;
+  taskId: string;
+  taskDir: string;
+  taskMdPath: string;
+  repoRoot: string;
+  content: string;
+  inventory: ReturnType<typeof inspectTaskArtifacts>;
+  pr: ReturnType<typeof prReviewExecution>;
+};
+type ActivityTransition =
+  | { kind: 'ready'; step: string; note: string; linkArtifact: boolean }
+  | { kind: 'no-op' }
+  | { kind: 'failed'; code: string; message: string };
 
 const HEAD_RE = /^[0-9a-f]{40}$/;
 const VERDICTS: ReadonlySet<string> = new Set(['approved', 'changes-requested', 'commented']);
@@ -161,9 +176,7 @@ function toIdentity(state: RoundState, terminal = false): PrReviewIdentity {
   };
 }
 
-function readSnapshot(taskRef: string, repoRoot?: string):
-  | { ok: true; taskId: string; taskDir: string; taskMdPath: string; repoRoot: string; content: string; states: RoundState[]; snapshot: PrReviewActivitySnapshot }
-  | { ok: false; code: string; message: string; taskId: string | null } {
+function readSnapshotInput(taskRef: string, repoRoot?: string): SnapshotInput | SnapshotFailure {
   const resolved = resolveTaskRef(taskRef, { repoRoot });
   if (!resolved.ok) return { ok: false, code: resolved.code, message: resolved.message, taskId: resolved.taskId };
   if (resolved.state !== 'active') {
@@ -185,51 +198,90 @@ function readSnapshot(taskRef: string, repoRoot?: string):
   let pr;
   try { pr = prReviewExecution(content); }
   catch (error) { return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: String(error), taskId: resolved.taskId }; }
-  const states: RoundState[] = [];
-  for (const identity of inventory.artifacts) {
-    const parsed = parseArtifactRecord(identity);
-    if ('code' in parsed) return { ok: false, ...parsed, taskId: resolved.taskId };
-    const started = pr.open?.artifact === identity.name ? pr.open : null;
-    const terminals = pr.terminals.filter((entry) => entry.artifact === identity.name);
-    if (terminals.length > 1) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `duplicate PR review terminal for ${identity.name}`, taskId: resolved.taskId };
-    const terminal = terminals[0];
-    if (terminal) {
-      const matches = (terminal.note.startsWith('Verdict: ') && LOCAL_COMPLETION_STATUSES.has(parsed.status))
-        || (terminal.note.startsWith('Outcome: Aborted, ') && parsed.status === 'aborted')
-        || (terminal.note.startsWith('Outcome: Superseded, ') && parsed.status === 'superseded')
-        || (terminal.note.startsWith('receipt ') && SUCCESS_STATUSES.has(parsed.status));
-      if (!matches) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `terminal note conflicts with artifact status ${parsed.status}`, taskId: resolved.taskId };
-    }
-    if ((started && started.head !== parsed.head) || (terminal && terminal.head !== parsed.head)) return { ok: false, code: 'ACTIVITY_IDENTITY_MISMATCH', message: `head does not match ${identity.name}`, taskId: resolved.taskId };
-    states.push({ ...parsed, startedAgent: started?.agent ?? null, terminalAgent: terminal?.agent ?? null, terminalNote: terminal?.note ?? null });
-  }
-  if ((pr.open && !states.some((state) => state.identity.name === pr.open!.artifact)) || pr.terminals.some((entry) => !states.some((state) => state.identity.name === entry.artifact))) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: 'PR review execution references a missing artifact', taskId: resolved.taskId };
+  return {
+    ok: true, taskId: resolved.taskId, taskDir: resolved.taskDir, taskMdPath: resolved.taskMdPath,
+    repoRoot: resolved.repoRoot, content, inventory, pr
+  };
+}
 
+function terminalStatusMatches(note: string, status: PrReviewArtifactStatus): boolean {
+  if (note.startsWith('Verdict: ')) return LOCAL_COMPLETION_STATUSES.has(status);
+  if (note.startsWith('Outcome: Aborted, ')) return status === 'aborted';
+  if (note.startsWith('Outcome: Superseded, ')) return status === 'superseded';
+  if (note.startsWith('receipt ')) return SUCCESS_STATUSES.has(status);
+  return false;
+}
+
+function findRoundExecution(identity: ArtifactIdentity, pr: ReturnType<typeof prReviewExecution>, taskId: string):
+  | { ok: true; started: NonNullable<typeof pr.open> | null; terminal: (typeof pr.terminals)[number] | undefined }
+  | SnapshotFailure {
+  const started = pr.open?.artifact === identity.name ? pr.open : null;
+  const terminals = pr.terminals.filter((entry) => entry.artifact === identity.name);
+  if (terminals.length > 1) return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `duplicate PR review terminal for ${identity.name}`, taskId };
+  return { ok: true, started, terminal: terminals[0] };
+}
+
+function validateRoundExecution(identity: ArtifactIdentity, parsed: ArtifactRecord, started: NonNullable<ReturnType<typeof prReviewExecution>['open']> | null, terminal: ReturnType<typeof prReviewExecution>['terminals'][number] | undefined, taskId: string): SnapshotFailure | null {
+  if (terminal && !terminalStatusMatches(terminal.note, parsed.status)) {
+    return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: `terminal note conflicts with artifact status ${parsed.status}`, taskId };
+  }
+  if ((started && started.head !== parsed.head) || (terminal && terminal.head !== parsed.head)) {
+    return { ok: false, code: 'ACTIVITY_IDENTITY_MISMATCH', message: `head does not match ${identity.name}`, taskId };
+  }
+  return null;
+}
+
+function readRoundState(identity: ArtifactIdentity, pr: ReturnType<typeof prReviewExecution>, taskId: string): RoundState | SnapshotFailure {
+  const parsed = parseArtifactRecord(identity);
+  if ('code' in parsed) return { ok: false, ...parsed, taskId };
+  const execution = findRoundExecution(identity, pr, taskId);
+  if (!execution.ok) return execution;
+  const invalid = validateRoundExecution(identity, parsed, execution.started, execution.terminal, taskId);
+  if (invalid) return invalid;
+  return { ...parsed, startedAgent: execution.started?.agent ?? null, terminalAgent: execution.terminal?.agent ?? null, terminalNote: execution.terminal?.note ?? null };
+}
+
+function hasExecutionArtifact(pr: ReturnType<typeof prReviewExecution>, states: readonly RoundState[]): boolean {
+  if (pr.open && !states.some((state) => state.identity.name === pr.open!.artifact)) return false;
+  return pr.terminals.every((entry) => states.some((state) => state.identity.name === entry.artifact));
+}
+
+function buildActivitySnapshot(states: readonly RoundState[], nextRound: number | undefined, taskId: string): PrReviewActivitySnapshot | SnapshotFailure {
   const openStates = states.filter((state) => state.startedAgent !== null && state.terminalNote === null);
   const preparedStates = states.filter((state) => state.status === 'pending' && state.startedAgent === null && state.terminalNote === null);
   if (openStates.length > 1 || preparedStates.length > 1) {
-    return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: 'multiple prepared or open PR review rounds exist', taskId: resolved.taskId };
+    return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: 'multiple prepared or open PR review rounds exist', taskId };
   }
   const terminalStates = states.filter((state) => state.terminalNote !== null);
   const successfulStates = states.filter((state) => SUCCESS_STATUSES.has(state.status));
   const latestTerminal = terminalStates.at(-1) ?? null;
   const latestSuccessful = successfulStates.at(-1) ?? null;
   return {
-    ok: true,
-    taskId: resolved.taskId,
-    taskDir: resolved.taskDir,
-    taskMdPath: resolved.taskMdPath,
-    repoRoot: resolved.repoRoot,
-    content,
-    states,
-    snapshot: {
-      nextRound: inventory.next?.round ?? 1,
-      prepared: preparedStates[0] ? toIdentity(preparedStates[0]) : null,
-      open: openStates[0] ? toIdentity(openStates[0]) : null,
-      latestTerminal: latestTerminal ? toIdentity(latestTerminal, true) : null,
-      latestSuccessful: latestSuccessful ? toIdentity(latestSuccessful, true) : null
-    }
+    nextRound: nextRound ?? 1,
+    prepared: preparedStates[0] ? toIdentity(preparedStates[0]) : null,
+    open: openStates[0] ? toIdentity(openStates[0]) : null,
+    latestTerminal: latestTerminal ? toIdentity(latestTerminal, true) : null,
+    latestSuccessful: latestSuccessful ? toIdentity(latestSuccessful, true) : null
   };
+}
+
+function readSnapshot(taskRef: string, repoRoot?: string):
+  | { ok: true; taskId: string; taskDir: string; taskMdPath: string; repoRoot: string; content: string; states: RoundState[]; snapshot: PrReviewActivitySnapshot }
+  | SnapshotFailure {
+  const input = readSnapshotInput(taskRef, repoRoot);
+  if (!input.ok) return input;
+  const states: RoundState[] = [];
+  for (const identity of input.inventory.artifacts) {
+    const state = readRoundState(identity, input.pr, input.taskId);
+    if ('ok' in state) return state;
+    states.push(state);
+  }
+  if (!hasExecutionArtifact(input.pr, states)) {
+    return { ok: false, code: 'ACTIVITY_STATE_CONFLICT', message: 'PR review execution references a missing artifact', taskId: input.taskId };
+  }
+  const snapshot = buildActivitySnapshot(states, input.inventory.next?.round, input.taskId);
+  if ('ok' in snapshot) return snapshot;
+  return { ...input, states, snapshot };
 }
 
 export function inspectPrReviewActivity(intent: PrReviewInspectIntent, options: Pick<ActivityIntentOptions, 'repoRoot'> = {}): PrReviewInspectionResult {
@@ -278,6 +330,33 @@ function terminalNote(intent: PrReviewCompleteIntent | PrReviewTerminateIntent):
   return `Outcome: ${outcomeLabel(intent.outcome)}, reason: ${intent.reason} → ${intent.artifact}`;
 }
 
+function decideStartTransition(roundState: RoundState, snapshot: PrReviewActivitySnapshot, base: string, artifact: string): ActivityTransition {
+  if (roundState.terminalNote !== null) return { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `${base} is already terminal` };
+  if (roundState.startedAgent !== null) return { kind: 'no-op' };
+  if (roundState.status !== 'pending') return { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `${artifact} must be pending before start` };
+  if (snapshot.open && snapshot.open.artifact !== artifact) {
+    return { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `another PR review round is open: ${snapshot.open.artifact}` };
+  }
+  return { kind: 'ready', step: `${base} [started]`, note: 'started', linkArtifact: false };
+}
+
+function decideTerminalTransition(intent: PrReviewCompleteIntent | PrReviewTerminateIntent, roundState: RoundState, base: string): ActivityTransition {
+  const note = terminalNote(intent);
+  if (roundState.terminalNote !== null) {
+    return roundState.terminalNote === note
+      ? { kind: 'no-op' }
+      : { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `${base} has a different terminal payload` };
+  }
+  if (roundState.startedAgent === null) return { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `${base} has no matching started row` };
+  if (intent.kind === 'pr-review-complete' && !LOCAL_COMPLETION_STATUSES.has(roundState.status)) {
+    return { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `${intent.artifact} must record a publication outcome before completion` };
+  }
+  if (intent.kind === 'pr-review-terminate' && roundState.status !== intent.outcome) {
+    return { kind: 'failed', code: 'ACTIVITY_STATE_CONFLICT', message: `${intent.artifact} status must match outcome ${intent.outcome}` };
+  }
+  return { kind: 'ready', step: base, note, linkArtifact: true };
+}
+
 function applyActivityIntent(intent: PrReviewActivityIntent, normalizedAgent: string, options: ActivityIntentOptions): PrReviewActivityResult {
   const state = readSnapshot(intent.taskRef, options.repoRoot);
   if (!state.ok) return failed(intent, state.code, state.message, state.taskId);
@@ -288,44 +367,12 @@ function applyActivityIntent(intent: PrReviewActivityIntent, normalizedAgent: st
     return failed(intent, 'ACTIVITY_IDENTITY_MISMATCH', `head does not match ${intent.artifact}`, state.taskId);
   }
   const base = `Review PR (Round ${parsed.round})`;
-  let step: string;
-  let note: string;
-  let linkArtifact = false;
-
-  if (intent.kind === 'pr-review-start') {
-    if (roundState.terminalNote !== null) {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${base} is already terminal`, state.taskId);
-    }
-    if (roundState.startedAgent !== null) {
-      return { status: 'no-op', changed: false, intent: intent.kind, taskId: state.taskId, artifact: intent.artifact, operations: [], error: null };
-    }
-    if (roundState.status !== 'pending') {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${intent.artifact} must be pending before start`, state.taskId);
-    }
-    if (state.snapshot.open && state.snapshot.open.artifact !== intent.artifact) {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `another PR review round is open: ${state.snapshot.open.artifact}`, state.taskId);
-    }
-    step = `${base} [started]`;
-    note = 'started';
-  } else {
-    note = terminalNote(intent);
-    if (roundState.terminalNote !== null) {
-      if (roundState.terminalNote === note) {
-        return { status: 'no-op', changed: false, intent: intent.kind, taskId: state.taskId, artifact: intent.artifact, operations: [], error: null };
-      }
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${base} has a different terminal payload`, state.taskId);
-    }
-    if (roundState.startedAgent === null) {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${base} has no matching started row`, state.taskId);
-    }
-    if (intent.kind === 'pr-review-complete' && !LOCAL_COMPLETION_STATUSES.has(roundState.status)) {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${intent.artifact} must record a publication outcome before completion`, state.taskId);
-    }
-    if (intent.kind === 'pr-review-terminate' && roundState.status !== intent.outcome) {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${intent.artifact} status must match outcome ${intent.outcome}`, state.taskId);
-    }
-    step = base;
-    linkArtifact = true;
+  const transition = intent.kind === 'pr-review-start'
+    ? decideStartTransition(roundState, state.snapshot, base, intent.artifact)
+    : decideTerminalTransition(intent, roundState, base);
+  if (transition.kind === 'failed') return failed(intent, transition.code, transition.message, state.taskId);
+  if (transition.kind === 'no-op') {
+    return { status: 'no-op', changed: false, intent: intent.kind, taskId: state.taskId, artifact: intent.artifact, operations: [], error: null };
   }
 
   let metadata;
@@ -336,14 +383,14 @@ function applyActivityIntent(intent: PrReviewActivityIntent, normalizedAgent: st
   }
   const section = locateActivityLog(state.content);
   const pr = prReviewExecution(state.content);
-  if (intent.kind === 'pr-review-start') pr.open = { artifact: intent.artifact, head: intent.head, agent: normalizedAgent, startedAt: metadata.timestamp };
+  if (!transition.linkArtifact) pr.open = { artifact: intent.artifact, head: intent.head, agent: normalizedAgent, startedAt: metadata.timestamp };
   else {
     pr.open = null;
-    pr.terminals.push({ artifact: intent.artifact, head: intent.head, agent: normalizedAgent, note });
+    pr.terminals.push({ artifact: intent.artifact, head: intent.head, agent: normalizedAgent, note: transition.note });
   }
   const mutations: TaskMutation[] = [{ kind: 'frontmatter', lifecycleExecutionDomain: 'pr-review', set: { lifecycle_execution: serializeLifecycleExecution(lifecycleExecutions(state.content), state.content, pr) } }];
-  if (section) mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body: appendActivityEntry(section, { time: metadata.timestamp, step, agent: normalizedAgent, note }) });
-  if (linkArtifact) {
+  if (section) mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body: appendActivityEntry(section, { time: metadata.timestamp, step: transition.step, agent: normalizedAgent, note: transition.note }) });
+  if (transition.linkArtifact) {
     const link = buildArtifactLinkSection(state.content, roundState.identity);
     mutations.push({ kind: 'section', aliases: link.aliases, heading: link.heading, body: link.body });
   }
