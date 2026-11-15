@@ -261,15 +261,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/operation-coordinator.ts",
-      "ruleId": "complexity",
-      "stableId": "68ad0c757c1763a26e834ff8b923437f2fef8785e8f7c950d380d3a4da47f2c9",
-      "displayName": "coordinatePlatformWrite",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/commands/create.ts",
       "ruleId": "complexity",
       "stableId": "f65233ddbaf231878df1118176e4b661674222b4c18f6ec5a976ff63bbfaf059",
@@ -729,24 +720,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/platform-operation-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "a34c981f092fed3721dd66c2cc5b8bfb604d930c982dcf983ed317edb21fc517",
-      "displayName": "recoverPlatformOperations",
-      "metric": 37,
-      "normalizedMessage": "complexity=37",
-      "count": 1
-    },
-    {
-      "file": "lib/task/platform-operation-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "c6b8d338d02a092476d8b19cfe32a49ea28b8e35b1261918f2c234567967c4dc",
-      "displayName": "recoverPlatformOperationsOnce",
-      "metric": 66,
-      "normalizedMessage": "complexity=66",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "c44aee27f51b773d89109f7e3ce6cede053a3b80eff45261ec642af49240f399",
@@ -780,15 +753,6 @@
       "displayName": "removeUncheckedSandbox",
       "metric": 34,
       "normalizedMessage": "complexity=34",
-      "count": 1
-    },
-    {
-      "file": "lib/task/platform-operation-recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "0017348d3a91f0d12dd08f1577a22af52872d63c759fbcdbabec06ea505a35aa",
-      "displayName": "replayIssueMetadata",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
       "count": 1
     },
     {
