@@ -53,6 +53,24 @@ test('manual-validation transaction accepts only verified committed final state'
   if (!committed.ok) assert.equal(committed.error.code, 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID');
 });
 
+test('manual-validation transaction validates shape before expected identity', () => {
+  const prepared = createManualValidationTransaction(input);
+  const invalidPhase = validateManualValidationTransaction(
+    { ...prepared, phase: 'unknown' },
+    { taskId: 'TASK-20260910-000002' }
+  );
+
+  assert.equal(invalidPhase.ok, false);
+  if (!invalidPhase.ok) {
+    assert.equal(invalidPhase.error.code, 'MANUAL_VALIDATION_TRANSACTION_INVALID');
+    assert.equal(invalidPhase.error.message, 'phase is invalid');
+  }
+
+  const wrongIdentity = validateManualValidationTransaction(prepared, { taskId: 'TASK-20260910-000002' });
+  assert.equal(wrongIdentity.ok, false);
+  if (!wrongIdentity.ok) assert.equal(wrongIdentity.error.code, 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH');
+});
+
 test('manual-validation retry starts a clean next attempt', () => {
   const prepared = createManualValidationTransaction(input);
   const staged = transitionManualValidationTransaction(prepared, 'summary-staged');

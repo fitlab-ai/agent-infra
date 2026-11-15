@@ -29,3 +29,23 @@ test('manual-validation evidence creates the current allowlisted envelope', () =
   assert.equal(evidence.taskId, null);
   assert.equal(evidence.recoverable, false);
 });
+
+test('manual-validation evidence accepts a recoverable task-bound identity', () => {
+  const evidence = createManualValidationEvidence({
+    ...baseInput,
+    mode: 'task-bound',
+    taskId: 'TASK-20260910-000001',
+    recoverable: true
+  });
+
+  assert.equal(evidence.mode, 'task-bound');
+  assert.equal(evidence.taskId, 'TASK-20260910-000001');
+  assert.equal(evidence.recoverable, true);
+});
+
+test('manual-validation evidence preserves identity field error order', () => {
+  assert.throws(
+    () => createManualValidationEvidence({ ...baseInput, branch: '', commit: 'invalid' } as never),
+    /MANUAL_VALIDATION_EVIDENCE_INVALID: branch must be a non-empty single line/
+  );
+});

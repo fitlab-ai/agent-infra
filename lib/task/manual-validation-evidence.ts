@@ -60,6 +60,47 @@ function invalid(message: string): ManualValidationEvidenceResult {
   return { ok: false, error: { code: 'MANUAL_VALIDATION_EVIDENCE_INVALID', message } };
 }
 
+function validateEvidenceIdentity(value: Record<string, unknown>): string | null {
+  if (value.mode !== 'task-bound' && value.mode !== 'branch-only') return 'mode must be task-bound or branch-only';
+  if (value.taskId !== null && (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId))) return 'taskId must be a TASK identifier or null';
+  if (typeof value.branch !== 'string' || !value.branch.trim() || /[\r\n]/u.test(value.branch)) return 'branch must be a non-empty single line';
+  if (typeof value.commit !== 'string' || !SHA40.test(value.commit)) return 'commit must be a 40-character lowercase hexadecimal SHA';
+  if (typeof value.recoverable !== 'boolean') return 'recoverable must be boolean';
+  if (value.source !== 'run-manual-validation') return 'source is unsupported';
+  return validateEvidenceModeIdentity(value);
+}
+
+function validateEvidenceModeIdentity(value: Record<string, unknown>): string | null {
+  if (value.mode === 'branch-only' && (value.taskId !== null || value.recoverable !== false)) return 'branch-only evidence must be non-recoverable and task-free';
+  if (value.mode === 'task-bound' && (value.taskId === null || value.recoverable !== true)) return 'task-bound evidence must identify a recoverable task';
+  return null;
+}
+
+function validateEvidenceResultFields(result: Record<string, unknown>): string | null {
+  if (result.scope !== 'snapshot' && result.scope !== 'inplace') return 'result.scope is invalid';
+  if (typeof result.command !== 'string' || !result.command || /[\\/\r\n]/u.test(result.command)) return 'result.command must be a basename';
+  if (!validTimestamp(result.startedAt) || !validTimestamp(result.completedAt) || Date.parse(result.completedAt) < Date.parse(result.startedAt)) return 'result timestamps are invalid';
+  return null;
+}
+
+function validateEvidenceResultOutcome(result: Record<string, unknown>): string | null {
+  const exitCode = result.exitCode;
+  if (!Number.isSafeInteger(exitCode) || (exitCode as number) < 0) return 'result.exitCode must be a non-negative integer';
+  if (result.signal !== null && (typeof result.signal !== 'string' || !result.signal || /[\r\n]/u.test(result.signal))) return 'result.signal must be a string or null';
+  if (!['completed', 'pending', 'failed', 'not-created'].includes(result.cleanup as string)) return 'result.cleanup is invalid';
+  return null;
+}
+
+function validateEvidenceResult(value: Record<string, unknown>): string | null {
+  if (!isRecord(value.result)) return 'result must be a JSON object';
+  const result = value.result;
+  const resultError = exactKeys(result, ['scope', 'command', 'startedAt', 'completedAt', 'exitCode', 'signal', 'cleanup'], 'result');
+  if (resultError) return resultError;
+  const fieldsError = validateEvidenceResultFields(result);
+  if (fieldsError) return fieldsError;
+  return validateEvidenceResultOutcome(result);
+}
+
 function validateShape(value: unknown): ManualValidationEvidenceResult {
   if (!isRecord(value)) return invalid('evidence must be a JSON object');
   const topError = exactKeys(value, ['schema', 'version', 'mode', 'taskId', 'branch', 'commit', 'recoverable', 'source', 'result'], 'evidence');
@@ -67,25 +108,10 @@ function validateShape(value: unknown): ManualValidationEvidenceResult {
   if (value.schema !== MANUAL_VALIDATION_EVIDENCE_SCHEMA || value.version !== MANUAL_VALIDATION_EVIDENCE_VERSION) {
     return invalid('evidence schema or version is unsupported');
   }
-  if (value.mode !== 'task-bound' && value.mode !== 'branch-only') return invalid('mode must be task-bound or branch-only');
-  if (value.taskId !== null && (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId))) return invalid('taskId must be a TASK identifier or null');
-  if (typeof value.branch !== 'string' || !value.branch.trim() || /[\r\n]/u.test(value.branch)) return invalid('branch must be a non-empty single line');
-  if (typeof value.commit !== 'string' || !SHA40.test(value.commit)) return invalid('commit must be a 40-character lowercase hexadecimal SHA');
-  if (typeof value.recoverable !== 'boolean') return invalid('recoverable must be boolean');
-  if (value.source !== 'run-manual-validation') return invalid('source is unsupported');
-  if (value.mode === 'branch-only' && (value.taskId !== null || value.recoverable !== false)) return invalid('branch-only evidence must be non-recoverable and task-free');
-  if (value.mode === 'task-bound' && (value.taskId === null || value.recoverable !== true)) return invalid('task-bound evidence must identify a recoverable task');
-  if (!isRecord(value.result)) return invalid('result must be a JSON object');
-  const result = value.result;
-  const resultError = exactKeys(result, ['scope', 'command', 'startedAt', 'completedAt', 'exitCode', 'signal', 'cleanup'], 'result');
+  const identityError = validateEvidenceIdentity(value);
+  if (identityError) return invalid(identityError);
+  const resultError = validateEvidenceResult(value);
   if (resultError) return invalid(resultError);
-  if (result.scope !== 'snapshot' && result.scope !== 'inplace') return invalid('result.scope is invalid');
-  if (typeof result.command !== 'string' || !result.command || /[\\/\r\n]/u.test(result.command)) return invalid('result.command must be a basename');
-  if (!validTimestamp(result.startedAt) || !validTimestamp(result.completedAt) || Date.parse(result.completedAt) < Date.parse(result.startedAt)) return invalid('result timestamps are invalid');
-  const exitCode = result.exitCode;
-  if (!Number.isSafeInteger(exitCode) || (exitCode as number) < 0) return invalid('result.exitCode must be a non-negative integer');
-  if (result.signal !== null && (typeof result.signal !== 'string' || !result.signal || /[\r\n]/u.test(result.signal))) return invalid('result.signal must be a string or null');
-  if (!['completed', 'pending', 'failed', 'not-created'].includes(result.cleanup as string)) return invalid('result.cleanup is invalid');
   return { ok: true, value: value as unknown as ManualValidationEvidence };
 }
 
