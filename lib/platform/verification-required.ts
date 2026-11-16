@@ -110,16 +110,22 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   return requiredChecksSnapshotResult(context.inspection, relation, prHead, shared);
 }
 
-export async function check({ taskDir }: any, shared: any): Promise<any> {
-  const task = shared.loadTask(taskDir);
-  if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
-  const prFlow = readPrFlow(shared.repoRoot);
-  const factRead = readPrDeliveryFact(task.metadata);
-  if (factRead.status === "invalid") return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
-  const bound = factRead.status === "valid" && factRead.fact.state === "bound";
-  if (prFlow === "disabled" || (factRead.status === "valid" && factRead.fact.state === "skipped") || !bound) {
-    return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
-  }
+async function evaluateBoundRequiredChecks(task: any, prFlow: any, shared: any): Promise<any> {
+  const repoRoot = shared.repoRoot;
+  const localHead = readHead(repoRoot);
+  if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);
+  const inspection = await inspectRequiredChecks(task.metadata.id, { cwd: repoRoot });
+  const reviewedHead = String(task.metadata.last_reviewed_commit || "");
+  const prHead = inspection.pullRequest?.head?.sha;
+  const relation = localHead === reviewedHead && localHead === prHead
+    ? { status: "strict" }
+    : inspection.pullRequest?.head
+      ? await resolveMaterializedReviewedHeadRelation({ cwd: repoRoot, platformType: inspection.platform?.type || null, lastReviewedCommit: reviewedHead, pullRequest: inspection.pullRequest })
+      : { status: "failed" };
+  return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection, prFlow, gitRoot: repoRoot, relation }, shared);
+}
+
+async function checkBoundRequiredChecks(task: any, prFlow: any, shared: any): Promise<any> {
   const loaded = await resolvePlatformProviderContext({ cwd: shared.repoRoot });
   const platform = loaded.ok ? loaded.value.context : loaded.context;
   const supportsChecks = loaded.ok && Boolean(loaded.value.provider.checks?.inspectRequired);
@@ -130,22 +136,19 @@ export async function check({ taskDir }: any, shared: any): Promise<any> {
       "dependency_error"
     );
   }
-  const localHead = readHead(shared.repoRoot);
-  if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);
-  const inspection = await inspectRequiredChecks(task.metadata.id, { cwd: shared.repoRoot });
-  const reviewedHead = String(task.metadata.last_reviewed_commit || "");
-  const prHead = inspection.pullRequest?.head?.sha;
-  const relation = localHead === reviewedHead && localHead === prHead
-    ? { status: "strict" }
-    : inspection.pullRequest?.head
-      ? await resolveMaterializedReviewedHeadRelation({ cwd: shared.repoRoot, platformType: inspection.platform?.type || null, lastReviewedCommit: reviewedHead, pullRequest: inspection.pullRequest })
-      : { status: "failed" };
-  return evaluateRequiredChecks({
-    metadata: task.metadata,
-    localHead,
-    inspection,
-    prFlow,
-    gitRoot: shared.repoRoot,
-    relation
-  }, shared);
+  return evaluateBoundRequiredChecks(task, prFlow, shared);
+}
+
+export async function check({ taskDir }: any, shared: any): Promise<any> {
+  const task = shared.loadTask(taskDir);
+  if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
+  const prFlow = readPrFlow(shared.repoRoot);
+  const factRead = readPrDeliveryFact(task.metadata);
+  if (factRead.status === "invalid") return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
+  const bound = factRead.status === "valid" && factRead.fact.state === "bound";
+  const skipped = factRead.status === "valid" && factRead.fact.state === "skipped";
+  if (prFlow === "disabled" || skipped || !bound) {
+    return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
+  }
+  return checkBoundRequiredChecks(task, prFlow, shared);
 }

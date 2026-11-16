@@ -17,6 +17,7 @@ import type { PullRequestSnapshot } from "./pull-requests.ts";
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 const REVIEWED_HEAD_REF = "refs/agent-infra/reviewed-head";
 const TARGET_HEAD_REF = "refs/agent-infra/target-head";
+type LoadedPlatform = Extract<Awaited<ReturnType<typeof resolvePlatformProviderContext>>, { ok: true }>["value"];
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -40,6 +41,39 @@ function blocked(code: string, message: string): ReviewedHeadRelation {
 
 function failed(code: string, message: string): ReviewedHeadRelation {
   return { status: "failed", code, message };
+}
+
+async function resolveDomainAssociations(input: {
+  loaded: LoadedPlatform;
+  gitRoot: string;
+  commits: string[];
+  comparisonHead: string;
+  lastReviewedCommit: string;
+  pullRequest: PullRequestSnapshot;
+  defaultBranch: string;
+}): Promise<ReviewedHeadRelation> {
+  const associations = new Map<string, CommitPullRequestIdentity>();
+  for (const commitSha of input.commits) {
+    const associated = input.loaded.provider.changeRequests?.listCommitPullRequestAssociations
+      ? await input.loaded.provider.changeRequests.listCommitPullRequestAssociations({
+          context: providerOperationContext(input.loaded),
+          commitSha
+        })
+      : undefined;
+    if (!associated?.ok || !associated.value) {
+      const error = associated && !associated.ok ? providerError(associated.error, "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE") : null;
+      return blocked(error?.code || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE", error?.message || "Unable to resolve commit pull request associations");
+    }
+    associations.set(commitSha, associated.value);
+  }
+  return resolveReviewedHeadRelation({
+    gitRoot: input.gitRoot,
+    comparisonHead: input.comparisonHead,
+    lastReviewedCommit: input.lastReviewedCommit,
+    pullRequest: input.pullRequest,
+    defaultBranch: input.defaultBranch,
+    associations
+  });
 }
 
 function validMergeIdentity(lastReviewedCommit: string, pullRequest: PullRequestSnapshot):
@@ -151,32 +185,17 @@ async function resolveMaterializedReviewedHeadRelation(input: {
       );
     } else {
       const domain = resolveMergeDomain(evidenceRoot, input.pullRequest.head.sha, input.pullRequest.mergeCommitSha!);
-      if (domain.status !== "ok") result = domain.relation;
-      else {
-        const associations = new Map<string, CommitPullRequestIdentity>();
-        for (const commitSha of domain.commits) {
-          const associated = loaded.value.provider.changeRequests?.listCommitPullRequestAssociations
-            ? await loaded.value.provider.changeRequests.listCommitPullRequestAssociations({
-                context: providerOperationContext(loaded.value),
-                commitSha
-            })
-            : undefined;
-          if (!associated?.ok || !associated.value) {
-            const error = associated && !associated.ok ? providerError(associated.error, "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE") : null;
-            result = blocked(error?.code || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE", error?.message || "Unable to resolve commit pull request associations");
-            break;
-          }
-          associations.set(commitSha, associated.value);
-        }
-        if (associations.size === domain.commits.length) result = resolveReviewedHeadRelation({
-          gitRoot: evidenceRoot,
-          comparisonHead,
-          lastReviewedCommit: input.lastReviewedCommit,
-          pullRequest: input.pullRequest,
-          defaultBranch: source.value.defaultBranch,
-          associations
-        });
-      }
+      result = domain.status !== "ok"
+        ? domain.relation
+        : await resolveDomainAssociations({
+            loaded: loaded.value,
+            gitRoot: evidenceRoot,
+            commits: domain.commits,
+            comparisonHead,
+            lastReviewedCommit: input.lastReviewedCommit,
+            pullRequest: input.pullRequest,
+            defaultBranch: source.value.defaultBranch
+          });
     }
   } catch {
     result = phase === "fetch"
