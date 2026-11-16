@@ -72,50 +72,60 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
   if (unexpected) { fail(`${operation} does not accept '--${unexpected}'`); return; }
 
   if (internalHandlerRoute('pr-review-grade', 'decide', operation)) {
-    if (typeof values.inputFile !== 'string') { fail('decide requires --input-file'); return; }
-    let input: unknown;
-    try {
-      input = JSON.parse(readInput(values.inputFile, cwd));
-    } catch (error) {
-      fail(`unable to read decide input: ${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-    try {
-      const record: DecisionRecord = decide(input as Parameters<typeof decide>[0]);
-      finish(record);
-    } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'DECIDE_FAILED';
-      finish({ status: 'failed', changed: false, error: { code, message: error instanceof Error ? error.message : String(error) } }, 1);
-    }
+    await runDecide(values, cwd);
     return;
   }
-
   if (internalHandlerRoute('pr-review-grade', 'resolve-host', operation)) {
-    const pr = typeof values.pr === 'string' ? values.pr : '';
-    if (!pr) { fail('resolve-host requires --pr <token>'); return; }
-    const inspected = await inspectPlatformPullRequestByNumber(pr, { cwd });
-    if (!inspected.pullRequest) {
-      finish({
-        status: 'failed', changed: false, host: null, candidates: [], closingIssues: [],
-        error: inspected.error ?? { code: 'PR_INSPECTION_INVALID', message: 'unable to inspect the pull request', retryable: false }
-      }, inspected.status === 'blocked' ? 2 : 1);
-      return;
-    }
-    const prNumber = inspected.pullRequest.number;
-    const prIdentity = inspected.pullRequest.identity || { kind: 'number' as const, value: prNumber };
-    const closingIssues = extractClosingIssueNumbers(inspected.pullRequest.body);
-    const candidates = collectHostCandidates({ prNumber, prIdentity, closingIssues, workspaceRoot: cwd });
-    const host: HostResolution = resolveHostFromCandidates(candidates);
-    finish({
-      status: 'ok', changed: false,
-      pr: { number: prNumber, identity: prIdentity, baseSha: inspected.pullRequest.base.sha, headSha: inspected.pullRequest.head.sha, state: inspected.pullRequest.state },
-      closingIssues, candidates, host,
-      taskIssueMatches: deriveTaskIssueMatches(host, closingIssues), error: null
-    });
+    await runResolveHost(values, cwd);
     return;
   }
-
   if (!internalHandlerRoute('pr-review-grade', 'verify-artifact', operation)) { fail('operation is not registered'); return; }
+  await runVerifyArtifact(values, cwd);
+}
+
+async function runDecide(values: Record<string, string | boolean>, cwd: string): Promise<void> {
+  if (typeof values.inputFile !== 'string') { fail('decide requires --input-file'); return; }
+  let input: unknown;
+  try {
+    input = JSON.parse(readInput(values.inputFile, cwd));
+  } catch (error) {
+    fail(`unable to read decide input: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  try {
+    const record: DecisionRecord = decide(input as Parameters<typeof decide>[0]);
+    finish(record);
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'DECIDE_FAILED';
+    finish({ status: 'failed', changed: false, error: { code, message: error instanceof Error ? error.message : String(error) } }, 1);
+  }
+}
+
+async function runResolveHost(values: Record<string, string | boolean>, cwd: string): Promise<void> {
+  const pr = typeof values.pr === 'string' ? values.pr : '';
+  if (!pr) { fail('resolve-host requires --pr <token>'); return; }
+  const inspected = await inspectPlatformPullRequestByNumber(pr, { cwd });
+  if (!inspected.pullRequest) {
+    finish({
+      status: 'failed', changed: false, host: null, candidates: [], closingIssues: [],
+      error: inspected.error ?? { code: 'PR_INSPECTION_INVALID', message: 'unable to inspect the pull request', retryable: false }
+    }, inspected.status === 'blocked' ? 2 : 1);
+    return;
+  }
+  const prNumber = inspected.pullRequest.number;
+  const prIdentity = inspected.pullRequest.identity || { kind: 'number' as const, value: prNumber };
+  const closingIssues = extractClosingIssueNumbers(inspected.pullRequest.body);
+  const candidates = collectHostCandidates({ prNumber, prIdentity, closingIssues, workspaceRoot: cwd });
+  const host: HostResolution = resolveHostFromCandidates(candidates);
+  finish({
+    status: 'ok', changed: false,
+    pr: { number: prNumber, identity: prIdentity, baseSha: inspected.pullRequest.base.sha, headSha: inspected.pullRequest.head.sha, state: inspected.pullRequest.state },
+    closingIssues, candidates, host,
+    taskIssueMatches: deriveTaskIssueMatches(host, closingIssues), error: null
+  });
+}
+
+async function runVerifyArtifact(values: Record<string, string | boolean>, cwd: string): Promise<void> {
   if (typeof values.artifactFile !== 'string') { fail('verify-artifact requires --artifact-file'); return; }
   const artifactPath = path.resolve(cwd, values.artifactFile);
   let result: Record<string, unknown>;

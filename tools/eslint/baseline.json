@@ -522,15 +522,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/platform-pr-review.ts",
-      "ruleId": "complexity",
-      "stableId": "d6dd299e0b42ae131307c25123fa009178024b393e526940e0f0ac581fe80a65",
-      "displayName": "platformPrReview",
-      "metric": 40,
-      "normalizedMessage": "complexity=40",
-      "count": 1
-    },
-    {
       "file": "lib/internal/platform-security.ts",
       "ruleId": "complexity",
       "stableId": "518fa0ddff9da6e50c405466104e0165a4023ff053c8a87acc1be9cc969d719c",
@@ -546,15 +537,6 @@
       "displayName": "prOnlyInLabelFixture.anonymous-object-1.method:json",
       "metric": 29,
       "normalizedMessage": "complexity=29",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/pr-review-grade.ts",
-      "ruleId": "complexity",
-      "stableId": "50da000f8bc139fd85e5d9c5884c4eb6e811e60bdcefa9786bed6f8007734554",
-      "displayName": "prReviewGrade",
-      "metric": 30,
-      "normalizedMessage": "complexity=30",
       "count": 1
     },
     {
@@ -600,15 +582,6 @@
       "displayName": "prune",
       "metric": 20,
       "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pr-review.ts",
-      "ruleId": "complexity",
-      "stableId": "abd82c877a239131dbcf03074a6814281934f1ecf348e460fee5272238c1e18a",
-      "displayName": "publishPrReview",
-      "metric": 37,
-      "normalizedMessage": "complexity=37",
       "count": 1
     },
     {
