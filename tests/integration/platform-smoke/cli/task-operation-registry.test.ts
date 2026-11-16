@@ -41,7 +41,7 @@ function commands(descriptors: readonly TaskOperationDescriptor[], command: stri
   return descriptors.filter((item) => item.command === command);
 }
 
-function routeKey(command: string, selector: string): string {
+function routeKey(command: string, selector: string | null): string {
   return `${command}:${selector}`;
 }
 
@@ -111,15 +111,19 @@ test('public descriptor selectors match the actual command dispatchers', () => {
   assert.deepEqual(
     Object.fromEntries(Object.keys(PUBLIC_CLI_ROUTE_SELECTORS).map((route) => [
       route,
-      commands(PUBLIC_OPERATION_DESCRIPTORS, route).filter((item) => item.selector !== 'root-help').map((item) => item.selector).sort()
+      commands(PUBLIC_OPERATION_DESCRIPTORS, route).flatMap((item) => item.selector === null ? [] : [item.selector]).sort()
     ])),
     Object.fromEntries(Object.entries(PUBLIC_CLI_ROUTE_SELECTORS).map(([route, selectors]) => [route, [...selectors].sort()]))
   );
-  for (const item of PUBLIC_OPERATION_DESCRIPTORS.filter((route) => route.selector === 'root-help')) {
+  for (const item of PUBLIC_OPERATION_DESCRIPTORS.filter((route) => route.selector === null)) {
     assert.equal(item.dispatcher, 'public');
     assert.equal(item.scope, 'non-task');
     assert.equal(item.effect, 'diagnostic');
     assert.ok(Object.hasOwn(PUBLIC_CLI_ROUTE_SELECTORS, item.command));
+    assert.equal(resolveTaskOperation('public', item.command, [])?.selector, null);
+    if (['agent-client', 'data', 'sandbox', 'server', 'task'].includes(item.command)) {
+      assert.equal(resolveTaskOperation('public', item.command, ['root-help']), null);
+    }
   }
   assert.equal(resolveTaskOperation('public', 'agent-client', ['status'])?.selector, 'status');
   assert.equal(resolveTaskOperation('public', 'agent-client', ['inspect']), null);
@@ -193,10 +197,18 @@ test('task-bound guard preserves public argv, input, and delegated reference che
 
   for (const command of ['task', 't', 'sandbox', 's', 'server', 'data', 'agent-client', 'run']) {
     const rootHelp = guardTaskOperation('public', command, [], { env: taskEnv, taskView: currentView });
-    assert.equal(rootHelp.descriptor.selector, 'root-help');
+    assert.equal(rootHelp.descriptor.selector, null);
     assert.equal(rootHelp.descriptor.scope, 'non-task');
     assert.equal(rootHelp.descriptor.effect, 'diagnostic');
     assert.equal(rootHelp.taskView, null);
+  }
+
+  for (const command of ['decide', 'merge']) {
+    const usage = guardTaskOperation('public', command, [], { env: taskEnv, taskView: staleView });
+    assert.equal(usage.descriptor.selector, null);
+    assert.equal(usage.descriptor.scope, 'non-task');
+    assert.equal(usage.descriptor.effect, 'diagnostic');
+    assert.equal(usage.taskView, null);
   }
 
   for (const command of ['init', 'sync', 'update']) {
@@ -205,15 +217,17 @@ test('task-bound guard preserves public argv, input, and delegated reference che
     assert.equal(action.descriptor.selector, command);
   }
 
-  const rootTaskHelp = guardTaskOperation('public', 'task', [], { env: taskEnv, taskView: currentView });
-  assert.equal(rootTaskHelp.descriptor.selector, 'root-help');
-  assert.equal(rootTaskHelp.descriptor.scope, 'non-task');
-  assert.equal(rootTaskHelp.descriptor.effect, 'diagnostic');
-  assert.equal(rootTaskHelp.taskView, null);
-  assert.throws(
-    () => guardTaskOperation('public', 'task', ['unknown'], { env: taskEnv, taskView: currentView }),
-    (error: unknown) => error instanceof Error && error.message.startsWith('TASK_VIEW_OPERATION_UNREGISTERED:')
-  );
+  for (const [command, selector] of [
+    ['task', 'root-help'], ['t', 'root-help'], ['sandbox', 'root-help'], ['s', 'root-help'],
+    ['server', 'root-help'], ['data', 'root-help'], ['agent-client', 'root-help'],
+    ['run', 'root-help'], ['task', 'unknown']
+  ]) {
+    assert.equal(resolveTaskOperation('public', command!, [selector!]), null);
+    assert.throws(
+      () => guardTaskOperation('public', command!, [selector!], { env: taskEnv, taskView: currentView }),
+      (error: unknown) => error instanceof Error && error.message.startsWith('TASK_VIEW_OPERATION_UNREGISTERED:')
+    );
+  }
   assert.throws(
     () => guardTaskOperation('internal', 'task-event', [], { env: taskEnv, taskView: currentView }),
     (error: unknown) => error instanceof Error && error.message.startsWith('TASK_VIEW_OPERATION_UNREGISTERED:')

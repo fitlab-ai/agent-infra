@@ -32,10 +32,16 @@ test('public root help in a task-bound workspace preserves each command’s outp
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
   };
 
-  for (const command of ['task', 't', 'sandbox', 's', 'server', 'data', 'agent-client', 'run']) {
+  const usageCommands = [
+    ['task', 1], ['t', 1], ['sandbox', 1], ['s', 1], ['server', 1], ['data', 1],
+    ['agent-client', 0], ['run', 1], ['decide', 1], ['merge', 1], ['cp', 1]
+  ] as const;
+
+  for (const [command, expectedStatus] of usageCommands) {
     const host = runCli([command]);
     const bound = runCli([command], taskEnv);
-    assert.match(host.stdout, /Usage: ai /, `${command}: host root usage`);
+    assert.match(`${host.stdout}${host.stderr}`, /Usage: ai /, `${command}: host usage`);
+    assert.equal(host.status, expectedStatus, `${command}: host exit code`);
     assert.equal(bound.status, host.status, `${command}: exit code`);
     assert.equal(bound.stdout, host.stdout, `${command}: stdout`);
     assert.equal(bound.stderr, host.stderr, `${command}: stderr`);
