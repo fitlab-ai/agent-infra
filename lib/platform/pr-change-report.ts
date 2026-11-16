@@ -171,17 +171,22 @@ function validateChangeFileBytes(value: Record<string, unknown>, index: number):
   return { ok: true, value: null };
 }
 
-function parseChangeFile(value: unknown, index: number): ValidationResult<ChangeFile> {
-  if (!isRecord(value)) return invalid(`diff.files[${index}] must be an object`);
+function validateChangeFilePaths(value: Record<string, unknown>, index: number): ValidationResult<{ status: string; oldPath: string | null; newPath: string | null }> {
   const pathValue = value.oldPath ?? value.newPath;
   if (!isNonEmptyString(pathValue)) return invalid(`diff.files[${index}] must have a path`);
   if (!isSafeRenderedText(value.status)) return invalid(`diff.files[${index}].status is invalid`);
   if (!(value.oldPath === null || isSafeRenderedText(value.oldPath))) return invalid(`diff.files[${index}].oldPath is invalid`);
   if (!(value.newPath === null || isSafeRenderedText(value.newPath))) return invalid(`diff.files[${index}].newPath is invalid`);
+  return { ok: true, value: { status: value.status, oldPath: value.oldPath as string | null, newPath: value.newPath as string | null } };
+}
+
+function validateChangeFileLineCounts(value: Record<string, unknown>, index: number): ValidationResult<{ additions: number | null; deletions: number | null }> {
   if (!isIntegerOrNull(value.additions) || !isIntegerOrNull(value.deletions)) return invalid(`diff.files[${index}] line counts are invalid`);
   if ((value.additions === null) !== (value.deletions === null)) return invalid(`diff.files[${index}] line counts must both be null or integers`);
-  const bytes = validateChangeFileBytes(value, index);
-  if (!bytes.ok) return bytes;
+  return { ok: true, value: { additions: value.additions, deletions: value.deletions } };
+}
+
+function parseChangeFileLocations(value: Record<string, unknown>, index: number): ValidationResult<ChangeLocation[]> {
   if (!Array.isArray(value.locations)) return invalid(`diff.files[${index}].locations must be an array`);
   const locations: ChangeLocation[] = [];
   for (const [position, item] of value.locations.entries()) {
@@ -190,21 +195,40 @@ function parseChangeFile(value: unknown, index: number): ValidationResult<Change
         !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine)) return invalid(`diff.files[${index}].locations[${position}] is invalid`);
     locations.push({ side: item.side, startLine: Number(item.startLine), endLine: Number(item.endLine) });
   }
+  return { ok: true, value: locations };
+}
+
+function validateChangedLineLocations(locations: ChangeLocation[], additions: number | null, deletions: number | null, index: number): ValidationResult<null> {
   const addedPositions = locations.filter((item) => item.side === 'new').reduce((sum, item) => sum + item.endLine - item.startLine + 1, 0);
   const deletedPositions = locations.filter((item) => item.side === 'old').reduce((sum, item) => sum + item.endLine - item.startLine + 1, 0);
-  if (value.additions === null ? locations.length !== 0 : addedPositions !== value.additions || deletedPositions !== value.deletions) return invalid(`diff.files[${index}] changed-line locations do not match numstat`);
+  if (additions === null ? locations.length !== 0 : addedPositions !== additions || deletedPositions !== deletions) return invalid(`diff.files[${index}] changed-line locations do not match numstat`);
+  return { ok: true, value: null };
+}
+
+function parseChangeFile(value: unknown, index: number): ValidationResult<ChangeFile> {
+  if (!isRecord(value)) return invalid(`diff.files[${index}] must be an object`);
+  const paths = validateChangeFilePaths(value, index);
+  if (!paths.ok) return paths;
+  const lineCounts = validateChangeFileLineCounts(value, index);
+  if (!lineCounts.ok) return lineCounts;
+  const bytes = validateChangeFileBytes(value, index);
+  if (!bytes.ok) return bytes;
+  const locations = parseChangeFileLocations(value, index);
+  if (!locations.ok) return locations;
+  const verifiedLocations = validateChangedLineLocations(locations.value, lineCounts.value.additions, lineCounts.value.deletions, index);
+  if (!verifiedLocations.ok) return verifiedLocations;
   return {
     ok: true,
     value: {
-      status: value.status,
-      oldPath: value.oldPath as string | null,
-      newPath: value.newPath as string | null,
-      additions: value.additions as number | null,
-      deletions: value.deletions as number | null,
+      status: paths.value.status,
+      oldPath: paths.value.oldPath,
+      newPath: paths.value.newPath,
+      additions: lineCounts.value.additions,
+      deletions: lineCounts.value.deletions,
       oldBytes: value.oldBytes as number,
       newBytes: value.newBytes as number,
       netBytes: value.netBytes as number,
-      locations
+      locations: locations.value
     }
   };
 }
@@ -270,8 +294,7 @@ function parseFunctionalGroupTests(value: unknown, prefix: string): ValidationRe
   return { ok: true, value: { coverage: value.coverage.trim(), cost: value.cost.trim() } };
 }
 
-function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>): ValidationResult<FunctionalGroup> {
-  if (!isRecord(value)) return invalid(`${prefix} must be an object`);
+function validateFunctionalGroupFields(value: Record<string, unknown>, prefix: string, ids: Set<string>): ValidationResult<null> {
   if (Object.hasOwn(value, 'additions') || Object.hasOwn(value, 'deletions') || Object.hasOwn(value, 'net') || Object.hasOwn(value, 'counts')) {
     return invalid(`${prefix} line counts are derived from diff files and must not be supplied`);
   }
@@ -279,32 +302,45 @@ function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>):
   if (!isSafeRenderedText(value.target)) return invalid(`${prefix}.target is required`);
   if (!isSafeRenderedText(value.behaviorChange)) return invalid(`${prefix}.behaviorChange is required`);
   if (!isSafeRenderedText(value.necessity)) return invalid(`${prefix}.necessity is required`);
-  const files = parseFunctionalGroupFiles(value.files, `${prefix}.files`);
-  if (!files.ok) return files;
-  const parseRanges = (input: unknown, at: string): ValidationResult<Array<{ path: string; side: 'old' | 'new'; startLine: number; endLine: number }>> => {
+  return { ok: true, value: null };
+}
+
+function parseFunctionalGroupLocations(value: unknown, prefix: string): ValidationResult<FunctionalGroup['locations']> {
+  if (!isRecord(value)) return invalid(`${prefix}.locations must provide full and increment allocations`);
+  const parseRanges = (input: unknown, at: string): ValidationResult<Array<AssignedRange>> => {
     if (!Array.isArray(input)) return invalid(`${at} must be an array`);
-    const ranges = [];
+    const ranges: AssignedRange[] = [];
     for (const [index, item] of input.entries()) {
       if (!isRecord(item) || !isSafeRenderedText(item.path) || (item.side !== 'old' && item.side !== 'new') ||
           !Number.isSafeInteger(item.startLine) || Number(item.startLine) < 1 || !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine)) return invalid(`${at}[${index}] is invalid`);
-      ranges.push({ path: item.path.trim(), side: item.side as 'old' | 'new', startLine: Number(item.startLine), endLine: Number(item.endLine) });
+      ranges.push({ path: item.path.trim(), side: item.side, startLine: Number(item.startLine), endLine: Number(item.endLine) });
     }
     return { ok: true, value: ranges };
   };
-  if (!isRecord(value.locations)) return invalid(`${prefix}.locations must provide full and increment allocations`);
-  const full = parseRanges(value.locations.full, `${prefix}.locations.full`);
-  const increment = parseRanges(value.locations.increment, `${prefix}.locations.increment`);
+  const full = parseRanges(value.full, `${prefix}.locations.full`);
   if (!full.ok) return full;
+  const increment = parseRanges(value.increment, `${prefix}.locations.increment`);
   if (!increment.ok) return increment;
+  return { ok: true, value: { full: full.value, increment: increment.value } };
+}
+
+function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>): ValidationResult<FunctionalGroup> {
+  if (!isRecord(value)) return invalid(`${prefix} must be an object`);
+  const fields = validateFunctionalGroupFields(value, prefix, ids);
+  if (!fields.ok) return fields;
+  const files = parseFunctionalGroupFiles(value.files, `${prefix}.files`);
+  if (!files.ok) return files;
+  const locations = parseFunctionalGroupLocations(value.locations, prefix);
+  if (!locations.ok) return locations;
   const tests = parseFunctionalGroupTests(value.tests, `${prefix}.tests`);
   if (!tests.ok) return tests;
-  const id = value.id.trim();
+  const id = (value.id as string).trim();
   ids.add(id);
   return {
     ok: true,
     value: {
-      id, target: value.target.trim(), behaviorChange: value.behaviorChange.trim(),
-      necessity: value.necessity.trim(), files: files.value, locations: { full: full.value, increment: increment.value }, tests: tests.value
+      id, target: (value.target as string).trim(), behaviorChange: (value.behaviorChange as string).trim(),
+      necessity: (value.necessity as string).trim(), files: files.value, locations: locations.value, tests: tests.value
     }
   };
 }
@@ -343,6 +379,41 @@ function collectGroupMembership(
     }
   }
   return { ok: true, value: assigned };
+}
+
+function validateKnownGroupFiles(groups: FunctionalGroup[], knownPaths: Set<string>): ValidationResult<null> {
+  for (const group of groups) {
+    if (group.files.some((file) => !knownPaths.has(file))) return invalid(`change-composition group '${group.id}' references a file outside either diff`);
+  }
+  return { ok: true, value: null };
+}
+
+function findMissingGroupFile(
+  indexed: Map<string, ChangeFile>, assigned: Set<string>, composition: Precheck
+): string | null {
+  const groupRanges = composition.groups!.flatMap((group) => [...group.locations.full, ...group.locations.increment]);
+  const groupAllocatedPaths = new Set(groupRanges.map((range) => range.path));
+  const unassignedPaths = new Set([...composition.unassigned!.full, ...composition.unassigned!.increment].map((range) => range.path));
+  const missingFile = [...indexed].find(([filePath, file]) => !assigned.has(filePath)
+    && !(file.locations.length > 0 && unassignedPaths.has(filePath) && !groupAllocatedPaths.has(filePath)));
+  return missingFile?.[0] ?? null;
+}
+
+function validateAllocatedFileMembers(groups: FunctionalGroup[], full: ChangeFile[], increment: ChangeFile[]): ValidationResult<null> {
+  const allFiles = [...full, ...increment];
+  for (const group of groups) {
+    const ranges = [...group.locations.full, ...group.locations.increment];
+    const allocatedPaths = new Set(ranges.map((range) => range.path));
+    const memberPaths = new Set(group.files);
+    for (const filePath of allocatedPaths) {
+      if (!memberPaths.has(filePath)) return invalid(`change-composition group '${group.id}' allocates locations outside its files list`);
+    }
+    for (const filePath of memberPaths) {
+      const hasLineLocations = allFiles.some((file) => (file.oldPath ?? file.newPath) === filePath && file.locations.length > 0);
+      if (hasLineLocations && !allocatedPaths.has(filePath)) return invalid(`change-composition group '${group.id}' lists a text file without allocated locations`);
+    }
+  }
+  return { ok: true, value: null };
 }
 
 type AssignedRange = { path: string; side: 'old' | 'new'; startLine: number; endLine: number };
@@ -391,7 +462,8 @@ function validateGroupMembership(checks: Precheck[], full: ChangeFile[], increme
   const assigned = collectGroupMembership(composition.groups, indexed.value);
   if (!assigned.ok) return assigned;
   const knownPaths = new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!));
-  for (const group of composition.groups) if (group.files.some((file) => !knownPaths.has(file))) return invalid(`change-composition group '${group.id}' references a file outside either diff`);
+  const knownFiles = validateKnownGroupFiles(composition.groups, knownPaths);
+  if (!knownFiles.ok) return knownFiles;
   const unassigned = composition.unassigned;
   if (!unassigned) return invalid('change-composition unassigned full/increment ranges are required');
   const fullRanges = composition.groups.flatMap((group) => group.locations.full);
@@ -400,20 +472,10 @@ function validateGroupMembership(checks: Precheck[], full: ChangeFile[], increme
   if (!fullCheck.ok) return fullCheck;
   const incrementCheck = validateAllocation(incrementRanges, unassigned.increment, increment, 'increment');
   if (!incrementCheck.ok) return incrementCheck;
-  const groupAllocatedPaths = new Set([...fullRanges, ...incrementRanges].map((range) => range.path));
-  const unassignedPaths = new Set([...unassigned.full, ...unassigned.increment].map((range) => range.path));
-  const missingFile = [...indexed.value].find(([filePath, file]) => !assigned.value.has(filePath)
-    && !(file.locations.length > 0 && unassignedPaths.has(filePath) && !groupAllocatedPaths.has(filePath)));
-  if (missingFile) return invalid(`diff file '${missingFile[0]}' is absent from change-composition groups`);
-  for (const group of composition.groups) {
-    const allocatedPaths = new Set([...group.locations.full, ...group.locations.increment].map((range) => range.path));
-    const memberPaths = new Set(group.files);
-    for (const filePath of allocatedPaths) if (!memberPaths.has(filePath)) return invalid(`change-composition group '${group.id}' allocates locations outside its files list`);
-    for (const filePath of memberPaths) {
-      const hasLineLocations = [...full, ...increment].some((file) => (file.oldPath ?? file.newPath) === filePath && file.locations.length > 0);
-      if (hasLineLocations && !allocatedPaths.has(filePath)) return invalid(`change-composition group '${group.id}' lists a text file without allocated locations`);
-    }
-  }
+  const missingFile = findMissingGroupFile(indexed.value, assigned.value, composition);
+  if (missingFile) return invalid(`diff file '${missingFile}' is absent from change-composition groups`);
+  const members = validateAllocatedFileMembers(composition.groups, full, increment);
+  if (!members.ok) return members;
   return { ok: true, value: checks };
 }
 
@@ -476,56 +538,115 @@ function parseChecks(value: unknown, prefix = 'precheck.checks', diff?: { full: 
   return { ok: true, value: checks };
 }
 
-function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff & { version?: 2; base?: string; head?: string }> {
-  if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if ((value.version !== undefined && value.version !== 2) || (value.kind !== 'merge-base' && value.kind !== 'head-to-head') || (value.base !== undefined && !isSha(value.base)) || (value.head !== undefined && !isSha(value.head)) || !isSha(value.from) || !isSha(value.head ?? value.to) || !(value.mergeBase === null || isSha(value.mergeBase)) || !isSha(value.patchSha256)) {
-    return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  }
-  if ((value.kind === 'merge-base' && (!isSha(value.mergeBase) || value.from !== value.mergeBase)) || (value.kind === 'head-to-head' && (value.mergeBase !== null || value.from === value.head))) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!Array.isArray(value.files)) return invalid('mechanical report files must be an array', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+function validateScopedMechanicalMetadata(value: Record<string, unknown>): ValidationResult<null> {
+  if (value.version !== undefined && value.version !== 2) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (value.kind !== 'merge-base' && value.kind !== 'head-to-head') return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (value.base !== undefined && !isSha(value.base)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (value.head !== undefined && !isSha(value.head)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return { ok: true, value: null };
+}
+
+function validateScopedMechanicalIdentity(value: Record<string, unknown>): ValidationResult<{ kind: 'merge-base' | 'head-to-head'; from: string; to: string; mergeBase: string | null; patchSha256: string }> {
+  const metadata = validateScopedMechanicalMetadata(value);
+  if (!metadata.ok) return metadata;
+  const kind = value.kind as 'merge-base' | 'head-to-head';
+  const to = value.head ?? value.to;
+  if (!isSha(value.from)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!isSha(to)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!(value.mergeBase === null || isSha(value.mergeBase))) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!isSha(value.patchSha256)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  const endpoints = validateMechanicalEndpoints(kind, value.from, to, value.mergeBase);
+  if (!endpoints.ok) return endpoints;
+  return { ok: true, value: { kind, from: value.from as string, to: to as string, mergeBase: value.mergeBase as string | null, patchSha256: value.patchSha256 as string } };
+}
+
+function validateMechanicalEndpoints(kind: 'merge-base' | 'head-to-head', from: unknown, to: unknown, mergeBase: unknown): ValidationResult<null> {
+  if (kind === 'merge-base' && (!isSha(mergeBase) || from !== mergeBase)) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (kind === 'head-to-head' && mergeBase !== null) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (kind === 'head-to-head' && from === to) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return { ok: true, value: null };
+}
+
+function parseMechanicalFiles(value: unknown): ValidationResult<ChangeFile[]> {
+  if (!Array.isArray(value)) return invalid('mechanical report files must be an array', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   const files: ChangeFile[] = [];
-  for (let index = 0; index < value.files.length; index += 1) {
-    const parsed = parseChangeFile(value.files[index], index);
+  for (let index = 0; index < value.length; index += 1) {
+    const parsed = parseChangeFile(value[index], index);
     if (!parsed.ok) return { ...parsed, error: { ...parsed.error, code: 'PR_CHANGE_REPORT_MECHANICAL_INVALID' } };
     files.push(parsed.value);
   }
+  return { ok: true, value: files };
+}
+
+function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff & { version?: 2; base?: string; head?: string }> {
+  if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  const identity = validateScopedMechanicalIdentity(value);
+  if (!identity.ok) return identity;
+  const files = parseMechanicalFiles(value.files);
+  if (!files.ok) return files;
   const totals = parseTotals(value.totals);
   if (!totals.ok) return { ...totals, error: { ...totals.error, code: 'PR_CHANGE_REPORT_MECHANICAL_INVALID' } };
-  if (!totalsMatchFiles(totals.value, files)) return invalid('mechanical report totals do not match files', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!totalsMatchFiles(totals.value, files.value)) return invalid('mechanical report totals do not match files', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   return {
     ok: true,
     value: {
       ...(value.version === undefined ? {} : { version: 2 as const }),
-      kind: value.kind,
-      from: value.from,
-      to: value.head ?? value.to,
-      mergeBase: value.mergeBase,
-      patchSha256: value.patchSha256,
-      files,
+      ...identity.value,
+      files: files.value,
       totals: totals.value,
-      ...(value.base === undefined ? {} : { base: value.base }),
-      ...(value.head === undefined ? {} : { head: value.head })
+      ...(value.base === undefined ? {} : { base: value.base as string }),
+      ...(value.head === undefined ? {} : { head: value.head as string })
     } as ScopedDiff & { version?: 2; base?: string; head?: string }
   };
 }
 
+function validateMechanicalFull(value: unknown, base: string, head: string): ValidationResult<ScopedDiff & { version?: 2; base?: string; head?: string }> {
+  const full = validateScopedMechanical(value);
+  if (!full.ok) return full;
+  if (full.value.kind !== 'merge-base' || full.value.to !== head || (full.value.base !== undefined && full.value.base !== base) || (full.value.head !== undefined && full.value.head !== head)) return invalid('mechanical full diff identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return full;
+}
+
+function validateMechanicalIncrementIdentity(value: unknown, head: string): ValidationResult<Record<string, unknown>> {
+  if (!isRecord(value)) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!['available', 'unchanged', 'unconfirmed'].includes(String(value.status))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!(value.fromHead === null || isSha(value.fromHead))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (value.toHead !== head) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!(value.sourceReportSha256 === null || isSha(value.sourceReportSha256))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return { ok: true, value };
+}
+
+function parseAvailableMechanicalIncrement(value: Record<string, unknown>, head: string): ValidationResult<IncrementDiff> {
+  const parsed = validateScopedMechanical(value.diff);
+  if (!parsed.ok) return parsed;
+  if (parsed.value.kind !== 'head-to-head' || parsed.value.from !== value.fromHead || parsed.value.to !== head || (parsed.value.head !== undefined && parsed.value.head !== head) || !isSha(value.sourceReportSha256)) return invalid('mechanical increment endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  const { version: _version, base: _base, head: _head, ...diff } = parsed.value as ScopedDiff & { version?: 2; base?: string; head?: string };
+  return { ok: true, value: { status: 'available', fromHead: value.fromHead as string, toHead: head, sourceReportSha256: value.sourceReportSha256 as string, diff } };
+}
+
+function validateEmptyMechanicalIncrement(value: Record<string, unknown>, head: string): ValidationResult<IncrementDiff> {
+  if (value.diff !== null) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (value.status === 'unchanged' && (value.fromHead !== head || value.sourceReportSha256 !== null)) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (value.status === 'unconfirmed' && (value.fromHead !== null || value.sourceReportSha256 !== null)) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return { ok: true, value: { status: value.status as 'unchanged' | 'unconfirmed', fromHead: value.fromHead as string | null, toHead: head, sourceReportSha256: null, diff: null } };
+}
+
+function validateMechanicalIncrement(value: unknown, head: string): ValidationResult<IncrementDiff> {
+  const identity = validateMechanicalIncrementIdentity(value, head);
+  if (!identity.ok) return identity;
+  return identity.value.status === 'available'
+    ? parseAvailableMechanicalIncrement(identity.value, head)
+    : validateEmptyMechanicalIncrement(identity.value, head);
+}
+
 function validateMechanicalReport(value: unknown): ValidationResult<MechanicalChangeReport> {
   if (!isRecord(value) || value.version !== 2 || !isSha(value.base) || !isSha(value.head)) return invalid('mechanical bundle version or PR identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const full = validateScopedMechanical(value.full);
+  const full = validateMechanicalFull(value.full, value.base, value.head);
   if (!full.ok) return full;
-  if (full.value.kind !== 'merge-base' || full.value.to !== value.head || (full.value.base !== undefined && full.value.base !== value.base) || (full.value.head !== undefined && full.value.head !== value.head)) return invalid('mechanical full diff identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const rawIncrement = value.increment;
-  if (!isRecord(rawIncrement) || !['available', 'unchanged', 'unconfirmed'].includes(String(rawIncrement.status)) || !(rawIncrement.fromHead === null || isSha(rawIncrement.fromHead)) || rawIncrement.toHead !== value.head || !(rawIncrement.sourceReportSha256 === null || isSha(rawIncrement.sourceReportSha256))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  let incrementDiff: ScopedDiff | null = null;
-  if (rawIncrement.status === 'available') {
-    const parsed = validateScopedMechanical(rawIncrement.diff);
-    if (!parsed.ok) return parsed;
-    if (parsed.value.kind !== 'head-to-head' || parsed.value.from !== rawIncrement.fromHead || parsed.value.to !== value.head || (parsed.value.head !== undefined && parsed.value.head !== value.head) || !isSha(rawIncrement.sourceReportSha256)) return invalid('mechanical increment endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-    incrementDiff = parsed.value;
-  } else if (rawIncrement.diff !== null || (rawIncrement.status === 'unchanged' && (rawIncrement.fromHead !== value.head || rawIncrement.sourceReportSha256 !== null)) || (rawIncrement.status === 'unconfirmed' && (rawIncrement.fromHead !== null || rawIncrement.sourceReportSha256 !== null))) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const { version: _fullVersion, base: _fullBase, head: _fullHead, ...fullDiff } = full.value;
-  const normalizedIncrement = incrementDiff ? (({ version: _incVersion, base: _incBase, head: _incHead, ...rest }) => rest)(incrementDiff as ScopedDiff & { version: 2; base: string; head: string }) : null;
-  return { ok: true, value: { version: 2, base: value.base, head: value.head, full: fullDiff, increment: { status: rawIncrement.status as IncrementDiff['status'], fromHead: rawIncrement.fromHead as string | null, toHead: value.head, sourceReportSha256: rawIncrement.sourceReportSha256 as string | null, diff: normalizedIncrement } } };
+  const increment = validateMechanicalIncrement(value.increment, value.head);
+  if (!increment.ok) return increment;
+  const { version: _version, base: _base, head: _head, ...fullDiff } = full.value;
+  return { ok: true, value: { version: 2, base: value.base, head: value.head, full: fullDiff, increment: increment.value } };
 }
 
 function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCandidate> {
@@ -538,9 +659,18 @@ function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCan
   return { ok: true, value: { taskIntentSha256, checks: parsed.value } };
 }
 
+function validateScopedReportIdentity(diff: Record<string, unknown>, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<{ kind: 'merge-base' | 'head-to-head'; from: string; to: string; mergeBase: string | null; patchSha256: string }> {
+  if (diff.kind !== expectedKind || !isSha(diff.from) || !isSha(diff.to) || !(diff.mergeBase === null || isSha(diff.mergeBase)) || !isSha(diff.patchSha256)) return invalid(`change report ${expectedKind} diff is invalid`);
+  if (expectedKind === 'merge-base' && diff.mergeBase !== diff.from) return invalid(`change report ${expectedKind} endpoints are invalid`);
+  if (expectedKind === 'head-to-head' && diff.mergeBase !== null) return invalid(`change report ${expectedKind} endpoints are invalid`);
+  return { ok: true, value: { kind: expectedKind, from: diff.from, to: diff.to, mergeBase: diff.mergeBase, patchSha256: diff.patchSha256 } };
+}
+
 function parseScopedDiff(diff: unknown, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<ScopedDiff> {
-  if (!isRecord(diff) || diff.kind !== expectedKind || !isSha(diff.from) || !isSha(diff.to) || !(diff.mergeBase === null || isSha(diff.mergeBase)) || !isSha(diff.patchSha256) || !Array.isArray(diff.files)) return invalid(`change report ${expectedKind} diff is invalid`);
-  if ((expectedKind === 'merge-base' && diff.mergeBase !== diff.from) || (expectedKind === 'head-to-head' && diff.mergeBase !== null)) return invalid(`change report ${expectedKind} endpoints are invalid`);
+  if (!isRecord(diff)) return invalid(`change report ${expectedKind} diff is invalid`);
+  const identity = validateScopedReportIdentity(diff, expectedKind);
+  if (!identity.ok) return identity;
+  if (!Array.isArray(diff.files)) return invalid(`change report ${expectedKind} diff is invalid`);
   const files: ChangeFile[] = [];
   for (let index = 0; index < diff.files.length; index += 1) {
     const parsed = parseChangeFile(diff.files[index], index);
@@ -550,7 +680,7 @@ function parseScopedDiff(diff: unknown, expectedKind: 'merge-base' | 'head-to-he
   const totals = parseTotals(diff.totals);
   if (!totals.ok) return totals;
   if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
-  return { ok: true, value: { kind: expectedKind, from: diff.from, to: diff.to, mergeBase: diff.mergeBase as string | null, patchSha256: diff.patchSha256, files, totals: totals.value } };
+  return { ok: true, value: { ...identity.value, files, totals: totals.value } };
 }
 
 function parseReportPrecheck(report: Record<string, unknown>, diff: { full: ChangeFile[]; increment: ChangeFile[] }): ValidationResult<Precheck[]> {
@@ -565,52 +695,74 @@ function parseReportPrecheck(report: Record<string, unknown>, diff: { full: Chan
   return checks;
 }
 
+function parseReportIdentityPart(part: unknown, name: string): ValidationResult<{ repository: string; ref: string; sha: string }> {
+  if (!isRecord(part) || !isNonEmptyString(part.repository) || !isNonEmptyString(part.ref) || !isSha(part.sha)) return invalid(`change report identity.${name} is invalid`);
+  return { ok: true, value: { repository: part.repository, ref: part.ref, sha: part.sha } };
+}
+
+function parseReportIdentity(value: Record<string, unknown>): ValidationResult<PullRequestIdentity> {
+  if (!isNonEmptyString(value.repository) || !isResourceIdentity(value.resource)) return invalid('change report identity is invalid');
+  const base = parseReportIdentityPart(value.base, 'base');
+  if (!base.ok) return base;
+  const head = parseReportIdentityPart(value.head, 'head');
+  if (!head.ok) return head;
+  return { ok: true, value: { repository: value.repository, resource: value.resource, base: base.value, head: head.value } };
+}
+
+function validateReportIncrementIdentity(value: unknown): ValidationResult<Record<string, unknown>> {
+  if (!isRecord(value)) return invalid('change report increment identity is invalid');
+  if (!['available', 'unchanged', 'unconfirmed'].includes(String(value.status))) return invalid('change report increment identity is invalid');
+  if (!isSha(value.toHead) || !(value.fromHead === null || isSha(value.fromHead)) || !(value.sourceReportSha256 === null || isSha(value.sourceReportSha256))) return invalid('change report increment identity is invalid');
+  return { ok: true, value };
+}
+
+function parseReportIncrement(value: unknown): ValidationResult<{ increment: IncrementDiff; files: ChangeFile[] }> {
+  const identity = validateReportIncrementIdentity(value);
+  if (!identity.ok) return identity;
+  const increment = identity.value;
+  if (increment.status === 'available') {
+    const parsed = parseScopedDiff(increment.diff, 'head-to-head');
+    if (!parsed.ok) return parsed;
+    if (!isSha(increment.fromHead) || parsed.value.from !== increment.fromHead || parsed.value.to !== increment.toHead || !isSha(increment.sourceReportSha256)) return invalid('change report increment source identity is invalid');
+    return { ok: true, value: { increment: { status: 'available', fromHead: increment.fromHead, toHead: increment.toHead as string, sourceReportSha256: increment.sourceReportSha256, diff: parsed.value }, files: parsed.value.files } };
+  }
+  if (increment.diff !== null) return invalid('change report increment status is inconsistent');
+  if (increment.status === 'unchanged' && (increment.fromHead !== increment.toHead || increment.sourceReportSha256 !== null)) return invalid('change report increment status is inconsistent');
+  if (increment.status === 'unconfirmed' && (increment.fromHead !== null || increment.sourceReportSha256 !== null)) return invalid('change report increment status is inconsistent');
+  return { ok: true, value: { increment: { status: increment.status as 'unchanged' | 'unconfirmed', fromHead: increment.fromHead as string | null, toHead: increment.toHead as string, sourceReportSha256: null, diff: null }, files: [] } };
+}
+
+function validateReportEndpoints(full: ScopedDiff, base: string, head: string, increment: IncrementDiff): ValidationResult<null> {
+  if (full.from !== base && !isSha(full.mergeBase)) return invalid('change report full diff lacks merge-base identity');
+  if (full.to !== head || increment.toHead !== head) return invalid('change report diff endpoints do not match pull request identity');
+  return { ok: true, value: null };
+}
+
 function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport> {
   if (!isRecord(value)) return invalid('change report must be an object');
   if (value.version !== REPORT_VERSION || !isRecord(value.identity) || !isRecord(value.inputs) || !isRecord(value.diff) || !isRecord(value.precheck)) {
     return invalid('change report has an invalid top-level shape');
   }
-  const identity = value.identity;
-  const identityRepository = identity.repository;
-  const identityResource = identity.resource;
-  if (!isNonEmptyString(identityRepository) || !isResourceIdentity(identityResource)) return invalid('change report identity is invalid');
-  const parseIdentityPart = (part: unknown, name: string): ValidationResult<{ repository: string; ref: string; sha: string }> => {
-    if (!isRecord(part) || !isNonEmptyString(part.repository) || !isNonEmptyString(part.ref) || !isSha(part.sha)) return invalid(`change report identity.${name} is invalid`);
-    return { ok: true, value: { repository: part.repository, ref: part.ref, sha: part.sha } };
-  };
-  const base = parseIdentityPart(identity.base, 'base');
-  const head = parseIdentityPart(identity.head, 'head');
-  if (!base.ok) return base;
-  if (!head.ok) return head;
+  const identity = parseReportIdentity(value.identity);
+  if (!identity.ok) return identity;
   const inputTaskIntentSha256 = value.inputs.taskIntentSha256;
   if (!isSha(inputTaskIntentSha256)) return invalid('change report taskIntentSha256 is invalid');
   const diff = value.diff;
   const full = parseScopedDiff(diff.full, 'merge-base');
   if (!full.ok) return full;
-  if (!isRecord(diff.increment) || !['available', 'unchanged', 'unconfirmed'].includes(String(diff.increment.status)) || !isSha(diff.increment.toHead) || !(diff.increment.fromHead === null || isSha(diff.increment.fromHead)) || !(diff.increment.sourceReportSha256 === null || isSha(diff.increment.sourceReportSha256))) return invalid('change report increment identity is invalid');
-  let incrementDiff: ScopedDiff | null = null;
-  if (diff.increment.status === 'available') {
-    const parsedIncrement = parseScopedDiff(diff.increment.diff, 'head-to-head');
-    if (!parsedIncrement.ok) return parsedIncrement;
-    if (!isSha(diff.increment.fromHead) || parsedIncrement.value.from !== diff.increment.fromHead || parsedIncrement.value.to !== diff.increment.toHead || !isSha(diff.increment.sourceReportSha256)) return invalid('change report increment source identity is invalid');
-    incrementDiff = parsedIncrement.value;
-  } else if (diff.increment.diff !== null || (diff.increment.status === 'unchanged' && (diff.increment.fromHead !== diff.increment.toHead || diff.increment.sourceReportSha256 !== null)) || (diff.increment.status === 'unconfirmed' && (diff.increment.fromHead !== null || diff.increment.sourceReportSha256 !== null))) return invalid('change report increment status is inconsistent');
-  if (full.value.from !== base.value.sha && !isSha(full.value.mergeBase)) return invalid('change report full diff lacks merge-base identity');
-  if (full.value.to !== head.value.sha || diff.increment.toHead !== head.value.sha) return invalid('change report diff endpoints do not match pull request identity');
-  const checks = parseReportPrecheck(value as Record<string, unknown>, { full: full.value.files, increment: incrementDiff?.files ?? [] });
+  const increment = parseReportIncrement(diff.increment);
+  if (!increment.ok) return increment;
+  const endpoints = validateReportEndpoints(full.value, identity.value.base.sha, identity.value.head.sha, increment.value.increment);
+  if (!endpoints.ok) return endpoints;
+  const checks = parseReportPrecheck(value, { full: full.value.files, increment: increment.value.files });
   if (!checks.ok) return checks;
   return {
     ok: true,
     value: {
       version: REPORT_VERSION,
-      identity: {
-        repository: identityRepository,
-        resource: identityResource,
-        base: base.value,
-        head: head.value
-      },
+      identity: identity.value,
       inputs: { taskIntentSha256: inputTaskIntentSha256 },
-      diff: { full: full.value, increment: { status: diff.increment.status as IncrementDiff['status'], fromHead: diff.increment.fromHead as string | null, toHead: diff.increment.toHead as string, sourceReportSha256: diff.increment.sourceReportSha256 as string | null, diff: incrementDiff } },
+      diff: { full: full.value, increment: increment.value.increment },
       precheck: { verdict: value.precheck.verdict as PrecheckVerdict, formalReview: false, route: value.precheck.route as PrecheckRoute, checks: checks.value }
     }
   };
