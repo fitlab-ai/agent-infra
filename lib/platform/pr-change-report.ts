@@ -1009,39 +1009,84 @@ function renderScopeLineCounts(ranges: AssignedRange[]): [string, string, string
   return [String(added), String(deleted), signedNumber(added - deleted)];
 }
 
-function renderFunctionalGroupSummary(groups: FunctionalGroup[], report: PrChangeReport, unassigned: Precheck['unassigned']): string[] {
-  const increment = report.diff.increment;
-  const fullFiles = report.diff.full.files;
-  const incrementFiles = increment.status === 'available' ? increment.diff!.files : [];
-  const rows = groups.map((group) => {
-    const fullCounts = renderScopeLineCounts(group.locations.full);
-    const incrementCounts = increment.status === 'available'
-      ? renderScopeLineCounts(group.locations.increment)
-      : increment.status === 'unchanged' ? ['0', '0', '0'] : ['未确认', '未确认', '未确认'];
-    return `| ${escapeReportTableCell(`${group.id} — ${group.target}`)} | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | — |`;
-  });
-  for (const reason of ['shared', 'unconfirmed'] as const) {
-    const ranges = unassigned?.full.filter((range) => range.reason === reason) ?? [];
+function renderIncrementLineCounts(status: IncrementDiff['status'], ranges: AssignedRange[]): [string, string, string] {
+  if (status === 'available') return renderScopeLineCounts(ranges);
+  if (status === 'unchanged') return ['0', '0', '0'];
+  return ['未确认', '未确认', '未确认'];
+}
+
+function renderFunctionalGroupRow(group: FunctionalGroup, incrementStatus: IncrementDiff['status']): string {
+  const fullCounts = renderScopeLineCounts(group.locations.full);
+  const incrementCounts = renderIncrementLineCounts(incrementStatus, group.locations.increment);
+  return `| ${escapeReportTableCell(`${group.id} — ${group.target}`)} | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | — |`;
+}
+
+function renderUnassignedSummaryRows(unassigned: Precheck['unassigned'], incrementStatus: IncrementDiff['status']): string[] {
+  return (['shared', 'unconfirmed'] as const).flatMap((reason) => {
+    const fullRanges = unassigned?.full.filter((range) => range.reason === reason) ?? [];
     const incrementRanges = unassigned?.increment.filter((range) => range.reason === reason) ?? [];
-    if (ranges.length === 0 && incrementRanges.length === 0) continue;
-    const fullCounts = renderScopeLineCounts(ranges);
-    const incrementCounts = increment.status === 'available'
-      ? renderScopeLineCounts(incrementRanges)
-      : increment.status === 'unchanged' ? ['0', '0', '0'] : ['未确认', '未确认', '未确认'];
-    rows.push(`| 未归属（${reason === 'shared' ? '共享' : '待确认'}） | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | — |`);
-  }
+    if (fullRanges.length === 0 && incrementRanges.length === 0) return [];
+    const fullCounts = renderScopeLineCounts(fullRanges);
+    const incrementCounts = renderIncrementLineCounts(incrementStatus, incrementRanges);
+    const label = reason === 'shared' ? '共享' : '待确认';
+    return [`| 未归属（${label}） | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | — |`];
+  });
+}
+
+function renderFunctionalGroupTotals(report: PrChangeReport): string {
   const fullTotals = report.diff.full.totals;
-  const incrementTotals = increment.status === 'available' ? increment.diff!.totals : null;
-  rows.push(`| **合计（机械统计）** | ${fullTotals.additions} | ${fullTotals.deletions} | ${signedNumber(fullTotals.additions - fullTotals.deletions)} | ${incrementTotals?.additions ?? (increment.status === 'unchanged' ? '0' : '未确认')} | ${incrementTotals?.deletions ?? (increment.status === 'unchanged' ? '0' : '未确认')} | ${incrementTotals ? signedNumber(incrementTotals.additions - incrementTotals.deletions) : increment.status === 'unchanged' ? '0' : '未确认'} | ${fullFiles.filter((file) => file.additions === null).length} 个文件 / ${increment.status === 'available' ? `${incrementFiles.filter((file) => file.additions === null).length} 个文件` : increment.status === 'unchanged' ? '0' : '未确认'} |`);
+  const increment = report.diff.increment;
+  let incrementAdditions: string;
+  let incrementDeletions: string;
+  let incrementNet: string;
+  let incrementUnknownFiles: string;
+  switch (increment.status) {
+    case 'available':
+      incrementAdditions = String(increment.diff!.totals.additions);
+      incrementDeletions = String(increment.diff!.totals.deletions);
+      incrementNet = signedNumber(increment.diff!.totals.additions - increment.diff!.totals.deletions);
+      incrementUnknownFiles = `${increment.diff!.files.filter((file) => file.additions === null).length} 个文件`;
+      break;
+    case 'unchanged':
+      incrementAdditions = '0';
+      incrementDeletions = '0';
+      incrementNet = '0';
+      incrementUnknownFiles = '0';
+      break;
+    case 'unconfirmed':
+      incrementAdditions = '未确认';
+      incrementDeletions = '未确认';
+      incrementNet = '未确认';
+      incrementUnknownFiles = '未确认';
+      break;
+  }
+  const fullUnknownFiles = report.diff.full.files.filter((file) => file.additions === null).length;
+  return `| **合计（机械统计）** | ${fullTotals.additions} | ${fullTotals.deletions} | ${signedNumber(fullTotals.additions - fullTotals.deletions)} | ${incrementAdditions} | ${incrementDeletions} | ${incrementNet} | ${fullUnknownFiles} 个文件 / ${incrementUnknownFiles} |`;
+}
+
+function renderIncrementScopeDescription(increment: IncrementDiff): string {
+  switch (increment.status) {
+    case 'available':
+      return `上一份有效报告 HEAD \`${shortSha(increment.fromHead!)}\` → 当前 HEAD \`${shortSha(increment.toHead)}\` 的直接 head-to-head 差异`;
+    case 'unchanged':
+      return `上一份有效报告 HEAD 与当前 HEAD 均为 \`${shortSha(increment.toHead)}\`，差异为零`;
+    case 'unconfirmed':
+      return `缺少可确认的上一份有效报告 HEAD，目标 HEAD 为 \`${shortSha(increment.toHead)}\`，增量未确认`;
+  }
+}
+
+function renderFunctionalGroupSummary(groups: FunctionalGroup[], report: PrChangeReport, unassigned: Precheck['unassigned']): string[] {
+  const rows = groups.map((group) => renderFunctionalGroupRow(group, report.diff.increment.status));
+  rows.push(...renderUnassignedSummaryRows(unassigned, report.diff.increment.status));
+  rows.push(renderFunctionalGroupTotals(report));
   return [
     '#### 功能模块代码增减（行）',
     '',
-    `完整 PR：目标分支 merge-base \`${shortSha(report.diff.full.mergeBase!)}\` → 当前 HEAD \`${shortSha(report.diff.full.to)}\`；增量：${increment.status === 'available' ? `上一份有效报告 HEAD \`${shortSha(increment.fromHead!)}\` → 当前 HEAD \`${shortSha(increment.toHead)}\` 的直接 head-to-head 差异` : increment.status === 'unchanged' ? `上一份有效报告 HEAD 与当前 HEAD 均为 \`${shortSha(increment.toHead)}\`，差异为零` : `缺少可确认的上一份有效报告 HEAD，目标 HEAD 为 \`${shortSha(increment.toHead)}\`，增量未确认`}。两个范围分别统计且不相加；增量可能包含 rebase 或 main 带入的变化。`,
+    `完整 PR：目标分支 merge-base \`${shortSha(report.diff.full.mergeBase!)}\` → 当前 HEAD \`${shortSha(report.diff.full.to)}\`；增量：${renderIncrementScopeDescription(report.diff.increment)}。两个范围分别统计且不相加；增量可能包含 rebase 或 main 带入的变化。`,
     '',
     '| 功能模块 | 完整 PR 新增 | 完整 PR 删除 | 完整 PR 净增 | 报告间增量新增 | 报告间增量删除 | 报告间增量净增 | 不可计行文件（full / 增量） |',
     '| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
     ...rows,
-    ...(rows.length === 0 ? ['| 无功能组 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 |'] : []),
     '',
     '表中模块行只统计已分配的精确文本行；二进制或 numstat 未知文件无法归到具体行，文件数仅在机械总计中列出以避免重复。'
   ];
