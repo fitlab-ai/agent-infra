@@ -13,6 +13,7 @@ import {
   replaceCanonicalReportPlaceholder,
   taskIntentDigest,
   validatePrecheckCandidate,
+  validateMechanicalReport,
   validatePrChangeReport,
   writePrChangeReportAtomic
 } from '../../../lib/platform/pr-change-report.ts';
@@ -200,6 +201,30 @@ test('report validation rejects inconsistent totals and verdict facts', () => {
   }
 });
 
+test('mechanical and persisted reports share head-to-head endpoint rules', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  diff.increment = {
+    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
+    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64),
+      files: diff.full.files, totals: diff.full.totals }
+  };
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  assert.equal(validateMechanicalReport(diff).ok, true);
+  assert.equal(validatePrChangeReport(built.value).ok, true);
+
+  const sameEndpoint = structuredClone(diff);
+  sameEndpoint.increment.diff!.from = sha('c');
+  sameEndpoint.increment.fromHead = sha('c');
+  const sameEndpointReport = structuredClone(built.value);
+  sameEndpointReport.diff.increment.diff!.from = sha('c');
+  sameEndpointReport.diff.increment.fromHead = sha('c');
+  assert.equal(validateMechanicalReport(sameEndpoint).ok, false);
+  assert.equal(validatePrChangeReport(sameEndpointReport).ok, false);
+});
+
 test('summary body requires one placeholder and core renders the canonical report', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, mechanical(), candidate(digest));
@@ -207,6 +232,10 @@ test('summary body requires one placeholder and core renders the canonical repor
   if (built.ok) {
     const rendered = renderCanonicalChangeReport(built.value);
     assert.match(rendered, new RegExp(`^${CANONICAL_REPORT_HEADING}`));
+    assert.ok(rendered.indexOf('| **合计** |') < rendered.indexOf('#### 功能模块与验证变化'));
+    assert.ok(rendered.indexOf('#### 功能模块与验证变化') < rendered.indexOf('功能组 summary-content'));
+    assert.ok(rendered.indexOf('功能组 summary-content') < rendered.indexOf('#### 代表性变更文件'));
+    assert.ok(rendered.indexOf('功能组 summary-content') < rendered.indexOf('#### 适宜性预检'));
     const replaced = replaceCanonicalReportPlaceholder(`## Summary\n\n${CANONICAL_REPORT_PLACEHOLDER}\n`, built.value);
     assert.equal(replaced.ok, true);
     if (replaced.ok) assert.match(replaced.value, /\| \*\*合计\*\* \|/);

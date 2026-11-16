@@ -381,13 +381,6 @@ function collectGroupMembership(
   return { ok: true, value: assigned };
 }
 
-function validateKnownGroupFiles(groups: FunctionalGroup[], knownPaths: Set<string>): ValidationResult<null> {
-  for (const group of groups) {
-    if (group.files.some((file) => !knownPaths.has(file))) return invalid(`change-composition group '${group.id}' references a file outside either diff`);
-  }
-  return { ok: true, value: null };
-}
-
 function findMissingGroupFile(
   indexed: Map<string, ChangeFile>, assigned: Set<string>, composition: Precheck
 ): string | null {
@@ -461,9 +454,6 @@ function validateGroupMembership(checks: Precheck[], full: ChangeFile[], increme
   if (!indexed.ok) return indexed;
   const assigned = collectGroupMembership(composition.groups, indexed.value);
   if (!assigned.ok) return assigned;
-  const knownPaths = new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!));
-  const knownFiles = validateKnownGroupFiles(composition.groups, knownPaths);
-  if (!knownFiles.ok) return knownFiles;
   const unassigned = composition.unassigned;
   if (!unassigned) return invalid('change-composition unassigned full/increment ranges are required');
   const fullRanges = composition.groups.flatMap((group) => group.locations.full);
@@ -540,31 +530,49 @@ function parseChecks(value: unknown, prefix = 'precheck.checks', diff?: { full: 
 
 function validateScopedMechanicalMetadata(value: Record<string, unknown>): ValidationResult<null> {
   if (value.version !== undefined && value.version !== 2) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.kind !== 'merge-base' && value.kind !== 'head-to-head') return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   if (value.base !== undefined && !isSha(value.base)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   if (value.head !== undefined && !isSha(value.head)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   return { ok: true, value: null };
 }
 
-function validateScopedMechanicalIdentity(value: Record<string, unknown>): ValidationResult<{ kind: 'merge-base' | 'head-to-head'; from: string; to: string; mergeBase: string | null; patchSha256: string }> {
-  const metadata = validateScopedMechanicalMetadata(value);
-  if (!metadata.ok) return metadata;
-  const kind = value.kind as 'merge-base' | 'head-to-head';
-  const to = value.head ?? value.to;
-  if (!isSha(value.from)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!isSha(to)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!(value.mergeBase === null || isSha(value.mergeBase))) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!isSha(value.patchSha256)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const endpoints = validateMechanicalEndpoints(kind, value.from, to, value.mergeBase);
-  if (!endpoints.ok) return endpoints;
-  return { ok: true, value: { kind, from: value.from as string, to: to as string, mergeBase: value.mergeBase as string | null, patchSha256: value.patchSha256 as string } };
+type ScopedIdentity = { kind: 'merge-base' | 'head-to-head'; from: string; to: string; mergeBase: string | null; patchSha256: string };
+
+function hasScopedIdentityFields(value: Record<string, unknown>, expectedKind: 'merge-base' | 'head-to-head' | null): boolean {
+  const kind = value.kind;
+  return (kind === 'merge-base' || kind === 'head-to-head')
+    && (expectedKind === null || kind === expectedKind)
+    && isSha(value.from)
+    && isSha(value.to)
+    && (value.mergeBase === null || isSha(value.mergeBase))
+    && isSha(value.patchSha256);
 }
 
-function validateMechanicalEndpoints(kind: 'merge-base' | 'head-to-head', from: unknown, to: unknown, mergeBase: unknown): ValidationResult<null> {
-  if (kind === 'merge-base' && (!isSha(mergeBase) || from !== mergeBase)) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (kind === 'head-to-head' && mergeBase !== null) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (kind === 'head-to-head' && from === to) return invalid('mechanical report comparison endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  return { ok: true, value: null };
+function hasValidScopedEndpoints(identity: ScopedIdentity): boolean {
+  return identity.kind === 'merge-base'
+    ? identity.mergeBase === identity.from
+    : identity.mergeBase === null && identity.from !== identity.to;
+}
+
+function validateScopedIdentity(
+  value: Record<string, unknown>, expectedKind: 'merge-base' | 'head-to-head' | null, errorCode = 'PR_CHANGE_REPORT_INVALID'
+): ValidationResult<ScopedIdentity> {
+  const prefix = errorCode === 'PR_CHANGE_REPORT_MECHANICAL_INVALID' ? 'mechanical report' : `change report ${String(expectedKind)} diff`;
+  if (!hasScopedIdentityFields(value, expectedKind)) {
+    return invalid(`${prefix} identity is invalid`, errorCode);
+  }
+  const identity: ScopedIdentity = {
+    kind: value.kind as ScopedIdentity['kind'], from: value.from as string, to: value.to as string,
+    mergeBase: value.mergeBase as string | null, patchSha256: value.patchSha256 as string
+  };
+  if (!hasValidScopedEndpoints(identity)) return invalid(`${prefix} endpoints are invalid`, errorCode);
+  return { ok: true, value: identity };
+}
+
+function validateScopedMechanicalIdentity(value: Record<string, unknown>): ValidationResult<ScopedIdentity> {
+  const metadata = validateScopedMechanicalMetadata(value);
+  if (!metadata.ok) return metadata;
+  const normalized = { ...value, to: value.head ?? value.to };
+  return validateScopedIdentity(normalized, null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
 }
 
 function parseMechanicalFiles(value: unknown): ValidationResult<ChangeFile[]> {
@@ -659,11 +667,8 @@ function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCan
   return { ok: true, value: { taskIntentSha256, checks: parsed.value } };
 }
 
-function validateScopedReportIdentity(diff: Record<string, unknown>, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<{ kind: 'merge-base' | 'head-to-head'; from: string; to: string; mergeBase: string | null; patchSha256: string }> {
-  if (diff.kind !== expectedKind || !isSha(diff.from) || !isSha(diff.to) || !(diff.mergeBase === null || isSha(diff.mergeBase)) || !isSha(diff.patchSha256)) return invalid(`change report ${expectedKind} diff is invalid`);
-  if (expectedKind === 'merge-base' && diff.mergeBase !== diff.from) return invalid(`change report ${expectedKind} endpoints are invalid`);
-  if (expectedKind === 'head-to-head' && diff.mergeBase !== null) return invalid(`change report ${expectedKind} endpoints are invalid`);
-  return { ok: true, value: { kind: expectedKind, from: diff.from, to: diff.to, mergeBase: diff.mergeBase, patchSha256: diff.patchSha256 } };
+function validateScopedReportIdentity(diff: Record<string, unknown>, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<ScopedIdentity> {
+  return validateScopedIdentity(diff, expectedKind);
 }
 
 function parseScopedDiff(diff: unknown, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<ScopedDiff> {
@@ -1035,16 +1040,16 @@ function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[], 
   }));
 }
 
-function renderPrechecks(checks: Precheck[], files: ChangeFile[], incrementFiles: ChangeFile[], incrementStatus: IncrementDiff['status']): string[] {
+function renderPrechecks(checks: Precheck[]): string[] {
   return checks.flatMap((check) => [
     `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeReportText(check.rationale)}`,
-    ...check.evidence.map(renderEvidence),
-    ...(check.groups ? renderFunctionalGroups(check.groups, files, incrementFiles, incrementStatus, check.unassigned) : [])
+    ...check.evidence.map(renderEvidence)
   ]);
 }
 
 function renderCanonicalChangeReport(report: PrChangeReport): string {
   const totals = report.diff.full.totals;
+  const composition = report.precheck.checks.find((check) => check.id === 'change-composition');
   const categories = summarizeChangeCategories(report.diff.full.files);
   const rows = categories.map(({ label, totals: categoryTotals }) => {
     const [additions, deletions, netLines] = renderLineCounts(categoryTotals);
@@ -1065,6 +1070,15 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     ...rows,
     `| **合计** | ${totals.files} | ${additions} | ${deletions} | ${netLines} | ${totals.oldBytes} | ${totals.newBytes} | ${signedNumber(totals.netBytes)} | ${totals.textFiles} / ${totals.binaryFiles} |`,
     '',
+    '#### 功能模块与验证变化',
+    ...renderFunctionalGroups(
+      composition?.groups ?? [],
+      report.diff.full.files,
+      report.diff.increment.diff?.files ?? [],
+      report.diff.increment.status,
+      composition?.unassigned
+    ),
+    '',
     `- 总体统计：新增 ${totals.additions} 行、删除 ${totals.deletions} 行；旧字节 ${totals.oldBytes}，新字节 ${totals.newBytes}。`,
     `- 变更明细按高层类别聚合展示；完整逐文件事实保留在结构化报告中供审计。`,
     `- 完整 PR 补丁摘要：\`${report.diff.full.patchSha256}\`；merge-base：\`${report.diff.full.mergeBase}\`。`,
@@ -1074,7 +1088,7 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     '',
     '#### 适宜性预检',
     `- 结论：${precheckSummary}；${route}；正式审查：否。`,
-    ...renderPrechecks(report.precheck.checks, report.diff.full.files, report.diff.increment.diff?.files ?? [], report.diff.increment.status)
+    ...renderPrechecks(report.precheck.checks)
   ].join('\n');
 }
 
