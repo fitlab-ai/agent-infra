@@ -185,6 +185,16 @@ test('task-bound guard preserves public argv, input, and delegated reference che
   };
   const currentView: SandboxTaskView = { ...staleView, state: 'current', reasonCode: null };
 
+  const rootTaskHelp = guardTaskOperation('public', 'task', [], { env: taskEnv, taskView: currentView });
+  assert.equal(rootTaskHelp.descriptor.selector, 'help');
+  assert.equal(rootTaskHelp.descriptor.scope, 'non-task');
+  assert.equal(rootTaskHelp.descriptor.effect, 'diagnostic');
+  assert.equal(rootTaskHelp.taskView, null);
+  assert.throws(
+    () => guardTaskOperation('public', 'task', ['unknown'], { env: taskEnv, taskView: currentView }),
+    (error: unknown) => error instanceof Error && error.message.startsWith('TASK_VIEW_OPERATION_UNREGISTERED:')
+  );
+
   for (const args of [['--task', taskId], ['-t', taskId]]) {
     assert.equal(guardTaskOperation('public', 'decide', args, { env: taskEnv, taskView: currentView }).descriptor.selector, 'decide');
   }

@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 
 import { CLI_PATH } from '../../helpers.ts';
 
-function runCli(args: string[]) {
-  return spawnSync('node', [CLI_PATH, ...args], { encoding: 'utf8' });
+function runCli(args: string[], env: NodeJS.ProcessEnv = process.env) {
+  return spawnSync('node', [CLI_PATH, ...args], { encoding: 'utf8', env });
 }
 
 test('ai task without subcommand prints USAGE and exits non-zero', () => {
@@ -14,6 +14,21 @@ test('ai task without subcommand prints USAGE and exits non-zero', () => {
   assert.match(out.stdout, /Usage: ai task <command>/);
   assert.match(out.stdout, /ls \[--all/);
   assert.match(out.stdout, /show \[--task <ref> \| -t <ref>\]/);
+});
+
+test('ai task without subcommand in a task-bound workspace prints USAGE and keeps the host exit code', () => {
+  const out = runCli(['task'], {
+    ...process.env,
+    AGENT_INFRA_SANDBOX: '1',
+    AGENT_INFRA_TASK_ID: 'TASK-20261116-150024',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_DIR: '/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime'
+  });
+  assert.equal(out.status, 1);
+  assert.match(out.stdout, /Usage: ai task <command>/);
+  assert.equal(out.stderr, '');
 });
 
 test('ai task --help prints USAGE and exits zero', () => {

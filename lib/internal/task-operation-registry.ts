@@ -496,7 +496,7 @@ export function guardTaskOperation(
   options: Readonly<{ env?: NodeJS.ProcessEnv; taskView?: SandboxTaskView }> = {}
 ): Readonly<{ descriptor: TaskOperationDescriptor; taskView: SandboxTaskView | null }> {
   const env = options.env ?? process.env;
-  if (isHelpRequest(args)) {
+  if (isHelpRequest(args) || (dispatcher === 'public' && command === 'task' && args.length === 0)) {
     return {
       descriptor: helpOperation(dispatcher, command, args),
       taskView: null
