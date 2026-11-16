@@ -596,8 +596,17 @@ function validators(providerType: string, declaration?: ProviderIdentityDeclarat
     'changeRequests.update': validateReceipt,
     'changeRequests.resolveGitEvidence': (value) => {
       const item = record(value, 'git evidence');
-      exactKeys(item, ['remoteUrl', 'reviewedHeadRef', 'targetHeadRef'], 'git evidence');
-      return { remoteUrl: stringValue(item.remoteUrl, 'git evidence.remoteUrl'), reviewedHeadRef: stringValue(item.reviewedHeadRef, 'git evidence.reviewedHeadRef'), targetHeadRef: stringValue(item.targetHeadRef, 'git evidence.targetHeadRef') } satisfies GitEvidenceSnapshot;
+      exactKeys(item, ['remoteUrl', 'reviewedHeadRef', 'targetHeadRef', 'defaultBranch'], 'git evidence');
+      return { remoteUrl: stringValue(item.remoteUrl, 'git evidence.remoteUrl'), reviewedHeadRef: stringValue(item.reviewedHeadRef, 'git evidence.reviewedHeadRef'), targetHeadRef: stringValue(item.targetHeadRef, 'git evidence.targetHeadRef'), defaultBranch: stringValue(item.defaultBranch, 'git evidence.defaultBranch') } satisfies GitEvidenceSnapshot;
+    },
+    'changeRequests.listCommitPullRequestAssociations': (value) => {
+      const item = record(value, 'commit pull request associations');
+      exactKeys(item, ['repository', 'pullRequestNumbers'], 'commit pull request associations');
+      return {
+        repository: stringValue(item.repository, 'commit pull request associations.repository'),
+        pullRequestNumbers: arrayValue(item.pullRequestNumbers, 'commit pull request associations.pullRequestNumbers')
+          .map((number) => positiveNumberValue(number, 'commit pull request number'))
+      };
     },
     'checks.inspectRequired': (value) => arrayValue(value, 'checks').map((entry) => {
       const item = record(entry, 'check');

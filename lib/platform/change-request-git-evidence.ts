@@ -10,8 +10,8 @@ import {
   unsupportedProviderOperation
 } from './provider-bridge.ts';
 import { isResourceIdentity } from './resource-identity.ts';
-import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
-import type { ReviewedHeadRelation } from "./merged-pr-equivalence.ts";
+import { resolveMergeDomain, resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
+import type { CommitPullRequestIdentity, ReviewedHeadRelation } from "./merged-pr-equivalence.ts";
 import type { PullRequestSnapshot } from "./pull-requests.ts";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
@@ -78,6 +78,9 @@ async function resolveMaterializedReviewedHeadRelation(input: {
       loaded.context.error?.message || 'Unable to resolve the configured platform provider'
     );
   }
+  if (input.pullRequest.repository !== loaded.value.snapshot.scope.id || input.pullRequest.base.repository !== loaded.value.snapshot.scope.id) {
+    return failed("PR_MERGE_IDENTITY_INVALID", "Pull request base repository does not match the configured repository");
+  }
   const target = isResourceIdentity(input.pullRequest.identity)
     ? input.pullRequest.identity
     : { kind: 'number' as const, value: input.pullRequest.number };
@@ -88,6 +91,7 @@ async function resolveMaterializedReviewedHeadRelation(input: {
       expected: {
         baseSha: input.pullRequest.base.sha,
         headSha: input.pullRequest.head.sha,
+        baseRepository: input.pullRequest.base.repository,
         targetBranch: input.pullRequest.base.ref
       }
     })
@@ -112,10 +116,13 @@ async function resolveMaterializedReviewedHeadRelation(input: {
       "Platform returned an invalid PR Git evidence source"
     );
   }
+  if (source.value.defaultBranch !== input.pullRequest.base.ref) {
+    return failed("PR_MERGE_IDENTITY_INVALID", "Pull request target is not the repository default branch");
+  }
 
   let evidenceRoot: string | null = null;
   let phase: "prepare" | "fetch" | "resolve" = "prepare";
-  let result: ReviewedHeadRelation;
+  let result: ReviewedHeadRelation = blocked("PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE", "Unable to resolve authoritative PR Git evidence");
   try {
     evidenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-pr-evidence-"));
     execFileSync("git", ["init", "--bare", "-q", evidenceRoot], {
@@ -143,12 +150,33 @@ async function resolveMaterializedReviewedHeadRelation(input: {
         "Fetched PR head does not match the authoritative platform snapshot"
       );
     } else {
-      result = resolveReviewedHeadRelation({
-        gitRoot: evidenceRoot,
-        comparisonHead,
-        lastReviewedCommit: input.lastReviewedCommit,
-        pullRequest: input.pullRequest
-      });
+      const domain = resolveMergeDomain(evidenceRoot, input.pullRequest.head.sha, input.pullRequest.mergeCommitSha!);
+      if (domain.status !== "ok") result = domain.relation;
+      else {
+        const associations = new Map<string, CommitPullRequestIdentity>();
+        for (const commitSha of domain.commits) {
+          const associated = loaded.value.provider.changeRequests?.listCommitPullRequestAssociations
+            ? await loaded.value.provider.changeRequests.listCommitPullRequestAssociations({
+                context: providerOperationContext(loaded.value),
+                commitSha
+            })
+            : undefined;
+          if (!associated?.ok || !associated.value) {
+            const error = associated && !associated.ok ? providerError(associated.error, "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE") : null;
+            result = blocked(error?.code || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE", error?.message || "Unable to resolve commit pull request associations");
+            break;
+          }
+          associations.set(commitSha, associated.value);
+        }
+        if (associations.size === domain.commits.length) result = resolveReviewedHeadRelation({
+          gitRoot: evidenceRoot,
+          comparisonHead,
+          lastReviewedCommit: input.lastReviewedCommit,
+          pullRequest: input.pullRequest,
+          defaultBranch: source.value.defaultBranch,
+          associations
+        });
+      }
     }
   } catch {
     result = phase === "fetch"

@@ -99,7 +99,7 @@ function writeTask(
   return taskDir;
 }
 
-test("complete-task gate verifies target advancement and consecutive squash merges from isolated remote evidence", async () => {
+test("complete-task gate verifies target advancement and consecutive PR ranges from isolated remote evidence", async () => {
   const fixtureRoot = createTempDir("complete-task-remote-evidence-");
   const remote = path.join(fixtureRoot, "remote.git");
   const seed = path.join(fixtureRoot, "seed");
@@ -121,16 +121,14 @@ test("complete-task gate verifies target advancement and consecutive squash merg
     git(seed, ["push", "-q", "origin", `${reviewedHeadA}:refs/pull/1/head`]);
     git(seed, ["switch", "-q", "main"]);
     const advancedBase = commit(seed, "advanced\nbase\n", "advance target");
-    git(seed, ["merge", "--squash", "feature-a"]);
-    git(seed, ["commit", "-qm", "squash A"]);
+    commit(seed, "advanced\nbase\nreviewed-a\n", "land PR A");
     const mergeCommitA = git(seed, ["rev-parse", "HEAD"]);
 
     git(seed, ["switch", "-qc", "feature-b"]);
-    const reviewedHeadB = commit(seed, "base\nreviewed-a\nreviewed-b\n", "reviewed B");
+    const reviewedHeadB = commit(seed, "advanced\nbase\nreviewed-a\nreviewed-b\n", "reviewed B");
     git(seed, ["push", "-q", "origin", `${reviewedHeadB}:refs/pull/2/head`]);
     git(seed, ["switch", "-q", "main"]);
-    git(seed, ["merge", "--squash", "feature-b"]);
-    git(seed, ["commit", "-qm", "squash B"]);
+    commit(seed, "advanced\nbase\nreviewed-a\nreviewed-b\n", "land PR B");
     const mergeCommitB = git(seed, ["rev-parse", "HEAD"]);
     git(seed, ["push", "-q", "origin", "main"]);
 
@@ -178,7 +176,11 @@ test("complete-task gate verifies target advancement and consecutive squash merg
         providers: {
           [platformType]: {
             source: providerSource,
-            config: { remoteUrl: remote, pullRequests: Object.fromEntries(pullRequests) }
+            config: {
+              remoteUrl: remote,
+              pullRequests: Object.fromEntries(pullRequests),
+              associations: { [mergeCommitA]: [1], [mergeCommitB]: [2] }
+            }
           }
         }
       }
@@ -207,7 +209,7 @@ test("complete-task gate verifies target advancement and consecutive squash merg
       });
       assert.equal(result.gate, "pass");
       assert.equal(result.checks[0].status, "pass");
-      assert.match(result.checks[0].message, /content-equivalent to squash merge/);
+      assert.match(result.checks[0].message, /content-equivalent to merge end/);
     }
     assert.deepEqual(repositorySnapshot(caller), before);
   } finally {

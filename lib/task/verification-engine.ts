@@ -17,7 +17,6 @@ import { check as checkPlatformSync } from "../platform/verification-sync.ts";
 import { check as checkRequiredChecks } from "../platform/verification-required.ts";
 import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
 import { resolveMaterializedReviewedHeadRelation } from "../platform/change-request-git-evidence.ts";
-import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
 import { LEDGER_TERMINAL, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
@@ -858,13 +857,13 @@ async function inspectMergedReviewedPullRequest({ task, hasPullRequest, gitRoot,
     pullRequest: inspected.pullRequest
   });
   if (relation.status === "merged-equivalent") {
-    return { result: passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)} on target ${relation.comparisonHead.slice(0, 8)}`) };
+    return { result: passResult("post-review-commit", `Reviewed PR head is content-equivalent to merge end ${relation.mergeCommit.slice(0, 8)} on target ${relation.comparisonHead.slice(0, 8)}`) };
   }
   if (relation.status === "blocked") return { result: blockedResult("post-review-commit", relation.message, relation.code) };
   if (relation.status === "strict") {
     return { result: resolvePostReviewIdentityFailure(task.content, {
       code: "PR_MERGE_IDENTITY_INVALID",
-      message: "Merged PR evidence did not establish squash merge equivalence"
+      message: "Merged PR evidence did not establish merged-range equivalence"
     }) };
   }
   if (relation.code === "PR_MERGE_IDENTITY_INVALID") return { result: resolvePostReviewIdentityFailure(task.content, relation) };
@@ -886,10 +885,10 @@ function collectPostReviewCommits({ gitRoot, lastReviewedCommit, reviewArtifact,
   return { sha, commits };
 }
 
-function resolvePostReviewCommitEquivalence({ hasPullRequest, inspected, gitRoot, localHead, sha, commits, globs }: any): any {
+async function resolvePostReviewCommitEquivalence({ hasPullRequest, inspected, gitRoot, localHead, sha, commits, globs }: any): Promise<any> {
   if (hasPullRequest && inspected?.pullRequest) {
-    const relation = resolveReviewedHeadRelation({ gitRoot, comparisonHead: localHead, lastReviewedCommit: sha, pullRequest: inspected.pullRequest });
-    if (relation.status === "merged-equivalent") return passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)}`);
+    const relation = await resolveMaterializedReviewedHeadRelation({ cwd: gitRoot, platformType: inspected.platform?.type || null, lastReviewedCommit: sha, pullRequest: inspected.pullRequest });
+    if (relation.status === "merged-equivalent") return passResult("post-review-commit", `Reviewed PR head is content-equivalent to merge end ${relation.mergeCommit.slice(0, 8)}`);
     if (relation.status === "blocked") return blockedResult("post-review-commit", relation.message, relation.code);
   } else if (!hasPullRequest && commits.length === 1) {
     const relation = resolveLocalReviewedCommitRelation({ gitRoot, localHead, lastReviewedCommit: sha, rewrittenCommit: commits[0]!, pathspecs: globs });
@@ -919,7 +918,7 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
     return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
   }
 
-  const equivalent = resolvePostReviewCommitEquivalence({ hasPullRequest, inspected: mergedReview.inspected, gitRoot, localHead, sha, commits, globs });
+  const equivalent = await resolvePostReviewCommitEquivalence({ hasPullRequest, inspected: mergedReview.inspected, gitRoot, localHead, sha, commits, globs });
   if (equivalent) return equivalent;
 
   const exemption = resolvePostReviewExemption(task.content);

@@ -111,6 +111,12 @@ type GitEvidenceSnapshot = {
   remoteUrl: string;
   reviewedHeadRef: string;
   targetHeadRef: string;
+  defaultBranch: string;
+};
+
+type CommitPullRequestAssociations = {
+  repository: string;
+  pullRequestNumbers: number[];
 };
 
 type RequiredCheckSnapshot = {
@@ -373,8 +379,12 @@ type PlatformProvider = {
     resolveGitEvidence(input: {
       context: ProviderOperationContext;
       target: ResourceIdentity;
-      expected: { baseSha?: string; headSha?: string; targetBranch?: string };
+      expected: { baseSha?: string; headSha?: string; baseRepository?: string; targetBranch?: string };
     }): Promise<ProviderResult<GitEvidenceSnapshot>>;
+    listCommitPullRequestAssociations?(input: {
+      context: ProviderOperationContext;
+      commitSha: string;
+    }): Promise<ProviderResult<CommitPullRequestAssociations>>;
   };
   checks?: {
     inspectRequired(input: {
@@ -532,7 +542,7 @@ function validatePlatformProvider(
   const operationGroups: Record<string, { required: string[]; optional: string[] }> = {
     issues: { required: ['inspect', 'create', 'update', 'describeRepository'], optional: ['listLabels', 'listMilestones'] },
     comments: { required: ['list', 'write', 'delete'], optional: [] },
-    changeRequests: { required: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'], optional: ['verifyHead', 'listFiles', 'listClosingIssues'] },
+    changeRequests: { required: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'], optional: ['verifyHead', 'listFiles', 'listClosingIssues', 'listCommitPullRequestAssociations'] },
     checks: { required: ['inspectRequired', 'resolveRun', 'fetchLogs'], optional: [] },
     reviews: { required: ['list', 'publish'], optional: [] },
     releases: { required: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes', 'collectNotes'], optional: [] },
@@ -598,6 +608,7 @@ export type {
   CheckLogSnapshot,
   CheckRunSnapshot,
   GitEvidenceSnapshot,
+  CommitPullRequestAssociations,
   IssueSnapshot,
   JsonValue,
   MilestoneReconciliation,

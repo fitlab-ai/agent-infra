@@ -73,9 +73,14 @@ export default async function createPlatformProvider(input) {
           value: {
             remoteUrl: String(input.config.remoteUrl || ''),
             reviewedHeadRef: `refs/pull/${request.target.value}/head`,
-            targetHeadRef: `refs/heads/${request.expected.targetBranch || 'main'}`
+            targetHeadRef: `refs/heads/${request.expected.targetBranch || 'main'}`,
+            defaultBranch: request.expected.targetBranch || 'main'
           }
         };
+      },
+      async listCommitPullRequestAssociations({ commitSha }) {
+        const associations = input.config.associations || {};
+        return { ok: true, value: { repository: 'o/r', pullRequestNumbers: associations[commitSha] || [] } };
       }
     }
   };

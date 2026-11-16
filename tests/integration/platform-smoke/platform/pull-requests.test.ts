@@ -9,7 +9,7 @@ import { inspectPlatformPullRequestByNumber, selectExternalPullRequest, syncPlat
 import { inspectGitHubIssueClosingChangeRequests, normalizePullRequest } from '../../../../lib/platform/github-data.ts';
 import type { GitHubClient, RequestOptions } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
-import { resolveGitHubChangeRequestGitEvidence } from '../../../../lib/platform/github-provider.ts';
+import { listGitHubCommitPullRequestAssociations, resolveGitHubChangeRequestGitEvidence } from '../../../../lib/platform/github-provider.ts';
 import { createTempDir } from '../../../helpers.ts';
 
 const remote = (number: number, head = 'feature', base = 'main') => ({
@@ -598,6 +598,7 @@ test('GitHub evidence prefers an exact upstream remote', () => {
     assert.equal(spawnSync('git', ['remote', 'add', 'upstream', 'https://github.com/o/r.git'], { cwd: root }).status, 0);
     const pullRequest = normalizePullRequest(remote(7), 'o/r')!;
     assert.deepEqual(resolveGitHubChangeRequestGitEvidence({
+      client: { json: () => ({ ok: true, value: { full_name: 'o/r', default_branch: 'main' } }) } as any,
       cwd: root, repository: 'o/r', number: pullRequest.number,
       baseRepository: pullRequest.base.repository, baseRef: pullRequest.base.ref
     }), {
@@ -605,7 +606,8 @@ test('GitHub evidence prefers an exact upstream remote', () => {
       value: {
         remoteUrl: 'https://github.com/o/r.git',
         reviewedHeadRef: 'refs/pull/7/head',
-        targetHeadRef: 'refs/heads/main'
+        targetHeadRef: 'refs/heads/main',
+        defaultBranch: 'main'
       }
     });
   } finally {
@@ -620,10 +622,26 @@ test('GitHub evidence preserves origin transport when rewriting a fork remote', 
     assert.equal(spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fork/r.git'], { cwd: root }).status, 0);
     const pullRequest = normalizePullRequest(remote(7), 'o/r')!;
     assert.equal(resolveGitHubChangeRequestGitEvidence({
+      client: { json: () => ({ ok: true, value: { full_name: 'o/r', default_branch: 'main' } }) } as any,
       cwd: root, repository: 'o/r', number: pullRequest.number,
       baseRepository: pullRequest.base.repository, baseRef: pullRequest.base.ref
     }).value?.remoteUrl, 'git@github.com:o/r.git');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('GitHub commit association lookup collects every paginated page and keeps repository identity', () => {
+  let argsSeen: string[] = [];
+  const client = {
+    json(args: string[]) {
+      argsSeen = args;
+      return { ok: true, value: [[{ number: 7, base: { repo: { full_name: 'o/r' } } }], [{ number: 8, base: { repo: { full_name: 'o/r' } } }]] };
+    }
+  } as unknown as GitHubClient;
+  assert.deepEqual(listGitHubCommitPullRequestAssociations(client, 'o/r', 'a'.repeat(40), process.cwd()), {
+    ok: true,
+    value: { repository: 'o/r', pullRequestNumbers: [7, 8] }
+  });
+  assert.deepEqual(argsSeen.slice(0, 3), ['api', '--paginate', '--slurp']);
 });

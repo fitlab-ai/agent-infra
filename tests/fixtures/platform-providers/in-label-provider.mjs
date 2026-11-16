@@ -163,7 +163,7 @@ export default async function createPlatformProvider(input) {
       },
       async resolveGitEvidence() {
         recordCall(config, 'changeRequests.resolveGitEvidence');
-        return { ok: true, value: { remoteUrl: 'https://external.example/project', reviewedHeadRef: 'refs/heads/feature', targetHeadRef: 'refs/heads/main' } };
+        return { ok: true, value: { remoteUrl: 'https://external.example/project', reviewedHeadRef: 'refs/heads/feature', targetHeadRef: 'refs/heads/main', defaultBranch: 'main' } };
       }
     },
     verification: {
