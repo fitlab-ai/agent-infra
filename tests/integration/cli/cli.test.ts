@@ -211,7 +211,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.equal(config.templateVersion, `v${JSON.parse(read("package.json")).version}`);
     assert.ok(!("templateSource" in config), "init should not generate templateSource");
     assert.ok(!("templates" in config), "blank template sources should not generate templates config");
-    assert.ok(!("skills" in config), "blank skill sources should not generate skills config");
+    assert.deepEqual(config.skills, { sources: [], registrations: [] });
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.match(output, /npm install -g @fitlab-ai\/agent-infra/);
@@ -455,7 +455,7 @@ test("agent-infra init omits optional source config when source prompts are blan
 
     assert.deepEqual(config.platform, { type: "gitea" });
     assert.ok(!("templates" in config), "blank template source should not generate templates config");
-    assert.ok(!("skills" in config), "blank skill source should not generate skills config");
+    assert.deepEqual(config.skills, { sources: [], registrations: [] });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -479,7 +479,8 @@ test("agent-infra init records optional external skill sources", () => {
       sources: [
         { type: "local", path: "~/private-skills" },
         { type: "local", path: "~/team-skills" }
-      ]
+      ],
+      registrations: []
     });
     assert.ok(!("templates" in config), "blank template source should not generate templates config");
   } finally {

@@ -193,6 +193,96 @@ function trustedBaseline(value) {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value) ? value : null;
 }
 
+function scanRegisteredSkillSources(projectRoot, registrations, sources, templateSkillNames) {
+  const found = new Map();
+  const errors = [];
+  let invalidRegistration = false;
+  for (const source of sources) {
+    if (source?.type !== 'local' || typeof source.path !== 'string' || !source.path.trim()) {
+      errors.push({ source: String(source?.path || ''), reason: 'invalid path' });
+      continue;
+    }
+    const root = expandHome(source.path);
+    let entries;
+    try {
+      if (!fs.statSync(root).isDirectory()) throw new Error('not a directory');
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      errors.push({ source: source.path, reason: 'directory unavailable or unreadable' });
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (templateSkillNames.has(entry.name)) {
+        errors.push({ source: source.path, reason: `skill ${entry.name} conflicts with built-in skill` });
+        continue;
+      }
+      const dir = path.join(root, entry.name);
+      let skillFiles;
+      try {
+        skillFiles = walkDir(dir);
+        if (!skillFiles.some((file) => path.basename(file) === 'SKILL.md')) continue;
+        for (const file of skillFiles) {
+          const stat = fs.lstatSync(file);
+          if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('non-regular skill file');
+        }
+        const files = new Map(skillFiles.map((file) => [norm(path.relative(dir, file)), fs.readFileSync(file)]));
+        const key = `${entry.name}\0${path.resolve(dir)}`;
+        found.set(key, { name: entry.name, path: path.resolve(dir), files });
+      } catch {
+        errors.push({ source: source.path, reason: `skill ${entry.name} is incomplete or unreadable` });
+      }
+    }
+  }
+  const byName = new Map();
+  for (const candidate of found.values()) {
+    const current = byName.get(candidate.name) || [];
+    current.push(candidate);
+    byName.set(candidate.name, current);
+  }
+  const selected = new Map();
+  const names = new Set();
+  for (const registration of registrations) {
+    if (!registration || !['project', 'local'].includes(registration.type) || typeof registration.name !== 'string' || typeof registration.path !== 'string') {
+      errors.push({ source: '', reason: 'invalid skill registration' });
+      invalidRegistration = true;
+      continue;
+    }
+    if (!/^[a-zA-Z0-9_.@-]+$/.test(registration.name) || names.has(registration.name) || templateSkillNames.has(registration.name)) {
+      errors.push({ source: registration.path, reason: `invalid, duplicate, or built-in registration name: ${registration.name}` });
+      invalidRegistration = true;
+      continue;
+    }
+    names.add(registration.name);
+    if (registration.type === 'project') {
+      if (norm(registration.path) !== `.agents/skills/${registration.name}`) {
+        errors.push({ source: registration.path, reason: `project registration path must be .agents/skills/${registration.name}` });
+        invalidRegistration = true;
+        continue;
+      }
+      const dir = path.resolve(projectRoot, registration.path);
+      selected.set(registration.name, { ...registration, path: dir, project: true, files: null });
+      continue;
+    }
+    const dir = path.resolve(expandHome(registration.path));
+    const candidate = found.get(`${registration.name}\0${dir}`);
+    if (!candidate) {
+      errors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable or not configured in skills.sources` });
+      continue;
+    }
+    selected.set(registration.name, { ...registration, path: dir, project: false, files: candidate.files });
+  }
+  return { selected, candidates: byName, errors, invalidRegistration };
+}
+
+function valueBaseline(value) {
+  if (trustedBaseline(value)) return { hash: value, source: null };
+  if (value && typeof value === 'object' && trustedBaseline(value.hash) && typeof value.source === 'string') {
+    return { hash: value.hash, source: path.resolve(expandHome(value.source)) };
+  }
+  return null;
+}
+
 function isInsideProject(projectRoot, relativePath) {
   if (typeof relativePath !== 'string' || relativePath.trim() === '' || path.isAbsolute(relativePath)) {
     return false;
@@ -321,27 +411,14 @@ function listTemplateSkillNames(templateRoot) {
   );
 }
 
-function detectCustomSkills(projectRoot, templateSkillNames) {
+function detectUnregisteredProjectSkills(projectRoot, templateSkillNames, registrations) {
   const skillsDir = path.join(projectRoot, '.agents/skills');
   if (!fs.existsSync(skillsDir)) return [];
-
+  const registered = new Set(registrations.map((entry) => entry?.name));
   return fs.readdirSync(skillsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !templateSkillNames.has(entry.name))
-    .map((entry) => {
-      const skillMd = path.join(skillsDir, entry.name, 'SKILL.md');
-      if (!fs.existsSync(skillMd)) return null;
-
-      const meta = parseSkillFrontmatter(skillMd);
-      return {
-        dirName: entry.name,
-        name: meta.name || entry.name,
-        description: meta.description || '',
-        args: meta.args || null,
-        disableModelInvocation: meta['disable-model-invocation'] === 'true'
-      };
-    })
-    .filter(Boolean)
-    .sort((left, right) => left.dirName.localeCompare(right.dirName));
+    .filter((entry) => entry.isDirectory() && !templateSkillNames.has(entry.name) && !registered.has(entry.name))
+    .filter((entry) => fs.existsSync(path.join(skillsDir, entry.name, 'SKILL.md')))
+    .map((entry) => ({ dirName: entry.name }));
 }
 
 function isCustomProtected(targetPath, customSkills, customCommandTargets) {
@@ -434,94 +511,6 @@ function mergeTemplateSources(baseRoot, sources, report) {
     mergedRels: [...sourceMap.keys()],
     sourceMap
   };
-}
-
-function syncCustomSkillSources(projectRoot, sources, report, templateSkillNames) {
-  const skillsDir = path.join(projectRoot, '.agents/skills');
-  const syncedSkills = new Map();
-
-  for (const source of sources) {
-    if (source?.type !== 'local') continue;
-    if (typeof source.path !== 'string' || source.path.trim() === '') {
-      report.custom.sourceErrors.push({ source: String(source?.path || ''), reason: 'invalid path' });
-      continue;
-    }
-
-    const srcDir = expandHome(source.path);
-    if (!fs.existsSync(srcDir) || !fs.statSync(srcDir).isDirectory()) {
-      report.custom.sourceErrors.push({ source: source.path, reason: 'directory not found' });
-      continue;
-    }
-
-    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      if (templateSkillNames.has(entry.name)) {
-        report.custom.sourceErrors.push({
-          source: source.path,
-          reason: `skill ${entry.name} conflicts with built-in skill`
-        });
-        continue;
-      }
-
-      const skillSrcDir = path.join(srcDir, entry.name);
-      const skillMd = path.join(skillSrcDir, 'SKILL.md');
-      if (!fs.existsSync(skillMd)) continue;
-
-      const skillDstDir = path.join(skillsDir, entry.name);
-      const trackedFiles = syncedSkills.get(entry.name) || new Set();
-      syncedSkills.set(entry.name, trackedFiles);
-
-      for (const srcFile of walkDir(skillSrcDir)) {
-        const relPath = norm(path.relative(skillSrcDir, srcFile));
-        const dstFile = path.join(skillDstDir, relPath);
-        const projectPath = norm(path.relative(projectRoot, dstFile));
-        const srcContent = fs.readFileSync(srcFile);
-        const existed = fs.existsSync(dstFile);
-
-        trackedFiles.add(relPath);
-
-        if (existed) {
-          const dstContent = fs.readFileSync(dstFile);
-          if (srcContent.equals(dstContent)) {
-            report.custom.unchanged.push(projectPath);
-            continue;
-          }
-        }
-
-        const dir = path.dirname(dstFile);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(dstFile, srcContent);
-
-        (existed ? report.custom.updated : report.custom.generated).push(projectPath);
-      }
-    }
-  }
-
-  return syncedSkills;
-}
-
-function cleanStaleSyncedFiles(projectRoot, syncedSkills, report) {
-  const skillsDir = path.join(projectRoot, '.agents/skills');
-
-  for (const [skillName, expectedFiles] of syncedSkills) {
-    const skillDir = path.join(skillsDir, skillName);
-    if (!fs.existsSync(skillDir)) continue;
-
-    const actualFiles = walkDir(skillDir).map((filePath) => norm(path.relative(skillDir, filePath)));
-    const removedBefore = report.custom.removed.length;
-
-    for (const actualFile of actualFiles) {
-      if (expectedFiles.has(actualFile)) continue;
-
-      const staleFile = path.join(skillDir, actualFile);
-      fs.unlinkSync(staleFile);
-      report.custom.removed.push(norm(path.relative(projectRoot, staleFile)));
-    }
-
-    if (report.custom.removed.length > removedBefore) {
-      removeEmptyDirs(skillDir);
-    }
-  }
 }
 
 function formatYamlMetadata(key, value) {
@@ -775,7 +764,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const originalConfigText = fs.readFileSync(cfgPath, 'utf8');
   const cfg = JSON.parse(originalConfigText);
-  ensureRuntimeWorkspace(cfg.project);
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
   let templateRoot = templateRootOverride;
   if (!templateRoot) {
@@ -794,6 +782,29 @@ function syncTemplates(projectRoot, templateRootOverride) {
     && fs.realpathSync(templateRoot) === fs.realpathSync(projectTemplateRoot);
 
   const { project, org, language: lang = 'en' } = cfg;
+  const templateSkillNames = listTemplateSkillNames(templateRoot);
+  const hadRegistrations = Object.prototype.hasOwnProperty.call(cfg.skills || {}, 'registrations');
+  if (hadRegistrations && !Array.isArray(cfg.skills.registrations)) {
+    return { error: 'Invalid skills.registrations; expected an array.' };
+  }
+  const sourceRoots = Array.isArray(cfg.skills?.sources) ? cfg.skills.sources : [];
+  const registrations = hadRegistrations ? cfg.skills.registrations : [];
+  const scannedSkills = scanRegisteredSkillSources(projectRoot, registrations, sourceRoots, templateSkillNames);
+  if (hadRegistrations && scannedSkills.invalidRegistration) {
+    return { error: 'Invalid skills.registrations; repair the names, types, paths, or duplicates before updating.' };
+  }
+  if (!hadRegistrations) {
+    if (scannedSkills.errors.length > 0) {
+      return { error: 'Legacy skill registration migration deferred because one or more configured sources could not be fully read.', custom: { sourceErrors: scannedSkills.errors } };
+    }
+    const migrated = [];
+    for (const [name, candidates] of scannedSkills.candidates) {
+      if (candidates.length !== 1) continue;
+      migrated.push({ name, type: 'local', path: candidates[0].path });
+    }
+    cfg.skills = { ...(cfg.skills || {}), registrations: migrated };
+  }
+  ensureRuntimeWorkspace(cfg.project);
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
   const enabledResolution = normalizeAgentClientConfig(cfg);
   if (enabledResolution.error) {
@@ -804,8 +815,19 @@ function syncTemplates(projectRoot, templateRootOverride) {
   );
   materializeAgentClientConfig(cfg, enabledResolution);
   const vars = { project, org };
-  const templateSkillNames = listTemplateSkillNames(templateRoot);
-  const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
+  const activeRegistrations = Array.isArray(cfg.skills?.registrations) ? cfg.skills.registrations : [];
+  const projectCustomSkills = activeRegistrations
+    .filter((entry) => entry?.type === 'project')
+    .map((entry) => {
+      const dirName = path.basename(entry.path);
+      const meta = parseSkillFrontmatter(path.join(projectRoot, entry.path, 'SKILL.md'));
+      return { dirName, name: meta.name || entry.name, description: meta.description || '', args: meta.args || null, disableModelInvocation: meta['disable-model-invocation'] === 'true' };
+    })
+    .filter((entry) => fs.existsSync(path.join(projectRoot, '.agents/skills', entry.dirName, 'SKILL.md')));
+  const protectedCustomSkills = [
+    ...projectCustomSkills,
+    ...detectUnregisteredProjectSkills(projectRoot, templateSkillNames, activeRegistrations)
+  ];
 
   cfg.files ||= {};
   const currentRegistry = {
@@ -842,6 +864,13 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const ejected = [...assetPlan.registry.ejected];
   const guardedManaged = new Set((DEFAULTS.files.guardedManaged || []).map(norm));
   const allClientManaged = adapterAssets(AGENT_CLIENT_MANIFEST, 'managed');
+  const retiredAssetTargets = new Set((DEFAULTS.files.retiredAssets || []).map((asset) => norm(asset.target)));
+  const registeredCommandTargets = new Set(activeRegistrations.flatMap((registration) => {
+    const adapterTargets = AGENT_CLIENT_MANIFEST
+      .filter((adapter) => enabledTUIs.has(adapter.id) && adapter.customCommand)
+      .map((adapter) => adapter.customCommand.target.replaceAll('${skillName}', registration.name));
+    return adapterTargets;
+  }));
   const managedBaselines = cfg.files.managedBaselines && typeof cfg.files.managedBaselines === 'object'
     && !Array.isArray(cfg.files.managedBaselines)
     ? { ...cfg.files.managedBaselines }
@@ -849,10 +878,21 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
 
   for (const target of Object.keys(managedBaselines)) {
+    const skillPath = norm(target).match(/^\.agents\/skills\/([^/]+)\//);
+    if (skillPath && managedBaselines[target] && typeof managedBaselines[target] === 'object') {
+      const registration = activeRegistrations.find((entry) => entry?.name === skillPath[1] && entry.type === 'local');
+      const record = managedBaselines[target];
+      if (registration && typeof record.source === 'string'
+        && path.resolve(expandHome(record.source)) === path.resolve(expandHome(registration.path))) continue;
+      delete managedBaselines[target];
+      continue;
+    }
     if (
       !guardedManaged.has(norm(target))
       && !retiredManagedForTarget(target)
+      && !retiredAssetTargets.has(norm(target))
       && !allClientManaged.some((entry) => assetMatches(entry, target))
+      && !registeredCommandTargets.has(target)
     ) {
       delete managedBaselines[target];
     }
@@ -1005,6 +1045,59 @@ function syncTemplates(projectRoot, templateRootOverride) {
         template: null
       });
     }
+  }
+
+  const retiredAssets = DEFAULTS.files.retiredAssets || [];
+  for (const groupName of new Set(retiredAssets.map((asset) => asset.group))) {
+    const assets = retiredAssets.filter((asset) => asset.group === groupName);
+    const skillName = groupName;
+    const protectedByRegistration = activeRegistrations.some((entry) => entry.name === skillName);
+    const knownTargets = new Set(assets.map((asset) => norm(asset.target)));
+    const skillDir = path.join(projectRoot, '.agents', 'skills', skillName);
+    let inventory = [];
+    let inventoryValid = true;
+    if (fs.existsSync(skillDir)) {
+      const stat = fs.lstatSync(skillDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) inventoryValid = false;
+      else inventory = walkDir(skillDir).map((file) => norm(path.relative(projectRoot, file)));
+      if (inventory.some((target) => !knownTargets.has(target))) inventoryValid = false;
+    }
+    const eligible = !protectedByRegistration && inventoryValid && assets.every((asset) => {
+      const target = norm(asset.target);
+      const full = path.join(projectRoot, target);
+      const ejectedMatch = ejected.some((pattern) => assetMatches(pattern, target) || globMatch(pattern, target));
+      const declared = currentRegistry.managed.some((pattern) => assetMatches(pattern, target));
+      if (!fs.existsSync(full)) return !ejectedMatch;
+      if (ejectedMatch || !declared) return false;
+      const stat = fs.lstatSync(full);
+      if (!stat.isFile() || stat.isSymbolicLink()) return false;
+      const localHash = sha256(fs.readFileSync(full));
+      const baseline = trustedBaseline(managedBaselines[target]);
+      const historical = (asset.templateHashes || []).includes(localHash);
+      return baseline !== null && localHash === baseline || historical;
+    });
+    if (!eligible) {
+      for (const asset of assets) {
+        const full = path.join(projectRoot, asset.target);
+        if (fs.existsSync(full)) report.managed.protected.push({
+          target: asset.target,
+          reason: protectedByRegistration ? 'registered-custom' : 'unknown-origin-or-modified',
+          baseline: trustedBaseline(managedBaselines[asset.target]),
+          local: fs.lstatSync(full).isFile() && !fs.lstatSync(full).isSymbolicLink() ? sha256(fs.readFileSync(full)) : null,
+          template: null
+        });
+      }
+      continue;
+    }
+    for (const asset of assets) {
+      const target = norm(asset.target);
+      const full = path.join(projectRoot, target);
+      if (!fs.existsSync(full)) continue;
+      fs.unlinkSync(full);
+      report.managed.removed.push(target);
+      delete managedBaselines[target];
+    }
+    removeEmptyDirs(skillDir);
   }
 
   const templateSources = Array.isArray(cfg.templates?.sources) ? cfg.templates.sources : [];
@@ -1364,21 +1457,129 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
   }
 
-  const sources = Array.isArray(cfg.skills?.sources) ? cfg.skills.sources : [];
-  if (sources.length > 0) {
-    const syncedSkills = syncCustomSkillSources(projectRoot, sources, report, templateSkillNames);
-    cleanStaleSyncedFiles(projectRoot, syncedSkills, report);
+  report.custom.sourceErrors.push(...scannedSkills.errors);
+  const customSkills = [];
+  const currentSkillTargets = new Map();
+  for (const registration of activeRegistrations) {
+    const selected = scannedSkills.selected.get(registration.name);
+    if (!selected) continue;
+    const dirName = registration.name;
+    const skillDir = path.join(projectRoot, '.agents', 'skills', dirName);
+    let skill;
+    try {
+      const sourceDir = selected.project ? selected.path : selected.path;
+      skill = parseSkillFrontmatter(path.join(sourceDir, 'SKILL.md'));
+    } catch {
+      report.custom.sourceErrors.push({ source: registration.path, reason: `registered skill ${registration.name} could not be read` });
+      continue;
+    }
+    const customSkill = {
+      dirName,
+      name: skill.name || dirName,
+      description: skill.description || '',
+      args: skill.args || null,
+      disableModelInvocation: skill['disable-model-invocation'] === 'true'
+    };
+    if (!selected.project) {
+      const source = selected.path;
+      const files = selected.files;
+      const expected = new Set();
+      currentSkillTargets.set(dirName, { source, expected });
+      for (const [relative, content] of files) {
+        const target = norm(path.join('.agents', 'skills', dirName, relative));
+        expected.add(target);
+        const absolute = path.join(projectRoot, target);
+        const raw = managedBaselines[target];
+        const baseline = valueBaseline(raw);
+        const existed = fs.existsSync(absolute) || fs.lstatSync(absolute, { throwIfNoEntry: false })?.isSymbolicLink();
+        const local = existed && fs.lstatSync(absolute).isFile() && !fs.lstatSync(absolute).isSymbolicLink()
+          ? sha256(fs.readFileSync(absolute)) : null;
+        const sourceHash = sha256(content);
+        const ownerMatches = baseline?.source === source;
+        if (!existed) {
+          fs.mkdirSync(path.dirname(absolute), { recursive: true });
+          fs.writeFileSync(absolute, content);
+          managedBaselines[target] = { hash: sourceHash, source };
+          report.custom.generated.push(target);
+        } else if (local === null || !ownerMatches) {
+          report.custom.sourceErrors.push({ source: registration.path, reason: `unowned target preserved: ${target}` });
+          report.custom.unchanged.push(target);
+        } else if (local === baseline.hash && local === sourceHash) {
+          report.custom.unchanged.push(target);
+        } else if (local === baseline.hash) {
+          fs.writeFileSync(absolute, content);
+          managedBaselines[target] = { hash: sourceHash, source };
+          report.custom.updated.push(target);
+        } else {
+          report.custom.sourceErrors.push({ source: registration.path, reason: `modified target preserved: ${target}` });
+        }
+      }
+      const prefix = `.agents/skills/${dirName}/`;
+      for (const [target, raw] of Object.entries(managedBaselines)) {
+        if (!target.startsWith(prefix) || expected.has(target)) continue;
+        const baseline = valueBaseline(raw);
+        if (baseline?.source !== source) continue;
+        const absolute = path.join(projectRoot, target);
+        try {
+          const stat = fs.lstatSync(absolute);
+          if (stat.isFile() && !stat.isSymbolicLink() && sha256(fs.readFileSync(absolute)) === baseline.hash) {
+            fs.unlinkSync(absolute);
+            delete managedBaselines[target];
+            report.custom.removed.push(target);
+          } else {
+            report.custom.sourceErrors.push({ source: registration.path, reason: `modified stale target preserved: ${target}` });
+          }
+        } catch { /* missing or unreadable target remains for diagnosis */ }
+      }
+      if (fs.existsSync(skillDir)) {
+        for (const file of walkDir(skillDir)) {
+          const target = norm(path.relative(projectRoot, file));
+          if (expected.has(target) || report.custom.removed.includes(target)) continue;
+          const baseline = valueBaseline(managedBaselines[target]);
+          if (baseline?.source === source) continue;
+          report.custom.sourceErrors.push({ source: registration.path, reason: `unknown target preserved: ${target}` });
+        }
+      }
+    } else if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
+      report.custom.sourceErrors.push({ source: registration.path, reason: `project skill ${dirName} is missing` });
+      continue;
+    }
+    customSkills.push(customSkill);
   }
-
-  const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
-  report.custom.detected = customSkills.map((skill) => skill.dirName);
-  generateCustomCommands(
-    customSkills,
-    lang,
-    report,
-    enabledTUIs,
-    writeProtectedManaged
-  );
+  report.custom.detected = [...new Set([
+    ...activeRegistrations.map((registration) => registration.name),
+    ...customSkills.map((skill) => skill.dirName),
+    ...protectedCustomSkills.map((skill) => skill.dirName)
+  ])].sort();
+  const availableNames = new Set(customSkills.map((skill) => skill.dirName));
+  const customCommandWriter = (target, content, bucket) => {
+    const absolute = path.join(projectRoot, target);
+    const existed = fs.existsSync(absolute);
+    const baseline = trustedBaseline(managedBaselines[target]);
+    const local = existed && fs.lstatSync(absolute).isFile() && !fs.lstatSync(absolute).isSymbolicLink()
+      ? sha256(fs.readFileSync(absolute)) : null;
+    const template = sha256(content);
+    if (existed && (local === null || baseline === null)) {
+      report.custom.sourceErrors.push({ source: target, reason: 'unowned generated command preserved' });
+      return false;
+    }
+    if (baseline !== null && local !== baseline && local !== template) {
+      report.custom.sourceErrors.push({ source: target, reason: 'modified generated command preserved' });
+      return false;
+    }
+    if (local === template) {
+      if (baseline !== null) managedBaselines[target] = template;
+      bucket.unchanged.push(target);
+      return false;
+    }
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, content);
+    managedBaselines[target] = template;
+    (existed ? bucket.updated : bucket.generated).push(target);
+    return true;
+  };
+  const availableSkills = customSkills.filter((skill) => availableNames.has(skill.dirName));
+  generateCustomCommands(availableSkills, lang, report, enabledTUIs, customCommandWriter);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);

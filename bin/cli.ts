@@ -29,6 +29,7 @@ Commands:
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another current workspace directory (active/blocked/completed/archive)
   run             Schedule a lifecycle skill in the task sandbox tmux session
+  skill           Register, list, or remove project and local skills
   sandbox, s      Manage Docker-based AI sandboxes
   server          Run the local AI collaboration daemon (start/stop/status/logs)
   task, t         Read-only views of project task workspaces
@@ -166,6 +167,17 @@ if (!taskViewGuardFailed) switch (command) {
       process.stderr.write(`Error: ${errorMessage(e)}\n`);
       process.exit(1);
     });
+    break;
+  }
+  case 'skill': {
+    const imported = await importCommand('../lib/skill.ts');
+    if (!imported) break;
+    const { cmdSkill } = imported;
+    const code = await cmdSkill(process.argv.slice(3)).catch((e: unknown) => {
+      process.stderr.write(`Error: ${errorMessage(e)}\n`);
+      return 1;
+    });
+    if (code) process.exitCode = code;
     break;
   }
   case 'server': {

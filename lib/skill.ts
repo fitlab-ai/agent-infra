@@ -1,0 +1,200 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { closePrompt, prompt, select } from './prompt.ts';
+import { resolveTemplateDir } from './paths.ts';
+import { listAgentClientAdapters } from './agent-clients/registry.ts';
+
+type Registration = { name: string; type: 'project' | 'local'; path: string };
+type SkillConfig = {
+  skills?: { sources?: { type: string; path: string }[]; registrations?: Registration[] };
+  files?: { managedBaselines?: Record<string, unknown> };
+};
+
+const NAME = /^[a-zA-Z0-9_.@-]+$/;
+const hash = (data: Buffer | string) => `sha256:${crypto.createHash('sha256').update(data).digest('hex')}`;
+const norm = (value: string) => value.split(path.sep).join('/').replace(/^\.\//, '');
+
+function readConfig(root = process.cwd()): { file: string; config: SkillConfig } {
+  const file = path.join(root, '.agents', '.airc.json');
+  const config = JSON.parse(fs.readFileSync(file, 'utf8')) as SkillConfig;
+  if (config.skills?.registrations !== undefined && !Array.isArray(config.skills.registrations)) {
+    throw new Error('skills.registrations must be an array.');
+  }
+  return { file, config };
+}
+
+function writeConfig(file: string, config: SkillConfig): void {
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* preserve original error */ }
+    throw error;
+  }
+}
+
+function resolveLocal(input: string): string {
+  if (input === '~') return os.homedir();
+  if (input.startsWith('~/')) return path.resolve(os.homedir(), input.slice(2));
+  return path.resolve(input);
+}
+
+function templateNames(): Set<string> {
+  const template = resolveTemplateDir();
+  if (!template) throw new Error('Built-in skill templates are unavailable.');
+  const dir = path.join(template, '.agents', 'skills');
+  return new Set(fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && ['SKILL.md', 'SKILL.en.md', 'SKILL.zh-CN.md'].some((file) => fs.existsSync(path.join(dir, entry.name, file))))
+    .map((entry) => entry.name));
+}
+
+function localCandidates(config: SkillConfig): { name: string; type: 'project' | 'local'; path: string; available: boolean }[] {
+  const result: { name: string; type: 'project' | 'local'; path: string; available: boolean }[] = [];
+  const projectDir = path.resolve('.agents/skills');
+  if (fs.existsSync(projectDir)) {
+    for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
+      if (entry.isDirectory() && fs.existsSync(path.join(projectDir, entry.name, 'SKILL.md'))) {
+        result.push({ name: entry.name, type: 'project', path: path.join(projectDir, entry.name), available: true });
+      }
+    }
+  }
+  for (const source of config.skills?.sources ?? []) {
+    if (source?.type !== 'local' || typeof source.path !== 'string') continue;
+    const root = resolveLocal(source.path);
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillPath = path.join(root, entry.name);
+      if (fs.existsSync(path.join(skillPath, 'SKILL.md'))) {
+        result.push({ name: entry.name, type: 'local', path: skillPath, available: true });
+      }
+    }
+  }
+  return result;
+}
+
+function removeEmptyDirs(dir: string, stop: string): void {
+  let current = dir;
+  while (current !== stop && current.startsWith(`${stop}${path.sep}`) && fs.existsSync(current)) {
+    if (fs.readdirSync(current).length > 0) break;
+    fs.rmdirSync(current);
+    current = path.dirname(current);
+  }
+}
+
+function cleanupOwnedOutputs(name: string, registration: Registration, config: SkillConfig): string[] {
+  const baselines = config.files?.managedBaselines;
+  if (!baselines || typeof baselines !== 'object') return [];
+  const removed: string[] = [];
+  const skillRoot = path.resolve('.agents/skills', name);
+  const projectSkills = path.resolve('.agents/skills');
+  if (registration.type === 'local' && fs.existsSync(skillRoot)) {
+    for (const target of Object.keys(baselines)) {
+      const absolute = path.resolve(target);
+      if (!absolute.startsWith(`${skillRoot}${path.sep}`)) continue;
+      const baseline = baselines[target];
+      if (!baseline || typeof baseline !== 'object' || !('hash' in baseline) || !('source' in baseline)) continue;
+      const record = baseline as { hash?: unknown; source?: unknown };
+      if (record.source !== registration.path || typeof record.hash !== 'string') continue;
+      try {
+        const stat = fs.lstatSync(absolute);
+        if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== record.hash) continue;
+        fs.unlinkSync(absolute);
+        delete baselines[target];
+        removed.push(norm(path.relative(process.cwd(), absolute)));
+      } catch { /* unavailable or changed files remain protected */ }
+    }
+    removeEmptyDirs(skillRoot, projectSkills);
+  }
+
+  for (const adapter of listAgentClientAdapters()) {
+    const descriptor = adapter.project.customCommand;
+    if (!descriptor) continue;
+    const target = descriptor.target.replaceAll('${skillName}', name);
+    const baseline = baselines[target];
+    if (typeof baseline !== 'string' || !baseline.startsWith('sha256:')) continue;
+    const absolute = path.resolve(target);
+    try {
+      const stat = fs.lstatSync(absolute);
+      if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== baseline) continue;
+      fs.unlinkSync(absolute);
+      delete baselines[target];
+      removed.push(target);
+      removeEmptyDirs(path.dirname(absolute), process.cwd());
+    } catch { /* unavailable or changed files remain protected */ }
+  }
+  for (const target of Object.keys(baselines)) {
+    const record = baselines[target];
+    if (record && typeof record === 'object' && 'source' in record && record.source === registration.path) delete baselines[target];
+  }
+  return removed;
+}
+
+export async function cmdSkill(args: string[]): Promise<number> {
+  const [action, requestedName] = args;
+  if (typeof action !== 'string' || !['add', 'list', 'remove'].includes(action)) {
+    process.stderr.write('Usage: ai skill <add|list|remove> [name]\n');
+    return 2;
+  }
+  try {
+    const { file, config } = readConfig();
+    const registrations = config.skills?.registrations;
+    const builtins = templateNames();
+    const candidates = localCandidates(config);
+    if (action === 'list') {
+      for (const name of [...builtins].sort()) process.stdout.write(`builtin\t${name}\n`);
+      for (const item of candidates) {
+        if (item.type === 'project' && builtins.has(item.name)) continue;
+        const registration = registrations?.find((entry) => entry.name === item.name && entry.path === item.path);
+        const conflicts = candidates.filter((candidate) => candidate.name === item.name).length > 1;
+        process.stdout.write(`${registration ? 'registered' : 'unregistered'}\t${conflicts ? 'conflict' : 'available'}\t${item.type}\t${item.name}\t${item.path}\n`);
+      }
+      for (const registration of registrations ?? []) {
+        if (!candidates.some((item) => item.name === registration.name && item.path === registration.path)) {
+          process.stdout.write(`registered\tunavailable\t${registration.type}\t${registration.name}\t${registration.path}\n`);
+        }
+      }
+      return 0;
+    }
+
+    if (!Array.isArray(registrations)) config.skills = { ...(config.skills ?? {}), registrations: [] };
+    const list = config.skills!.registrations!;
+    if (action === 'add') {
+      const available = candidates.filter((item) => !builtins.has(item.name));
+      if (!available.length) throw new Error('No custom skills are available from the project or configured local sources.');
+      const choices = available.map((item) => `${item.name} — ${item.path}`);
+      const selectedName = requestedName || await select('Choose a custom skill', choices);
+      const matches = available.filter((item) => selectedName === item.name || selectedName === `${item.name} — ${item.path}`);
+      if (matches.length > 1) throw new Error(`Skill '${selectedName}' has multiple sources. Run ai skill add interactively and choose an exact path.`);
+      const selected = matches[0];
+      if (!selected) throw new Error(`Unknown custom skill candidate: ${selectedName}`);
+      if (!NAME.test(selected.name) || builtins.has(selected.name)) throw new Error('The skill name is invalid or reserved by a built-in skill.');
+      if (list.some((entry) => entry.name === selected.name)) throw new Error(`Skill '${selected.name}' is already registered. Remove it before changing its source.`);
+      list.push({ name: selected.name, type: selected.type, path: selected.type === 'project' ? norm(path.relative(process.cwd(), selected.path)) : selected.path });
+      config.skills!.registrations = list;
+      writeConfig(file, config);
+      process.stdout.write(`Registered ${selected.name} from ${selected.path}. Run update-agent-infra to materialize it.\n`);
+      return 0;
+    }
+
+    const name = requestedName || await prompt('Custom skill name to remove', '');
+    const index = list.findIndex((entry) => entry.name === name);
+    if (builtins.has(name)) throw new Error(`Built-in skill '${name}' cannot be removed.`);
+    if (index < 0) throw new Error(`Custom skill '${name}' is not registered.`);
+    const [registration] = list.splice(index, 1);
+    config.skills!.registrations = list;
+    writeConfig(file, config);
+    const removed = cleanupOwnedOutputs(name, registration!, config);
+    writeConfig(file, config);
+    process.stdout.write(`Unregistered ${name}; source files were preserved.${removed.length ? ` Removed verified generated files: ${removed.join(', ')}` : ''}\n`);
+    return 0;
+  } catch (error) {
+    closePrompt();
+    process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}

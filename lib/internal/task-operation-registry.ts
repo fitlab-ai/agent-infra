@@ -176,6 +176,10 @@ function publicTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('public', 'run', 'create-task', 'conditional', 'progress'),
     descriptor('public', 'run', 'task-skill', 'task-bound', 'progress'),
     descriptor('public', 'run', 'recreate', 'task-bound', 'recovery'),
+    noArgsDiagnostic('skill'),
+    descriptor('public', 'skill', 'add', 'non-task', 'progress', 'none'),
+    descriptor('public', 'skill', 'list', 'non-task', 'diagnostic', 'none'),
+    descriptor('public', 'skill', 'remove', 'non-task', 'progress', 'none'),
     noArgsDiagnostic('sandbox'),
     descriptor('public', 'sandbox', 'ls', 'conditional', 'diagnostic'),
     descriptor('public', 'sandbox', 'show', 'conditional', 'diagnostic'),
@@ -219,7 +223,7 @@ export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
   'task-finalization', 'task-platform-recovery', 'task-short-id', 'task-snapshot', 'task-verify', 'task-validate', 'manual-validation'
 ]);
 export const PUBLIC_DISPATCHER_ROUTES = Object.freeze([
-  'agent-client', 'cp', 'data', 'decide', 'help', 'init', 'merge', 'run', 'sandbox', 'server', 'task', 'sync', 'update', 'version'
+  'agent-client', 'cp', 'data', 'decide', 'help', 'init', 'merge', 'run', 'sandbox', 'server', 'skill', 'task', 'sync', 'update', 'version'
 ]);
 
 function first(args: readonly string[]): string {
@@ -234,7 +238,7 @@ function optionValue(args: readonly string[], name: string): string | undefined 
 }
 
 function publicSelector(command: string, args: readonly string[]): string {
-  if (command === 'agent-client' || command === 'data' || command === 'server' || command === 'sandbox' || command === 'task') {
+  if (command === 'agent-client' || command === 'data' || command === 'server' || command === 'sandbox' || command === 'skill' || command === 'task') {
     const selector = first(args);
     if (command === 'task') {
       return PUBLIC_CLI_SELECTOR_ALIASES.task[selector as keyof typeof PUBLIC_CLI_SELECTOR_ALIASES.task] ?? selector;

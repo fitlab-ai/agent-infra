@@ -63,6 +63,10 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
       skills: {
         sources: [
           { type: "local", path: sourceRoot }
+        ],
+        registrations: [
+          { name: "local-rules", type: "project", path: ".agents/skills/local-rules" },
+          { name: "shared-rules", type: "local", path: path.join(sourceRoot, "shared-rules") }
         ]
       },
       files: {
@@ -178,6 +182,9 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
       skills: {
         sources: [
           { type: "local", path: sourceRoot }
+        ],
+        registrations: [
+          { name: "shared-rules", type: "local", path: path.join(sourceRoot, "shared-rules") }
         ]
       },
       files: {
@@ -203,12 +210,11 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
 
     assert.deepEqual(
       secondReport.custom.removed.sort(),
-      [
-        ".agents/skills/shared-rules/reference/guide.md",
-        ".agents/skills/shared-rules/reference/stale.md"
-      ]
+      [".agents/skills/shared-rules/reference/guide.md"]
     );
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".agents/skills/shared-rules/reference")));
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/shared-rules/reference/guide.md")), false);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/shared-rules/reference/stale.md"), "utf8"), "remove me\n");
+    assert.ok(secondReport.custom.sourceErrors.some((entry) => String(entry.reason).includes("unknown target preserved")));
     assert.equal(
       fs.readFileSync(path.join(projectRoot, ".agents/skills/manual-only/notes.md"), "utf8"),
       "keep me\n"
@@ -248,6 +254,9 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
         sources: [
           { type: "local", path: missingSource },
           { type: "local", path: sourceRoot }
+        ],
+        registrations: [
+          { name: "qa-check", type: "local", path: path.join(sourceRoot, "qa-check") }
         ]
       },
       files: {
@@ -266,7 +275,7 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
     assert.deepEqual(report.custom.detected, ["qa-check"]);
     assert.ok(
       report.custom.sourceErrors.some((entry) =>
-        entry.source === missingSource && entry.reason === "directory not found"
+        entry.source === missingSource && String(entry.reason).includes("unavailable")
       )
     );
     assert.ok(

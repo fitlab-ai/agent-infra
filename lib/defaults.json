@@ -108,6 +108,50 @@
           "sha256:15aa21942cf2a1396d27834f1d3d723b61a46f8d14600b706f39f3bebc21aea3"
         ]
       }
+    ],
+    "retiredAssets": [
+      {
+        "group": "run-task",
+        "target": ".agents/skills/run-task/SKILL.md",
+        "sources": ["templates/.agents/skills/run-task/SKILL.en.md", "templates/.agents/skills/run-task/SKILL.zh-CN.md"],
+        "templateHashes": [
+          "sha256:f2c47f3a3c72c4f867debbb9967856d52d61b72c81dbf318b2ad21a38ffc86d4",
+          "sha256:96cf069c3e38850a408c82c3564da339fec6f0ac09c3b29eb094c0f38a26a18a"
+        ]
+      },
+      {
+        "group": "run-task",
+        "target": ".agents/skills/run-task/config/verify.json",
+        "sources": ["templates/.agents/skills/run-task/config/verify.en.json", "templates/.agents/skills/run-task/config/verify.zh-CN.json"],
+        "templateHashes": ["sha256:5da59c2b6f3e06794986c1c0c44f0a798b1bf750e7213967c8358a8d2f7371d5"]
+      },
+      {
+        "group": "run-task",
+        "target": ".agents/skills/run-task/reference/host-validation.md",
+        "sources": ["templates/.agents/skills/run-task/reference/host-validation.en.md", "templates/.agents/skills/run-task/reference/host-validation.zh-CN.md"],
+        "templateHashes": [
+          "sha256:afe4aa843a89701716fbc880f8bac548576a1a2739075455d7612c23304c66d0",
+          "sha256:00907ef3a9c82a4fe022d37ed66bc58e0b30664c0f52ce8f4d80166532e2c649"
+        ]
+      },
+      {
+        "group": "run-task",
+        "target": ".claude/commands/run-task.md",
+        "sources": ["templates/.claude/commands/run-task.en.md", "templates/.claude/commands/run-task.zh-CN.md"],
+        "templateHashes": [
+          "sha256:af4d1b9e773d2ec3dfa3c53dcd5204e1d92c0ee93617dc371d719800257e093e",
+          "sha256:92b1707e8aa06686bac422c2f09002ddf86ffbdb4ad8779631c341ac787ceddb"
+        ]
+      },
+      {
+        "group": "run-task",
+        "target": ".opencode/commands/run-task.md",
+        "sources": ["templates/.opencode/commands/run-task.en.md", "templates/.opencode/commands/run-task.zh-CN.md"],
+        "templateHashes": [
+          "sha256:ffd5e6572b638ff8aaf5f8754670e6c9e6f1fad54453d9489f915d1e30378091",
+          "sha256:01a83a668fcc4a095949e97606bf2fe4f0c1546aa1adbd95777b6befb68780e1"
+        ]
+      }
     ]
   }
 }

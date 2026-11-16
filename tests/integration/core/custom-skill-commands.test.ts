@@ -37,6 +37,7 @@ test("syncTemplates generates built-in commands for custom skills", async () => 
       language: "en",
       agentClients: AGENT_CLIENTS,
       platform: { type: "github" },
+      skills: { sources: [], registrations: [{ name: "local-check", type: "project", path: ".agents/skills/local-check" }] },
       files: {
         managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
         merged: [],
