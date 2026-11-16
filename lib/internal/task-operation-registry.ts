@@ -23,7 +23,7 @@ export type TaskRefSource = 'argv' | 'environment' | 'none' | 'delegated' | 'inp
 export type TaskOperationDescriptor = Readonly<{
   dispatcher: TaskOperationDispatcher;
   command: string;
-  selector: string;
+  selector: string | null;
   scope: TaskOperationScope;
   effect: TaskOperationEffect;
   taskRefSource: TaskRefSource;
@@ -35,11 +35,14 @@ type TaskRefResolver = (command: string, args: readonly string[]) => string | nu
 const descriptor = (
   dispatcher: TaskOperationDispatcher,
   command: string,
-  selector: string,
+  selector: string | null,
   scope: TaskOperationScope,
   effect: TaskOperationEffect,
   taskRefSource: TaskRefSource = scope === 'non-task' ? 'none' : 'argv'
 ): TaskOperationDescriptor => ({ dispatcher, command, selector, scope, effect, taskRefSource, guardBeforeImport: true });
+
+const noArgsDiagnostic = (command: string): TaskOperationDescriptor =>
+  descriptor('public', command, null, 'non-task', 'diagnostic', 'none');
 
 function internalTaskRoutes(): TaskOperationDescriptor[] {
   return [
@@ -148,25 +151,32 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
 
 function publicTaskRoutes(): TaskOperationDescriptor[] {
   return [
+    // Empty argv diagnostics are distinct from selectors accepted by command handlers.
+    noArgsDiagnostic('agent-client'),
     descriptor('public', 'agent-client', 'list', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'agent-client', 'status', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'agent-client', 'enable', 'non-task', 'progress', 'none'),
     descriptor('public', 'agent-client', 'disable', 'non-task', 'progress', 'none'),
     descriptor('public', 'agent-client', 'configure', 'non-task', 'progress', 'none'),
     descriptor('public', 'cp', 'cp', 'non-task', 'remote-write', 'none'),
+    noArgsDiagnostic('data'),
     descriptor('public', 'data', 'capture', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'data', 'verify', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'data', 'audit', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'data', 'repair', 'non-task', 'progress', 'none'),
     descriptor('public', 'data', 'export', 'non-task', 'diagnostic', 'none'),
+    noArgsDiagnostic('decide'),
     descriptor('public', 'decide', 'decide', 'task-bound', 'progress'),
     descriptor('public', 'help', 'help', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'version', 'version', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'init', 'init', 'non-task', 'progress', 'none'),
+    noArgsDiagnostic('merge'),
     descriptor('public', 'merge', 'merge', 'conditional', 'progress'),
+    noArgsDiagnostic('run'),
     descriptor('public', 'run', 'create-task', 'conditional', 'progress'),
     descriptor('public', 'run', 'task-skill', 'task-bound', 'progress'),
     descriptor('public', 'run', 'recreate', 'task-bound', 'recovery'),
+    noArgsDiagnostic('sandbox'),
     descriptor('public', 'sandbox', 'ls', 'conditional', 'diagnostic'),
     descriptor('public', 'sandbox', 'show', 'conditional', 'diagnostic'),
     descriptor('public', 'sandbox', 'create', 'conditional', 'recovery'),
@@ -177,11 +187,13 @@ function publicTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('public', 'sandbox', 'rebuild', 'non-task', 'progress', 'none'),
     descriptor('public', 'sandbox', 'refresh', 'non-task', 'progress', 'none'),
     descriptor('public', 'sandbox', 'vm', 'non-task', 'progress', 'none'),
+    noArgsDiagnostic('server'),
     descriptor('public', 'server', 'start', 'non-task', 'progress', 'none'),
     descriptor('public', 'server', 'stop', 'non-task', 'progress', 'none'),
     descriptor('public', 'server', 'status', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'server', 'logs', 'non-task', 'diagnostic', 'none'),
     descriptor('public', 'server', '__daemon', 'non-task', 'progress', 'none'),
+    noArgsDiagnostic('task'),
     descriptor('public', 'task', 'cat', 'task-bound', 'diagnostic'),
     descriptor('public', 'task', 'decisions', 'task-bound', 'diagnostic'),
     descriptor('public', 'task', 'files', 'task-bound', 'diagnostic'),
@@ -250,9 +262,13 @@ export function resolveTaskOperation(
   const normalizedCommand = dispatcher === 'public'
     ? PUBLIC_CLI_COMMAND_ALIASES[command as keyof typeof PUBLIC_CLI_COMMAND_ALIASES] ?? command
     : command;
+  if (dispatcher === 'public' && args.length === 0) {
+    const rootHelp = descriptorsFor(dispatcher).find((item) => item.command === normalizedCommand && item.selector === null);
+    if (rootHelp) return rootHelp;
+  }
   const selector = dispatcher === 'internal' ? internalRouteSelector(normalizedCommand, args) : publicSelector(normalizedCommand, args);
   if (!selector) return null;
-  return descriptorsFor(dispatcher).find((item) => item.command === normalizedCommand && item.selector === selector) ?? null;
+  return descriptorsFor(dispatcher).find((item) => item.command === normalizedCommand && item.selector !== null && item.selector === selector) ?? null;
 }
 
 export function resolveDelegatedTaskOperation(args: readonly string[]): TaskOperationDescriptor | null {

@@ -4,8 +4,13 @@ import { spawnSync } from 'node:child_process';
 
 import { CLI_PATH } from '../../helpers.ts';
 
-function runCli(args: string[]) {
-  return spawnSync('node', [CLI_PATH, ...args], { encoding: 'utf8' });
+const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+  !key.startsWith('AGENT_INFRA_CONTROL_')
+  && !['AGENT_INFRA_SANDBOX', 'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_RUNTIME_DIR'].includes(key)
+)) as NodeJS.ProcessEnv;
+
+function runCli(args: string[], env: NodeJS.ProcessEnv = hostEnv) {
+  return spawnSync('node', [CLI_PATH, ...args], { encoding: 'utf8', env });
 }
 
 test('ai task without subcommand prints USAGE and exits non-zero', () => {
@@ -14,6 +19,34 @@ test('ai task without subcommand prints USAGE and exits non-zero', () => {
   assert.match(out.stdout, /Usage: ai task <command>/);
   assert.match(out.stdout, /ls \[--all/);
   assert.match(out.stdout, /show \[--task <ref> \| -t <ref>\]/);
+});
+
+test('public root help in a task-bound workspace preserves each command’s output and exit code', () => {
+  const cliEnv = { ...hostEnv, NODE_NO_WARNINGS: '1' };
+  const taskEnv = {
+    ...cliEnv,
+    AGENT_INFRA_SANDBOX: '1',
+    AGENT_INFRA_TASK_ID: 'TASK-20261116-150024',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_DIR: '/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime'
+  };
+
+  const usageCommands = [
+    ['task', 1], ['t', 1], ['sandbox', 1], ['s', 1], ['server', 1], ['data', 1],
+    ['agent-client', 0], ['run', 1], ['decide', 1], ['merge', 1], ['cp', 1]
+  ] as const;
+
+  for (const [command, expectedStatus] of usageCommands) {
+    const host = runCli([command], cliEnv);
+    const bound = runCli([command], taskEnv);
+    assert.match(`${host.stdout}${host.stderr}`, /Usage: ai /, `${command}: host usage`);
+    assert.equal(host.status, expectedStatus, `${command}: host exit code`);
+    assert.equal(bound.status, host.status, `${command}: exit code`);
+    assert.equal(bound.stdout, host.stdout, `${command}: stdout`);
+    assert.equal(bound.stderr, host.stderr, `${command}: stderr`);
+  }
 });
 
 test('ai task --help prints USAGE and exits zero', () => {
