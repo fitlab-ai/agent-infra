@@ -71,12 +71,18 @@ function compareReplayedTree(input: { gitRoot: string; mergeBase: string; review
       const patch = spawnSync("git", ["diff", "--no-renames", "--binary", "--full-index", mergeBase, reviewedHead], { cwd: gitRoot, env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
       if (patch.error || patch.status !== 0) relation = blocked("Unable to generate the reviewed PR patch");
       else {
-        const requiredBlobs = [...patch.stdout.matchAll(/^index ([0-9a-f]{40})\.\./gm)].map((match) => match[1]!).filter((oid) => !/^0+$/.test(oid));
+        const diffBlocks = patch.stdout.split(/^diff --git .*$/m).slice(1);
+        const requiredBlobs = diffBlocks.flatMap((block) => {
+          const index = block.match(/^index ([0-9a-f]{40})\.\.([0-9a-f]{40})(?: (\d{6}))?$/m);
+          const oldMode = block.match(/^(?:old mode|deleted file mode) (\d{6})$/m)?.[1];
+          const preimageMode = oldMode ?? index?.[3];
+          return index && preimageMode !== "160000" && !/^0+$/.test(index[1]!) ? [index[1]!] : [];
+        });
         for (const oid of requiredBlobs) {
           const blob = spawnSync("git", ["cat-file", "-e", `${oid}^{blob}`], { cwd: gitRoot, env, stdio: ["ignore", "ignore", "ignore"] });
           if (blob.error || blob.status !== 0) { relation = blocked("A reviewed patch preimage object is unavailable", "PR_MERGE_OBJECT_MISSING"); break; }
         }
-        if (relation === null) {
+        if (relation === null && patch.stdout.length > 0) {
           const apply = spawnSync("git", ["apply", "--cached", "--3way", "--binary", "-q"], { cwd: gitRoot, env, encoding: "utf8", input: patch.stdout, maxBuffer: 32 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] });
           const unmerged = spawnSync("git", ["ls-files", "--unmerged", "-z"], { cwd: gitRoot, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
           if (unmerged.error || unmerged.status !== 0) relation = blocked("Unable to inspect the isolated PR merge index");

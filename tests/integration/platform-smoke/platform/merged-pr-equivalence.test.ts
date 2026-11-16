@@ -118,6 +118,85 @@ test("accepts an authoritative content-equivalent merged-range merge", () => {
   }
 });
 
+test("accepts an empty reviewed delta only for the reviewed head and matching merge tree", () => {
+  const f = fixture();
+  try {
+    const tree = git(f.root, ["rev-parse", `${f.base}^{tree}`]);
+    const merge = commitTree(f.root, tree, [f.base], "empty reviewed delta landing");
+    f.pullRequest.head.sha = f.base;
+    f.pullRequest.base.sha = f.base;
+    f.pullRequest.mergeCommitSha = merge;
+    const identity = new Map([[merge, { repository: f.pullRequest.repository, pullRequestNumbers: [f.pullRequest.number] }]]);
+    const input = {
+      gitRoot: f.root,
+      comparisonHead: merge,
+      lastReviewedCommit: f.base,
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: identity
+    };
+
+    assert.equal(resolveReviewedHeadRelation(input).status, "merged-equivalent");
+    assert.equal(resolveReviewedHeadRelation({ ...input, lastReviewedCommit: f.head }).status, "failed");
+
+    const differentTree = git(f.root, ["rev-parse", `${f.head}^{tree}`]);
+    const mismatchedMerge = commitTree(f.root, differentTree, [f.base], "empty delta with different tree");
+    f.pullRequest.mergeCommitSha = mismatchedMerge;
+    const mismatch = resolveReviewedHeadRelation({
+      ...input,
+      comparisonHead: mismatchedMerge,
+      associations: new Map([[mismatchedMerge, { repository: f.pullRequest.repository, pullRequestNumbers: [f.pullRequest.number] }]])
+    });
+    assert.equal(mismatch.status, "failed");
+    assert.equal(mismatch.code, "PR_MERGE_CONTENT_MISMATCH");
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("accepts reviewed gitlink updates and deletions without requiring commit objects as blobs", () => {
+  for (const change of ["update", "delete"] as const) {
+    const root = createTempDir(`merged-pr-gitlink-${change}-`);
+    try {
+      git(root, ["init", "-q", "-b", "master"]);
+      git(root, ["config", "user.name", "Test"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      const oldSubmoduleCommit = writeCommit(root, "submodule old\n", "old submodule commit");
+      git(root, ["update-index", "--add", "--cacheinfo", `160000,${oldSubmoduleCommit},submodule`]);
+      git(root, ["commit", "-qm", "add gitlink"]);
+      const base = git(root, ["rev-parse", "HEAD"]);
+      const newSubmoduleCommit = commitTree(root, git(root, ["rev-parse", `${oldSubmoduleCommit}^{tree}`]), [oldSubmoduleCommit], "new submodule commit");
+      git(root, ["switch", "-qc", "feature"]);
+      if (change === "update") git(root, ["update-index", "--cacheinfo", `160000,${newSubmoduleCommit},submodule`]);
+      else git(root, ["update-index", "--force-remove", "submodule"]);
+      git(root, ["commit", "-qm", `reviewed gitlink ${change}`]);
+      const head = git(root, ["rev-parse", "HEAD"]);
+      const tree = git(root, ["rev-parse", "HEAD^{tree}"]);
+      const merge = commitTree(root, tree, [base], `land gitlink ${change}`);
+      const pullRequest: PullRequestSnapshot = {
+        repository: "o/r", number: 1, nodeId: "PR_1", url: "https://example.test/1",
+        state: "closed", title: "", body: "", draft: false,
+        head: { repository: "o/r", ref: "feature", sha: head },
+        base: { repository: "o/r", ref: "master", sha: base },
+        mergedAt: "2026-07-25T00:00:00Z", mergeCommitSha: merge,
+        labels: [], assignees: [], milestone: null
+      };
+
+      const result = resolveReviewedHeadRelation({
+        gitRoot: root,
+        comparisonHead: merge,
+        lastReviewedCommit: head,
+        pullRequest,
+        defaultBranch: pullRequest.base.ref,
+        associations: new Map([[merge, { repository: pullRequest.repository, pullRequestNumbers: [pullRequest.number] }]])
+      });
+      assert.equal(result.status, "merged-equivalent", `${change}: ${JSON.stringify(result)}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("fails closed for a non-default target and incomplete commit identity evidence", () => {
   const f = fixture();
   try {
