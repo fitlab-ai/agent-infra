@@ -25,7 +25,8 @@
         "lib/server/index.ts",
         "lib/task/index.ts",
         "lib/self-update.ts",
-        "lib/update.ts"
+        "lib/update.ts",
+        "lib/skill.ts"
       ],
       "project": [
         "bin/**/*.ts",
