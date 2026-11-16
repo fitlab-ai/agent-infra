@@ -67,8 +67,14 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
     deletions: 1,
     oldBytes: Buffer.byteLength(compactBefore),
     newBytes: Buffer.byteLength(compactAfter),
-    netBytes: Buffer.byteLength(compactAfter) - Buffer.byteLength(compactBefore)
+    netBytes: Buffer.byteLength(compactAfter) - Buffer.byteLength(compactBefore),
+    locations: [
+      { side: "old", startLine: 1, endLine: 1 },
+      { side: "new", startLine: 1, endLine: 1 }
+    ]
   });
+  assert.equal(report.version, 2);
+  assert.equal(report.kind, "merge-base");
   assert.equal(renamed.status, "R100");
   assert.equal(renamed.oldBytes, Buffer.byteLength(renamedContent));
   assert.equal(renamed.newBytes, Buffer.byteLength(renamedContent));
@@ -77,6 +83,13 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
   assert.equal(binary.deletions, null);
   assert.equal(binary.oldBytes, 0);
   assert.equal(binary.newBytes, binaryContent.byteLength);
+  assert.deepEqual(binary.locations, []);
+
+  const compactPositions = report.files.find((file: { newPath: string | null }) => file.newPath === "compact.txt").locations;
+  assert.deepEqual(compactPositions, [
+    { side: "old", startLine: 1, endLine: 1 },
+    { side: "new", startLine: 1, endLine: 1 }
+  ]);
 
   const expectedOldBytes = Buffer.byteLength(compactBefore) + Buffer.byteLength(renamedContent) + Buffer.byteLength(removedContent);
   const expectedNewBytes = Buffer.byteLength(compactAfter) + Buffer.byteLength(renamedContent) + binaryContent.byteLength;
@@ -90,6 +103,38 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
     newBytes: expectedNewBytes,
     netBytes: expectedNewBytes - expectedOldBytes
   });
+});
+
+test("head-to-head report compares two non-ancestor trees directly", (t) => {
+  const repo = createTempDir("create-pr-change-report-heads-");
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  initIsolatedGitRepo(repo);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(repo, "shared.txt"), "base\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "base"]);
+  const base = git(repo, ["rev-parse", "HEAD"]);
+  fs.writeFileSync(path.join(repo, "shared.txt"), "old\n");
+  fs.writeFileSync(path.join(repo, "old-only.txt"), "old\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "old head"]);
+  const oldHead = git(repo, ["rev-parse", "HEAD"]);
+  git(repo, ["switch", "-q", "-c", "new-head", base]);
+  fs.writeFileSync(path.join(repo, "shared.txt"), "new\n");
+  fs.writeFileSync(path.join(repo, "new-only.txt"), "new\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "new head"]);
+  const newHead = git(repo, ["rev-parse", "HEAD"]);
+  const report = JSON.parse(execFileSync(process.execPath, [
+    runtimeScript, "--base", base, "--head", newHead, "--kind", "head-to-head", "--from-head", oldHead, "--cwd", repo
+  ], { encoding: "utf8", env: gitSafeEnv() }));
+  assert.equal(report.kind, "head-to-head");
+  assert.equal(report.from, oldHead);
+  assert.equal(report.head, newHead);
+  assert.equal(report.mergeBase, null);
+  assert.ok(report.files.some((file: { oldPath: string | null; additions: number | null; deletions: number | null }) => file.oldPath === "old-only.txt" && file.deletions === 1));
+  assert.ok(report.files.some((file: { newPath: string | null; additions: number | null }) => file.newPath === "new-only.txt" && file.additions === 1));
 });
 
 test("create-pr installs the same change report calculator as the local skill", () => {

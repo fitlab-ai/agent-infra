@@ -16,12 +16,27 @@ import {
   validatePrChangeReport,
   writePrChangeReportAtomic
 } from '../../../lib/platform/pr-change-report.ts';
-import type { MechanicalChangeReport, PrecheckCandidate, PullRequestIdentity } from '../../../lib/platform/pr-change-report.ts';
+import type { ChangeFile, MechanicalChangeReport, PrecheckCandidate, PullRequestIdentity } from '../../../lib/platform/pr-change-report.ts';
 import { createTempDir } from '../../helpers.ts';
 
 const sha = (letter: string) => letter.repeat(40);
 
+function withLocations<T extends Omit<ChangeFile, 'locations'>>(files: T[]) {
+  return files.map((file) => ({ ...file, locations: file.additions === null ? [] : [
+    ...(file.additions ? [{ side: 'new' as const, startLine: 1, endLine: file.additions }] : []),
+    ...(file.deletions ? [{ side: 'old' as const, startLine: 1, endLine: file.deletions }] : [])
+  ] }));
+}
+
+function bundle(base: string, head: string, files: ReturnType<typeof withLocations>, totals: MechanicalChangeReport['full']['totals']): MechanicalChangeReport {
+  return { version: 2, base, head, full: { kind: 'merge-base', from: sha('a'), to: head, mergeBase: sha('a'), patchSha256: 'e'.repeat(64), files, totals },
+    increment: { status: 'unconfirmed', fromHead: null, toHead: head, sourceReportSha256: null, diff: null } };
+}
+
 function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
+  const full = diff.full.files;
+  const increment = diff.increment.diff?.files ?? [];
+  const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
     checks: PRECHECK_IDS.map((id) => ({
@@ -31,14 +46,18 @@ function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandi
       rationale: 'The complete diff is within the approved scope.',
       ...(id === 'change-composition' ? { groups: [{
         id: 'summary-content', target: 'Structure managed comment content', behaviorChange: 'Validate and render typed content.',
-        necessity: 'Keep required content complete.', files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        necessity: 'Keep required content complete.', files: [...new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full), increment: allocations(increment) },
         tests: { coverage: 'Existing unit and integration contracts cover the change.', cost: 'No new fixture beyond this candidate.' }
-      }] } : {})
+      }], unassigned: { full: [], increment: [] } } : {})
     }))
   };
 }
 
 function detailedCandidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
+  const full = diff.full.files;
+  const increment = diff.increment.diff?.files ?? [];
+  const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
     checks: PRECHECK_IDS.map((id, index) => ({
@@ -51,75 +70,53 @@ function detailedCandidate(taskIntentSha256: string, diff = mechanical()): Prech
       rationale: `Rationale-${id}-responsibility-${index}`,
       ...(id === 'change-composition' ? { groups: [{
         id: 'summary-content', target: 'Structured content', behaviorChange: 'Add structure validation.', necessity: 'Prevent missing sections.',
-        files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        files: [...new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full), increment: allocations(increment) },
         tests: { coverage: 'Tests exercise required paths.', cost: 'One shared fixture.' }
-      }] } : {})
+      }], unassigned: { full: [], increment: [] } } : {})
     }))
   };
 }
 
 function mechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
-  return {
-    version: 1,
-    base,
-    head,
-    mergeBase: sha('a'),
-    patchSha256: 'e'.repeat(64),
-    files: [{
+  const files = withLocations([{
       status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts',
       additions: 2, deletions: 1, oldBytes: 10, newBytes: 20, netBytes: 10
-    }],
-    totals: {
+    }]);
+  return bundle(base, head, files, {
       files: 1, textFiles: 1, binaryFiles: 0, additions: 2, deletions: 1,
       oldBytes: 10, newBytes: 20, netBytes: 10
-    }
-  };
+    });
 }
 
 function categorizedMechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
-  const files = [
+  const files = withLocations([
     { status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts', additions: 4, deletions: 1, oldBytes: 10, newBytes: 13, netBytes: 3 },
     { status: 'M', oldPath: 'tests/example.test.ts', newPath: 'tests/example.test.ts', additions: 2, deletions: 0, oldBytes: 5, newBytes: 7, netBytes: 2 },
     { status: 'A', oldPath: null, newPath: 'templates/example.md', additions: 3, deletions: 0, oldBytes: 0, newBytes: 20, netBytes: 20 },
     { status: 'D', oldPath: '.agents/example.md', newPath: null, additions: 0, deletions: 2, oldBytes: 10, newBytes: 0, netBytes: -10 },
     { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 0, newBytes: 4, netBytes: 4 },
     { status: 'A', oldPath: null, newPath: 'package.json', additions: 1, deletions: 0, oldBytes: 0, newBytes: 1, netBytes: 1 }
-  ];
-  return {
-    version: 1,
-    base,
-    head,
-    mergeBase: sha('a'),
-    patchSha256: 'e'.repeat(64),
-    files,
-    totals: {
+  ]);
+  return bundle(base, head, files, {
       files: 6, textFiles: 5, binaryFiles: 1, additions: 10, deletions: 3,
       oldBytes: 25, newBytes: 45, netBytes: 20
-    }
-  };
+    });
 }
 
 function representativeMechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
-  const files = [
+  const files = withLocations([
     { status: 'M', oldPath: 'lib/large.ts', newPath: 'lib/large.ts', additions: 8, deletions: 4, oldBytes: 100, newBytes: 110, netBytes: 10 },
     { status: 'M', oldPath: 'tests/large.test.ts', newPath: 'tests/large.test.ts', additions: 6, deletions: 6, oldBytes: 20, newBytes: 20, netBytes: 0 },
     { status: 'A', oldPath: null, newPath: 'templates/large.md', additions: 7, deletions: 0, oldBytes: 0, newBytes: 90, netBytes: 90 },
     { status: 'R100', oldPath: '.agents/old.md', newPath: '.agents/new.md', additions: 0, deletions: 0, oldBytes: 300, newBytes: 300, netBytes: 0 },
     { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 },
     { status: 'D', oldPath: 'tests/removed.test.ts', newPath: null, additions: 0, deletions: 10, oldBytes: 300, newBytes: 0, netBytes: -300 }
-  ];
-  return {
-    version: 1,
-    base,
-    head,
-    mergeBase: sha('a'),
-    patchSha256: 'e'.repeat(64),
-    files,
-    totals: {
+  ]);
+  return bundle(base, head, files, {
       files: 6, textFiles: 5, binaryFiles: 1, additions: 21, deletions: 20,
       oldBytes: 1320, newBytes: 820, netBytes: -500
-    }
-  };
+    });
 }
 
 function identity(): PullRequestIdentity {
@@ -161,17 +158,16 @@ test('report builder derives route and formal review from the six checks', () =>
     assert.equal(result.value.precheck.verdict, 'clear');
     assert.equal(result.value.precheck.route, 'watch-pr');
     assert.equal(result.value.precheck.formalReview, false);
-    assert.deepEqual(result.value.diff.totals, mechanical().totals);
+    assert.deepEqual(result.value.diff.full.totals, mechanical().full.totals);
   }
 });
 
 test('report validation accepts a negative aggregate byte delta', () => {
   const value = mechanical();
-  const file = { ...value.files[0]!, oldBytes: 20, newBytes: 10, netBytes: -10 };
+  const file = { ...value.full.files[0]!, oldBytes: 20, newBytes: 10, netBytes: -10 };
   const built = buildPrChangeReport(identity(), 'd'.repeat(64), {
     ...value,
-    files: [file],
-    totals: { ...value.totals, oldBytes: 20, newBytes: 10, netBytes: -10 }
+    full: { ...value.full, files: [file], totals: { ...value.full.totals, oldBytes: 20, newBytes: 10, netBytes: -10 } }
   }, candidate('d'.repeat(64)));
   assert.equal(built.ok, true);
   if (built.ok) assert.equal(validatePrChangeReport(built.value).ok, true);
@@ -196,7 +192,7 @@ test('report validation rejects inconsistent totals and verdict facts', () => {
   if (built.ok) {
     const mismatchedTotals = {
       ...built.value,
-      diff: { ...built.value.diff, totals: { ...built.value.diff.totals, additions: built.value.diff.totals.additions + 1 } }
+      diff: { ...built.value.diff, full: { ...built.value.diff.full, totals: { ...built.value.diff.full.totals, additions: built.value.diff.full.totals.additions + 1 } } }
     };
     assert.equal(validatePrChangeReport(mismatchedTotals).ok, false);
     const invalid = validatePrChangeReport({ ...built.value, precheck: { ...built.value.precheck, verdict: 'needs-review', route: 'review-code' } });
@@ -310,8 +306,8 @@ test('canonical report lists bounded text representatives with stable tie orderi
 test('canonical report renders a text rename as a path change without content labels', () => {
   const digest = 'd'.repeat(64);
   const value = representativeMechanical();
-  value.files = [{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }];
-  value.totals = { files: 1, textFiles: 1, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 };
+  value.full.files = withLocations([{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }]);
+  value.full.totals = { files: 1, textFiles: 1, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 };
   const built = buildPrChangeReport(identity(), digest, value, candidate(digest, value));
   assert.equal(built.ok, true);
   if (!built.ok) return;
@@ -324,8 +320,8 @@ test('canonical report renders a text rename as a path change without content la
 test('canonical report omits binary-only changes from representative summaries', () => {
   const digest = 'd'.repeat(64);
   const value = representativeMechanical();
-  value.files = [{ status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 }];
-  value.totals = { files: 1, textFiles: 0, binaryFiles: 1, additions: 0, deletions: 0, oldBytes: 600, newBytes: 300, netBytes: -300 };
+  value.full.files = withLocations([{ status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 }]);
+  value.full.totals = { files: 1, textFiles: 0, binaryFiles: 1, additions: 0, deletions: 0, oldBytes: 600, newBytes: 300, netBytes: -300 };
   const built = buildPrChangeReport(identity(), digest, value, candidate(digest, value));
   assert.equal(built.ok, true);
   if (!built.ok) return;
@@ -335,7 +331,7 @@ test('canonical report omits binary-only changes from representative summaries',
   assert.match(rendered, /- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：\n  - 无可比较的文本文件。/);
 });
 
-test('typed functional groups derive line totals from unique complete diff file membership', () => {
+test('typed functional groups derive counts from exact locations and reject overlapping or missing lines', () => {
   const digest = 'd'.repeat(64);
   const diff = representativeMechanical();
   const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
@@ -343,27 +339,73 @@ test('typed functional groups derive line totals from unique complete diff file 
   if (!built.ok) return;
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /功能组 summary-content/u);
-  assert.match(rendered, /由正式 diff 逐文件推导）：新增 21、删除 20、净增 1；另有 1 个文件行数不可计/u);
+  assert.match(rendered, /完整 PR：新增 21、删除 20、净增 1；本轮增量：未确认，不报告数字；另有 1 个二进制文件行数不可计/u);
   assert.match(rendered, /<code>\.agents\/old\.md<\/code> → <code>\.agents\/new\.md<\/code>/u);
 
   const malformed = candidate(digest, diff);
   const composition = malformed.checks.find((check) => check.id === 'change-composition')!;
-  composition.groups![0]!.files[0] = composition.groups![0]!.files[1]!;
+  composition.groups![0]!.locations.full.push({ ...composition.groups![0]!.locations.full[0]! });
   const rejected = buildPrChangeReport(identity(), digest, diff, malformed);
   assert.equal(rejected.ok, false);
-  if (!rejected.ok) assert.match(rejected.error.message, /more than one functional group|no functional group/u);
+  if (!rejected.ok) assert.match(rejected.error.message, /overlaps or duplicates/u);
 
   const omitted = candidate(digest, diff);
-  omitted.checks.find((check) => check.id === 'change-composition')!.groups![0]!.files.pop();
+  omitted.checks.find((check) => check.id === 'change-composition')!.groups![0]!.locations.full.pop();
   const omittedFile = buildPrChangeReport(identity(), digest, diff, omitted);
   assert.equal(omittedFile.ok, false);
-  if (!omittedFile.ok) assert.match(omittedFile.error.message, /has no functional group/u);
+  if (!omittedFile.ok) assert.match(omittedFile.error.message, /exactly cover changed lines/u);
 
   const unknown = candidate(digest, diff);
-  unknown.checks.find((check) => check.id === 'change-composition')!.groups![0]!.files[0] = 'src/not-in-diff.ts';
+  unknown.checks.find((check) => check.id === 'change-composition')!.groups![0]!.locations.full[0]!.path = 'src/not-in-diff.ts';
   const unknownFile = buildPrChangeReport(identity(), digest, diff, unknown);
   assert.equal(unknownFile.ok, false);
-  if (!unknownFile.ok) assert.match(unknownFile.error.message, /references unknown diff file/u);
+  if (!unknownFile.ok) assert.match(unknownFile.error.message, /wrong path or direction/u);
+});
+
+test('changed positions can split one file across functions and retain shared attribution', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  const value = candidate(digest, diff);
+  const composition = value.checks.find((check) => check.id === 'change-composition')!;
+  const first = composition.groups![0]!;
+  first.locations.full = [{ path: 'lib/example.ts', side: 'new', startLine: 1, endLine: 1 }];
+  first.files = ['lib/example.ts'];
+  composition.groups!.push({
+    ...first,
+    id: 'second-feature', target: 'Another task behavior',
+    locations: { full: [{ path: 'lib/example.ts', side: 'old', startLine: 1, endLine: 1 }], increment: [] }
+  });
+  composition.unassigned!.full = [{ path: 'lib/example.ts', side: 'new', startLine: 2, endLine: 2, reason: 'shared', explanation: 'This added line serves both behaviors.' }];
+  const built = buildPrChangeReport(identity(), digest, diff, value);
+  assert.equal(built.ok, true);
+  if (built.ok) {
+    const rendered = renderCanonicalChangeReport(built.value);
+    assert.match(rendered, /功能组 summary-content/u);
+    assert.match(rendered, /功能组 second-feature/u);
+    assert.match(rendered, /完整 PR 未归属位置\*\*：新增 1、删除 0；shared：This added line serves both behaviors/u);
+  }
+});
+
+test('full and head-to-head allocations remain independently identified and validated', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  const incrementFiles = withLocations([{ status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts', additions: 1, deletions: 0, oldBytes: 20, newBytes: 22, netBytes: 2 }]);
+  diff.increment = {
+    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
+    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64), files: incrementFiles,
+      totals: { files: 1, textFiles: 1, binaryFiles: 0, additions: 1, deletions: 0, oldBytes: 20, newBytes: 22, netBytes: 2 } }
+  };
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  assert.equal(built.value.diff.increment.status, 'available');
+  assert.equal(built.value.diff.increment.diff?.from, sha('d'));
+  assert.equal(built.value.diff.full.totals.additions, 2);
+  assert.equal(built.value.diff.increment.diff?.totals.additions, 1);
+  assert.equal(validatePrChangeReport(built.value).ok, true);
+  const tampered = JSON.parse(JSON.stringify(built.value)) as Record<string, any>;
+  tampered.diff.increment.diff.from = sha('e');
+  assert.equal(validatePrChangeReport(tampered).ok, false);
 });
 
 test('typed group structure requires nested test coverage and rejects hand-entered counts', () => {

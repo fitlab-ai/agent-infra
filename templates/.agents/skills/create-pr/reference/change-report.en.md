@@ -9,7 +9,8 @@ After a PR is created or uniquely reused, use the authoritative `base.sha` and `
 ## Evidence Commands
 
 ```bash
-node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head {head-sha}
+node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head {head-sha} --kind merge-base
+node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head {head-sha} --kind head-to-head --from-head {previous-head-sha}
 git diff --find-renames --name-status {base-sha}...{head-sha}
 git diff --find-renames --summary {base-sha}...{head-sha}
 ```
@@ -24,10 +25,14 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 The core validates the task-intent digest, PR identity, complete patch SHA, totals, and the ordered checks `target-alignment`, `change-composition`, `compatibility-policy`, `legacy-path-cleanup`, `redundancy`, and `scope-discipline`. A `needs-review` check routes to `review-code`; `formalReview` remains `false`.
 
-Before generating the candidate, list functional change groups from the task goal and complete diff; file responsibilities or category totals are not functional groups. Represent each group as a typed object in the existing `change-composition.groups[]` with `id`, `target`, `behaviorChange`, `necessity`, `files[]`, and `tests:{coverage,cost}`. `rationale` and `Evidence[]` may support the judgment and locations but cannot replace group objects.
+Put the `--kind merge-base` output under `full`. When a valid prior sidecar exists, put the `--kind head-to-head --from-head {previous-head}` output under `increment.diff`, and bind its `identity.head.sha`, current head, and raw sidecar SHA-256 as `fromHead`, `toHead`, and `sourceReportSha256`. Without a valid prior sidecar use `status=unconfirmed` with null source and diff. For the same head use `status=unchanged`, identical endpoints, no source hash, and `diff:null`. Core independently validates the source and recomputes the bundle; hand-entered mechanics or coordinates are rejected.
 
-- `files[]` must reference canonical paths (`oldPath ?? newPath`) from the complete formal diff. A rename remains one mechanical file record with both old and new paths. Assign every formal diff file to exactly one group; do not omit, duplicate, or invent paths.
-- Do not enter group line counts in the candidate. Core derives each group's additions, deletions, and net from the bound formal diff's per-file counts and reconciles group totals with the complete diff. A `null` count stays uncountable; the file still belongs to one group and must not be represented as zero.
+The mechanical-file uses schema v2 with PR `base/head`, a `full` comparison, and an `increment` status. `full` uses `kind=merge-base`. A confirmed increment includes `kind=head-to-head`, `fromHead/toHead`, and source sidecar SHA-256. Without a valid same-PR sidecar, use `status=unconfirmed` and `diff:null`; identical heads use `status=unchanged` and `diff:null`. Core verifies the prior sidecar before replacement and recomputes both scopes.
+
+Before generating the candidate, list functional change groups from the task goal and both diffs. Represent each group in `change-composition.groups[]` with `id`, `target`, `behaviorChange`, `necessity`, `files[]`, `locations:{full:[],increment:[]}`, and `tests:{coverage,cost}`. Each location has canonical `path`, `side` (`new` for additions, `old` for deletions), `startLine`, and `endLine`. `rationale` and `Evidence[]` may support the judgment but cannot replace group objects.
+
+- `files[]` references canonical paths (`oldPath ?? newPath`) from either scope. A mixed file may appear in multiple groups; a rename stays one record with both paths.
+- `locations.full` and `locations.increment` must cover each changed line exactly once per scope, either in one group or under `unassigned` with `reason=shared|unconfirmed` and an explanation. Core rejects duplicates, gaps, wrong path/direction, and out-of-range coordinates, then derives counts and reconciles each scope with its own totals. Binary files have no locations and remain uncountable; do not invent zeroes or ranges.
 - `Evidence[].detail` may cite relevant code, test, or documentation changes. Use `tests.coverage` and `tests.cost` for existing/new test coverage and fixture/test cost. If no test changed, state why existing coverage is sufficient.
 - List and reconcile complete-PR changes separately from the current head-to-head increment. Do not infer increment values when the previous head is unconfirmed.
 

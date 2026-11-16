@@ -629,18 +629,17 @@ function currentReportCheck(
   };
   let mechanical: MechanicalChangeReport;
   try {
-    mechanical = runMechanicalChangeReport(repoRoot, snapshot.base.sha, snapshot.head.sha);
+    mechanical = runMechanicalChangeReport(repoRoot, snapshot.base.sha, snapshot.head.sha,
+      report.diff.increment.status === 'unconfirmed' ? undefined : { headSha: report.diff.increment.fromHead!, reportSha256: report.diff.increment.sourceReportSha256 });
   } catch (error) {
     return { ok: false, error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false } };
   }
   const reportMechanical: MechanicalChangeReport = {
-    version: 1,
+    version: 2,
     base: snapshot.base.sha,
     head: snapshot.head.sha,
-    mergeBase: report.diff.mergeBase,
-    patchSha256: report.diff.patchSha256,
-    files: report.diff.files,
-    totals: report.diff.totals
+    full: report.diff.full,
+    increment: report.diff.increment
   };
   if (!sameMechanical(reportMechanical, mechanical)) return {
     ok: false,
@@ -772,7 +771,14 @@ async function prepareReportWrite(
   if (!inputs.ok) return { ok: false, status: 'failed', error: inputs.error };
   let recomputed: MechanicalChangeReport;
   try {
-    recomputed = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha);
+    const oldPath = taskReportPath(resolved.taskDir);
+    const old = readPrChangeReport(oldPath);
+    const oldContent = old.ok ? fs.readFileSync(oldPath) : null;
+    const oldIdentityMatches = old.ok && old.value.identity.repository === initial.value.repository &&
+      resourceIdentityEquals(old.value.identity.resource, initial.value.identity) &&
+      JSON.stringify(old.value.identity.base) === JSON.stringify(initial.value.base);
+    recomputed = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha,
+      oldIdentityMatches && oldContent ? { headSha: old.value.identity.head.sha, reportSha256: createHash('sha256').update(oldContent).digest('hex') } : undefined);
   } catch (error) {
     return {
       ok: false,
