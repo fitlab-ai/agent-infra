@@ -296,3 +296,82 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
     fs.rmSync(sourceRoot, { recursive: true, force: true });
   }
 });
+
+test("syncTemplates does not materialize a skill through a symlinked parent", async () => {
+  const tmpDir = createTempDir("agent-infra-custom-symlink-parent-");
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const sourceRoot = path.join(tmpDir, "source");
+    const outside = path.join(tmpDir, "outside");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    writeFile(sourceRoot, "guide/SKILL.md", "---\nname: guide\ndescription: Guide\n---\nSource\n");
+    fs.mkdirSync(path.join(projectRoot, ".agents/skills"), { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    fs.symlinkSync(outside, path.join(projectRoot, ".agents/skills/guide"), "dir");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", agentClients: CANONICAL_AGENT_CLIENTS,
+      platform: { type: "github" },
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: path.join(sourceRoot, "guide") }] },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.existsSync(path.join(outside, "SKILL.md")), false);
+    assert.deepEqual(report.custom.commands.generated, [], JSON.stringify(report.custom));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates does not write a command through a symlinked client parent", async () => {
+  const tmpDir = createTempDir("agent-infra-custom-command-symlink-parent-");
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const sourceRoot = path.join(tmpDir, "source");
+    const outside = path.join(tmpDir, "outside");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    writeFile(sourceRoot, "guide/SKILL.md", "---\nname: guide\ndescription: Guide\n---\nSource\n");
+    fs.mkdirSync(path.join(projectRoot, ".agents"), { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    fs.symlinkSync(outside, path.join(projectRoot, ".claude"), "dir");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", agentClients: CANONICAL_AGENT_CLIENTS,
+      platform: { type: "github" },
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: path.join(sourceRoot, "guide") }] },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md")), true);
+    assert.equal(fs.existsSync(path.join(outside, "commands/guide.md")), false);
+    assert.equal(report.custom.commands.generated.includes(".claude/commands/guide.md"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates does not generate commands for an unowned materialized skill target", async () => {
+  const tmpDir = createTempDir("agent-infra-custom-unowned-target-");
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const sourceRoot = path.join(tmpDir, "source");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    writeFile(sourceRoot, "guide/SKILL.md", "---\nname: guide\ndescription: Source guide\n---\nSource\n");
+    writeFile(projectRoot, ".agents/skills/guide/SKILL.md", "---\nname: user-guide\ndescription: User guide\n---\nUser\n");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", agentClients: CANONICAL_AGENT_CLIENTS,
+      platform: { type: "github" },
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: path.join(sourceRoot, "guide") }] },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md"), "utf8"), "---\nname: user-guide\ndescription: User guide\n---\nUser\n", JSON.stringify(report.custom));
+    assert.deepEqual(report.custom.commands.generated, []);
+    for (const target of [".claude/commands/guide.md", ".opencode/commands/guide.md", ".traecli/commands/guide.md"]) {
+      assert.equal(fs.existsSync(path.join(projectRoot, target)), false, `${target} should not be generated`);
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

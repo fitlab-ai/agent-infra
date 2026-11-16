@@ -1470,7 +1470,7 @@ test("legacy skill migration defers on unreadable sources and explicit empty reg
     const { templateRoot } = createTemplateInstall(tmpDir);
     fs.mkdirSync(projectRoot, { recursive: true });
     writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      project: "demo", org: "acme", language: "en", platform: { type: "github" },
       skills: { sources: [{ type: "local", path: sourceRoot }] },
       files: { managed: [], merged: [], ejected: [] }
     });
@@ -1485,11 +1485,41 @@ test("legacy skill migration defers on unreadable sources and explicit empty reg
     assert.equal(migrated.error, undefined);
     let config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
     assert.deepEqual(config.skills.registrations.map((entry: { name: string }) => entry.name), ["guide"]);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md"), "utf8"), "---\nname: guide\n---\nGuide\n");
+    assert.ok(migrated.custom.commands.generated.includes(".claude/commands/guide.md"));
+    const repeated = syncTemplates(projectRoot, templateRoot);
+    assert.deepEqual(repeated.custom.generated, []);
+    assert.deepEqual(repeated.custom.commands.generated, []);
     config.skills.registrations = [];
     writeJson(projectRoot, ".agents/.airc.json", config);
     syncTemplates(projectRoot, templateRoot);
     config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
     assert.deepEqual(config.skills.registrations, []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("retired run-task remains when readable external sources conflict by name", async () => {
+  const tmpDir = createTempDir("ai-collab-retired-run-task-source-conflict-");
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const firstSource = path.join(tmpDir, "first-source");
+    const secondSource = path.join(tmpDir, "second-source");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const legacy = fs.readFileSync(path.resolve("tests/fixtures/skills/legacy-run-task/SKILL.md"), "utf8");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [{ type: "local", path: firstSource }, { type: "local", path: secondSource }] },
+      files: { managed: [".agents/skills/"], merged: [], ejected: [] }
+    });
+    writeFile(firstSource, "run-task/SKILL.md", legacy);
+    writeFile(secondSource, "run-task/SKILL.md", legacy);
+    writeFile(projectRoot, ".agents/skills/run-task/SKILL.md", legacy);
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/run-task/SKILL.md"), "utf8"), legacy);
+    assert.ok(report.managed.protected.some((entry) => entry.target === ".agents/skills/run-task/SKILL.md"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

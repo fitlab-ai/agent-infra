@@ -16,6 +16,32 @@ const NAME = /^[a-zA-Z0-9_.@-]+$/;
 const hash = (data: Buffer | string) => `sha256:${crypto.createHash('sha256').update(data).digest('hex')}`;
 const norm = (value: string) => value.split(path.sep).join('/').replace(/^\.\//, '');
 
+function safeProjectTarget(target: string, root = process.cwd()): string | null {
+  if (path.isAbsolute(target)) return null;
+  const absolute = path.resolve(root, target);
+  const relative = path.relative(path.resolve(root), absolute);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  let current = path.resolve(root);
+  const parent = path.relative(current, path.dirname(absolute));
+  for (const segment of parent ? parent.split(path.sep) : []) {
+    current = path.join(current, segment);
+    try {
+      const stat = fs.lstatSync(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
+      return null;
+    }
+  }
+  return absolute;
+}
+
+function sameIdentity(registration: Registration, candidate: { name: string; type: 'project' | 'local'; path: string }): boolean {
+  if (registration.name !== candidate.name || registration.type !== candidate.type) return false;
+  const resolve = (type: 'project' | 'local', value: string) => type === 'project' ? path.resolve(value) : resolveLocal(value);
+  return resolve(registration.type, registration.path) === resolve(candidate.type, candidate.path);
+}
+
 function readConfig(root = process.cwd()): { file: string; config: SkillConfig } {
   const file = path.join(root, '.agents', '.airc.json');
   const config = JSON.parse(fs.readFileSync(file, 'utf8')) as SkillConfig;
@@ -90,16 +116,18 @@ function cleanupOwnedOutputs(name: string, registration: Registration, config: S
   const baselines = config.files?.managedBaselines;
   if (!baselines || typeof baselines !== 'object') return [];
   const removed: string[] = [];
-  const skillRoot = path.resolve('.agents/skills', name);
+  const skillRootRelative = path.join('.agents', 'skills', name);
+  const skillRoot = safeProjectTarget(skillRootRelative);
   const projectSkills = path.resolve('.agents/skills');
-  if (registration.type === 'local' && fs.existsSync(skillRoot)) {
+  const skillRootStat = skillRoot ? fs.lstatSync(skillRoot, { throwIfNoEntry: false }) : undefined;
+  if (registration.type === 'local' && skillRoot && skillRootStat?.isDirectory() && !skillRootStat.isSymbolicLink()) {
     for (const target of Object.keys(baselines)) {
-      const absolute = path.resolve(target);
-      if (!absolute.startsWith(`${skillRoot}${path.sep}`)) continue;
+      const absolute = safeProjectTarget(target);
+      if (!absolute || !absolute.startsWith(`${skillRoot}${path.sep}`)) continue;
       const baseline = baselines[target];
       if (!baseline || typeof baseline !== 'object' || !('hash' in baseline) || !('source' in baseline)) continue;
       const record = baseline as { hash?: unknown; source?: unknown };
-      if (record.source !== registration.path || typeof record.hash !== 'string') continue;
+      if (typeof record.source !== 'string' || resolveLocal(record.source) !== resolveLocal(registration.path) || typeof record.hash !== 'string') continue;
       try {
         const stat = fs.lstatSync(absolute);
         if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== record.hash) continue;
@@ -117,7 +145,8 @@ function cleanupOwnedOutputs(name: string, registration: Registration, config: S
     const target = descriptor.target.replaceAll('${skillName}', name);
     const baseline = baselines[target];
     if (typeof baseline !== 'string' || !baseline.startsWith('sha256:')) continue;
-    const absolute = path.resolve(target);
+    const absolute = safeProjectTarget(target);
+    if (!absolute) continue;
     try {
       const stat = fs.lstatSync(absolute);
       if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== baseline) continue;
@@ -127,9 +156,13 @@ function cleanupOwnedOutputs(name: string, registration: Registration, config: S
       removeEmptyDirs(path.dirname(absolute), process.cwd());
     } catch { /* unavailable or changed files remain protected */ }
   }
+  const commandTargets = new Set(listAgentClientAdapters().flatMap((adapter) => {
+    const descriptor = adapter.project.customCommand;
+    return descriptor ? [descriptor.target.replaceAll('${skillName}', name)] : [];
+  }));
   for (const target of Object.keys(baselines)) {
     const record = baselines[target];
-    if (record && typeof record === 'object' && 'source' in record && record.source === registration.path) delete baselines[target];
+    if (commandTargets.has(target) || (record && typeof record === 'object' && 'source' in record && typeof record.source === 'string' && resolveLocal(record.source) === resolveLocal(registration.path))) delete baselines[target];
   }
   return removed;
 }
@@ -149,12 +182,12 @@ export async function cmdSkill(args: string[]): Promise<number> {
       for (const name of [...builtins].sort()) process.stdout.write(`builtin\t${name}\n`);
       for (const item of candidates) {
         if (item.type === 'project' && builtins.has(item.name)) continue;
-        const registration = registrations?.find((entry) => entry.name === item.name && entry.path === item.path);
+        const registration = registrations?.find((entry) => sameIdentity(entry, item));
         const conflicts = candidates.filter((candidate) => candidate.name === item.name).length > 1;
         process.stdout.write(`${registration ? 'registered' : 'unregistered'}\t${conflicts ? 'conflict' : 'available'}\t${item.type}\t${item.name}\t${item.path}\n`);
       }
       for (const registration of registrations ?? []) {
-        if (!candidates.some((item) => item.name === registration.name && item.path === registration.path)) {
+        if (!candidates.some((item) => sameIdentity(registration, item))) {
           process.stdout.write(`registered\tunavailable\t${registration.type}\t${registration.name}\t${registration.path}\n`);
         }
       }
