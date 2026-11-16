@@ -130,7 +130,7 @@ function compareIsolatedTree(gitRoot: string, env: NodeJS.ProcessEnv, input: { m
 
 function compareReplayedTree(input: { gitRoot: string; mergeBase: string; reviewedHead: string; candidateBase: string; mergeEnd: string }): ReviewedHeadRelation | null {
   let tempDir: string | undefined;
-  let relation: ReviewedHeadRelation | null = null;
+  let relation: ReviewedHeadRelation | null;
   try {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-merge-equivalence-"));
     const env = { ...process.env, GIT_INDEX_FILE: path.join(tempDir, "index") };
