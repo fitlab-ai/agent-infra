@@ -22,8 +22,9 @@ test('ai task without subcommand prints USAGE and exits non-zero', () => {
 });
 
 test('public root help in a task-bound workspace preserves each command’s output and exit code', () => {
+  const cliEnv = { ...hostEnv, NODE_NO_WARNINGS: '1' };
   const taskEnv = {
-    ...hostEnv,
+    ...cliEnv,
     AGENT_INFRA_SANDBOX: '1',
     AGENT_INFRA_TASK_ID: 'TASK-20261116-150024',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
@@ -38,7 +39,7 @@ test('public root help in a task-bound workspace preserves each command’s outp
   ] as const;
 
   for (const [command, expectedStatus] of usageCommands) {
-    const host = runCli([command]);
+    const host = runCli([command], cliEnv);
     const bound = runCli([command], taskEnv);
     assert.match(`${host.stdout}${host.stderr}`, /Usage: ai /, `${command}: host usage`);
     assert.equal(host.status, expectedStatus, `${command}: host exit code`);
