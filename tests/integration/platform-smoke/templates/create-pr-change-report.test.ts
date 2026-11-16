@@ -105,6 +105,40 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
   });
 });
 
+test("create-pr change report counts diff content beginning with header-like prefixes", (t) => {
+  const repo = createTempDir("create-pr-change-report-prefixes-");
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  initIsolatedGitRepo(repo);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+
+  fs.writeFileSync(path.join(repo, "added.txt"), "before\n");
+  fs.writeFileSync(path.join(repo, "deleted.txt"), "-- deleted content\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "base"]);
+  const base = git(repo, ["rev-parse", "HEAD"]);
+
+  fs.writeFileSync(path.join(repo, "added.txt"), "++ actual content\n");
+  fs.writeFileSync(path.join(repo, "deleted.txt"), "ordinary\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "header-like content"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+
+  const report = JSON.parse(execFileSync(process.execPath, [
+    runtimeScript, "--base", base, "--head", head, "--cwd", repo
+  ], { encoding: "utf8", env: gitSafeEnv() }));
+  const added = report.files.find((file: { newPath: string | null }) => file.newPath === "added.txt");
+  const deleted = report.files.find((file: { newPath: string | null }) => file.newPath === "deleted.txt");
+  assert.deepEqual(added.locations, [
+    { side: "old", startLine: 1, endLine: 1 },
+    { side: "new", startLine: 1, endLine: 1 }
+  ]);
+  assert.deepEqual(deleted.locations, [
+    { side: "old", startLine: 1, endLine: 1 },
+    { side: "new", startLine: 1, endLine: 1 }
+  ]);
+});
+
 test("head-to-head report compares two non-ancestor trees directly", (t) => {
   const repo = createTempDir("create-pr-change-report-heads-");
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));

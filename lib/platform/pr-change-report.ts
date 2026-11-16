@@ -402,6 +402,15 @@ function validateGroupMembership(checks: Precheck[], full: ChangeFile[], increme
   if (!fullCheck.ok) return fullCheck;
   const incrementCheck = validateAllocation(incrementRanges, unassigned.increment, increment, 'increment');
   if (!incrementCheck.ok) return incrementCheck;
+  for (const group of composition.groups) {
+    const allocatedPaths = new Set([...group.locations.full, ...group.locations.increment].map((range) => range.path));
+    const memberPaths = new Set(group.files);
+    for (const filePath of allocatedPaths) if (!memberPaths.has(filePath)) return invalid(`change-composition group '${group.id}' allocates locations outside its files list`);
+    for (const filePath of memberPaths) {
+      const hasLineLocations = [...full, ...increment].some((file) => (file.oldPath ?? file.newPath) === filePath && file.locations.length > 0);
+      if (hasLineLocations && !allocatedPaths.has(filePath)) return invalid(`change-composition group '${group.id}' lists a text file without allocated locations`);
+    }
+  }
   return { ok: true, value: checks };
 }
 
@@ -840,14 +849,15 @@ function countLocations(ranges: AssignedRange[]): number {
 }
 
 function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[], incrementFiles: ChangeFile[], incrementStatus: IncrementDiff['status'], unassigned: Precheck['unassigned']): string[] {
-  const filesByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
+  const filesByPath = new Map([...incrementFiles, ...files].map((file) => [file.oldPath ?? file.newPath!, file]));
+  const fullByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
   return groups.flatMap((group) => {
     const incrementByPath = new Map(incrementFiles.map((file) => [file.oldPath ?? file.newPath!, file]));
     const fullAdded = countLocations(group.locations.full.filter((range) => range.side === 'new'));
     const fullDeleted = countLocations(group.locations.full.filter((range) => range.side === 'old'));
     const incAdded = countLocations(group.locations.increment.filter((range) => range.side === 'new'));
     const incDeleted = countLocations(group.locations.increment.filter((range) => range.side === 'old'));
-    const unknownFiles = group.files.filter((member) => filesByPath.get(member)?.additions === null || incrementByPath.get(member)?.additions === null).length;
+    const unknownFiles = group.files.filter((member) => fullByPath.get(member)?.additions === null || incrementByPath.get(member)?.additions === null).length;
     return [
       `  - **功能组 ${escapeReportText(group.id)}**：${escapeReportText(group.target)}`,
       `    - 行为变化：${escapeReportText(group.behaviorChange)}`,

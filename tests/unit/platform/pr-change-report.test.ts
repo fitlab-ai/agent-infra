@@ -386,6 +386,48 @@ test('changed positions can split one file across functions and retain shared at
   }
 });
 
+test('canonical report renders increment-only text, binary, and renamed files', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  const incrementFiles = withLocations([
+    { status: 'D', oldPath: 'src/increment-only.ts', newPath: null, additions: 0, deletions: 2, oldBytes: 12, newBytes: 0, netBytes: -12 },
+    { status: 'M', oldPath: 'assets/increment-only.bin', newPath: 'assets/increment-only.bin', additions: null, deletions: null, oldBytes: 4, newBytes: 8, netBytes: 4 },
+    { status: 'R100', oldPath: 'docs/old-name.md', newPath: 'docs/new-name.md', additions: 0, deletions: 0, oldBytes: 9, newBytes: 9, netBytes: 0 }
+  ]);
+  diff.increment = {
+    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
+    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64), files: incrementFiles,
+      totals: { files: 3, textFiles: 2, binaryFiles: 1, additions: 0, deletions: 2, oldBytes: 25, newBytes: 17, netBytes: -8 } }
+  };
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /<code>src\/increment-only\.ts<\/code>/u);
+  assert.match(rendered, /<code>assets\/increment-only\.bin<\/code>/u);
+  assert.match(rendered, /<code>docs\/old-name\.md<\/code> → <code>docs\/new-name\.md<\/code>/u);
+});
+
+test('functional groups reject files that disagree with their allocated locations', () => {
+  const digest = 'd'.repeat(64);
+  const files = withLocations([
+    { status: 'A', oldPath: null, newPath: 'src/added.ts', additions: 1, deletions: 0, oldBytes: 0, newBytes: 4, netBytes: 4 },
+    { status: 'D', oldPath: 'src/deleted.ts', newPath: null, additions: 0, deletions: 1, oldBytes: 4, newBytes: 0, netBytes: -4 }
+  ]);
+  const diff = bundle(sha('b'), sha('c'), files, {
+    files: 2, textFiles: 2, binaryFiles: 0, additions: 1, deletions: 1, oldBytes: 4, newBytes: 4, netBytes: 0
+  });
+  const value = candidate(digest, diff);
+  const composition = value.checks.find((check) => check.id === 'change-composition')!;
+  const original = composition.groups![0]!;
+  composition.groups = [
+    { ...original, id: 'added-feature', files: ['src/added.ts'], locations: { full: [{ path: 'src/deleted.ts', side: 'old', startLine: 1, endLine: 1 }], increment: [] } },
+    { ...original, id: 'deleted-feature', files: ['src/deleted.ts'], locations: { full: [{ path: 'src/added.ts', side: 'new', startLine: 1, endLine: 1 }], increment: [] } }
+  ];
+  const built = buildPrChangeReport(identity(), digest, diff, value);
+  assert.equal(built.ok, false);
+});
+
 test('full and head-to-head allocations remain independently identified and validated', () => {
   const digest = 'd'.repeat(64);
   const diff = mechanical();

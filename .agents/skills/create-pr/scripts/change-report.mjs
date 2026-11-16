@@ -131,14 +131,20 @@ function changedRanges(patch) {
   const ranges = [];
   let oldLine = 0;
   let newLine = 0;
+  let inHunk = false;
   for (const line of patch.toString('utf8').split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      inHunk = false;
+      continue;
+    }
     const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
     if (hunk) {
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[3]);
+      inHunk = true;
       continue;
     }
-    if (line.startsWith('+++ ') || line.startsWith('--- ') || line.startsWith('\\')) continue;
+    if (!inHunk || line.startsWith('\\')) continue;
     if (line.startsWith('+')) {
       appendPosition(ranges, 'new', newLine++);
     } else if (line.startsWith('-')) {

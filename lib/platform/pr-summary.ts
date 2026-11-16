@@ -770,15 +770,18 @@ async function prepareReportWrite(
   const inputs = readReportWriteInputs(resolved.repoRoot, options);
   if (!inputs.ok) return { ok: false, status: 'failed', error: inputs.error };
   let recomputed: MechanicalChangeReport;
+  let oldReport: PrChangeReport | null = null;
+  let oldIdentityMatches = false;
   try {
     const oldPath = taskReportPath(resolved.taskDir);
     const old = readPrChangeReport(oldPath);
+    oldReport = old.ok ? old.value : null;
     const oldContent = old.ok ? fs.readFileSync(oldPath) : null;
-    const oldIdentityMatches = old.ok && old.value.identity.repository === initial.value.repository &&
+    oldIdentityMatches = old.ok && old.value.identity.repository === initial.value.repository &&
       resourceIdentityEquals(old.value.identity.resource, initial.value.identity) &&
       JSON.stringify(old.value.identity.base) === JSON.stringify(initial.value.base);
     recomputed = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha,
-      oldIdentityMatches && oldContent ? { headSha: old.value.identity.head.sha, reportSha256: createHash('sha256').update(oldContent).digest('hex') } : undefined);
+      oldIdentityMatches && oldContent && oldReport ? { headSha: oldReport.identity.head.sha, reportSha256: createHash('sha256').update(oldContent).digest('hex') } : undefined);
   } catch (error) {
     return {
       ok: false,
@@ -786,13 +789,17 @@ async function prepareReportWrite(
       error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
     };
   }
-  if (!sameMechanical(inputs.mechanical, recomputed)) return {
+  const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
+  if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
+  const sameRequestReplay = oldReport !== null && oldIdentityMatches && oldReport.identity.head.sha === initial.value.head.sha &&
+    oldReport.inputs.taskIntentSha256 === digest.value.sha256 &&
+    JSON.stringify(oldReport) === JSON.stringify(built.value) &&
+    JSON.stringify(inputs.mechanical.full) === JSON.stringify(recomputed.full);
+  if (!sameMechanical(inputs.mechanical, recomputed) && !sameRequestReplay) return {
     ok: false,
     status: 'failed',
     error: { code: 'PR_CHANGE_REPORT_MECHANICAL_MISMATCH', message: 'Mechanical report input does not match the current complete diff', retryable: false }
   };
-  const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
-  if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
   return { ok: true, initial: initial.value, report: built.value };
 }
 

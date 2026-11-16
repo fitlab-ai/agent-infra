@@ -832,24 +832,58 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
     });
     assert.equal(first.status, 'applied', JSON.stringify(first.error));
     assert.equal(first.report?.status, 'written');
-    const replayMechanical = mechanicalAfterSidecar(fixture);
-    fs.writeFileSync(mechanicalFile, JSON.stringify(replayMechanical));
-    fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256, replayMechanical)));
     const replay = await reportWrite(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
       client: resolvedContextClient(fixture.root, 'comments', fixture.baseSha, fixture.headSha)
     });
-    assert.equal(replay.status, 'applied');
-    assert.equal(replay.report?.status, 'written');
-    const convergedMechanical = mechanicalAfterSidecar(fixture);
-    fs.writeFileSync(mechanicalFile, JSON.stringify(convergedMechanical));
-    fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256, convergedMechanical)));
-    const converged = await reportWrite(fixture.taskId, {
+    assert.equal(replay.status, 'no-op');
+    assert.equal(replay.report?.status, 'no-op');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('change-report replay with the original available increment is idempotent', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'task.md');
+    const taskContent = fs.readFileSync(taskPath, 'utf8');
+    const digest = taskIntentDigest(taskContent);
+    if (!digest.ok) throw new Error(digest.error.message);
+    git(fixture.root, ['switch', '-q', '-c', 'prior-report', fixture.baseSha]);
+    fs.writeFileSync(path.join(fixture.root, 'prior.txt'), 'prior change\n');
+    git(fixture.root, ['add', 'prior.txt']);
+    git(fixture.root, ['commit', '-qm', 'prior report head']);
+    const priorHead = git(fixture.root, ['rev-parse', 'HEAD']);
+    git(fixture.root, ['switch', '-q', 'feature']);
+    const priorMechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, priorHead);
+    const priorReport = buildPrChangeReport({
+      repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
+      base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha },
+      head: { repository: 'acme/widgets', ref: 'feature', sha: priorHead }
+    }, digest.value.sha256, priorMechanical, candidate(digest.value.sha256, priorMechanical));
+    assert.equal(priorReport.ok, true, priorReport.ok ? undefined : JSON.stringify(priorReport.error));
+    if (!priorReport.ok) return;
+    writePrChangeReportAtomic(fixture.reportPath, priorReport.value);
+    const priorBytes = fs.readFileSync(fixture.reportPath);
+    const mechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, fixture.headSha, {
+      headSha: priorHead, reportSha256: createHash('sha256').update(priorBytes).digest('hex')
+    });
+    assert.equal(mechanical.increment.status, 'available');
+    const mechanicalFile = path.join(fixture.root, 'mechanical.json');
+    const precheckFile = path.join(fixture.root, 'precheck.json');
+    fs.writeFileSync(mechanicalFile, JSON.stringify(mechanical));
+    fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256, mechanical)));
+    const options = {
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
       client: resolvedContextClient(fixture.root, 'comments', fixture.baseSha, fixture.headSha)
-    });
-    assert.equal(converged.status, 'no-op');
-    assert.equal(converged.report?.status, 'no-op');
+    };
+    const first = await reportWrite(fixture.taskId, options);
+    assert.equal(first.status, 'applied');
+    assert.equal(first.report?.status, 'written');
+    const replay = await reportWrite(fixture.taskId, options);
+    assert.equal(replay.status, 'no-op');
+    assert.equal(replay.report?.status, 'no-op');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
