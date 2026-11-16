@@ -66,11 +66,11 @@ test("required-checks accepts only a verified merged-equivalent relation", () =>
     relation: { status: "merged-equivalent", reviewedHead: SHA, mergeCommit: "b".repeat(40) }
   });
   assert.equal(result.status, "pass");
-  assert.match(result.message, /verified squash merge equivalence/);
+  assert.match(result.message, /verified merged-range equivalence/);
 
   assert.equal(evaluate({
     localHead: "b".repeat(40),
-    relation: { status: "failed", message: "squash content mismatch" }
+    relation: { status: "failed", message: "merged-range content mismatch" }
   }).status, "fail");
   assert.equal(evaluate({
     localHead: "b".repeat(40),

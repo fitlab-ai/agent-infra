@@ -125,7 +125,7 @@ export default async function createPlatformProvider(input) {
       async listClosing() { return { ok: true, value: [] }; },
       async create() { return receipt('pr-created'); },
       async update() { return receipt('pr-updated'); },
-      async resolveGitEvidence() { return { ok: true, value: { remoteUrl: 'https://opaque.example/project', reviewedHeadRef: 'refs/heads/feature', targetHeadRef: 'refs/heads/main' } }; }
+      async resolveGitEvidence() { return { ok: true, value: { remoteUrl: 'https://opaque.example/project', reviewedHeadRef: 'refs/heads/feature', targetHeadRef: 'refs/heads/main', defaultBranch: 'main' } }; }
     },
     checks: {
       async inspectRequired() { return { ok: true, value: [] }; },

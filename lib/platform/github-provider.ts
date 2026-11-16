@@ -113,12 +113,14 @@ function rewriteGitHubRemote(remote: string, repository: string): string | null 
 }
 
 function resolveGitHubChangeRequestGitEvidence({
+  client,
   cwd,
   repository,
   number,
   baseRepository,
   baseRef
 }: {
+  client: GitHubClient;
   cwd: string;
   repository: string;
   number: number;
@@ -172,10 +174,36 @@ function resolveGitHubChangeRequestGitEvidence({
       }
     };
   }
+  const repositoryInfo = client.json<{ full_name?: unknown; default_branch?: unknown }>(['api', `repos/${repository}`], { cwd });
+  if (!repositoryInfo.ok || !repositoryInfo.value || repositoryInfo.value.full_name !== repository || typeof repositoryInfo.value.default_branch !== 'string' || !repositoryInfo.value.default_branch) {
+    return { ok: false as const, error: { code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE', message: 'Unable to resolve repository default branch' } };
+  }
   return {
     ok: true as const,
-    value: { remoteUrl, reviewedHeadRef, targetHeadRef }
+    value: { remoteUrl, reviewedHeadRef, targetHeadRef, defaultBranch: repositoryInfo.value.default_branch }
   };
+}
+
+function listGitHubCommitPullRequestAssociations(client: GitHubClient, repository: string, commitSha: string, cwd: string) {
+  const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/commits/${commitSha}/pulls?per_page=100`], { cwd });
+  if (!response.ok) return response;
+  if (!Array.isArray(response.value) || response.value.some((page) => !Array.isArray(page))) {
+    return { ok: false as const, error: { code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE', message: 'GitHub returned incomplete commit pull request associations' } };
+  }
+  const pullRequestNumbers: number[] = [];
+  for (const page of response.value) {
+    for (const item of page) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return { ok: false as const, error: { code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE', message: 'GitHub returned an invalid commit pull request association' } };
+      }
+      const record = item as { number?: unknown; base?: { repo?: { full_name?: unknown } } };
+      if (!Number.isSafeInteger(record.number) || Number(record.number) <= 0 || record.base?.repo?.full_name !== repository) {
+        return { ok: false as const, error: { code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE', message: 'GitHub returned an inconsistent commit pull request identity' } };
+      }
+      pullRequestNumbers.push(Number(record.number));
+    }
+  }
+  return { ok: true as const, value: { repository, pullRequestNumbers } };
 }
 
 function failure(error: PlatformError | ProviderError): ProviderResult<PlatformContextSnapshot> {
@@ -900,12 +928,17 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
       return resolveGitHubChangeRequestGitEvidence({
+        client,
         cwd: context.workingDirectory,
         repository: repository(context),
         number,
-        baseRepository: repository(context),
+        baseRepository: expected.baseRepository || repository(context),
         baseRef: expected.targetBranch || 'main'
       });
+    },
+    async listCommitPullRequestAssociations({ context, commitSha }) {
+      if (!/^[0-9a-f]{40}$/i.test(commitSha)) return invalid('PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE', 'Commit identity is invalid');
+      return listGitHubCommitPullRequestAssociations(client, repository(context), commitSha, context.workingDirectory);
     }
   };
 
@@ -1177,5 +1210,6 @@ export {
   createGitHubProvider,
   defaultGitRemote,
   parseGitHubRemote,
-  resolveGitHubChangeRequestGitEvidence
+  resolveGitHubChangeRequestGitEvidence,
+  listGitHubCommitPullRequestAssociations
 };

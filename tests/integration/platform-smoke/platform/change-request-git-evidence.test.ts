@@ -61,8 +61,7 @@ function fixture(advanceTarget = false) {
   const snapshotBase = advanceTarget
     ? writeCommit(seed, "advanced\nbase\n", "advance target")
     : base;
-  git(seed, ["merge", "--squash", "feature"]);
-  git(seed, ["commit", "-qm", "squash"]);
+  writeCommit(seed, advanceTarget ? "advanced\nbase\nreviewed\n" : "base\nreviewed\n", "land reviewed change");
   const merge = git(seed, ["rev-parse", "HEAD"]);
   git(seed, ["push", "-q", "origin", "main"]);
 
@@ -87,13 +86,13 @@ function fixture(advanceTarget = false) {
   return { root, remote, caller, base, head, merge, pullRequest };
 }
 
-function configureEvidenceProvider(caller: string, type: string, remote: string, reviewedHeadRef = "refs/pull/1/head") {
+function configureEvidenceProvider(caller: string, type: string, remote: string, reviewedHeadRef = "refs/pull/1/head", associations: Record<string, number[]> = {}) {
   fs.mkdirSync(path.join(caller, ".agents"), { recursive: true });
   fs.writeFileSync(path.join(caller, ".agents", ".airc.json"), JSON.stringify({
     platform: {
       type,
       providers: {
-        [type]: { source: providerSource, config: { remoteUrl: remote, reviewedHeadRef } }
+        [type]: { source: providerSource, config: { remoteUrl: remote, reviewedHeadRef, associations } }
       }
     }
   }));
@@ -102,7 +101,7 @@ function configureEvidenceProvider(caller: string, type: string, remote: string,
 test("materializes merged PR evidence without changing the caller repository", async () => {
   const f = fixture();
   try {
-    configureEvidenceProvider(f.caller, "isolated-evidence-test", f.remote);
+    configureEvidenceProvider(f.caller, "isolated-evidence-test", f.remote, "refs/pull/1/head", { [f.merge]: [1] });
     assert.notEqual(spawnSync("git", ["cat-file", "-e", `${f.head}^{commit}`], {
       cwd: f.caller,
       env: gitSafeEnv()
@@ -131,10 +130,10 @@ test("materializes merged PR evidence without changing the caller repository", a
   }
 });
 
-test("materializes an equivalent squash after the target advances in the same file", async () => {
+test("materializes an equivalent commit range after the target advances in the same file", async () => {
   const f = fixture(true);
   try {
-    configureEvidenceProvider(f.caller, "advanced-isolated-evidence-test", f.remote);
+    configureEvidenceProvider(f.caller, "advanced-isolated-evidence-test", f.remote, "refs/pull/1/head", { [f.merge]: [1] });
     const before = repositorySnapshot(f.caller);
     assert.deepEqual(await resolveMaterializedReviewedHeadRelation({
       cwd: f.caller,

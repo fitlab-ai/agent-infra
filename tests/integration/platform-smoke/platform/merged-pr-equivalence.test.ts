@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { resolveReviewedHeadRelation } from "../../../../lib/platform/merged-pr-equivalence.ts";
+import { resolveMergeDomain, resolveReviewedHeadRelation } from "../../../../lib/platform/merged-pr-equivalence.ts";
 import { inspectPlatformPullRequestByNumber } from "../../../../lib/platform/pull-requests.ts";
 import type { PullRequestSnapshot } from "../../../../lib/platform/pull-requests.ts";
 import { createTempDir, filePath, gitSafeEnv } from "../../../helpers.ts";
@@ -35,8 +35,7 @@ function fixture() {
   git(root, ["switch", "-qc", "feature"]);
   const head = writeCommit(root, "base\nreviewed\n", "reviewed");
   git(root, ["switch", "-q", "master"]);
-  git(root, ["merge", "--squash", "feature"]);
-  git(root, ["commit", "-qm", "squash"]);
+  writeCommit(root, "base\nreviewed\n", "land reviewed change");
   const merge = git(root, ["rev-parse", "HEAD"]);
   const pullRequest: PullRequestSnapshot = {
     repository: "o/r", number: 1, nodeId: "PR_1", url: "https://example.test/1",
@@ -46,7 +45,13 @@ function fixture() {
     mergedAt: "2026-07-25T00:00:00Z", mergeCommitSha: merge,
     labels: [], assignees: [], milestone: null
   };
-  return { root, base, head, merge, pullRequest };
+  return { root, base, head, merge, pullRequest, defaultBranch: "master" };
+}
+
+function associations(root: string, pullRequest: PullRequestSnapshot) {
+  const domain = resolveMergeDomain(root, pullRequest.head.sha, pullRequest.mergeCommitSha!);
+  if (domain.status !== "ok") return new Map();
+  return new Map(domain.commits.map((sha, index) => [sha, { repository: pullRequest.repository, pullRequestNumbers: index === domain.commits.length - 1 ? [pullRequest.number] : [] }]));
 }
 
 test("accepts a strict reviewed head match", () => {
@@ -59,7 +64,9 @@ test("accepts a strict reviewed head match", () => {
       gitRoot: f.root,
       comparisonHead: f.head,
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     }), {
       status: "strict",
       reviewedHead: f.head
@@ -79,8 +86,7 @@ function advancedTargetFixture() {
   const head = writeCommit(root, "base\nanchor\nreviewed\n", "reviewed");
   git(root, ["switch", "-q", "master"]);
   const advancedBase = writeCommit(root, "advanced\nbase\nanchor\n", "advance target");
-  git(root, ["merge", "--squash", "feature"]);
-  git(root, ["commit", "-qm", "squash"]);
+  writeCommit(root, "advanced\nbase\nanchor\nreviewed\n", "land reviewed change");
   const merge = git(root, ["rev-parse", "HEAD"]);
   const pullRequest: PullRequestSnapshot = {
     repository: "o/r", number: 1, nodeId: "PR_1", url: "https://example.test/1",
@@ -90,15 +96,17 @@ function advancedTargetFixture() {
     mergedAt: "2026-07-25T00:00:00Z", mergeCommitSha: merge,
     labels: [], assignees: [], milestone: null
   };
-  return { root, mergeBase, advancedBase, head, merge, pullRequest };
+  return { root, mergeBase, advancedBase, head, merge, pullRequest, defaultBranch: "master" };
 }
 
-test("accepts an authoritative content-equivalent squash merge", () => {
+test("accepts an authoritative content-equivalent merged-range merge", () => {
   const f = fixture();
   try {
     assert.deepEqual(resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,
@@ -110,13 +118,117 @@ test("accepts an authoritative content-equivalent squash merge", () => {
   }
 });
 
-test("accepts an equivalent squash after the target advances in the same file", () => {
+test("accepts an empty reviewed delta only for the reviewed head and matching merge tree", () => {
+  const f = fixture();
+  try {
+    const tree = git(f.root, ["rev-parse", `${f.base}^{tree}`]);
+    const merge = commitTree(f.root, tree, [f.base], "empty reviewed delta landing");
+    f.pullRequest.head.sha = f.base;
+    f.pullRequest.base.sha = f.base;
+    f.pullRequest.mergeCommitSha = merge;
+    const identity = new Map([[merge, { repository: f.pullRequest.repository, pullRequestNumbers: [f.pullRequest.number] }]]);
+    const input = {
+      gitRoot: f.root,
+      comparisonHead: merge,
+      lastReviewedCommit: f.base,
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: identity
+    };
+
+    assert.equal(resolveReviewedHeadRelation(input).status, "merged-equivalent");
+    assert.equal(resolveReviewedHeadRelation({ ...input, lastReviewedCommit: f.head }).status, "failed");
+
+    const differentTree = git(f.root, ["rev-parse", `${f.head}^{tree}`]);
+    const mismatchedMerge = commitTree(f.root, differentTree, [f.base], "empty delta with different tree");
+    f.pullRequest.mergeCommitSha = mismatchedMerge;
+    const mismatch = resolveReviewedHeadRelation({
+      ...input,
+      comparisonHead: mismatchedMerge,
+      associations: new Map([[mismatchedMerge, { repository: f.pullRequest.repository, pullRequestNumbers: [f.pullRequest.number] }]])
+    });
+    assert.equal(mismatch.status, "failed");
+    assert.equal(mismatch.code, "PR_MERGE_CONTENT_MISMATCH");
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("accepts reviewed gitlink updates and deletions without requiring commit objects as blobs", () => {
+  for (const change of ["update", "delete"] as const) {
+    const root = createTempDir(`merged-pr-gitlink-${change}-`);
+    try {
+      git(root, ["init", "-q", "-b", "master"]);
+      git(root, ["config", "user.name", "Test"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      const oldSubmoduleCommit = writeCommit(root, "submodule old\n", "old submodule commit");
+      git(root, ["update-index", "--add", "--cacheinfo", `160000,${oldSubmoduleCommit},submodule`]);
+      git(root, ["commit", "-qm", "add gitlink"]);
+      const base = git(root, ["rev-parse", "HEAD"]);
+      const newSubmoduleCommit = commitTree(root, git(root, ["rev-parse", `${oldSubmoduleCommit}^{tree}`]), [oldSubmoduleCommit], "new submodule commit");
+      git(root, ["switch", "-qc", "feature"]);
+      if (change === "update") git(root, ["update-index", "--cacheinfo", `160000,${newSubmoduleCommit},submodule`]);
+      else git(root, ["update-index", "--force-remove", "submodule"]);
+      git(root, ["commit", "-qm", `reviewed gitlink ${change}`]);
+      const head = git(root, ["rev-parse", "HEAD"]);
+      const tree = git(root, ["rev-parse", "HEAD^{tree}"]);
+      const merge = commitTree(root, tree, [base], `land gitlink ${change}`);
+      const pullRequest: PullRequestSnapshot = {
+        repository: "o/r", number: 1, nodeId: "PR_1", url: "https://example.test/1",
+        state: "closed", title: "", body: "", draft: false,
+        head: { repository: "o/r", ref: "feature", sha: head },
+        base: { repository: "o/r", ref: "master", sha: base },
+        mergedAt: "2026-07-25T00:00:00Z", mergeCommitSha: merge,
+        labels: [], assignees: [], milestone: null
+      };
+
+      const result = resolveReviewedHeadRelation({
+        gitRoot: root,
+        comparisonHead: merge,
+        lastReviewedCommit: head,
+        pullRequest,
+        defaultBranch: pullRequest.base.ref,
+        associations: new Map([[merge, { repository: pullRequest.repository, pullRequestNumbers: [pullRequest.number] }]])
+      });
+      assert.equal(result.status, "merged-equivalent", `${change}: ${JSON.stringify(result)}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("fails closed for a non-default target and incomplete commit identity evidence", () => {
+  const f = fixture();
+  try {
+    const input = {
+      gitRoot: f.root,
+      comparisonHead: f.merge,
+      lastReviewedCommit: f.head,
+      pullRequest: f.pullRequest,
+      defaultBranch: "other",
+      associations: associations(f.root, f.pullRequest)
+    };
+    const nonDefault = resolveReviewedHeadRelation(input);
+    assert.equal(nonDefault.status, "failed");
+    assert.equal(nonDefault.code, "PR_MERGE_IDENTITY_INVALID");
+
+    const incomplete = resolveReviewedHeadRelation({ ...input, defaultBranch: f.pullRequest.base.ref, associations: new Map() });
+    assert.equal(incomplete.status, "blocked");
+    assert.equal(incomplete.code, "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE");
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("accepts an equivalent merged-range after the target advances in the same file", () => {
   const f = advancedTargetFixture();
   try {
     assert.notEqual(f.pullRequest.base.sha, f.mergeBase);
     assert.deepEqual(resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,
@@ -128,7 +240,7 @@ test("accepts an equivalent squash after the target advances in the same file", 
   }
 });
 
-test("accepts a normalized squash snapshot supplied by a custom platform provider", async () => {
+test("accepts a normalized merged-range snapshot supplied by a custom platform provider", async () => {
   const f = fixture();
   try {
     fs.mkdirSync(path.join(f.root, ".agents"));
@@ -150,7 +262,9 @@ test("accepts a normalized squash snapshot supplied by a custom platform provide
       gitRoot: f.root,
       comparisonHead: f.merge,
       lastReviewedCommit: f.head,
-      pullRequest: inspected.pullRequest
+      pullRequest: inspected.pullRequest,
+      defaultBranch: inspected.pullRequest.base.ref,
+      associations: associations(f.root, inspected.pullRequest)
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,
@@ -162,19 +276,21 @@ test("accepts a normalized squash snapshot supplied by a custom platform provide
   }
 });
 
-test("fails closed for changed squash content and accepts later target changes", () => {
+test("fails closed for changed merged-range content and accepts later target changes", () => {
   const changed = fixture();
   try {
     git(changed.root, ["reset", "--hard", `${changed.merge}^`]);
-    writeCommit(changed.root, "base\ndifferent\n", "different squash");
+    writeCommit(changed.root, "base\ndifferent\n", "different merged-range");
     changed.pullRequest.mergeCommitSha = git(changed.root, ["rev-parse", "HEAD"]);
     const mismatch = resolveReviewedHeadRelation({
       gitRoot: changed.root, comparisonHead: changed.pullRequest.mergeCommitSha,
-      lastReviewedCommit: changed.head, pullRequest: changed.pullRequest
+      lastReviewedCommit: changed.head, pullRequest: changed.pullRequest,
+      defaultBranch: changed.pullRequest.base.ref,
+      associations: associations(changed.root, changed.pullRequest)
     });
     assert.equal(mismatch.status, "failed");
     assert.equal(mismatch.code, "PR_MERGE_CONTENT_MISMATCH");
-    assert.equal(mismatch.message, "Replayed reviewed PR content differs from the squash merge tree");
+    assert.equal(mismatch.message, "Replayed reviewed PR content differs from the authoritative merge tree");
   } finally {
     fs.rmSync(changed.root, { recursive: true, force: true });
   }
@@ -184,7 +300,9 @@ test("fails closed for changed squash content and accepts later target changes",
     const localHead = writeCommit(later.root, "base\nreviewed\nlater\n", "later");
     const result = resolveReviewedHeadRelation({
       gitRoot: later.root, comparisonHead: localHead, lastReviewedCommit: later.head,
-      pullRequest: later.pullRequest
+      pullRequest: later.pullRequest,
+      defaultBranch: later.pullRequest.base.ref,
+      associations: associations(later.root, later.pullRequest)
     });
     assert.deepEqual(result, {
       status: "merged-equivalent",
@@ -197,7 +315,7 @@ test("fails closed for changed squash content and accepts later target changes",
   }
 });
 
-test("fails closed for whitespace-only squash content drift", () => {
+test("fails closed for whitespace-only merged-range content drift", () => {
   const f = fixture();
   try {
     git(f.root, ["reset", "--hard", `${f.merge}^`]);
@@ -205,28 +323,32 @@ test("fails closed for whitespace-only squash content drift", () => {
     f.pullRequest.mergeCommitSha = merge;
     const result = resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_CONTENT_MISMATCH");
-    assert.equal(result.message, "Replayed reviewed PR content differs from the squash merge tree");
+    assert.equal(result.message, "Replayed reviewed PR content differs from the authoritative merge tree");
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test("fails closed when the reviewed patch conflicts with the squash parent", () => {
+test("fails closed when the reviewed patch conflicts with the merged-range parent", () => {
   const f = fixture();
   try {
     git(f.root, ["reset", "--hard", f.base]);
     writeCommit(f.root, "target change\n", "advance target");
-    const squashParent = git(f.root, ["rev-parse", "HEAD"]);
-    const merge = writeCommit(f.root, "reviewed change\n", "manual squash");
-    f.pullRequest.base.sha = squashParent;
+    const candidateBase = git(f.root, ["rev-parse", "HEAD"]);
+    const merge = writeCommit(f.root, "reviewed change\n", "manual merged-range");
+    f.pullRequest.base.sha = candidateBase;
     f.pullRequest.mergeCommitSha = merge;
     const result = resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_CONTENT_MISMATCH");
@@ -239,45 +361,49 @@ test("fails closed when the reviewed patch conflicts with the squash parent", ()
   }
 });
 
-test("rejects squash histories without a unique merge base", () => {
+test("rejects merged-range histories without a unique merge base", () => {
   const f = fixture();
   try {
     git(f.root, ["switch", "--orphan", "unrelated"]);
-    const squashParent = writeCommit(f.root, "unrelated\n", "unrelated root");
-    const merge = writeCommit(f.root, "unrelated\nreviewed\n", "unrelated squash");
-    f.pullRequest.base.sha = squashParent;
+    const candidateBase = writeCommit(f.root, "unrelated\n", "unrelated root");
+    const merge = writeCommit(f.root, "unrelated\nreviewed\n", "unrelated merged-range");
+    f.pullRequest.base.sha = candidateBase;
     f.pullRequest.mergeCommitSha = merge;
     const result = resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_TOPOLOGY_INVALID");
-    assert.equal(result.message, "Reviewed head and squash parent do not have a unique merge base");
+    assert.equal(result.message, "Reviewed head and PR merge end first parent do not have a unique merge base");
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test("rejects squash histories with multiple best merge bases", () => {
+test("rejects merged-range histories with multiple best merge bases", () => {
   const f = fixture();
   try {
     const tree = git(f.root, ["rev-parse", `${f.base}^{tree}`]);
     const firstSide = commitTree(f.root, tree, [f.base], "first side");
     const secondSide = commitTree(f.root, tree, [f.base], "second side");
     const reviewedHead = commitTree(f.root, tree, [firstSide, secondSide], "reviewed head");
-    const squashParent = commitTree(f.root, tree, [secondSide, firstSide], "squash parent");
-    const merge = commitTree(f.root, tree, [squashParent], "squash");
+    const candidateBase = commitTree(f.root, tree, [secondSide, firstSide], "merged-range parent");
+    const merge = commitTree(f.root, tree, [candidateBase], "merged-range");
     f.pullRequest.head.sha = reviewedHead;
-    f.pullRequest.base.sha = squashParent;
+    f.pullRequest.base.sha = candidateBase;
     f.pullRequest.mergeCommitSha = merge;
     const result = resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: merge, lastReviewedCommit: reviewedHead,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_TOPOLOGY_INVALID");
-    assert.equal(result.message, "Reviewed head and squash parent do not have a unique merge base");
+    assert.equal(result.message, "Reviewed head and PR merge end first parent do not have a unique merge base");
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -289,7 +415,9 @@ test("blocks when authoritative merge objects are missing", () => {
     f.pullRequest.base.sha = "f".repeat(40);
     const result = resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     });
     assert.equal(result.status, "blocked");
     assert.equal(result.code, "PR_MERGE_OBJECT_MISSING");
@@ -305,7 +433,9 @@ test("rejects a merge commit outside authoritative target history", () => {
       gitRoot: f.root,
       comparisonHead: f.base,
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_TARGET_MISMATCH");
@@ -314,7 +444,7 @@ test("rejects a merge commit outside authoritative target history", () => {
   }
 });
 
-test("rejects a two-parent merge topology", () => {
+test("accepts the target PR at the end of a first-parent range with two-parent commits", () => {
   const f = fixture();
   try {
     git(f.root, ["reset", "--hard", f.base]);
@@ -325,10 +455,38 @@ test("rejects a two-parent merge topology", () => {
       gitRoot: f.root,
       comparisonHead: mergeCommit,
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: associations(f.root, f.pullRequest)
+    });
+    assert.equal(result.status, "merged-equivalent");
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a target PR identity that breaks and reappears inside the bounded range", () => {
+  const f = fixture();
+  try {
+    git(f.root, ["reset", "--hard", f.base]);
+    const first = writeCommit(f.root, "base\nfirst\n", "first target commit");
+    const middle = writeCommit(f.root, "base\nfirst\nother\n", "other PR commit");
+    const end = writeCommit(f.root, "base\nfirst\nother\nreviewed\n", "last target commit");
+    f.pullRequest.mergeCommitSha = end;
+    const result = resolveReviewedHeadRelation({
+      gitRoot: f.root,
+      comparisonHead: end,
+      lastReviewedCommit: f.head,
+      pullRequest: f.pullRequest,
+      defaultBranch: f.pullRequest.base.ref,
+      associations: new Map([
+        [first, { repository: "o/r", pullRequestNumbers: [1] }],
+        [middle, { repository: "o/r", pullRequestNumbers: [2] }],
+        [end, { repository: "o/r", pullRequestNumbers: [1] }]
+      ])
     });
     assert.equal(result.status, "failed");
-    assert.equal(result.code, "PR_MERGE_TOPOLOGY_INVALID");
+    assert.equal(result.code, "PR_MERGE_IDENTITY_INVALID");
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 
 import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformProviderContext } from "./context.ts";
-import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
+import { resolveMaterializedReviewedHeadRelation } from "./change-request-git-evidence.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 
 const CHECK_TYPE = "required-checks";
@@ -66,19 +66,8 @@ function requiredChecksInspectionResult(inspection: any, shared: any): any | nul
 function resolveRequiredChecksHeadRelation(context: any): { prHead: any; relation: any } {
   const { metadata, localHead, inspection } = context;
   const reviewedHead = String(metadata.last_reviewed_commit || "");
-  const prHead = inspection.pullRequest?.head?.sha || inspection.pullRequest?.headSha;
-  const relation = context.relation || (
-    context.gitRoot && inspection.pullRequest?.head
-      ? resolveReviewedHeadRelation({
-          gitRoot: context.gitRoot,
-          comparisonHead: localHead,
-          lastReviewedCommit: reviewedHead,
-          pullRequest: inspection.pullRequest
-        })
-      : localHead === reviewedHead && localHead === prHead
-        ? { status: "strict" }
-        : { status: "failed" }
-  );
+  const prHead = inspection.pullRequest?.head?.sha || (inspection.pullRequest as any)?.headSha;
+  const relation = context.relation || (localHead === reviewedHead && localHead === prHead ? { status: "strict" } : { status: "failed" });
   return { prHead, relation };
 }
 
@@ -95,7 +84,7 @@ function requiredChecksRelationResult(relation: any, shared: any): any | null {
 function requiredChecksSnapshotResult(inspection: any, relation: any, prHead: any, shared: any): any {
   const state = inspection.checks?.state;
   if (state === "passed" || state === "no-required") {
-    const suffix = relation.status === "merged-equivalent" ? " via verified squash merge equivalence" : "";
+    const suffix = relation.status === "merged-equivalent" ? " via verified merged-range equivalence" : "";
     return shared.passResult(CHECK_TYPE, `Required checks are ${state} for PR head ${prHead}${suffix}`);
   }
   if (state === "pending") {
@@ -121,16 +110,22 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   return requiredChecksSnapshotResult(context.inspection, relation, prHead, shared);
 }
 
-export async function check({ taskDir }: any, shared: any): Promise<any> {
-  const task = shared.loadTask(taskDir);
-  if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
-  const prFlow = readPrFlow(shared.repoRoot);
-  const factRead = readPrDeliveryFact(task.metadata);
-  if (factRead.status === "invalid") return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
-  const bound = factRead.status === "valid" && factRead.fact.state === "bound";
-  if (prFlow === "disabled" || (factRead.status === "valid" && factRead.fact.state === "skipped") || !bound) {
-    return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
-  }
+async function evaluateBoundRequiredChecks(task: any, prFlow: any, shared: any): Promise<any> {
+  const repoRoot = shared.repoRoot;
+  const localHead = readHead(repoRoot);
+  if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);
+  const inspection = await inspectRequiredChecks(task.metadata.id, { cwd: repoRoot });
+  const reviewedHead = String(task.metadata.last_reviewed_commit || "");
+  const prHead = inspection.pullRequest?.head?.sha;
+  const relation = localHead === reviewedHead && localHead === prHead
+    ? { status: "strict" }
+    : inspection.pullRequest?.head
+      ? await resolveMaterializedReviewedHeadRelation({ cwd: repoRoot, platformType: inspection.platform?.type || null, lastReviewedCommit: reviewedHead, pullRequest: inspection.pullRequest })
+      : { status: "failed" };
+  return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection, prFlow, gitRoot: repoRoot, relation }, shared);
+}
+
+async function checkBoundRequiredChecks(task: any, prFlow: any, shared: any): Promise<any> {
   const loaded = await resolvePlatformProviderContext({ cwd: shared.repoRoot });
   const platform = loaded.ok ? loaded.value.context : loaded.context;
   const supportsChecks = loaded.ok && Boolean(loaded.value.provider.checks?.inspectRequired);
@@ -141,14 +136,19 @@ export async function check({ taskDir }: any, shared: any): Promise<any> {
       "dependency_error"
     );
   }
-  const localHead = readHead(shared.repoRoot);
-  if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);
-  const inspection = await inspectRequiredChecks(task.metadata.id, { cwd: shared.repoRoot });
-  return evaluateRequiredChecks({
-    metadata: task.metadata,
-    localHead,
-    inspection,
-    prFlow,
-    gitRoot: shared.repoRoot
-  }, shared);
+  return evaluateBoundRequiredChecks(task, prFlow, shared);
+}
+
+export async function check({ taskDir }: any, shared: any): Promise<any> {
+  const task = shared.loadTask(taskDir);
+  if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
+  const prFlow = readPrFlow(shared.repoRoot);
+  const factRead = readPrDeliveryFact(task.metadata);
+  if (factRead.status === "invalid") return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
+  const bound = factRead.status === "valid" && factRead.fact.state === "bound";
+  const skipped = factRead.status === "valid" && factRead.fact.state === "skipped";
+  if (prFlow === "disabled" || skipped || !bound) {
+    return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
+  }
+  return checkBoundRequiredChecks(task, prFlow, shared);
 }
