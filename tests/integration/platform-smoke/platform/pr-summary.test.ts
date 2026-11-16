@@ -843,7 +843,7 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
   }
 });
 
-test('change-report replay with the original available increment is idempotent', async () => {
+test('change-report preserves a trusted same-PR increment after the PR base advances', async () => {
   const fixture = summaryFixture();
   try {
     const taskPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'task.md');
@@ -866,7 +866,13 @@ test('change-report replay with the original available increment is idempotent',
     if (!priorReport.ok) return;
     writePrChangeReportAtomic(fixture.reportPath, priorReport.value);
     const priorBytes = fs.readFileSync(fixture.reportPath);
-    const mechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, fixture.headSha, {
+    git(fixture.root, ['switch', '-q', '-c', 'advanced-base', fixture.baseSha]);
+    fs.writeFileSync(path.join(fixture.root, 'main-only.txt'), 'main advance\n');
+    git(fixture.root, ['add', 'main-only.txt']);
+    git(fixture.root, ['commit', '-qm', 'main advance']);
+    const advancedBase = git(fixture.root, ['rev-parse', 'HEAD']);
+    git(fixture.root, ['switch', '-q', 'feature']);
+    const mechanical = runMechanicalChangeReport(fixture.root, advancedBase, fixture.headSha, {
       headSha: priorHead, reportSha256: createHash('sha256').update(priorBytes).digest('hex')
     });
     assert.equal(mechanical.increment.status, 'available');
@@ -876,7 +882,7 @@ test('change-report replay with the original available increment is idempotent',
     fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256, mechanical)));
     const options = {
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
-      client: resolvedContextClient(fixture.root, 'comments', fixture.baseSha, fixture.headSha)
+      client: resolvedContextClient(fixture.root, 'comments', advancedBase, fixture.headSha)
     };
     const first = await reportWrite(fixture.taskId, options);
     assert.equal(first.status, 'applied');
@@ -896,7 +902,7 @@ test('change-report replay with the original available increment is idempotent',
     const tamperedCandidate = candidate(digest.value.sha256, tamperedMechanical);
     const tamperedReport = buildPrChangeReport({
       repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
-      base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha },
+      base: { repository: 'acme/widgets', ref: 'main', sha: advancedBase },
       head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha }
     }, digest.value.sha256, tamperedMechanical, tamperedCandidate);
     assert.equal(tamperedReport.ok, true, tamperedReport.ok ? undefined : JSON.stringify(tamperedReport.error));

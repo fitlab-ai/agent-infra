@@ -767,8 +767,7 @@ function recomputeReportMechanical(resolved: ResolvedTaskRef, initial: PlatformC
     const oldContent = old.ok ? fs.readFileSync(oldPath) : null;
     const oldReport = old.ok ? old.value : null;
     const oldIdentityMatches = oldReport !== null && oldReport.identity.repository === initial.repository &&
-      resourceIdentityEquals(oldReport.identity.resource, initial.identity) &&
-      JSON.stringify(oldReport.identity.base) === JSON.stringify(initial.base);
+      resourceIdentityEquals(oldReport.identity.resource, initial.identity);
     const previous = oldIdentityMatches && oldContent && oldReport
       ? { headSha: oldReport.identity.head.sha, reportSha256: createHash('sha256').update(oldContent).digest('hex') }
       : undefined;

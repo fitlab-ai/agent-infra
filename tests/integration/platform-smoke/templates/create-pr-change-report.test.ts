@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createTempDir, filePath, gitSafeEnv, initIsolatedGitRepo } from "../../../helpers.ts";
+import { validateMechanicalReport } from "../../../../lib/platform/pr-change-report.ts";
 
 const runtimeScript = filePath(".agents/skills/create-pr/scripts/change-report.mjs");
 const templateScript = filePath("templates/.agents/skills/create-pr/scripts/change-report.mjs");
@@ -103,6 +104,63 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
     newBytes: expectedNewBytes,
     netBytes: expectedNewBytes - expectedOldBytes
   });
+});
+
+test("create-pr raw full and head-to-head outputs validate with head-only scope identity", (t) => {
+  const repo = createTempDir("create-pr-change-report-wire-");
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  initIsolatedGitRepo(repo);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+
+  fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "base"]);
+  const base = git(repo, ["rev-parse", "HEAD"]);
+
+  git(repo, ["switch", "-q", "-c", "prior", base]);
+  fs.writeFileSync(path.join(repo, "prior.txt"), "prior\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "prior head"]);
+  const fromHead = git(repo, ["rev-parse", "HEAD"]);
+
+  git(repo, ["switch", "-q", "-c", "feature", base]);
+  fs.writeFileSync(path.join(repo, "feature.txt"), "feature\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "feature head"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const run = (kind: "merge-base" | "head-to-head") => JSON.parse(execFileSync(process.execPath, [
+    runtimeScript, "--base", base, "--head", head, "--kind", kind,
+    ...(kind === "head-to-head" ? ["--from-head", fromHead] : []), "--cwd", repo
+  ], { encoding: "utf8", env: gitSafeEnv() }));
+  const rawFull = run("merge-base");
+  const rawIncrement = run("head-to-head");
+  const bundle = {
+    version: 2,
+    base,
+    head,
+    full: rawFull,
+    increment: {
+      status: "available",
+      fromHead,
+      toHead: head,
+      sourceReportSha256: "a".repeat(64),
+      diff: rawIncrement
+    }
+  };
+
+  assert.equal("to" in rawFull, false);
+  assert.equal("to" in rawIncrement, false);
+  assert.equal(rawIncrement.head, head);
+  assert.equal(validateMechanicalReport(bundle).ok, true);
+  assert.equal(validateMechanicalReport({
+    ...bundle,
+    increment: { ...bundle.increment, diff: { ...rawIncrement, head: fromHead } }
+  }).ok, false);
+  assert.equal(validateMechanicalReport({
+    ...bundle,
+    increment: { ...bundle.increment, diff: { ...rawIncrement, to: fromHead } }
+  }).ok, false);
 });
 
 test("create-pr change report counts diff content beginning with header-like prefixes", (t) => {

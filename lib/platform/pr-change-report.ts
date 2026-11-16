@@ -572,6 +572,10 @@ function withErrorCode<T>(result: ValidationResult<T>, code: string): Validation
   return result.ok ? result : { ...result, error: { ...result.error, code } };
 }
 
+function normalizeScopedMechanicalDiff(value: Record<string, unknown>): Record<string, unknown> {
+  return value.to === undefined ? { ...value, to: value.head } : value;
+}
+
 function parseScopedDiffContents(
   value: Record<string, unknown>,
   expectedKind: 'merge-base' | 'head-to-head' | null,
@@ -596,8 +600,7 @@ function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff &
   if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   const metadata = validateScopedMechanicalMetadata(value);
   if (!metadata.ok) return metadata;
-  const normalized = { ...value, to: value.head ?? value.to };
-  const scoped = parseScopedDiffContents(normalized, null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  const scoped = parseScopedDiffContents(normalizeScopedMechanicalDiff(value), null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   if (!scoped.ok) return scoped;
   return {
     ok: true,
@@ -631,13 +634,15 @@ function parseIncrementInput(value: unknown, head: string, errorCode: string): V
 }
 
 function parseAvailableIncrement(value: IncrementInput, head: string, errorCode: string): ValidationResult<IncrementDiff> {
+  let diff = value.diff;
   if (errorCode === 'PR_CHANGE_REPORT_MECHANICAL_INVALID' && isRecord(value.diff)) {
     const metadata = validateScopedMechanicalMetadata(value.diff);
     if (!metadata.ok) return metadata;
     if (value.diff.head !== undefined && value.diff.head !== head) return invalid('increment endpoints are invalid', errorCode);
+    diff = normalizeScopedMechanicalDiff(value.diff);
   }
-  if (!isRecord(value.diff)) return invalid('increment scoped diff is invalid', errorCode);
-  const parsed = parseScopedDiffContents(value.diff, 'head-to-head', errorCode);
+  if (!isRecord(diff)) return invalid('increment scoped diff is invalid', errorCode);
+  const parsed = parseScopedDiffContents(diff, 'head-to-head', errorCode);
   if (!parsed.ok) return parsed;
   if (!isSha(value.fromHead) || !isSha(value.sourceReportSha256) || parsed.value.from !== value.fromHead || parsed.value.to !== head) {
     return invalid('increment endpoints or source identity are invalid', errorCode);
