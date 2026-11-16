@@ -884,6 +884,29 @@ test('change-report replay with the original available increment is idempotent',
     const replay = await reportWrite(fixture.taskId, options);
     assert.equal(replay.status, 'no-op');
     assert.equal(replay.report?.status, 'no-op');
+
+    const tamperedMechanical = structuredClone(mechanical);
+    const increment = tamperedMechanical.increment.diff;
+    assert.ok(increment);
+    increment.patchSha256 = '0'.repeat(64);
+    for (const file of increment.files) for (const location of file.locations) {
+      location.startLine += 100;
+      location.endLine += 100;
+    }
+    const tamperedCandidate = candidate(digest.value.sha256, tamperedMechanical);
+    const tamperedReport = buildPrChangeReport({
+      repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
+      base: { repository: 'acme/widgets', ref: 'main', sha: fixture.baseSha },
+      head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha }
+    }, digest.value.sha256, tamperedMechanical, tamperedCandidate);
+    assert.equal(tamperedReport.ok, true, tamperedReport.ok ? undefined : JSON.stringify(tamperedReport.error));
+    if (!tamperedReport.ok) return;
+    writePrChangeReportAtomic(fixture.reportPath, tamperedReport.value);
+    fs.writeFileSync(mechanicalFile, JSON.stringify(tamperedMechanical));
+    fs.writeFileSync(precheckFile, JSON.stringify(tamperedCandidate));
+    const tamperedReplay = await reportWrite(fixture.taskId, options);
+    assert.equal(tamperedReplay.status, 'failed');
+    assert.equal(tamperedReplay.error?.code, 'PR_CHANGE_REPORT_MECHANICAL_MISMATCH');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

@@ -428,6 +428,34 @@ test('functional groups reject files that disagree with their allocated location
   assert.equal(built.ok, false);
 });
 
+test('a text file with every changed line explicitly unassigned need not belong to a functional group', () => {
+  const digest = 'd'.repeat(64);
+  const files = withLocations([
+    { status: 'A', oldPath: null, newPath: 'src/assigned.ts', additions: 1, deletions: 0, oldBytes: 0, newBytes: 4, netBytes: 4 },
+    { status: 'D', oldPath: 'src/unassigned.ts', newPath: null, additions: 0, deletions: 1, oldBytes: 4, newBytes: 0, netBytes: -4 }
+  ]);
+  const diff = bundle(sha('b'), sha('c'), files, {
+    files: 2, textFiles: 2, binaryFiles: 0, additions: 1, deletions: 1, oldBytes: 4, newBytes: 4, netBytes: 0
+  });
+  const value = candidate(digest, diff);
+  const composition = value.checks.find((check) => check.id === 'change-composition')!;
+  composition.groups![0]!.files = ['src/assigned.ts'];
+  composition.groups![0]!.locations = {
+    full: [{ path: 'src/assigned.ts', side: 'new', startLine: 1, endLine: 1 }], increment: []
+  };
+  composition.unassigned!.full = [{
+    path: 'src/unassigned.ts', side: 'old', startLine: 1, endLine: 1,
+    reason: 'unconfirmed', explanation: 'This file cannot be reliably attributed.'
+  }];
+
+  const built = buildPrChangeReport(identity(), digest, diff, value);
+  assert.equal(built.ok, true, built.ok ? undefined : JSON.stringify(built.error));
+  if (built.ok) {
+    const rendered = renderCanonicalChangeReport(built.value);
+    assert.match(rendered, /完整 PR 未归属位置\*\*：新增 0、删除 1；unconfirmed：This file cannot be reliably attributed/u);
+  }
+});
+
 test('full and head-to-head allocations remain independently identified and validated', () => {
   const digest = 'd'.repeat(64);
   const diff = mechanical();

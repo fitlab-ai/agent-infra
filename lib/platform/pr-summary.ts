@@ -791,10 +791,28 @@ async function prepareReportWrite(
   }
   const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
   if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
-  const sameRequestReplay = oldReport !== null && oldIdentityMatches && oldReport.identity.head.sha === initial.value.head.sha &&
+  const sameReplayIdentity = oldReport !== null && oldIdentityMatches && oldReport.identity.head.sha === initial.value.head.sha &&
     oldReport.inputs.taskIntentSha256 === digest.value.sha256 &&
-    JSON.stringify(oldReport) === JSON.stringify(built.value) &&
-    JSON.stringify(inputs.mechanical.full) === JSON.stringify(recomputed.full);
+    JSON.stringify(oldReport) === JSON.stringify(built.value);
+  let sameRequestReplay = false;
+  if (sameReplayIdentity) {
+    const increment = inputs.mechanical.increment;
+    const previous = increment.status === 'available' || increment.status === 'unchanged'
+      ? { headSha: increment.fromHead!, reportSha256: increment.sourceReportSha256 }
+      : undefined;
+    let replayMechanical: MechanicalChangeReport;
+    try {
+      replayMechanical = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha, previous);
+    } catch (error) {
+      return {
+        ok: false,
+        status: 'failed',
+        error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
+      };
+    }
+    sameRequestReplay = sameMechanical(inputs.mechanical, replayMechanical)
+      && JSON.stringify(inputs.mechanical.full) === JSON.stringify(recomputed.full);
+  }
   if (!sameMechanical(inputs.mechanical, recomputed) && !sameRequestReplay) return {
     ok: false,
     status: 'failed',

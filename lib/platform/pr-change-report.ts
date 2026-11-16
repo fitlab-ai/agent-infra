@@ -390,8 +390,6 @@ function validateGroupMembership(checks: Precheck[], full: ChangeFile[], increme
   if (!indexed.ok) return indexed;
   const assigned = collectGroupMembership(composition.groups, indexed.value);
   if (!assigned.ok) return assigned;
-  const missingFile = [...indexed.value.keys()].find((file) => !assigned.value.has(file));
-  if (missingFile) return invalid(`diff file '${missingFile}' is absent from change-composition groups`);
   const knownPaths = new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!));
   for (const group of composition.groups) if (group.files.some((file) => !knownPaths.has(file))) return invalid(`change-composition group '${group.id}' references a file outside either diff`);
   const unassigned = composition.unassigned;
@@ -402,6 +400,11 @@ function validateGroupMembership(checks: Precheck[], full: ChangeFile[], increme
   if (!fullCheck.ok) return fullCheck;
   const incrementCheck = validateAllocation(incrementRanges, unassigned.increment, increment, 'increment');
   if (!incrementCheck.ok) return incrementCheck;
+  const groupAllocatedPaths = new Set([...fullRanges, ...incrementRanges].map((range) => range.path));
+  const unassignedPaths = new Set([...unassigned.full, ...unassigned.increment].map((range) => range.path));
+  const missingFile = [...indexed.value].find(([filePath, file]) => !assigned.value.has(filePath)
+    && !(file.locations.length > 0 && unassignedPaths.has(filePath) && !groupAllocatedPaths.has(filePath)));
+  if (missingFile) return invalid(`diff file '${missingFile[0]}' is absent from change-composition groups`);
   for (const group of composition.groups) {
     const allocatedPaths = new Set([...group.locations.full, ...group.locations.increment].map((range) => range.path));
     const memberPaths = new Set(group.files);
