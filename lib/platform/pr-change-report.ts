@@ -568,40 +568,42 @@ function validateScopedIdentity(
   return { ok: true, value: identity };
 }
 
-function validateScopedMechanicalIdentity(value: Record<string, unknown>): ValidationResult<ScopedIdentity> {
-  const metadata = validateScopedMechanicalMetadata(value);
-  if (!metadata.ok) return metadata;
-  const normalized = { ...value, to: value.head ?? value.to };
-  return validateScopedIdentity(normalized, null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+function withErrorCode<T>(result: ValidationResult<T>, code: string): ValidationResult<T> {
+  return result.ok ? result : { ...result, error: { ...result.error, code } };
 }
 
-function parseMechanicalFiles(value: unknown): ValidationResult<ChangeFile[]> {
-  if (!Array.isArray(value)) return invalid('mechanical report files must be an array', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+function parseScopedDiffContents(
+  value: Record<string, unknown>,
+  expectedKind: 'merge-base' | 'head-to-head' | null,
+  errorCode: string
+): ValidationResult<ScopedDiff> {
+  const identity = validateScopedIdentity(value, expectedKind, errorCode);
+  if (!identity.ok) return identity;
+  if (!Array.isArray(value.files)) return invalid('scoped diff files must be an array', errorCode);
   const files: ChangeFile[] = [];
-  for (let index = 0; index < value.length; index += 1) {
-    const parsed = parseChangeFile(value[index], index);
-    if (!parsed.ok) return { ...parsed, error: { ...parsed.error, code: 'PR_CHANGE_REPORT_MECHANICAL_INVALID' } };
+  for (let index = 0; index < value.files.length; index += 1) {
+    const parsed = withErrorCode(parseChangeFile(value.files[index], index), errorCode);
+    if (!parsed.ok) return parsed;
     files.push(parsed.value);
   }
-  return { ok: true, value: files };
+  const totals = withErrorCode(parseTotals(value.totals), errorCode);
+  if (!totals.ok) return totals;
+  if (!totalsMatchFiles(totals.value, files)) return invalid('scoped diff totals do not match files', errorCode);
+  return { ok: true, value: { ...identity.value, files, totals: totals.value } };
 }
 
 function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff & { version?: 2; base?: string; head?: string }> {
   if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const identity = validateScopedMechanicalIdentity(value);
-  if (!identity.ok) return identity;
-  const files = parseMechanicalFiles(value.files);
-  if (!files.ok) return files;
-  const totals = parseTotals(value.totals);
-  if (!totals.ok) return { ...totals, error: { ...totals.error, code: 'PR_CHANGE_REPORT_MECHANICAL_INVALID' } };
-  if (!totalsMatchFiles(totals.value, files.value)) return invalid('mechanical report totals do not match files', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  const metadata = validateScopedMechanicalMetadata(value);
+  if (!metadata.ok) return metadata;
+  const normalized = { ...value, to: value.head ?? value.to };
+  const scoped = parseScopedDiffContents(normalized, null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!scoped.ok) return scoped;
   return {
     ok: true,
     value: {
       ...(value.version === undefined ? {} : { version: 2 as const }),
-      ...identity.value,
-      files: files.value,
-      totals: totals.value,
+      ...scoped.value,
       ...(value.base === undefined ? {} : { base: value.base as string }),
       ...(value.head === undefined ? {} : { head: value.head as string })
     } as ScopedDiff & { version?: 2; base?: string; head?: string }
@@ -615,43 +617,55 @@ function validateMechanicalFull(value: unknown, base: string, head: string): Val
   return full;
 }
 
-function validateMechanicalIncrementIdentity(value: unknown, head: string): ValidationResult<Record<string, unknown>> {
-  if (!isRecord(value)) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!['available', 'unchanged', 'unconfirmed'].includes(String(value.status))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!(value.fromHead === null || isSha(value.fromHead))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.toHead !== head) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!(value.sourceReportSha256 === null || isSha(value.sourceReportSha256))) return invalid('mechanical increment identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  return { ok: true, value };
+type IncrementInput = { status: 'available' | 'unchanged' | 'unconfirmed'; fromHead: string | null; toHead: string; sourceReportSha256: string | null; diff: unknown };
+
+function parseIncrementInput(value: unknown, head: string, errorCode: string): ValidationResult<IncrementInput> {
+  if (!isRecord(value)) return invalid('increment identity is invalid', errorCode);
+  const status = value.status;
+  if ((status !== 'available' && status !== 'unchanged' && status !== 'unconfirmed') ||
+      !(value.fromHead === null || isSha(value.fromHead)) || value.toHead !== head ||
+      !(value.sourceReportSha256 === null || isSha(value.sourceReportSha256))) {
+    return invalid('increment identity is invalid', errorCode);
+  }
+  return { ok: true, value: { status, fromHead: value.fromHead, toHead: head, sourceReportSha256: value.sourceReportSha256, diff: value.diff } };
 }
 
-function parseAvailableMechanicalIncrement(value: Record<string, unknown>, head: string): ValidationResult<IncrementDiff> {
-  const parsed = validateScopedMechanical(value.diff);
+function parseAvailableIncrement(value: IncrementInput, head: string, errorCode: string): ValidationResult<IncrementDiff> {
+  if (errorCode === 'PR_CHANGE_REPORT_MECHANICAL_INVALID' && isRecord(value.diff)) {
+    const metadata = validateScopedMechanicalMetadata(value.diff);
+    if (!metadata.ok) return metadata;
+    if (value.diff.head !== undefined && value.diff.head !== head) return invalid('increment endpoints are invalid', errorCode);
+  }
+  if (!isRecord(value.diff)) return invalid('increment scoped diff is invalid', errorCode);
+  const parsed = parseScopedDiffContents(value.diff, 'head-to-head', errorCode);
   if (!parsed.ok) return parsed;
-  if (parsed.value.kind !== 'head-to-head' || parsed.value.from !== value.fromHead || parsed.value.to !== head || (parsed.value.head !== undefined && parsed.value.head !== head) || !isSha(value.sourceReportSha256)) return invalid('mechanical increment endpoints are invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const { version: _version, base: _base, head: _head, ...diff } = parsed.value as ScopedDiff & { version?: 2; base?: string; head?: string };
-  return { ok: true, value: { status: 'available', fromHead: value.fromHead as string, toHead: head, sourceReportSha256: value.sourceReportSha256 as string, diff } };
+  if (!isSha(value.fromHead) || !isSha(value.sourceReportSha256) || parsed.value.from !== value.fromHead || parsed.value.to !== head) {
+    return invalid('increment endpoints or source identity are invalid', errorCode);
+  }
+  return { ok: true, value: { status: 'available', fromHead: value.fromHead, toHead: head, sourceReportSha256: value.sourceReportSha256, diff: parsed.value } };
 }
 
-function validateEmptyMechanicalIncrement(value: Record<string, unknown>, head: string): ValidationResult<IncrementDiff> {
-  if (value.diff !== null) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.status === 'unchanged' && (value.fromHead !== head || value.sourceReportSha256 !== null)) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.status === 'unconfirmed' && (value.fromHead !== null || value.sourceReportSha256 !== null)) return invalid('mechanical increment status is inconsistent', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  return { ok: true, value: { status: value.status as 'unchanged' | 'unconfirmed', fromHead: value.fromHead as string | null, toHead: head, sourceReportSha256: null, diff: null } };
+function parseEmptyIncrement(value: IncrementInput, errorCode: string): ValidationResult<IncrementDiff> {
+  const inconsistent = value.diff !== null ||
+    (value.status === 'unchanged' && (value.fromHead !== value.toHead || value.sourceReportSha256 !== null)) ||
+    (value.status === 'unconfirmed' && (value.fromHead !== null || value.sourceReportSha256 !== null));
+  if (inconsistent) return invalid('increment status is inconsistent', errorCode);
+  return { ok: true, value: { status: value.status, fromHead: value.fromHead, toHead: value.toHead, sourceReportSha256: null, diff: null } };
 }
 
-function validateMechanicalIncrement(value: unknown, head: string): ValidationResult<IncrementDiff> {
-  const identity = validateMechanicalIncrementIdentity(value, head);
-  if (!identity.ok) return identity;
-  return identity.value.status === 'available'
-    ? parseAvailableMechanicalIncrement(identity.value, head)
-    : validateEmptyMechanicalIncrement(identity.value, head);
+function parseIncrement(value: unknown, head: string, errorCode: string): ValidationResult<IncrementDiff> {
+  const input = parseIncrementInput(value, head, errorCode);
+  if (!input.ok) return input;
+  return input.value.status === 'available'
+    ? parseAvailableIncrement(input.value, head, errorCode)
+    : parseEmptyIncrement(input.value, errorCode);
 }
 
 function validateMechanicalReport(value: unknown): ValidationResult<MechanicalChangeReport> {
   if (!isRecord(value) || value.version !== 2 || !isSha(value.base) || !isSha(value.head)) return invalid('mechanical bundle version or PR identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   const full = validateMechanicalFull(value.full, value.base, value.head);
   if (!full.ok) return full;
-  const increment = validateMechanicalIncrement(value.increment, value.head);
+  const increment = parseIncrement(value.increment, value.head, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   if (!increment.ok) return increment;
   const { version: _version, base: _base, head: _head, ...fullDiff } = full.value;
   return { ok: true, value: { version: 2, base: value.base, head: value.head, full: fullDiff, increment: increment.value } };
@@ -667,25 +681,9 @@ function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCan
   return { ok: true, value: { taskIntentSha256, checks: parsed.value } };
 }
 
-function validateScopedReportIdentity(diff: Record<string, unknown>, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<ScopedIdentity> {
-  return validateScopedIdentity(diff, expectedKind);
-}
-
 function parseScopedDiff(diff: unknown, expectedKind: 'merge-base' | 'head-to-head'): ValidationResult<ScopedDiff> {
   if (!isRecord(diff)) return invalid(`change report ${expectedKind} diff is invalid`);
-  const identity = validateScopedReportIdentity(diff, expectedKind);
-  if (!identity.ok) return identity;
-  if (!Array.isArray(diff.files)) return invalid(`change report ${expectedKind} diff is invalid`);
-  const files: ChangeFile[] = [];
-  for (let index = 0; index < diff.files.length; index += 1) {
-    const parsed = parseChangeFile(diff.files[index], index);
-    if (!parsed.ok) return parsed;
-    files.push(parsed.value);
-  }
-  const totals = parseTotals(diff.totals);
-  if (!totals.ok) return totals;
-  if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
-  return { ok: true, value: { ...identity.value, files, totals: totals.value } };
+  return parseScopedDiffContents(diff, expectedKind, 'PR_CHANGE_REPORT_INVALID');
 }
 
 function parseReportPrecheck(report: Record<string, unknown>, diff: { full: ChangeFile[]; increment: ChangeFile[] }): ValidationResult<Precheck[]> {
@@ -714,27 +712,11 @@ function parseReportIdentity(value: Record<string, unknown>): ValidationResult<P
   return { ok: true, value: { repository: value.repository, resource: value.resource, base: base.value, head: head.value } };
 }
 
-function validateReportIncrementIdentity(value: unknown): ValidationResult<Record<string, unknown>> {
-  if (!isRecord(value)) return invalid('change report increment identity is invalid');
-  if (!['available', 'unchanged', 'unconfirmed'].includes(String(value.status))) return invalid('change report increment identity is invalid');
-  if (!isSha(value.toHead) || !(value.fromHead === null || isSha(value.fromHead)) || !(value.sourceReportSha256 === null || isSha(value.sourceReportSha256))) return invalid('change report increment identity is invalid');
-  return { ok: true, value };
-}
-
 function parseReportIncrement(value: unknown): ValidationResult<{ increment: IncrementDiff; files: ChangeFile[] }> {
-  const identity = validateReportIncrementIdentity(value);
-  if (!identity.ok) return identity;
-  const increment = identity.value;
-  if (increment.status === 'available') {
-    const parsed = parseScopedDiff(increment.diff, 'head-to-head');
-    if (!parsed.ok) return parsed;
-    if (!isSha(increment.fromHead) || parsed.value.from !== increment.fromHead || parsed.value.to !== increment.toHead || !isSha(increment.sourceReportSha256)) return invalid('change report increment source identity is invalid');
-    return { ok: true, value: { increment: { status: 'available', fromHead: increment.fromHead, toHead: increment.toHead as string, sourceReportSha256: increment.sourceReportSha256, diff: parsed.value }, files: parsed.value.files } };
-  }
-  if (increment.diff !== null) return invalid('change report increment status is inconsistent');
-  if (increment.status === 'unchanged' && (increment.fromHead !== increment.toHead || increment.sourceReportSha256 !== null)) return invalid('change report increment status is inconsistent');
-  if (increment.status === 'unconfirmed' && (increment.fromHead !== null || increment.sourceReportSha256 !== null)) return invalid('change report increment status is inconsistent');
-  return { ok: true, value: { increment: { status: increment.status as 'unchanged' | 'unconfirmed', fromHead: increment.fromHead as string | null, toHead: increment.toHead as string, sourceReportSha256: null, diff: null }, files: [] } };
+  if (!isRecord(value) || !isSha(value.toHead)) return invalid('change report increment identity is invalid');
+  const parsed = parseIncrement(value, value.toHead, 'PR_CHANGE_REPORT_INVALID');
+  if (!parsed.ok) return parsed;
+  return { ok: true, value: { increment: parsed.value, files: parsed.value.diff?.files ?? [] } };
 }
 
 function validateReportEndpoints(full: ScopedDiff, base: string, head: string, increment: IncrementDiff): ValidationResult<null> {

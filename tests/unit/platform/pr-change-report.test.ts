@@ -225,6 +225,30 @@ test('mechanical and persisted reports share head-to-head endpoint rules', () =>
   assert.equal(validatePrChangeReport(sameEndpointReport).ok, false);
 });
 
+test('mechanical and persisted scopes share file totals and increment status rules', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  const badTotals = structuredClone(diff);
+  badTotals.full.totals.additions += 1;
+  assert.equal(validateMechanicalReport(badTotals).ok, false);
+
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const badReportTotals = structuredClone(built.value);
+  badReportTotals.diff.full.totals.additions += 1;
+  assert.equal(validatePrChangeReport(badReportTotals).ok, false);
+
+  const badIncrement = structuredClone(diff);
+  badIncrement.increment = {
+    status: 'unchanged', fromHead: sha('b'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64), diff: null
+  };
+  assert.equal(validateMechanicalReport(badIncrement).ok, false);
+  const badReportIncrement = structuredClone(built.value);
+  badReportIncrement.diff.increment = badIncrement.increment;
+  assert.equal(validatePrChangeReport(badReportIncrement).ok, false);
+});
+
 test('summary body requires one placeholder and core renders the canonical report', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, mechanical(), candidate(digest));
