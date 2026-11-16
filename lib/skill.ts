@@ -174,7 +174,7 @@ function cleanupClientCommand(name: string, adapter: ReturnType<typeof listAgent
   if (!absolute || !removeUnchangedSkillFile(absolute, baseline)) return;
   delete baselines[target];
   removed.push(target);
-  removeEmptyDirs(path.dirname(absolute), process.cwd());
+  try { removeEmptyDirs(path.dirname(absolute), process.cwd()); } catch { /* client directory cleanup is best-effort */ }
 }
 
 function cleanupClientCommands(name: string, baselines: Record<string, unknown>, removed: string[]): void {
