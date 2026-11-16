@@ -995,35 +995,77 @@ function countLocations(ranges: AssignedRange[]): number {
   return ranges.reduce((sum, range) => sum + range.endLine - range.startLine + 1, 0);
 }
 
-function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[], incrementFiles: ChangeFile[], incrementStatus: IncrementDiff['status'], unassigned: Precheck['unassigned']): string[] {
+function escapeReportTableCell(value: string): string {
+  return escapeReportText(value).replaceAll('|', '&#124;');
+}
+
+function shortSha(value: string): string {
+  return value.slice(0, 7);
+}
+
+function renderScopeLineCounts(ranges: AssignedRange[]): [string, string, string] {
+  const added = countLocations(ranges.filter((range) => range.side === 'new'));
+  const deleted = countLocations(ranges.filter((range) => range.side === 'old'));
+  return [String(added), String(deleted), signedNumber(added - deleted)];
+}
+
+function renderFunctionalGroupSummary(groups: FunctionalGroup[], report: PrChangeReport, unassigned: Precheck['unassigned']): string[] {
+  const increment = report.diff.increment;
+  const fullFiles = report.diff.full.files;
+  const incrementFiles = increment.status === 'available' ? increment.diff!.files : [];
+  const rows = groups.map((group) => {
+    const fullCounts = renderScopeLineCounts(group.locations.full);
+    const incrementCounts = increment.status === 'available'
+      ? renderScopeLineCounts(group.locations.increment)
+      : increment.status === 'unchanged' ? ['0', '0', '0'] : ['未确认', '未确认', '未确认'];
+    return `| ${escapeReportTableCell(`${group.id} — ${group.target}`)} | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | — |`;
+  });
+  for (const reason of ['shared', 'unconfirmed'] as const) {
+    const ranges = unassigned?.full.filter((range) => range.reason === reason) ?? [];
+    const incrementRanges = unassigned?.increment.filter((range) => range.reason === reason) ?? [];
+    if (ranges.length === 0 && incrementRanges.length === 0) continue;
+    const fullCounts = renderScopeLineCounts(ranges);
+    const incrementCounts = increment.status === 'available'
+      ? renderScopeLineCounts(incrementRanges)
+      : increment.status === 'unchanged' ? ['0', '0', '0'] : ['未确认', '未确认', '未确认'];
+    rows.push(`| 未归属（${reason === 'shared' ? '共享' : '待确认'}） | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | — |`);
+  }
+  const fullTotals = report.diff.full.totals;
+  const incrementTotals = increment.status === 'available' ? increment.diff!.totals : null;
+  rows.push(`| **合计（机械统计）** | ${fullTotals.additions} | ${fullTotals.deletions} | ${signedNumber(fullTotals.additions - fullTotals.deletions)} | ${incrementTotals?.additions ?? (increment.status === 'unchanged' ? '0' : '未确认')} | ${incrementTotals?.deletions ?? (increment.status === 'unchanged' ? '0' : '未确认')} | ${incrementTotals ? signedNumber(incrementTotals.additions - incrementTotals.deletions) : increment.status === 'unchanged' ? '0' : '未确认'} | ${fullFiles.filter((file) => file.additions === null).length} 个文件 / ${increment.status === 'available' ? `${incrementFiles.filter((file) => file.additions === null).length} 个文件` : increment.status === 'unchanged' ? '0' : '未确认'} |`);
+  return [
+    '#### 功能模块代码增减（行）',
+    '',
+    `完整 PR：目标分支 merge-base \`${shortSha(report.diff.full.mergeBase!)}\` → 当前 HEAD \`${shortSha(report.diff.full.to)}\`；增量：${increment.status === 'available' ? `上一份有效报告 HEAD \`${shortSha(increment.fromHead!)}\` → 当前 HEAD \`${shortSha(increment.toHead)}\` 的直接 head-to-head 差异` : increment.status === 'unchanged' ? `上一份有效报告 HEAD 与当前 HEAD 均为 \`${shortSha(increment.toHead)}\`，差异为零` : `缺少可确认的上一份有效报告 HEAD，目标 HEAD 为 \`${shortSha(increment.toHead)}\`，增量未确认`}。两个范围分别统计且不相加；增量可能包含 rebase 或 main 带入的变化。`,
+    '',
+    '| 功能模块 | 完整 PR 新增 | 完整 PR 删除 | 完整 PR 净增 | 报告间增量新增 | 报告间增量删除 | 报告间增量净增 | 不可计行文件（full / 增量） |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
+    ...rows,
+    ...(rows.length === 0 ? ['| 无功能组 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 |'] : []),
+    '',
+    '表中模块行只统计已分配的精确文本行；二进制或 numstat 未知文件无法归到具体行，文件数仅在机械总计中列出以避免重复。'
+  ];
+}
+
+function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[], incrementFiles: ChangeFile[], unassigned: Precheck['unassigned']): string[] {
   const filesByPath = new Map([...incrementFiles, ...files].map((file) => [file.oldPath ?? file.newPath!, file]));
-  const fullByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
   return groups.flatMap((group) => {
-    const incrementByPath = new Map(incrementFiles.map((file) => [file.oldPath ?? file.newPath!, file]));
-    const fullAdded = countLocations(group.locations.full.filter((range) => range.side === 'new'));
-    const fullDeleted = countLocations(group.locations.full.filter((range) => range.side === 'old'));
-    const incAdded = countLocations(group.locations.increment.filter((range) => range.side === 'new'));
-    const incDeleted = countLocations(group.locations.increment.filter((range) => range.side === 'old'));
-    const unknownFiles = group.files.filter((member) => fullByPath.get(member)?.additions === null || incrementByPath.get(member)?.additions === null).length;
     return [
       `  - **功能组 ${escapeReportText(group.id)}**：${escapeReportText(group.target)}`,
       `    - 行为变化：${escapeReportText(group.behaviorChange)}`,
       `    - 必要性：${escapeReportText(group.necessity)}`,
       `    - 文件：${group.files.map((member) => {
-        const file = filesByPath.get(member)!;
+        const file = filesByPath.get(member) ?? [...filesByPath.values()].find((candidate) => candidate.oldPath === member || candidate.newPath === member)!;
         return file.oldPath && file.newPath && file.oldPath !== file.newPath
           ? `<code>${escapeReportText(file.oldPath)}</code> → <code>${escapeReportText(file.newPath)}</code>`
           : `<code>${escapeReportText(member)}</code>`;
       }).join('、')}`,
-      `    - 完整 PR：新增 ${fullAdded}、删除 ${fullDeleted}、净增 ${fullAdded - fullDeleted}；本轮增量：${incrementStatus === 'available' ? `新增 ${incAdded}、删除 ${incDeleted}、净增 ${incAdded - incDeleted}` : incrementStatus === 'unchanged' ? 'head 未变化，增量为 0' : '未确认，不报告数字'}${unknownFiles ? `；另有 ${unknownFiles} 个二进制文件行数不可计` : ''}。`,
       `    - 测试覆盖：${escapeReportText(group.tests.coverage)}；成本：${escapeReportText(group.tests.cost)}`
     ];
   }).concat((['full', 'increment'] as const).flatMap((scope) => {
     const items = unassigned?.[scope] ?? [];
     if (items.length === 0) return [];
-    const added = countLocations(items.filter((item) => item.side === 'new'));
-    const deleted = countLocations(items.filter((item) => item.side === 'old'));
-    return [`  - **${scope === 'full' ? '完整 PR ' : '本轮增量'}未归属位置**：新增 ${added}、删除 ${deleted}；${items.map((item) => `${escapeReportText(item.reason)}：${escapeReportText(item.explanation)}`).join('；')}`];
+    return [`  - **${scope === 'full' ? '完整 PR ' : '报告间增量'}未归属位置说明**：${items.map((item) => `${escapeReportText(item.reason)}：${escapeReportText(item.explanation)}`).join('；')}`];
   }));
 }
 
@@ -1057,12 +1099,13 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     ...rows,
     `| **合计** | ${totals.files} | ${additions} | ${deletions} | ${netLines} | ${totals.oldBytes} | ${totals.newBytes} | ${signedNumber(totals.netBytes)} | ${totals.textFiles} / ${totals.binaryFiles} |`,
     '',
+    ...renderFunctionalGroupSummary(composition?.groups ?? [], report, composition?.unassigned),
+    '',
     '#### 功能模块与验证变化',
     ...renderFunctionalGroups(
       composition?.groups ?? [],
       report.diff.full.files,
       report.diff.increment.diff?.files ?? [],
-      report.diff.increment.status,
       composition?.unassigned
     ),
     '',

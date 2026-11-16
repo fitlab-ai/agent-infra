@@ -256,7 +256,8 @@ test('summary body requires one placeholder and core renders the canonical repor
   if (built.ok) {
     const rendered = renderCanonicalChangeReport(built.value);
     assert.match(rendered, new RegExp(`^${CANONICAL_REPORT_HEADING}`));
-    assert.ok(rendered.indexOf('| **合计** |') < rendered.indexOf('#### 功能模块与验证变化'));
+    assert.match(rendered, /\| \*\*合计\*\* \|[^\n]*\n\n#### 功能模块代码增减（行）/u);
+    assert.ok(rendered.indexOf('#### 功能模块代码增减（行）') < rendered.indexOf('#### 功能模块与验证变化'));
     assert.ok(rendered.indexOf('#### 功能模块与验证变化') < rendered.indexOf('功能组 summary-content'));
     assert.ok(rendered.indexOf('功能组 summary-content') < rendered.indexOf('#### 代表性变更文件'));
     assert.ok(rendered.indexOf('功能组 summary-content') < rendered.indexOf('#### 适宜性预检'));
@@ -266,6 +267,59 @@ test('summary body requires one placeholder and core renders the canonical repor
     const bypass = replaceCanonicalReportPlaceholder(`\n${CANONICAL_REPORT_PLACEHOLDER}\n${CANONICAL_REPORT_HEADING}`, built.value);
     assert.equal(bypass.ok, false);
   }
+});
+
+test('canonical module summary keeps full and report-to-report counts separate and escapes table pipes', () => {
+  const fullFiles = withLocations([
+    { status: 'M', oldPath: 'lib/report.ts', newPath: 'lib/report.ts', additions: 4, deletions: 2, oldBytes: 20, newBytes: 30, netBytes: 10 },
+    { status: 'M', oldPath: 'assets/chart.bin', newPath: 'assets/chart.bin', additions: null, deletions: null, oldBytes: 4, newBytes: 8, netBytes: 4 }
+  ]);
+  const incrementFiles = withLocations([
+    { status: 'M', oldPath: 'lib/report.ts', newPath: 'lib/report.ts', additions: 1, deletions: 3, oldBytes: 30, newBytes: 25, netBytes: -5 },
+    { status: 'M', oldPath: 'assets/chart.bin', newPath: 'assets/chart.bin', additions: null, deletions: null, oldBytes: 8, newBytes: 8, netBytes: 0 }
+  ]);
+  const diff = bundle(sha('b'), sha('c'), fullFiles, {
+    files: 2, textFiles: 1, binaryFiles: 1, additions: 4, deletions: 2, oldBytes: 24, newBytes: 38, netBytes: 14
+  });
+  diff.increment = {
+    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
+    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64), files: incrementFiles,
+      totals: { files: 2, textFiles: 1, binaryFiles: 1, additions: 1, deletions: 3, oldBytes: 38, newBytes: 33, netBytes: -5 } }
+  };
+  const precheck = candidate('d'.repeat(64), diff);
+  const group = precheck.checks.find((check) => check.id === 'change-composition')!.groups![0]!;
+  group.id = 'feature|core';
+  group.target = 'Target | details';
+  const built = buildPrChangeReport(identity(), 'd'.repeat(64), diff, precheck);
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /完整 PR：目标分支 merge-base `aaaaaaa` → 当前 HEAD `ccccccc`/u);
+  assert.match(rendered, /增量：上一份有效报告 HEAD `ddddddd` → 当前 HEAD `ccccccc` 的直接 head-to-head 差异/u);
+  assert.match(rendered, /\| feature&#124;core — Target &#124; details \| 4 \| 2 \| \+2 \| 1 \| 3 \| -2 \| — \|/u);
+  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 4 \| 2 \| \+2 \| 1 \| 3 \| -2 \| 1 个文件 \/ 1 个文件 \|/u);
+  const summaryEnd = rendered.indexOf('| feature&#124;core — Target &#124; details |');
+  const detailStart = rendered.indexOf('#### 功能模块与验证变化');
+  assert.ok(summaryEnd < detailStart);
+  assert.match(rendered.slice(detailStart), /行为变化：Validate and render typed content\./u);
+});
+
+test('canonical module summary labels unknown and unchanged increments without inventing counts', () => {
+  const unknown = buildPrChangeReport(identity(), 'd'.repeat(64), mechanical(), candidate('d'.repeat(64)));
+  assert.equal(unknown.ok, true);
+  if (!unknown.ok) return;
+  const unknownRendered = renderCanonicalChangeReport(unknown.value);
+  assert.match(unknownRendered, /缺少可确认的上一份有效报告 HEAD/u);
+  assert.match(unknownRendered, /\| summary-content — Structure managed comment content \| 2 \| 1 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
+  assert.match(unknownRendered, /\| \*\*合计（机械统计）\*\* \| 2 \| 1 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| 0 个文件 \/ 未确认 \|/u);
+
+  const diff = mechanical();
+  diff.increment = { status: 'unchanged', fromHead: sha('c'), toHead: sha('c'), sourceReportSha256: null, diff: null };
+  const unchanged = buildPrChangeReport(identity(), 'd'.repeat(64), diff, candidate('d'.repeat(64), diff));
+  assert.equal(unchanged.ok, true);
+  if (!unchanged.ok) return;
+  assert.match(renderCanonicalChangeReport(unchanged.value), /\| summary-content — Structure managed comment content \| 2 \| 1 \| \+1 \| 0 \| 0 \| 0 \| — \|/u);
 });
 
 test('canonical report renders high-level change categories and all six precheck details', () => {
@@ -392,7 +446,8 @@ test('typed functional groups derive counts from exact locations and reject over
   if (!built.ok) return;
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /功能组 summary-content/u);
-  assert.match(rendered, /完整 PR：新增 21、删除 20、净增 1；本轮增量：未确认，不报告数字；另有 1 个二进制文件行数不可计/u);
+  assert.match(rendered, /\| summary-content — Structure managed comment content \| 21 \| 20 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
+  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 21 \| 20 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| 1 个文件 \/ 未确认 \|/u);
   assert.match(rendered, /<code>\.agents\/old\.md<\/code> → <code>\.agents\/new\.md<\/code>/u);
 
   const malformed = candidate(digest, diff);
@@ -435,7 +490,8 @@ test('changed positions can split one file across functions and retain shared at
     const rendered = renderCanonicalChangeReport(built.value);
     assert.match(rendered, /功能组 summary-content/u);
     assert.match(rendered, /功能组 second-feature/u);
-    assert.match(rendered, /完整 PR 未归属位置\*\*：新增 1、删除 0；shared：This added line serves both behaviors/u);
+    assert.match(rendered, /\| 未归属（共享） \| 1 \| 0 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
+    assert.match(rendered, /完整 PR 未归属位置说明\*\*：shared：This added line serves both behaviors/u);
   }
 });
 
@@ -505,7 +561,8 @@ test('a text file with every changed line explicitly unassigned need not belong 
   assert.equal(built.ok, true, built.ok ? undefined : JSON.stringify(built.error));
   if (built.ok) {
     const rendered = renderCanonicalChangeReport(built.value);
-    assert.match(rendered, /完整 PR 未归属位置\*\*：新增 0、删除 1；unconfirmed：This file cannot be reliably attributed/u);
+    assert.match(rendered, /\| 未归属（待确认） \| 0 \| 1 \| -1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
+    assert.match(rendered, /完整 PR 未归属位置说明\*\*：unconfirmed：This file cannot be reliably attributed/u);
   }
 });
 
