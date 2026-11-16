@@ -1579,3 +1579,42 @@ test("retired run-task cleanup requires the exact managed inventory and unchange
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("retired command cleanup rejects symlinked parents and removes the official file on a normal path", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = createTempDir("ai-collab-retired-command-paths-");
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const retiredCommand = fs.readFileSync(path.resolve("tests/fixtures/retired-assets/run-task-command.md"), "utf8");
+    const linkedRoot = path.join(tmpDir, "linked");
+    const outside = path.join(tmpDir, "outside");
+    const normalRoot = path.join(tmpDir, "normal");
+    fs.mkdirSync(outside, { recursive: true });
+
+    for (const root of [linkedRoot, normalRoot]) {
+      writeJson(root, ".agents/.airc.json", {
+        project: path.basename(root), org: "acme", language: "en", platform: { type: "none" },
+        skills: { sources: [], registrations: [] },
+        files: { managed: [".claude/commands/"], merged: [], ejected: [] }
+      });
+    }
+
+    fs.mkdirSync(path.join(linkedRoot, ".claude"), { recursive: true });
+    fs.symlinkSync(outside, path.join(linkedRoot, ".claude/commands"), "dir");
+    writeFile(outside, "run-task.md", retiredCommand);
+    writeFile(normalRoot, ".claude/commands/run-task.md", retiredCommand);
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const linkedReport = syncTemplates(linkedRoot, templateRoot);
+    const normalReport = syncTemplates(normalRoot, templateRoot);
+
+    assert.equal(fs.readFileSync(path.join(outside, "run-task.md"), "utf8"), retiredCommand);
+    assert.ok(linkedReport.managed.protected.some((entry) =>
+      entry.target === ".claude/commands/run-task.md" && entry.reason === "unsafe-path"
+    ));
+    assert.equal(linkedReport.managed.removed.includes(".claude/commands/run-task.md"), false);
+    assert.equal(fs.existsSync(path.join(normalRoot, ".claude/commands/run-task.md")), false);
+    assert.ok(normalReport.managed.removed.includes(".claude/commands/run-task.md"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

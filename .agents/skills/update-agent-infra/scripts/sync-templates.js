@@ -1339,6 +1339,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
     const protectedByRegistration = activeRegistrations.some((entry) => entry.name === skillName);
     const conflictingSources = (scannedSkills.candidates.get(skillName) || []).length > 1;
     const knownTargets = new Set(assets.map((asset) => norm(asset.target)));
+    const safeTargets = new Map(assets.map((asset) => {
+      const target = norm(asset.target);
+      return [target, safeProjectTarget(projectRoot, target)];
+    }));
     const skillDir = path.join(projectRoot, '.agents', 'skills', skillName);
     let inventory = [];
     let inventoryValid = safeProjectTarget(projectRoot, path.relative(projectRoot, skillDir)) !== null;
@@ -1350,7 +1354,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
     const eligible = !protectedByRegistration && !conflictingSources && inventoryValid && assets.every((asset) => {
       const target = norm(asset.target);
-      const full = path.join(projectRoot, target);
+      const full = safeTargets.get(target);
+      if (!full) return false;
       const ejectedMatch = ejected.some((pattern) => assetMatches(pattern, target) || globMatch(pattern, target));
       const declared = currentRegistry.managed.some((pattern) => assetMatches(pattern, target));
       if (!fs.existsSync(full)) return !ejectedMatch;
@@ -1364,9 +1369,20 @@ function syncTemplates(projectRoot, templateRootOverride) {
     });
     if (!eligible) {
       for (const asset of assets) {
-        const full = path.join(projectRoot, asset.target);
+        const target = norm(asset.target);
+        const full = safeTargets.get(target);
+        if (!full) {
+          report.managed.protected.push({
+            target,
+            reason: 'unsafe-path',
+            baseline: trustedBaseline(managedBaselines[target]),
+            local: null,
+            template: null
+          });
+          continue;
+        }
         if (fs.existsSync(full)) report.managed.protected.push({
-          target: asset.target,
+          target,
           reason: protectedByRegistration ? 'registered-custom' : conflictingSources ? 'conflicting-custom-sources' : 'unknown-origin-or-modified',
           baseline: trustedBaseline(managedBaselines[asset.target]),
           local: fs.lstatSync(full).isFile() && !fs.lstatSync(full).isSymbolicLink() ? sha256(fs.readFileSync(full)) : null,
@@ -1377,7 +1393,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
     for (const asset of assets) {
       const target = norm(asset.target);
-      const full = path.join(projectRoot, target);
+      const full = safeTargets.get(target);
+      if (!full) continue;
       if (!fs.existsSync(full)) continue;
       fs.unlinkSync(full);
       report.managed.removed.push(target);
