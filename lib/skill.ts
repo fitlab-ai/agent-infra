@@ -112,59 +112,162 @@ function removeEmptyDirs(dir: string, stop: string): void {
   }
 }
 
-function cleanupOwnedOutputs(name: string, registration: Registration, config: SkillConfig): string[] {
-  const baselines = config.files?.managedBaselines;
-  if (!baselines || typeof baselines !== 'object') return [];
-  const removed: string[] = [];
-  const skillRootRelative = path.join('.agents', 'skills', name);
-  const skillRoot = safeProjectTarget(skillRootRelative);
-  const projectSkills = path.resolve('.agents/skills');
-  const skillRootStat = skillRoot ? fs.lstatSync(skillRoot, { throwIfNoEntry: false }) : undefined;
-  if (registration.type === 'local' && skillRoot && skillRootStat?.isDirectory() && !skillRootStat.isSymbolicLink()) {
-    for (const target of Object.keys(baselines)) {
-      const absolute = safeProjectTarget(target);
-      if (!absolute || !absolute.startsWith(`${skillRoot}${path.sep}`)) continue;
-      const baseline = baselines[target];
-      if (!baseline || typeof baseline !== 'object' || !('hash' in baseline) || !('source' in baseline)) continue;
-      const record = baseline as { hash?: unknown; source?: unknown };
-      if (typeof record.source !== 'string' || resolveLocal(record.source) !== resolveLocal(registration.path) || typeof record.hash !== 'string') continue;
-      try {
-        const stat = fs.lstatSync(absolute);
-        if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== record.hash) continue;
-        fs.unlinkSync(absolute);
-        delete baselines[target];
-        removed.push(norm(path.relative(process.cwd(), absolute)));
-      } catch { /* unavailable or changed files remain protected */ }
-    }
-    removeEmptyDirs(skillRoot, projectSkills);
-  }
+function hasRegistrationSource(baseline: unknown, registration: Registration): baseline is { source: string } {
+  if (!baseline || typeof baseline !== 'object' || !('source' in baseline)) return false;
+  const record = baseline as { source?: unknown };
+  return typeof record.source === 'string' && resolveLocal(record.source) === resolveLocal(registration.path);
+}
 
-  for (const adapter of listAgentClientAdapters()) {
-    const descriptor = adapter.project.customCommand;
-    if (!descriptor) continue;
-    const target = descriptor.target.replaceAll('${skillName}', name);
-    const baseline = baselines[target];
-    if (typeof baseline !== 'string' || !baseline.startsWith('sha256:')) continue;
+function isOwnedSkillBaseline(baseline: unknown, registration: Registration): baseline is { hash: string; source: string } {
+  return hasRegistrationSource(baseline, registration)
+    && 'hash' in baseline
+    && typeof (baseline as { hash?: unknown }).hash === 'string';
+}
+
+function removeUnchangedSkillFile(absolute: string, baseline: string): boolean {
+  try {
+    const stat = fs.lstatSync(absolute);
+    if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== baseline) return false;
+    fs.unlinkSync(absolute);
+    return true;
+  } catch { /* unavailable or changed files remain protected */ }
+  return false;
+}
+
+function removeOwnedSkillFiles(
+  skillRoot: string,
+  registration: Registration,
+  baselines: Record<string, unknown>,
+  removed: string[]
+): void {
+  for (const target of Object.keys(baselines)) {
     const absolute = safeProjectTarget(target);
-    if (!absolute) continue;
-    try {
-      const stat = fs.lstatSync(absolute);
-      if (!stat.isFile() || stat.isSymbolicLink() || hash(fs.readFileSync(absolute)) !== baseline) continue;
-      fs.unlinkSync(absolute);
-      delete baselines[target];
-      removed.push(target);
-      removeEmptyDirs(path.dirname(absolute), process.cwd());
-    } catch { /* unavailable or changed files remain protected */ }
+    if (!absolute || !absolute.startsWith(`${skillRoot}${path.sep}`)) continue;
+    const baseline = baselines[target];
+    if (!isOwnedSkillBaseline(baseline, registration)) continue;
+    if (!removeUnchangedSkillFile(absolute, baseline.hash)) continue;
+    delete baselines[target];
+    removed.push(norm(path.relative(process.cwd(), absolute)));
   }
+}
+
+function cleanupLocalSkillFiles(
+  name: string,
+  registration: Registration,
+  baselines: Record<string, unknown>,
+  removed: string[]
+): void {
+  const skillRoot = safeProjectTarget(path.join('.agents', 'skills', name));
+  const skillRootStat = skillRoot ? fs.lstatSync(skillRoot, { throwIfNoEntry: false }) : undefined;
+  if (registration.type !== 'local' || !skillRoot || !skillRootStat?.isDirectory() || skillRootStat.isSymbolicLink()) return;
+  removeOwnedSkillFiles(skillRoot, registration, baselines, removed);
+  removeEmptyDirs(skillRoot, path.resolve('.agents/skills'));
+}
+
+function cleanupClientCommand(name: string, adapter: ReturnType<typeof listAgentClientAdapters>[number], baselines: Record<string, unknown>, removed: string[]): void {
+  const descriptor = adapter.project.customCommand;
+  if (!descriptor) return;
+  const target = descriptor.target.replaceAll('${skillName}', name);
+  const baseline = baselines[target];
+  if (typeof baseline !== 'string' || !baseline.startsWith('sha256:')) return;
+  const absolute = safeProjectTarget(target);
+  if (!absolute || !removeUnchangedSkillFile(absolute, baseline)) return;
+  delete baselines[target];
+  removed.push(target);
+  removeEmptyDirs(path.dirname(absolute), process.cwd());
+}
+
+function cleanupClientCommands(name: string, baselines: Record<string, unknown>, removed: string[]): void {
+  for (const adapter of listAgentClientAdapters()) cleanupClientCommand(name, adapter, baselines, removed);
+}
+
+function clearRegistrationBaselines(
+  name: string,
+  registration: Registration,
+  baselines: Record<string, unknown>
+): void {
   const commandTargets = new Set(listAgentClientAdapters().flatMap((adapter) => {
     const descriptor = adapter.project.customCommand;
     return descriptor ? [descriptor.target.replaceAll('${skillName}', name)] : [];
   }));
   for (const target of Object.keys(baselines)) {
     const record = baselines[target];
-    if (commandTargets.has(target) || (record && typeof record === 'object' && 'source' in record && typeof record.source === 'string' && resolveLocal(record.source) === resolveLocal(registration.path))) delete baselines[target];
+    const owned = hasRegistrationSource(record, registration);
+    if (commandTargets.has(target) || owned) delete baselines[target];
   }
+}
+
+function cleanupOwnedOutputs(name: string, registration: Registration, config: SkillConfig): string[] {
+  const baselines = config.files?.managedBaselines;
+  if (!baselines || typeof baselines !== 'object') return [];
+  const removed: string[] = [];
+  cleanupLocalSkillFiles(name, registration, baselines, removed);
+  cleanupClientCommands(name, baselines, removed);
+  clearRegistrationBaselines(name, registration, baselines);
   return removed;
+}
+
+function listSkills(builtins: Set<string>, candidates: ReturnType<typeof localCandidates>, registrations?: Registration[]): number {
+  for (const name of [...builtins].sort()) process.stdout.write(`builtin\t${name}\n`);
+  for (const item of candidates) {
+    if (item.type === 'project' && builtins.has(item.name)) continue;
+    const registration = registrations?.find((entry) => sameIdentity(entry, item));
+    const conflicts = candidates.filter((candidate) => candidate.name === item.name).length > 1;
+    process.stdout.write(`${registration ? 'registered' : 'unregistered'}\t${conflicts ? 'conflict' : 'available'}\t${item.type}\t${item.name}\t${item.path}\n`);
+  }
+  for (const registration of registrations ?? []) {
+    if (!candidates.some((item) => sameIdentity(registration, item))) {
+      process.stdout.write(`registered\tunavailable\t${registration.type}\t${registration.name}\t${registration.path}\n`);
+    }
+  }
+  return 0;
+}
+
+async function addSkill(
+  file: string,
+  config: SkillConfig,
+  candidates: ReturnType<typeof localCandidates>,
+  builtins: Set<string>,
+  requestedName?: string
+): Promise<number> {
+  if (!Array.isArray(config.skills?.registrations)) config.skills = { ...(config.skills ?? {}), registrations: [] };
+  const list = config.skills!.registrations!;
+  const available = candidates.filter((item) => !builtins.has(item.name));
+  if (!available.length) throw new Error('No custom skills are available from the project or configured local sources.');
+  const choices = available.map((item) => `${item.name} — ${item.path}`);
+  const selectedName = requestedName || await select('Choose a custom skill', choices);
+  const matches = available.filter((item) => selectedName === item.name || selectedName === `${item.name} — ${item.path}`);
+  if (matches.length > 1) throw new Error(`Skill '${selectedName}' has multiple sources. Run ai skill add interactively and choose an exact path.`);
+  const selected = matches[0];
+  if (!selected) throw new Error(`Unknown custom skill candidate: ${selectedName}`);
+  if (!NAME.test(selected.name) || builtins.has(selected.name)) throw new Error('The skill name is invalid or reserved by a built-in skill.');
+  if (list.some((entry) => entry.name === selected.name)) throw new Error(`Skill '${selected.name}' is already registered. Remove it before changing its source.`);
+  list.push({ name: selected.name, type: selected.type, path: selected.type === 'project' ? norm(path.relative(process.cwd(), selected.path)) : selected.path });
+  config.skills!.registrations = list;
+  writeConfig(file, config);
+  process.stdout.write(`Registered ${selected.name} from ${selected.path}. Run update-agent-infra to materialize it.\n`);
+  return 0;
+}
+
+async function removeSkill(
+  file: string,
+  config: SkillConfig,
+  builtins: Set<string>,
+  requestedName?: string
+): Promise<number> {
+  if (!Array.isArray(config.skills?.registrations)) config.skills = { ...(config.skills ?? {}), registrations: [] };
+  const list = config.skills!.registrations!;
+  const name = requestedName || await prompt('Custom skill name to remove', '');
+  const index = list.findIndex((entry) => entry.name === name);
+  if (builtins.has(name)) throw new Error(`Built-in skill '${name}' cannot be removed.`);
+  if (index < 0) throw new Error(`Custom skill '${name}' is not registered.`);
+  const [registration] = list.splice(index, 1);
+  config.skills!.registrations = list;
+  writeConfig(file, config);
+  const removed = cleanupOwnedOutputs(name, registration!, config);
+  writeConfig(file, config);
+  process.stdout.write(`Unregistered ${name}; source files were preserved.${removed.length ? ` Removed verified generated files: ${removed.join(', ')}` : ''}\n`);
+  return 0;
 }
 
 export async function cmdSkill(args: string[]): Promise<number> {
@@ -175,56 +278,11 @@ export async function cmdSkill(args: string[]): Promise<number> {
   }
   try {
     const { file, config } = readConfig();
-    const registrations = config.skills?.registrations;
     const builtins = templateNames();
     const candidates = localCandidates(config);
-    if (action === 'list') {
-      for (const name of [...builtins].sort()) process.stdout.write(`builtin\t${name}\n`);
-      for (const item of candidates) {
-        if (item.type === 'project' && builtins.has(item.name)) continue;
-        const registration = registrations?.find((entry) => sameIdentity(entry, item));
-        const conflicts = candidates.filter((candidate) => candidate.name === item.name).length > 1;
-        process.stdout.write(`${registration ? 'registered' : 'unregistered'}\t${conflicts ? 'conflict' : 'available'}\t${item.type}\t${item.name}\t${item.path}\n`);
-      }
-      for (const registration of registrations ?? []) {
-        if (!candidates.some((item) => sameIdentity(registration, item))) {
-          process.stdout.write(`registered\tunavailable\t${registration.type}\t${registration.name}\t${registration.path}\n`);
-        }
-      }
-      return 0;
-    }
-
-    if (!Array.isArray(registrations)) config.skills = { ...(config.skills ?? {}), registrations: [] };
-    const list = config.skills!.registrations!;
-    if (action === 'add') {
-      const available = candidates.filter((item) => !builtins.has(item.name));
-      if (!available.length) throw new Error('No custom skills are available from the project or configured local sources.');
-      const choices = available.map((item) => `${item.name} — ${item.path}`);
-      const selectedName = requestedName || await select('Choose a custom skill', choices);
-      const matches = available.filter((item) => selectedName === item.name || selectedName === `${item.name} — ${item.path}`);
-      if (matches.length > 1) throw new Error(`Skill '${selectedName}' has multiple sources. Run ai skill add interactively and choose an exact path.`);
-      const selected = matches[0];
-      if (!selected) throw new Error(`Unknown custom skill candidate: ${selectedName}`);
-      if (!NAME.test(selected.name) || builtins.has(selected.name)) throw new Error('The skill name is invalid or reserved by a built-in skill.');
-      if (list.some((entry) => entry.name === selected.name)) throw new Error(`Skill '${selected.name}' is already registered. Remove it before changing its source.`);
-      list.push({ name: selected.name, type: selected.type, path: selected.type === 'project' ? norm(path.relative(process.cwd(), selected.path)) : selected.path });
-      config.skills!.registrations = list;
-      writeConfig(file, config);
-      process.stdout.write(`Registered ${selected.name} from ${selected.path}. Run update-agent-infra to materialize it.\n`);
-      return 0;
-    }
-
-    const name = requestedName || await prompt('Custom skill name to remove', '');
-    const index = list.findIndex((entry) => entry.name === name);
-    if (builtins.has(name)) throw new Error(`Built-in skill '${name}' cannot be removed.`);
-    if (index < 0) throw new Error(`Custom skill '${name}' is not registered.`);
-    const [registration] = list.splice(index, 1);
-    config.skills!.registrations = list;
-    writeConfig(file, config);
-    const removed = cleanupOwnedOutputs(name, registration!, config);
-    writeConfig(file, config);
-    process.stdout.write(`Unregistered ${name}; source files were preserved.${removed.length ? ` Removed verified generated files: ${removed.join(', ')}` : ''}\n`);
-    return 0;
+    if (action === 'list') return listSkills(builtins, candidates, config.skills?.registrations);
+    if (action === 'add') return await addSkill(file, config, candidates, builtins, requestedName);
+    return await removeSkill(file, config, builtins, requestedName);
   } catch (error) {
     closePrompt();
     process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
