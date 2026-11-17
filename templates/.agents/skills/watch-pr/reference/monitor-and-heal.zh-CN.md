@@ -17,9 +17,7 @@
 
 每轮重建 precheck 时，除执行下方功能级报告门槛外，六项 `rationale` 都必须陈述对应检查的实际结论，并至少带一条含路径、行号和简短 `detail` 的证据；兼容、旧路径、冗余和范围检查分别说明，不复用泛化套话。理由和证据遵循当前部署语言，中文技能必须使用中文。
 
-功能分组、逐组字段、行数唯一归属及 `needs-review` 条件统一遵循 `.agents/skills/create-pr/reference/change-report.md` 的 candidate 内容契约。每次刷新都重新按当前任务目标和 patch 建立功能组，不沿用上一 head 的说明代替本轮证据。完整 PR 统计与上一有效 head → 当前 head 的增量分开核算；没有可验证的上一 head 时明确标为未确认。任何功能组缺少目标对应、行为增减、必要性、行数对账、测试覆盖/成本或定位证据时，将 `target-alignment` 或 `change-composition` 标为 `needs-review` 并指出缺口。沿用现有 `nextAction=review-code` 路由；不得以结构完整或 CI 全绿继续 `watch-pr`。
-
-完整 PR 的范围继续绑定当前权威 base/head/merge-base/patch 与完整统计。增量单独绑定上一有效报告 head → 当前 head：在覆盖旧 sidecar 前，用 `readPrChangeReport` 校验旧报告，只在 repository/resource identity 匹配当前 PR 时采用旧 `identity.head.sha`。对两个 head 做 tree-to-tree diff 并明确列出 SHA，不用 merge-base 替代端点差异，不把增量 totals 加到完整 PR totals。没有旧报告、报告无效或身份不符时标注上一 head 未确认，不从全量推算或填零。两个 SHA 相同只报告 head 未变化；rebase 后仍比较原 head 和新 head 的树差异。sidecar 无效只使增量不可确认，不改变现有 full-PR 报告流程。
+功能分组、逐组字段、行数唯一归属及 `needs-review` 条件统一遵循 `.agents/skills/create-pr/reference/change-report.md` 的 candidate 内容契约。每次刷新都重新按当前任务目标和完整 PR patch 建立功能组。报告范围为当前权威 base 的 merge-base 到 head。任何功能组缺少目标对应、行为增减、必要性、行数对账、测试覆盖/成本或定位证据时，将 `target-alignment` 或 `change-composition` 标为 `needs-review` 并指出缺口。沿用现有 `nextAction=review-code` 路由；不得以结构完整或 CI 全绿继续 `watch-pr`。
 
 ## 预检分流
 

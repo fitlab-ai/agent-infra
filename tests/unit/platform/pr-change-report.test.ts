@@ -13,15 +13,29 @@ import {
   replaceCanonicalReportPlaceholder,
   taskIntentDigest,
   validatePrecheckCandidate,
+  validateMechanicalReport,
   validatePrChangeReport,
   writePrChangeReportAtomic
 } from '../../../lib/platform/pr-change-report.ts';
-import type { MechanicalChangeReport, PrecheckCandidate, PullRequestIdentity } from '../../../lib/platform/pr-change-report.ts';
+import type { ChangeFile, MechanicalChangeReport, PrecheckCandidate, PullRequestIdentity } from '../../../lib/platform/pr-change-report.ts';
 import { createTempDir } from '../../helpers.ts';
 
 const sha = (letter: string) => letter.repeat(40);
 
+function withLocations<T extends Omit<ChangeFile, 'locations'>>(files: T[]) {
+  return files.map((file) => ({ ...file, locations: file.additions === null ? [] : [
+    ...(file.additions ? [{ side: 'new' as const, startLine: 1, endLine: file.additions }] : []),
+    ...(file.deletions ? [{ side: 'old' as const, startLine: 1, endLine: file.deletions }] : [])
+  ] }));
+}
+
+function bundle(base: string, head: string, files: ReturnType<typeof withLocations>, totals: MechanicalChangeReport['full']['totals']): MechanicalChangeReport {
+  return { version: 3, base, head, full: { kind: 'merge-base', from: sha('a'), to: head, mergeBase: sha('a'), patchSha256: 'e'.repeat(64), files, totals } };
+}
+
 function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
+  const full = diff.full.files;
+  const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
     checks: PRECHECK_IDS.map((id) => ({
@@ -31,14 +45,17 @@ function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandi
       rationale: 'The complete diff is within the approved scope.',
       ...(id === 'change-composition' ? { groups: [{
         id: 'summary-content', target: 'Structure managed comment content', behaviorChange: 'Validate and render typed content.',
-        necessity: 'Keep required content complete.', files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        necessity: 'Keep required content complete.', files: [...new Set(full.map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full) },
         tests: { coverage: 'Existing unit and integration contracts cover the change.', cost: 'No new fixture beyond this candidate.' }
-      }] } : {})
+      }], unassigned: { full: [] } } : {})
     }))
   };
 }
 
 function detailedCandidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
+  const full = diff.full.files;
+  const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
     checks: PRECHECK_IDS.map((id, index) => ({
@@ -51,75 +68,53 @@ function detailedCandidate(taskIntentSha256: string, diff = mechanical()): Prech
       rationale: `Rationale-${id}-responsibility-${index}`,
       ...(id === 'change-composition' ? { groups: [{
         id: 'summary-content', target: 'Structured content', behaviorChange: 'Add structure validation.', necessity: 'Prevent missing sections.',
-        files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        files: [...new Set(full.map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full) },
         tests: { coverage: 'Tests exercise required paths.', cost: 'One shared fixture.' }
-      }] } : {})
+      }], unassigned: { full: [] } } : {})
     }))
   };
 }
 
 function mechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
-  return {
-    version: 1,
-    base,
-    head,
-    mergeBase: sha('a'),
-    patchSha256: 'e'.repeat(64),
-    files: [{
+  const files = withLocations([{
       status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts',
       additions: 2, deletions: 1, oldBytes: 10, newBytes: 20, netBytes: 10
-    }],
-    totals: {
+    }]);
+  return bundle(base, head, files, {
       files: 1, textFiles: 1, binaryFiles: 0, additions: 2, deletions: 1,
       oldBytes: 10, newBytes: 20, netBytes: 10
-    }
-  };
+    });
 }
 
 function categorizedMechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
-  const files = [
+  const files = withLocations([
     { status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts', additions: 4, deletions: 1, oldBytes: 10, newBytes: 13, netBytes: 3 },
     { status: 'M', oldPath: 'tests/example.test.ts', newPath: 'tests/example.test.ts', additions: 2, deletions: 0, oldBytes: 5, newBytes: 7, netBytes: 2 },
     { status: 'A', oldPath: null, newPath: 'templates/example.md', additions: 3, deletions: 0, oldBytes: 0, newBytes: 20, netBytes: 20 },
     { status: 'D', oldPath: '.agents/example.md', newPath: null, additions: 0, deletions: 2, oldBytes: 10, newBytes: 0, netBytes: -10 },
     { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 0, newBytes: 4, netBytes: 4 },
     { status: 'A', oldPath: null, newPath: 'package.json', additions: 1, deletions: 0, oldBytes: 0, newBytes: 1, netBytes: 1 }
-  ];
-  return {
-    version: 1,
-    base,
-    head,
-    mergeBase: sha('a'),
-    patchSha256: 'e'.repeat(64),
-    files,
-    totals: {
+  ]);
+  return bundle(base, head, files, {
       files: 6, textFiles: 5, binaryFiles: 1, additions: 10, deletions: 3,
       oldBytes: 25, newBytes: 45, netBytes: 20
-    }
-  };
+    });
 }
 
 function representativeMechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
-  const files = [
+  const files = withLocations([
     { status: 'M', oldPath: 'lib/large.ts', newPath: 'lib/large.ts', additions: 8, deletions: 4, oldBytes: 100, newBytes: 110, netBytes: 10 },
     { status: 'M', oldPath: 'tests/large.test.ts', newPath: 'tests/large.test.ts', additions: 6, deletions: 6, oldBytes: 20, newBytes: 20, netBytes: 0 },
     { status: 'A', oldPath: null, newPath: 'templates/large.md', additions: 7, deletions: 0, oldBytes: 0, newBytes: 90, netBytes: 90 },
     { status: 'R100', oldPath: '.agents/old.md', newPath: '.agents/new.md', additions: 0, deletions: 0, oldBytes: 300, newBytes: 300, netBytes: 0 },
     { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 },
     { status: 'D', oldPath: 'tests/removed.test.ts', newPath: null, additions: 0, deletions: 10, oldBytes: 300, newBytes: 0, netBytes: -300 }
-  ];
-  return {
-    version: 1,
-    base,
-    head,
-    mergeBase: sha('a'),
-    patchSha256: 'e'.repeat(64),
-    files,
-    totals: {
+  ]);
+  return bundle(base, head, files, {
       files: 6, textFiles: 5, binaryFiles: 1, additions: 21, deletions: 20,
       oldBytes: 1320, newBytes: 820, netBytes: -500
-    }
-  };
+    });
 }
 
 function identity(): PullRequestIdentity {
@@ -161,17 +156,16 @@ test('report builder derives route and formal review from the six checks', () =>
     assert.equal(result.value.precheck.verdict, 'clear');
     assert.equal(result.value.precheck.route, 'watch-pr');
     assert.equal(result.value.precheck.formalReview, false);
-    assert.deepEqual(result.value.diff.totals, mechanical().totals);
+    assert.deepEqual(result.value.diff.full.totals, mechanical().full.totals);
   }
 });
 
 test('report validation accepts a negative aggregate byte delta', () => {
   const value = mechanical();
-  const file = { ...value.files[0]!, oldBytes: 20, newBytes: 10, netBytes: -10 };
+  const file = { ...value.full.files[0]!, oldBytes: 20, newBytes: 10, netBytes: -10 };
   const built = buildPrChangeReport(identity(), 'd'.repeat(64), {
     ...value,
-    files: [file],
-    totals: { ...value.totals, oldBytes: 20, newBytes: 10, netBytes: -10 }
+    full: { ...value.full, files: [file], totals: { ...value.full.totals, oldBytes: 20, newBytes: 10, netBytes: -10 } }
   }, candidate('d'.repeat(64)));
   assert.equal(built.ok, true);
   if (built.ok) assert.equal(validatePrChangeReport(built.value).ok, true);
@@ -196,12 +190,42 @@ test('report validation rejects inconsistent totals and verdict facts', () => {
   if (built.ok) {
     const mismatchedTotals = {
       ...built.value,
-      diff: { ...built.value.diff, totals: { ...built.value.diff.totals, additions: built.value.diff.totals.additions + 1 } }
+      diff: { ...built.value.diff, full: { ...built.value.diff.full, totals: { ...built.value.diff.full.totals, additions: built.value.diff.full.totals.additions + 1 } } }
     };
     assert.equal(validatePrChangeReport(mismatchedTotals).ok, false);
     const invalid = validatePrChangeReport({ ...built.value, precheck: { ...built.value.precheck, verdict: 'needs-review', route: 'review-code' } });
     assert.equal(invalid.ok, false);
   }
+});
+
+test('mechanical and persisted reports require a merge-base diff ending at the PR head', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  assert.equal(validateMechanicalReport(diff).ok, true);
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  assert.equal(validatePrChangeReport(built.value).ok, true);
+  const badHead = structuredClone(diff);
+  badHead.full.to = sha('d');
+  assert.equal(validateMechanicalReport(badHead).ok, false);
+  const badMergeBase = structuredClone(built.value);
+  badMergeBase.diff.full.mergeBase = sha('d');
+  assert.equal(validatePrChangeReport(badMergeBase).ok, false);
+});
+
+test('mechanical and persisted reports reject file totals that do not match the full diff', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  const badTotals = structuredClone(diff);
+  badTotals.full.totals.additions += 1;
+  assert.equal(validateMechanicalReport(badTotals).ok, false);
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const badReportTotals = structuredClone(built.value);
+  badReportTotals.diff.full.totals.additions += 1;
+  assert.equal(validatePrChangeReport(badReportTotals).ok, false);
 });
 
 test('summary body requires one placeholder and core renders the canonical report', () => {
@@ -211,12 +235,45 @@ test('summary body requires one placeholder and core renders the canonical repor
   if (built.ok) {
     const rendered = renderCanonicalChangeReport(built.value);
     assert.match(rendered, new RegExp(`^${CANONICAL_REPORT_HEADING}`));
+    assert.match(rendered, /\| \*\*合计\*\* \|[^\n]*\n\n#### 功能模块代码增减（行）/u);
+    assert.ok(rendered.indexOf('#### 功能模块代码增减（行）') < rendered.indexOf('#### 功能模块与验证变化'));
+    assert.ok(rendered.indexOf('#### 功能模块与验证变化') < rendered.indexOf('功能组 summary-content'));
+    assert.ok(rendered.indexOf('功能组 summary-content') < rendered.indexOf('#### 代表性变更文件'));
+    assert.ok(rendered.indexOf('功能组 summary-content') < rendered.indexOf('#### 适宜性预检'));
     const replaced = replaceCanonicalReportPlaceholder(`## Summary\n\n${CANONICAL_REPORT_PLACEHOLDER}\n`, built.value);
     assert.equal(replaced.ok, true);
     if (replaced.ok) assert.match(replaced.value, /\| \*\*合计\*\* \|/);
     const bypass = replaceCanonicalReportPlaceholder(`\n${CANONICAL_REPORT_PLACEHOLDER}\n${CANONICAL_REPORT_HEADING}`, built.value);
     assert.equal(bypass.ok, false);
   }
+});
+
+test('canonical module summary reports full-PR allocations and escapes table pipes', () => {
+  const files = withLocations([
+    { status: 'M', oldPath: 'lib/report.ts', newPath: 'lib/report.ts', additions: 4, deletions: 2, oldBytes: 20, newBytes: 30, netBytes: 10 },
+    { status: 'M', oldPath: 'assets/chart.bin', newPath: 'assets/chart.bin', additions: null, deletions: null, oldBytes: 4, newBytes: 8, netBytes: 4 }
+  ]);
+  const diff = bundle(sha('b'), sha('c'), files, { files: 2, textFiles: 1, binaryFiles: 1, additions: 4, deletions: 2, oldBytes: 24, newBytes: 38, netBytes: 14 });
+  const precheck = candidate('d'.repeat(64), diff);
+  const group = precheck.checks.find((check) => check.id === 'change-composition')!.groups![0]!;
+  group.id = 'feature|core'; group.target = 'Target | details';
+  const built = buildPrChangeReport(identity(), 'd'.repeat(64), diff, precheck);
+  assert.equal(built.ok, true); if (!built.ok) return;
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /完整 PR：目标分支 merge-base `aaaaaaa` → 当前 HEAD `ccccccc`/u);
+  assert.match(rendered, /\| feature&#124;core — Target &#124; details \| 4 \| 2 \| \+2 \| — \|/u);
+  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 4 \| 2 \| \+2 \| 1 个文件 \|/u);
+  assert.ok(rendered.indexOf('| feature&#124;core — Target &#124; details |') < rendered.indexOf('#### 功能模块与验证变化'));
+  assert.match(rendered, /行为变化：Validate and render typed content\./u);
+});
+
+test('canonical module summary keeps binary full-PR lines unknown', () => {
+  const digest = 'd'.repeat(64); const diff = categorizedMechanical();
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(built.ok, true); if (!built.ok) return;
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /\| 文档 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/u);
+  assert.match(rendered, /不可计行文件/u);
 });
 
 test('canonical report renders high-level change categories and all six precheck details', () => {
@@ -310,8 +367,8 @@ test('canonical report lists bounded text representatives with stable tie orderi
 test('canonical report renders a text rename as a path change without content labels', () => {
   const digest = 'd'.repeat(64);
   const value = representativeMechanical();
-  value.files = [{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }];
-  value.totals = { files: 1, textFiles: 1, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 };
+  value.full.files = withLocations([{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }]);
+  value.full.totals = { files: 1, textFiles: 1, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 };
   const built = buildPrChangeReport(identity(), digest, value, candidate(digest, value));
   assert.equal(built.ok, true);
   if (!built.ok) return;
@@ -324,8 +381,8 @@ test('canonical report renders a text rename as a path change without content la
 test('canonical report omits binary-only changes from representative summaries', () => {
   const digest = 'd'.repeat(64);
   const value = representativeMechanical();
-  value.files = [{ status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 }];
-  value.totals = { files: 1, textFiles: 0, binaryFiles: 1, additions: 0, deletions: 0, oldBytes: 600, newBytes: 300, netBytes: -300 };
+  value.full.files = withLocations([{ status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 }]);
+  value.full.totals = { files: 1, textFiles: 0, binaryFiles: 1, additions: 0, deletions: 0, oldBytes: 600, newBytes: 300, netBytes: -300 };
   const built = buildPrChangeReport(identity(), digest, value, candidate(digest, value));
   assert.equal(built.ok, true);
   if (!built.ok) return;
@@ -335,7 +392,7 @@ test('canonical report omits binary-only changes from representative summaries',
   assert.match(rendered, /- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：\n  - 无可比较的文本文件。/);
 });
 
-test('typed functional groups derive line totals from unique complete diff file membership', () => {
+test('typed functional groups derive counts from exact locations and reject overlapping or missing lines', () => {
   const digest = 'd'.repeat(64);
   const diff = representativeMechanical();
   const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
@@ -343,27 +400,102 @@ test('typed functional groups derive line totals from unique complete diff file 
   if (!built.ok) return;
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /功能组 summary-content/u);
-  assert.match(rendered, /由正式 diff 逐文件推导）：新增 21、删除 20、净增 1；另有 1 个文件行数不可计/u);
+  assert.match(rendered, /\| summary-content — Structure managed comment content \| 21 \| 20 \| \+1 \| — \|/u);
+  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 21 \| 20 \| \+1 \| 1 个文件 \|/u);
   assert.match(rendered, /<code>\.agents\/old\.md<\/code> → <code>\.agents\/new\.md<\/code>/u);
 
   const malformed = candidate(digest, diff);
   const composition = malformed.checks.find((check) => check.id === 'change-composition')!;
-  composition.groups![0]!.files[0] = composition.groups![0]!.files[1]!;
+  composition.groups![0]!.locations.full.push({ ...composition.groups![0]!.locations.full[0]! });
   const rejected = buildPrChangeReport(identity(), digest, diff, malformed);
   assert.equal(rejected.ok, false);
-  if (!rejected.ok) assert.match(rejected.error.message, /more than one functional group|no functional group/u);
+  if (!rejected.ok) assert.match(rejected.error.message, /overlaps or duplicates/u);
 
   const omitted = candidate(digest, diff);
-  omitted.checks.find((check) => check.id === 'change-composition')!.groups![0]!.files.pop();
+  omitted.checks.find((check) => check.id === 'change-composition')!.groups![0]!.locations.full.pop();
   const omittedFile = buildPrChangeReport(identity(), digest, diff, omitted);
   assert.equal(omittedFile.ok, false);
-  if (!omittedFile.ok) assert.match(omittedFile.error.message, /has no functional group/u);
+  if (!omittedFile.ok) assert.match(omittedFile.error.message, /exactly cover changed lines/u);
 
   const unknown = candidate(digest, diff);
-  unknown.checks.find((check) => check.id === 'change-composition')!.groups![0]!.files[0] = 'src/not-in-diff.ts';
+  unknown.checks.find((check) => check.id === 'change-composition')!.groups![0]!.locations.full[0]!.path = 'src/not-in-diff.ts';
   const unknownFile = buildPrChangeReport(identity(), digest, diff, unknown);
   assert.equal(unknownFile.ok, false);
-  if (!unknownFile.ok) assert.match(unknownFile.error.message, /references unknown diff file/u);
+  if (!unknownFile.ok) assert.match(unknownFile.error.message, /wrong path or direction/u);
+});
+
+test('changed positions can split one file across functions and retain shared attribution', () => {
+  const digest = 'd'.repeat(64);
+  const diff = mechanical();
+  const value = candidate(digest, diff);
+  const composition = value.checks.find((check) => check.id === 'change-composition')!;
+  const first = composition.groups![0]!;
+  first.locations.full = [{ path: 'lib/example.ts', side: 'new', startLine: 1, endLine: 1 }];
+  first.files = ['lib/example.ts'];
+  composition.groups!.push({
+    ...first,
+    id: 'second-feature', target: 'Another task behavior',
+    locations: { full: [{ path: 'lib/example.ts', side: 'old', startLine: 1, endLine: 1 }] }
+  });
+  composition.unassigned!.full = [{ path: 'lib/example.ts', side: 'new', startLine: 2, endLine: 2, reason: 'shared', explanation: 'This added line serves both behaviors.' }];
+  const built = buildPrChangeReport(identity(), digest, diff, value);
+  assert.equal(built.ok, true);
+  if (built.ok) {
+    const rendered = renderCanonicalChangeReport(built.value);
+    assert.match(rendered, /功能组 summary-content/u);
+    assert.match(rendered, /功能组 second-feature/u);
+    assert.match(rendered, /\| 未归属（共享） \| 1 \| 0 \| \+1 \| — \|/u);
+    assert.match(rendered, /完整 PR 未归属位置说明\*\*：shared：This added line serves both behaviors/u);
+  }
+});
+
+test('functional groups reject files that disagree with their allocated locations', () => {
+  const digest = 'd'.repeat(64);
+  const files = withLocations([
+    { status: 'A', oldPath: null, newPath: 'src/added.ts', additions: 1, deletions: 0, oldBytes: 0, newBytes: 4, netBytes: 4 },
+    { status: 'D', oldPath: 'src/deleted.ts', newPath: null, additions: 0, deletions: 1, oldBytes: 4, newBytes: 0, netBytes: -4 }
+  ]);
+  const diff = bundle(sha('b'), sha('c'), files, {
+    files: 2, textFiles: 2, binaryFiles: 0, additions: 1, deletions: 1, oldBytes: 4, newBytes: 4, netBytes: 0
+  });
+  const value = candidate(digest, diff);
+  const composition = value.checks.find((check) => check.id === 'change-composition')!;
+  const original = composition.groups![0]!;
+  composition.groups = [
+    { ...original, id: 'added-feature', files: ['src/added.ts'], locations: { full: [{ path: 'src/deleted.ts', side: 'old', startLine: 1, endLine: 1 }] } },
+    { ...original, id: 'deleted-feature', files: ['src/deleted.ts'], locations: { full: [{ path: 'src/added.ts', side: 'new', startLine: 1, endLine: 1 }] } }
+  ];
+  const built = buildPrChangeReport(identity(), digest, diff, value);
+  assert.equal(built.ok, false);
+});
+
+test('a text file with every changed line explicitly unassigned need not belong to a functional group', () => {
+  const digest = 'd'.repeat(64);
+  const files = withLocations([
+    { status: 'A', oldPath: null, newPath: 'src/assigned.ts', additions: 1, deletions: 0, oldBytes: 0, newBytes: 4, netBytes: 4 },
+    { status: 'D', oldPath: 'src/unassigned.ts', newPath: null, additions: 0, deletions: 1, oldBytes: 4, newBytes: 0, netBytes: -4 }
+  ]);
+  const diff = bundle(sha('b'), sha('c'), files, {
+    files: 2, textFiles: 2, binaryFiles: 0, additions: 1, deletions: 1, oldBytes: 4, newBytes: 4, netBytes: 0
+  });
+  const value = candidate(digest, diff);
+  const composition = value.checks.find((check) => check.id === 'change-composition')!;
+  composition.groups![0]!.files = ['src/assigned.ts'];
+  composition.groups![0]!.locations = {
+    full: [{ path: 'src/assigned.ts', side: 'new', startLine: 1, endLine: 1 }]
+  };
+  composition.unassigned!.full = [{
+    path: 'src/unassigned.ts', side: 'old', startLine: 1, endLine: 1,
+    reason: 'unconfirmed', explanation: 'This file cannot be reliably attributed.'
+  }];
+
+  const built = buildPrChangeReport(identity(), digest, diff, value);
+  assert.equal(built.ok, true, built.ok ? undefined : JSON.stringify(built.error));
+  if (built.ok) {
+    const rendered = renderCanonicalChangeReport(built.value);
+    assert.match(rendered, /\| 未归属（待确认） \| 0 \| 1 \| -1 \| — \|/u);
+    assert.match(rendered, /完整 PR 未归属位置说明\*\*：unconfirmed：This file cannot be reliably attributed/u);
+  }
 });
 
 test('typed group structure requires nested test coverage and rejects hand-entered counts', () => {

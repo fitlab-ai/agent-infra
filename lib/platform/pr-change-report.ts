@@ -7,7 +7,7 @@ import { isResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
 const REPORT_FILE_NAME = 'pr-change-report.json';
-const REPORT_VERSION = 3 as const;
+const REPORT_VERSION = 5 as const;
 const CANONICAL_REPORT_PLACEHOLDER = '<!-- canonical-pr-change-report -->';
 const CANONICAL_REPORT_HEADING = '### PR 代码增减';
 const PRECHECK_IDS = [
@@ -41,6 +41,18 @@ type ChangeFile = {
   oldBytes: number;
   newBytes: number;
   netBytes: number;
+  locations: ChangeLocation[];
+};
+
+type ChangeLocation = { side: 'old' | 'new'; startLine: number; endLine: number };
+type ScopedDiff = {
+  kind: 'merge-base';
+  from: string;
+  to: string;
+  mergeBase: string;
+  patchSha256: string;
+  files: ChangeFile[];
+  totals: ChangeTotals;
 };
 
 type ChangeTotals = {
@@ -55,13 +67,10 @@ type ChangeTotals = {
 };
 
 type MechanicalChangeReport = {
-  version: number;
+  version: 3;
   base: string;
   head: string;
-  mergeBase: string;
-  patchSha256: string;
-  files: ChangeFile[];
-  totals: ChangeTotals;
+  full: ScopedDiff;
 };
 
 type Evidence = {
@@ -77,6 +86,7 @@ type FunctionalGroup = {
   behaviorChange: string;
   necessity: string;
   files: string[];
+  locations: { full: Array<{ path: string; side: 'old' | 'new'; startLine: number; endLine: number }> };
   tests: { coverage: string; cost: string };
 };
 
@@ -86,6 +96,7 @@ type Precheck = {
   evidence: Evidence[];
   rationale: string;
   groups?: FunctionalGroup[];
+  unassigned?: { full: Array<{ path: string; side: 'old' | 'new'; startLine: number; endLine: number; reason: 'shared' | 'unconfirmed'; explanation: string }> };
 };
 
 type PrecheckCandidate = {
@@ -105,10 +116,7 @@ type PrChangeReport = {
   identity: PullRequestIdentity;
   inputs: { taskIntentSha256: string };
   diff: {
-    mergeBase: string;
-    patchSha256: string;
-    files: ChangeFile[];
-    totals: ChangeTotals;
+    full: ScopedDiff;
   };
   precheck: {
     verdict: PrecheckVerdict;
@@ -123,6 +131,10 @@ type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: Validati
 
 function invalid(message: string, code = 'PR_CHANGE_REPORT_INVALID'): ValidationResult<never> {
   return { ok: false, error: { code, message } };
+}
+
+function withErrorCode<T>(result: ValidationResult<T>, code: string): ValidationResult<T> {
+  return result.ok ? result : { ...result, error: { ...result.error, code } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,28 +172,64 @@ function validateChangeFileBytes(value: Record<string, unknown>, index: number):
   return { ok: true, value: null };
 }
 
-function parseChangeFile(value: unknown, index: number): ValidationResult<ChangeFile> {
-  if (!isRecord(value)) return invalid(`diff.files[${index}] must be an object`);
+function validateChangeFilePaths(value: Record<string, unknown>, index: number): ValidationResult<{ status: string; oldPath: string | null; newPath: string | null }> {
   const pathValue = value.oldPath ?? value.newPath;
   if (!isNonEmptyString(pathValue)) return invalid(`diff.files[${index}] must have a path`);
   if (!isSafeRenderedText(value.status)) return invalid(`diff.files[${index}].status is invalid`);
   if (!(value.oldPath === null || isSafeRenderedText(value.oldPath))) return invalid(`diff.files[${index}].oldPath is invalid`);
   if (!(value.newPath === null || isSafeRenderedText(value.newPath))) return invalid(`diff.files[${index}].newPath is invalid`);
+  return { ok: true, value: { status: value.status, oldPath: value.oldPath as string | null, newPath: value.newPath as string | null } };
+}
+
+function validateChangeFileLineCounts(value: Record<string, unknown>, index: number): ValidationResult<{ additions: number | null; deletions: number | null }> {
   if (!isIntegerOrNull(value.additions) || !isIntegerOrNull(value.deletions)) return invalid(`diff.files[${index}] line counts are invalid`);
   if ((value.additions === null) !== (value.deletions === null)) return invalid(`diff.files[${index}] line counts must both be null or integers`);
+  return { ok: true, value: { additions: value.additions, deletions: value.deletions } };
+}
+
+function parseChangeFileLocations(value: Record<string, unknown>, index: number): ValidationResult<ChangeLocation[]> {
+  if (!Array.isArray(value.locations)) return invalid(`diff.files[${index}].locations must be an array`);
+  const locations: ChangeLocation[] = [];
+  for (const [position, item] of value.locations.entries()) {
+    if (!isRecord(item) || (item.side !== 'old' && item.side !== 'new') ||
+        !Number.isSafeInteger(item.startLine) || Number(item.startLine) < 1 ||
+        !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine)) return invalid(`diff.files[${index}].locations[${position}] is invalid`);
+    locations.push({ side: item.side, startLine: Number(item.startLine), endLine: Number(item.endLine) });
+  }
+  return { ok: true, value: locations };
+}
+
+function validateChangedLineLocations(locations: ChangeLocation[], additions: number | null, deletions: number | null, index: number): ValidationResult<null> {
+  const addedPositions = locations.filter((item) => item.side === 'new').reduce((sum, item) => sum + item.endLine - item.startLine + 1, 0);
+  const deletedPositions = locations.filter((item) => item.side === 'old').reduce((sum, item) => sum + item.endLine - item.startLine + 1, 0);
+  if (additions === null ? locations.length !== 0 : addedPositions !== additions || deletedPositions !== deletions) return invalid(`diff.files[${index}] changed-line locations do not match numstat`);
+  return { ok: true, value: null };
+}
+
+function parseChangeFile(value: unknown, index: number): ValidationResult<ChangeFile> {
+  if (!isRecord(value)) return invalid(`diff.files[${index}] must be an object`);
+  const paths = validateChangeFilePaths(value, index);
+  if (!paths.ok) return paths;
+  const lineCounts = validateChangeFileLineCounts(value, index);
+  if (!lineCounts.ok) return lineCounts;
   const bytes = validateChangeFileBytes(value, index);
   if (!bytes.ok) return bytes;
+  const locations = parseChangeFileLocations(value, index);
+  if (!locations.ok) return locations;
+  const verifiedLocations = validateChangedLineLocations(locations.value, lineCounts.value.additions, lineCounts.value.deletions, index);
+  if (!verifiedLocations.ok) return verifiedLocations;
   return {
     ok: true,
     value: {
-      status: value.status,
-      oldPath: value.oldPath as string | null,
-      newPath: value.newPath as string | null,
-      additions: value.additions as number | null,
-      deletions: value.deletions as number | null,
+      status: paths.value.status,
+      oldPath: paths.value.oldPath,
+      newPath: paths.value.newPath,
+      additions: lineCounts.value.additions,
+      deletions: lineCounts.value.deletions,
       oldBytes: value.oldBytes as number,
       newBytes: value.newBytes as number,
-      netBytes: value.netBytes as number
+      netBytes: value.netBytes as number,
+      locations: locations.value
     }
   };
 }
@@ -247,8 +295,7 @@ function parseFunctionalGroupTests(value: unknown, prefix: string): ValidationRe
   return { ok: true, value: { coverage: value.coverage.trim(), cost: value.cost.trim() } };
 }
 
-function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>): ValidationResult<FunctionalGroup> {
-  if (!isRecord(value)) return invalid(`${prefix} must be an object`);
+function validateFunctionalGroupFields(value: Record<string, unknown>, prefix: string, ids: Set<string>): ValidationResult<null> {
   if (Object.hasOwn(value, 'additions') || Object.hasOwn(value, 'deletions') || Object.hasOwn(value, 'net') || Object.hasOwn(value, 'counts')) {
     return invalid(`${prefix} line counts are derived from diff files and must not be supplied`);
   }
@@ -256,17 +303,43 @@ function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>):
   if (!isSafeRenderedText(value.target)) return invalid(`${prefix}.target is required`);
   if (!isSafeRenderedText(value.behaviorChange)) return invalid(`${prefix}.behaviorChange is required`);
   if (!isSafeRenderedText(value.necessity)) return invalid(`${prefix}.necessity is required`);
+  return { ok: true, value: null };
+}
+
+function parseAssignedRange(item: unknown, at: string): ValidationResult<AssignedRange> {
+  if (!isRecord(item) || !isSafeRenderedText(item.path) || (item.side !== 'old' && item.side !== 'new') ||
+      !Number.isSafeInteger(item.startLine) || Number(item.startLine) < 1 || !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine)) return invalid(`${at} is invalid`);
+  return { ok: true, value: { path: item.path.trim(), side: item.side, startLine: Number(item.startLine), endLine: Number(item.endLine) } };
+}
+
+function parseFunctionalGroupLocations(value: unknown, prefix: string): ValidationResult<FunctionalGroup['locations']> {
+  if (!isRecord(value) || !Array.isArray(value.full)) return invalid(`${prefix}.locations.full must be an array`);
+  const full: AssignedRange[] = [];
+  for (const [index, item] of value.full.entries()) {
+    const range = parseAssignedRange(item, `${prefix}.locations.full[${index}]`);
+    if (!range.ok) return range;
+    full.push(range.value);
+  }
+  return { ok: true, value: { full } };
+}
+
+function parseFunctionalGroup(value: unknown, prefix: string, ids: Set<string>): ValidationResult<FunctionalGroup> {
+  if (!isRecord(value)) return invalid(`${prefix} must be an object`);
+  const fields = validateFunctionalGroupFields(value, prefix, ids);
+  if (!fields.ok) return fields;
   const files = parseFunctionalGroupFiles(value.files, `${prefix}.files`);
   if (!files.ok) return files;
+  const locations = parseFunctionalGroupLocations(value.locations, prefix);
+  if (!locations.ok) return locations;
   const tests = parseFunctionalGroupTests(value.tests, `${prefix}.tests`);
   if (!tests.ok) return tests;
-  const id = value.id.trim();
+  const id = (value.id as string).trim();
   ids.add(id);
   return {
     ok: true,
     value: {
-      id, target: value.target.trim(), behaviorChange: value.behaviorChange.trim(),
-      necessity: value.necessity.trim(), files: files.value, tests: tests.value
+      id, target: (value.target as string).trim(), behaviorChange: (value.behaviorChange as string).trim(),
+      necessity: (value.necessity as string).trim(), files: files.value, locations: locations.value, tests: tests.value
     }
   };
 }
@@ -301,11 +374,72 @@ function collectGroupMembership(
     for (const member of group.files) {
       const file = fileByPath.get(member);
       if (!file) return invalid(`change-composition group '${group.id}' references unknown diff file '${member}'`);
-      if (assigned.has(member)) return invalid(`diff file '${member}' belongs to more than one functional group`);
       assigned.add(member);
     }
   }
   return { ok: true, value: assigned };
+}
+
+function findMissingGroupFile(
+  indexed: Map<string, ChangeFile>, assigned: Set<string>, composition: Precheck
+): string | null {
+  const groupAllocatedPaths = new Set(composition.groups!.flatMap((group) => group.locations.full).map((range) => range.path));
+  const unassignedPaths = new Set(composition.unassigned!.full.map((range) => range.path));
+  const missingFile = [...indexed].find(([filePath, file]) => !assigned.has(filePath)
+    && !(file.locations.length > 0 && unassignedPaths.has(filePath) && !groupAllocatedPaths.has(filePath)));
+  return missingFile?.[0] ?? null;
+}
+
+function validateAllocatedFileMembers(groups: FunctionalGroup[], files: ChangeFile[]): ValidationResult<null> {
+  for (const group of groups) {
+    const allocatedPaths = new Set(group.locations.full.map((range) => range.path));
+    const memberPaths = new Set(group.files);
+    for (const filePath of allocatedPaths) {
+      if (!memberPaths.has(filePath)) return invalid(`change-composition group '${group.id}' allocates locations outside its files list`);
+    }
+    for (const filePath of memberPaths) {
+      const hasLineLocations = files.some((file) => (file.oldPath ?? file.newPath) === filePath && file.locations.length > 0);
+      if (hasLineLocations && !allocatedPaths.has(filePath)) return invalid(`change-composition group '${group.id}' lists a text file without allocated locations`);
+    }
+  }
+  return { ok: true, value: null };
+}
+
+type AssignedRange = { path: string; side: 'old' | 'new'; startLine: number; endLine: number };
+
+function validateAllocation(ranges: AssignedRange[], unassigned: AssignedRange[], files: ChangeFile[], scope: string): ValidationResult<null> {
+  const expected = new Map<string, Array<[number, number]>>();
+  for (const file of files) {
+    const filePath = file.oldPath ?? file.newPath!;
+    for (const location of file.locations) {
+      const key = `${filePath}\0${location.side}`;
+      expected.set(key, [...(expected.get(key) ?? []), [location.startLine, location.endLine]]);
+    }
+  }
+  const actual = new Map<string, Array<[number, number]>>();
+  for (const range of [...ranges, ...unassigned]) {
+    const key = `${range.path}\0${range.side}`;
+    if (!expected.has(key)) return invalid(`${scope} allocation references wrong path or direction '${range.path}' (${range.side})`);
+    actual.set(key, [...(actual.get(key) ?? []), [range.startLine, range.endLine]]);
+  }
+  const normalize = (intervals: Array<[number, number]>) => {
+    const merged: Array<[number, number]> = [];
+    for (const [start, end] of intervals.sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+      const previous = merged.at(-1);
+      if (previous && start <= previous[1]) return null;
+      if (previous && start === previous[1] + 1) previous[1] = end;
+      else merged.push([start, end]);
+    }
+    return merged;
+  };
+  const keys = new Set([...expected.keys(), ...actual.keys()]);
+  for (const key of keys) {
+    const wanted = normalize(expected.get(key) ?? []);
+    const supplied = normalize(actual.get(key) ?? []);
+    if (!wanted || !supplied) return invalid(`${scope} allocation overlaps or duplicates changed lines at '${key.replace('\0', ':')}'`);
+    if (JSON.stringify(wanted) !== JSON.stringify(supplied)) return invalid(`${scope} allocations do not exactly cover changed lines at '${key.replace('\0', ':')}'`);
+  }
+  return { ok: true, value: null };
 }
 
 function validateGroupMembership(checks: Precheck[], files: ChangeFile[]): ValidationResult<Precheck[]> {
@@ -315,8 +449,15 @@ function validateGroupMembership(checks: Precheck[], files: ChangeFile[]): Valid
   if (!indexed.ok) return indexed;
   const assigned = collectGroupMembership(composition.groups, indexed.value);
   if (!assigned.ok) return assigned;
-  const missing = [...indexed.value.keys()].find((key) => !assigned.value.has(key));
-  if (missing) return invalid(`diff file '${missing}' has no functional group`);
+  const unassigned = composition.unassigned;
+  if (!unassigned) return invalid('change-composition unassigned full ranges are required');
+  const fullRanges = composition.groups.flatMap((group) => group.locations.full);
+  const fullCheck = validateAllocation(fullRanges, unassigned.full, files, 'full');
+  if (!fullCheck.ok) return fullCheck;
+  const missingFile = findMissingGroupFile(indexed.value, assigned.value, composition);
+  if (missingFile) return invalid(`diff file '${missingFile}' is absent from change-composition groups`);
+  const members = validateAllocatedFileMembers(composition.groups, files);
+  if (!members.ok) return members;
   return { ok: true, value: checks };
 }
 
@@ -329,6 +470,19 @@ function parseEvidenceList(value: unknown, checkId: PrecheckId, prefix: string):
     evidence.push(parsed.value);
   }
   return { ok: true, value: evidence };
+}
+
+function parseUnassignedRanges(value: unknown, prefix: string): ValidationResult<Array<AssignedRange & { reason: 'shared' | 'unconfirmed'; explanation: string }>> {
+  if (!Array.isArray(value)) return invalid(`${prefix} must be an array`);
+  const ranges: Array<AssignedRange & { reason: 'shared' | 'unconfirmed'; explanation: string }> = [];
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) return invalid(`${prefix}[${index}] is invalid`);
+    const range = parseAssignedRange(item, `${prefix}[${index}]`);
+    if (!range.ok) return range;
+    if ((item.reason !== 'shared' && item.reason !== 'unconfirmed') || !isSafeRenderedText(item.explanation)) return invalid(`${prefix}[${index}] is invalid`);
+    ranges.push({ ...range.value, reason: item.reason, explanation: item.explanation.trim() });
+  }
+  return { ok: true, value: ranges };
 }
 
 function parseCheck(value: unknown, index: number, prefix: string): ValidationResult<Precheck> {
@@ -347,10 +501,14 @@ function parseCheck(value: unknown, index: number, prefix: string): ValidationRe
   }
   const groups = parseFunctionalGroups(value.groups, `${at}.groups`);
   if (!groups.ok) return groups;
-  return { ok: true, value: { id: expectedId, verdict: value.verdict, evidence: evidence.value, rationale: value.rationale, groups: groups.value } };
+  const rawUnassigned = value.unassigned;
+  if (!isRecord(rawUnassigned)) return invalid(`${at}.unassigned.full must be an array`);
+  const unassignedFull = parseUnassignedRanges(rawUnassigned.full, `${at}.unassigned.full`);
+  if (!unassignedFull.ok) return unassignedFull;
+  return { ok: true, value: { id: expectedId, verdict: value.verdict, evidence: evidence.value, rationale: value.rationale, groups: groups.value, unassigned: { full: unassignedFull.value } } };
 }
 
-function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: ChangeFile[]): ValidationResult<Precheck[]> {
+function parseChecks(value: unknown, prefix = 'precheck.checks', diff?: ChangeFile[]): ValidationResult<Precheck[]> {
   if (!Array.isArray(value) || value.length !== PRECHECK_IDS.length) return invalid(`${prefix} must contain exactly six checks`);
   const checks: Precheck[] = [];
   for (let index = 0; index < value.length; index += 1) {
@@ -358,37 +516,44 @@ function parseChecks(value: unknown, prefix = 'precheck.checks', diffFiles?: Cha
     if (!parsed.ok) return parsed;
     checks.push(parsed.value);
   }
-  if (diffFiles) return validateGroupMembership(checks, diffFiles);
+  if (diff) return validateGroupMembership(checks, diff);
   return { ok: true, value: checks };
 }
 
-function validateMechanicalReport(value: unknown): ValidationResult<MechanicalChangeReport> {
-  if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.version !== 1 || !isSha(value.base) || !isSha(value.head) || !isSha(value.mergeBase) || !isSha(value.patchSha256)) {
-    return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+function parseScopedDiffContents(value: Record<string, unknown>, errorCode: string): ValidationResult<ScopedDiff> {
+  if (value.kind !== 'merge-base' || !isSha(value.from) || !isSha(value.to) || value.mergeBase !== value.from || !isSha(value.patchSha256)) {
+    return invalid('complete PR diff identity is invalid', errorCode);
   }
-  if (!Array.isArray(value.files)) return invalid('mechanical report files must be an array', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (!Array.isArray(value.files)) return invalid('complete PR diff files must be an array', errorCode);
   const files: ChangeFile[] = [];
   for (let index = 0; index < value.files.length; index += 1) {
-    const parsed = parseChangeFile(value.files[index], index);
-    if (!parsed.ok) return { ...parsed, error: { ...parsed.error, code: 'PR_CHANGE_REPORT_MECHANICAL_INVALID' } };
+    const parsed = withErrorCode(parseChangeFile(value.files[index], index), errorCode);
+    if (!parsed.ok) return parsed;
     files.push(parsed.value);
   }
-  const totals = parseTotals(value.totals);
-  if (!totals.ok) return { ...totals, error: { ...totals.error, code: 'PR_CHANGE_REPORT_MECHANICAL_INVALID' } };
-  if (!totalsMatchFiles(totals.value, files)) return invalid('mechanical report totals do not match files', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  return {
-    ok: true,
-    value: {
-      version: 1,
-      base: value.base,
-      head: value.head,
-      mergeBase: value.mergeBase,
-      patchSha256: value.patchSha256,
-      files,
-      totals: totals.value
-    }
-  };
+  const totals = withErrorCode(parseTotals(value.totals), errorCode);
+  if (!totals.ok) return totals;
+  if (!totalsMatchFiles(totals.value, files)) return invalid('complete PR diff totals do not match files', errorCode);
+  return { ok: true, value: { kind: 'merge-base', from: value.from, to: value.to, mergeBase: value.mergeBase, patchSha256: value.patchSha256, files, totals: totals.value } };
+}
+
+function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff> {
+  if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return parseScopedDiffContents(value, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+}
+
+function validateMechanicalFull(value: unknown, base: string, head: string): ValidationResult<ScopedDiff> {
+  const full = validateScopedMechanical(value);
+  if (!full.ok) return full;
+  if (!isSha(base) || full.value.to !== head || full.value.mergeBase !== full.value.from) return invalid('mechanical complete PR diff identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  return full;
+}
+
+function validateMechanicalReport(value: unknown): ValidationResult<MechanicalChangeReport> {
+  if (!isRecord(value) || value.version !== 3 || !isSha(value.base) || !isSha(value.head)) return invalid('mechanical bundle version or PR identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  const full = validateMechanicalFull(value.full, value.base, value.head);
+  if (!full.ok) return full;
+  return { ok: true, value: { version: 3, base: value.base, head: value.head, full: full.value } };
 }
 
 function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCandidate> {
@@ -401,25 +566,16 @@ function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCan
   return { ok: true, value: { taskIntentSha256, checks: parsed.value } };
 }
 
-function parseReportDiff(diff: Record<string, unknown>): ValidationResult<{ files: ChangeFile[]; totals: ChangeTotals }> {
-  if (!isSha(diff.mergeBase) || !isSha(diff.patchSha256) || !Array.isArray(diff.files)) return invalid('change report diff is invalid');
-  const files: ChangeFile[] = [];
-  for (let index = 0; index < diff.files.length; index += 1) {
-    const parsed = parseChangeFile(diff.files[index], index);
-    if (!parsed.ok) return parsed;
-    files.push(parsed.value);
-  }
-  const totals = parseTotals(diff.totals);
-  if (!totals.ok) return totals;
-  if (!totalsMatchFiles(totals.value, files)) return invalid('change report totals do not match files');
-  return { ok: true, value: { files, totals: totals.value } };
+function parseScopedDiff(diff: unknown): ValidationResult<ScopedDiff> {
+  if (!isRecord(diff)) return invalid('change report complete PR diff is invalid');
+  return parseScopedDiffContents(diff, 'PR_CHANGE_REPORT_INVALID');
 }
 
-function parseReportPrecheck(report: Record<string, unknown>, files: ChangeFile[]): ValidationResult<Precheck[]> {
+function parseReportPrecheck(report: Record<string, unknown>, full: ChangeFile[]): ValidationResult<Precheck[]> {
   if ((report.precheck as Record<string, unknown>).formalReview !== false ||
       ((report.precheck as Record<string, unknown>).verdict !== 'clear' && (report.precheck as Record<string, unknown>).verdict !== 'needs-review') ||
       ((report.precheck as Record<string, unknown>).route !== 'watch-pr' && (report.precheck as Record<string, unknown>).route !== 'review-code')) return invalid('change report precheck envelope is invalid');
-  const checks = parseChecks((report.precheck as Record<string, unknown>).checks, 'precheck.checks', files);
+  const checks = parseChecks((report.precheck as Record<string, unknown>).checks, 'precheck.checks', full);
   if (!checks.ok) return checks;
   const derivedVerdict: PrecheckVerdict = checks.value.every((check) => check.verdict === 'pass') ? 'clear' : 'needs-review';
   const derivedRoute: PrecheckRoute = derivedVerdict === 'clear' ? 'watch-pr' : 'review-code';
@@ -427,43 +583,40 @@ function parseReportPrecheck(report: Record<string, unknown>, files: ChangeFile[
   return checks;
 }
 
+function parseReportIdentityPart(part: unknown, name: string): ValidationResult<{ repository: string; ref: string; sha: string }> {
+  if (!isRecord(part) || !isNonEmptyString(part.repository) || !isNonEmptyString(part.ref) || !isSha(part.sha)) return invalid(`change report identity.${name} is invalid`);
+  return { ok: true, value: { repository: part.repository, ref: part.ref, sha: part.sha } };
+}
+
+function parseReportIdentity(value: Record<string, unknown>): ValidationResult<PullRequestIdentity> {
+  if (!isNonEmptyString(value.repository) || !isResourceIdentity(value.resource)) return invalid('change report identity is invalid');
+  const base = parseReportIdentityPart(value.base, 'base');
+  if (!base.ok) return base;
+  const head = parseReportIdentityPart(value.head, 'head');
+  if (!head.ok) return head;
+  return { ok: true, value: { repository: value.repository, resource: value.resource, base: base.value, head: head.value } };
+}
+
 function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport> {
-  if (!isRecord(value)) return invalid('change report must be an object');
-  if (value.version !== REPORT_VERSION || !isRecord(value.identity) || !isRecord(value.inputs) || !isRecord(value.diff) || !isRecord(value.precheck)) {
+  if (!isRecord(value) || value.version !== REPORT_VERSION || !isRecord(value.identity) || !isRecord(value.inputs) || !isRecord(value.diff) || !isRecord(value.precheck)) {
     return invalid('change report has an invalid top-level shape');
   }
-  const identity = value.identity;
-  const identityRepository = identity.repository;
-  const identityResource = identity.resource;
-  if (!isNonEmptyString(identityRepository) || !isResourceIdentity(identityResource)) return invalid('change report identity is invalid');
-  const parseIdentityPart = (part: unknown, name: string): ValidationResult<{ repository: string; ref: string; sha: string }> => {
-    if (!isRecord(part) || !isNonEmptyString(part.repository) || !isNonEmptyString(part.ref) || !isSha(part.sha)) return invalid(`change report identity.${name} is invalid`);
-    return { ok: true, value: { repository: part.repository, ref: part.ref, sha: part.sha } };
-  };
-  const base = parseIdentityPart(identity.base, 'base');
-  const head = parseIdentityPart(identity.head, 'head');
-  if (!base.ok) return base;
-  if (!head.ok) return head;
+  const identity = parseReportIdentity(value.identity);
+  if (!identity.ok) return identity;
   const inputTaskIntentSha256 = value.inputs.taskIntentSha256;
   if (!isSha(inputTaskIntentSha256)) return invalid('change report taskIntentSha256 is invalid');
-  const diff = value.diff;
-  const parsedDiff = parseReportDiff(diff as Record<string, unknown>);
-  if (!parsedDiff.ok) return parsedDiff;
-  const { files, totals } = parsedDiff.value;
-  const checks = parseReportPrecheck(value as Record<string, unknown>, files);
+  const full = parseScopedDiff(value.diff.full);
+  if (!full.ok) return full;
+  if (full.value.to !== identity.value.head.sha || full.value.mergeBase !== full.value.from) return invalid('change report complete PR endpoints do not match pull request identity');
+  const checks = parseReportPrecheck(value, full.value.files);
   if (!checks.ok) return checks;
   return {
     ok: true,
     value: {
       version: REPORT_VERSION,
-      identity: {
-        repository: identityRepository,
-        resource: identityResource,
-        base: base.value,
-        head: head.value
-      },
+      identity: identity.value,
       inputs: { taskIntentSha256: inputTaskIntentSha256 },
-      diff: { mergeBase: diff.mergeBase as string, patchSha256: diff.patchSha256 as string, files, totals },
+      diff: { full: full.value },
       precheck: { verdict: value.precheck.verdict as PrecheckVerdict, formalReview: false, route: value.precheck.route as PrecheckRoute, checks: checks.value }
     }
   };
@@ -503,12 +656,7 @@ function buildPrChangeReport(
     version: REPORT_VERSION,
     identity,
     inputs: { taskIntentSha256 },
-    diff: {
-      mergeBase: mechanical.mergeBase,
-      patchSha256: mechanical.patchSha256,
-      files: mechanical.files,
-      totals: mechanical.totals
-    },
+    diff: { full: mechanical.full },
     precheck
   });
 }
@@ -555,15 +703,22 @@ function writePrChangeReportAtomic(file: string, report: PrChangeReport): void {
 
 function runMechanicalChangeReport(repoRoot: string, baseSha: string, headSha: string): MechanicalChangeReport {
   const script = path.join(repoRoot, '.agents', 'skills', 'create-pr', 'scripts', 'change-report.mjs');
-  const output = execFileSync(process.execPath, [script, '--base', baseSha, '--head', headSha, '--cwd', repoRoot], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024
-  });
-  const parsed: unknown = JSON.parse(output);
-  const validated = validateMechanicalReport(parsed);
-  if (!validated.ok) throw new Error(`${validated.error.code}: ${validated.error.message}`);
-  return validated.value;
+  const invoke = (): ScopedDiff => {
+    const args = [script, '--base', baseSha, '--head', headSha, '--cwd', repoRoot];
+    const output = execFileSync(process.execPath, args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024
+    });
+    const parsed: unknown = JSON.parse(output);
+    const validated = validateScopedMechanical(parsed);
+    if (!validated.ok) throw new Error(`${validated.error.code}: ${validated.error.message}`);
+    return validated.value;
+  };
+  const full = invoke();
+  const bundle = validateMechanicalReport({ version: 3, base: baseSha, head: headSha, full });
+  if (!bundle.ok) throw new Error(`${bundle.error.code}: ${bundle.error.message}`);
+  return bundle.value;
 }
 
 const DOCUMENTATION_CATEGORY = { label: '文档', prefixes: ['docs/'] } as const;
@@ -693,40 +848,96 @@ function renderEvidence(evidence: Evidence): string {
   return `  - 证据：<code>${escapeReportText(evidence.path)}</code>${location}：${escapeReportText(evidence.detail)}`;
 }
 
-function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[]): string[] {
-  const filesByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
-  return groups.flatMap((group) => {
-    const members = group.files.map((member) => filesByPath.get(member)!);
-    const additions = members.reduce((total, file) => total + (file.additions ?? 0), 0);
-    const deletions = members.reduce((total, file) => total + (file.deletions ?? 0), 0);
-    const unknownFiles = members.filter((file) => file.additions === null).length;
-    return [
-      `  - **功能组 ${escapeReportText(group.id)}**：${escapeReportText(group.target)}`,
-      `    - 行为变化：${escapeReportText(group.behaviorChange)}`,
-      `    - 必要性：${escapeReportText(group.necessity)}`,
-      `    - 文件：${group.files.map((member) => {
-        const file = filesByPath.get(member)!;
-        return file.oldPath && file.newPath && file.oldPath !== file.newPath
-          ? `<code>${escapeReportText(file.oldPath)}</code> → <code>${escapeReportText(file.newPath)}</code>`
-          : `<code>${escapeReportText(member)}</code>`;
-      }).join('、')}`,
-      `    - 可计数行数（由正式 diff 逐文件推导）：新增 ${additions}、删除 ${deletions}、净增 ${additions - deletions}${unknownFiles ? `；另有 ${unknownFiles} 个文件行数不可计` : ''}。`,
-      `    - 测试覆盖：${escapeReportText(group.tests.coverage)}；成本：${escapeReportText(group.tests.cost)}`
-    ];
+function countLocations(ranges: AssignedRange[]): number {
+  return ranges.reduce((sum, range) => sum + range.endLine - range.startLine + 1, 0);
+}
+
+function escapeReportTableCell(value: string): string {
+  return escapeReportText(value).replaceAll('|', '&#124;');
+}
+
+function shortSha(value: string): string {
+  return value.slice(0, 7);
+}
+
+function renderLineCountTriple(added: number, deleted: number): [string, string, string] {
+  return [String(added), String(deleted), signedNumber(added - deleted)];
+}
+
+function renderScopeLineCounts(ranges: AssignedRange[]): [string, string, string] {
+  const added = countLocations(ranges.filter((range) => range.side === 'new'));
+  const deleted = countLocations(ranges.filter((range) => range.side === 'old'));
+  return renderLineCountTriple(added, deleted);
+}
+
+function renderFunctionalGroupRow(group: FunctionalGroup): string {
+  const counts = renderScopeLineCounts(group.locations.full);
+  return `| ${escapeReportTableCell(`${group.id} — ${group.target}`)} | ${counts[0]} | ${counts[1]} | ${counts[2]} | — |`;
+}
+
+function renderUnassignedSummaryRows(unassigned: Precheck['unassigned']): string[] {
+  return (['shared', 'unconfirmed'] as const).flatMap((reason) => {
+    const ranges = unassigned?.full.filter((range) => range.reason === reason) ?? [];
+    if (ranges.length === 0) return [];
+    const counts = renderScopeLineCounts(ranges);
+    const label = reason === 'shared' ? '共享' : '待确认';
+    return [`| 未归属（${label}） | ${counts[0]} | ${counts[1]} | ${counts[2]} | — |`];
   });
 }
 
-function renderPrechecks(checks: Precheck[], files: ChangeFile[]): string[] {
+function renderFunctionalGroupTotals(report: PrChangeReport): string {
+  const full = report.diff.full;
+  const unknownFiles = full.files.filter((file) => file.additions === null).length;
+  const counts = renderLineCountTriple(full.totals.additions, full.totals.deletions);
+  return `| **合计（机械统计）** | ${counts[0]} | ${counts[1]} | ${counts[2]} | ${unknownFiles} 个文件 |`;
+}
+
+function renderFunctionalGroupSummary(groups: FunctionalGroup[], report: PrChangeReport, unassigned: Precheck['unassigned']): string[] {
+  const rows = groups.map(renderFunctionalGroupRow);
+  rows.push(...renderUnassignedSummaryRows(unassigned));
+  rows.push(renderFunctionalGroupTotals(report));
+  return [
+    '#### 功能模块代码增减（行）',
+    '',
+    `完整 PR：目标分支 merge-base \`${shortSha(report.diff.full.mergeBase)}\` → 当前 HEAD \`${shortSha(report.diff.full.to)}\`。`,
+    '',
+    '| 功能模块 | 新增行 | 删除行 | 净增行 | 不可计行文件 |',
+    '| --- | ---: | ---: | ---: | --- |',
+    ...rows,
+    '',
+    '模块行只统计已分配的精确文本行；binary 或 numstat 未知文件不虚构行数，文件数在机械总计中透明列出。'
+  ];
+}
+
+function renderFunctionalGroups(groups: FunctionalGroup[], files: ChangeFile[], unassigned: Precheck['unassigned']): string[] {
+  const filesByPath = new Map(files.map((file) => [file.oldPath ?? file.newPath!, file]));
+  return groups.flatMap((group) => [
+    `  - **功能组 ${escapeReportText(group.id)}**：${escapeReportText(group.target)}`,
+    `    - 行为变化：${escapeReportText(group.behaviorChange)}`,
+    `    - 必要性：${escapeReportText(group.necessity)}`,
+    `    - 文件：${group.files.map((member) => {
+      const file = filesByPath.get(member) ?? [...filesByPath.values()].find((candidate) => candidate.oldPath === member || candidate.newPath === member)!;
+      return file.oldPath && file.newPath && file.oldPath !== file.newPath
+        ? `<code>${escapeReportText(file.oldPath)}</code> → <code>${escapeReportText(file.newPath)}</code>`
+        : `<code>${escapeReportText(member)}</code>`;
+    }).join('、')}`,
+    `    - 测试覆盖：${escapeReportText(group.tests.coverage)}；成本：${escapeReportText(group.tests.cost)}`
+  ]).concat((unassigned?.full ?? []).length === 0 ? [] : [
+    `  - **完整 PR 未归属位置说明**：${unassigned!.full.map((item) => `${escapeReportText(item.reason)}：${escapeReportText(item.explanation)}`).join('；')}`
+  ]);
+}
+
+function renderPrechecks(checks: Precheck[]): string[] {
   return checks.flatMap((check) => [
     `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeReportText(check.rationale)}`,
-    ...check.evidence.map(renderEvidence),
-    ...(check.groups ? renderFunctionalGroups(check.groups, files) : [])
+    ...check.evidence.map(renderEvidence)
   ]);
 }
 
 function renderCanonicalChangeReport(report: PrChangeReport): string {
-  const totals = report.diff.totals;
-  const categories = summarizeChangeCategories(report.diff.files);
+  const totals = report.diff.full.totals;
+  const composition = report.precheck.checks.find((check) => check.id === 'change-composition');
+  const categories = summarizeChangeCategories(report.diff.full.files);
   const rows = categories.map(({ label, totals: categoryTotals }) => {
     const [additions, deletions, netLines] = renderLineCounts(categoryTotals);
     return `| ${label} | ${categoryTotals.files} | ${additions} | ${deletions} | ${netLines} | ${categoryTotals.oldBytes} | ${categoryTotals.newBytes} | ${signedNumber(categoryTotals.netBytes)} | ${categoryTotals.textFiles} / ${categoryTotals.binaryFiles} |`;
@@ -746,15 +957,24 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     ...rows,
     `| **合计** | ${totals.files} | ${additions} | ${deletions} | ${netLines} | ${totals.oldBytes} | ${totals.newBytes} | ${signedNumber(totals.netBytes)} | ${totals.textFiles} / ${totals.binaryFiles} |`,
     '',
+    ...renderFunctionalGroupSummary(composition?.groups ?? [], report, composition?.unassigned),
+    '',
+    '#### 功能模块与验证变化',
+    ...renderFunctionalGroups(
+      composition?.groups ?? [],
+      report.diff.full.files,
+      composition?.unassigned
+    ),
+    '',
     `- 总体统计：新增 ${totals.additions} 行、删除 ${totals.deletions} 行；旧字节 ${totals.oldBytes}，新字节 ${totals.newBytes}。`,
     `- 变更明细按高层类别聚合展示；完整逐文件事实保留在结构化报告中供审计。`,
-    `- 补丁摘要：\`${report.diff.patchSha256}\`。`,
+    `- 完整 PR 补丁摘要：\`${report.diff.full.patchSha256}\`；merge-base：\`${report.diff.full.mergeBase}\`。`,
     '',
-    ...renderRepresentativeFiles(report.diff.files),
+    ...renderRepresentativeFiles(report.diff.full.files),
     '',
     '#### 适宜性预检',
     `- 结论：${precheckSummary}；${route}；正式审查：否。`,
-    ...renderPrechecks(report.precheck.checks, report.diff.files)
+    ...renderPrechecks(report.precheck.checks)
   ].join('\n');
 }
 

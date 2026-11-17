@@ -57,6 +57,8 @@ function git(cwd: string, args: string[]): string {
 }
 
 function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): PrecheckCandidate {
+  const fullFiles = diff.full.files;
+  const allocations = (files: typeof fullFiles) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
     checks: ['target-alignment', 'change-composition', 'compatibility-policy', 'legacy-path-cleanup', 'redundancy', 'scope-discipline'].map((id) => ({
@@ -66,9 +68,10 @@ function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): Prec
       rationale: 'The complete diff is within the approved scope.',
       ...(id === 'change-composition' ? { groups: [{
         id: 'canonical-summary', target: 'Preserve the full summary contract', behaviorChange: 'Render typed summary content with the canonical report.',
-        necessity: 'Ensure refreshed summaries retain required sections.', files: diff.files.map((file) => file.oldPath ?? file.newPath!),
+        necessity: 'Ensure refreshed summaries retain required sections.', files: [...new Set(fullFiles.map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(fullFiles) },
         tests: { coverage: 'PR summary unit and integration fixtures.', cost: 'One fixture reused across report generation.' }
-      }] } : {})
+      }], unassigned: { full: [] } } : {})
     }))
   };
 }
@@ -520,6 +523,32 @@ test('summary context does not adopt a display number from a mismatched provider
   }
 });
 
+test('summary context marks tampered changed-line inventory stale after mechanical recomputation', async () => {
+  const fixture = summaryFixture();
+  try {
+    const report = JSON.parse(fs.readFileSync(fixture.reportPath, 'utf8')) as any;
+    const location = report.diff.full.files[0].locations[0];
+    const allocation = report.precheck.checks.find((check: { id: string }) => check.id === 'change-composition').groups[0].locations.full.find((range: { path: string; side: string; startLine: number }) =>
+      range.path === (report.diff.full.files[0].oldPath ?? report.diff.full.files[0].newPath) && range.side === location.side && range.startLine === location.startLine);
+    assert.ok(allocation);
+    location.startLine += 10;
+    location.endLine += 10;
+    allocation.startLine += 10;
+    allocation.endLine += 10;
+    fs.writeFileSync(fixture.reportPath, `${JSON.stringify(report)}\n`);
+
+    const context = await summaryContext(fixture.taskId, {
+      cwd: fixture.root,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha)
+    });
+
+    assert.equal(context.changeReport.status, 'stale');
+    assert.match(context.changeReport.reason ?? '', /patch or mechanical statistics are stale/u);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('manual-validation pending summary uses the opaque PR snapshot number and checks its transaction', async () => {
   const fixture = summaryFixture();
   try {
@@ -793,7 +822,7 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
       client: resolvedContextClient(fixture.root, 'comments', fixture.baseSha, fixture.headSha)
     });
-    assert.equal(first.status, 'applied');
+    assert.equal(first.status, 'applied', JSON.stringify(first.error));
     assert.equal(first.report?.status, 'written');
     const replay = await reportWrite(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
@@ -801,6 +830,58 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
     });
     assert.equal(replay.status, 'no-op');
     assert.equal(replay.report?.status, 'no-op');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('change-report recomputes the complete PR after the base advances and rejects tampering', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskPath = path.join(taskWorkspaceRoot(fixture.root), 'active', fixture.taskId, 'task.md');
+    const taskContent = fs.readFileSync(taskPath, 'utf8');
+    const digest = taskIntentDigest(taskContent);
+    if (!digest.ok) throw new Error(digest.error.message);
+
+    git(fixture.root, ['switch', '-q', '-c', 'advanced-base', fixture.baseSha]);
+    fs.writeFileSync(path.join(fixture.root, 'main-only.txt'), 'main advance\n');
+    git(fixture.root, ['add', 'main-only.txt']);
+    git(fixture.root, ['commit', '-qm', 'main advance']);
+    const advancedBase = git(fixture.root, ['rev-parse', 'HEAD']);
+    git(fixture.root, ['switch', '-q', 'feature']);
+    const mechanical = runMechanicalChangeReport(fixture.root, advancedBase, fixture.headSha);
+    assert.equal(mechanical.full.mergeBase, fixture.baseSha);
+    const mechanicalFile = path.join(fixture.root, 'mechanical.json');
+    const precheckFile = path.join(fixture.root, 'precheck.json');
+    const writeInputs = (value: MechanicalChangeReport) => {
+      fs.writeFileSync(mechanicalFile, JSON.stringify(value));
+      fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256, value)));
+    };
+    const client = resolvedContextClient(fixture.root, 'comments', advancedBase, fixture.headSha);
+    writeInputs(mechanical);
+    const options = { cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile, client };
+    const first = await reportWrite(fixture.taskId, options);
+    assert.equal(first.status, 'applied');
+    assert.equal(first.report?.status, 'written');
+    const replay = await reportWrite(fixture.taskId, options);
+    assert.equal(replay.status, 'no-op');
+    assert.equal(replay.report?.status, 'no-op');
+
+    const tampered = structuredClone(mechanical);
+    tampered.full.patchSha256 = '0'.repeat(64);
+    const tamperedCandidate = candidate(digest.value.sha256, tampered);
+    const tamperedReport = buildPrChangeReport({
+      repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
+      base: { repository: 'acme/widgets', ref: 'main', sha: advancedBase },
+      head: { repository: 'acme/widgets', ref: 'feature', sha: fixture.headSha }
+    }, digest.value.sha256, tampered, tamperedCandidate);
+    assert.equal(tamperedReport.ok, true, tamperedReport.ok ? undefined : JSON.stringify(tamperedReport.error));
+    if (!tamperedReport.ok) return;
+    writePrChangeReportAtomic(fixture.reportPath, tamperedReport.value);
+    writeInputs(tampered);
+    const rejected = await reportWrite(fixture.taskId, options);
+    assert.equal(rejected.status, 'failed');
+    assert.equal(rejected.error?.code, 'PR_CHANGE_REPORT_MECHANICAL_MISMATCH');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -824,7 +905,7 @@ test('change-report reads task semantics after provider context resolution', asy
         onContextResolved: () => fs.writeFileSync(taskPath, updatedTask)
       })
     });
-    assert.equal(result.status, 'applied');
+    assert.equal(result.status, 'applied', JSON.stringify(result.error));
     assert.equal(result.error, null);
     const report = JSON.parse(fs.readFileSync(fixture.reportPath, 'utf8')) as { inputs: { taskIntentSha256: string } };
     assert.equal(report.inputs.taskIntentSha256, updatedDigest.value.sha256);

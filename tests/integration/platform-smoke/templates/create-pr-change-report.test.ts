@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createTempDir, filePath, gitSafeEnv, initIsolatedGitRepo } from "../../../helpers.ts";
+import { validateMechanicalReport } from "../../../../lib/platform/pr-change-report.ts";
 
 const runtimeScript = filePath(".agents/skills/create-pr/scripts/change-report.mjs");
 const templateScript = filePath("templates/.agents/skills/create-pr/scripts/change-report.mjs");
@@ -67,8 +68,14 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
     deletions: 1,
     oldBytes: Buffer.byteLength(compactBefore),
     newBytes: Buffer.byteLength(compactAfter),
-    netBytes: Buffer.byteLength(compactAfter) - Buffer.byteLength(compactBefore)
+    netBytes: Buffer.byteLength(compactAfter) - Buffer.byteLength(compactBefore),
+    locations: [
+      { side: "old", startLine: 1, endLine: 1 },
+      { side: "new", startLine: 1, endLine: 1 }
+    ]
   });
+  assert.equal(report.kind, "merge-base");
+  assert.equal(report.to, head);
   assert.equal(renamed.status, "R100");
   assert.equal(renamed.oldBytes, Buffer.byteLength(renamedContent));
   assert.equal(renamed.newBytes, Buffer.byteLength(renamedContent));
@@ -77,6 +84,7 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
   assert.equal(binary.deletions, null);
   assert.equal(binary.oldBytes, 0);
   assert.equal(binary.newBytes, binaryContent.byteLength);
+  assert.deepEqual(binary.locations, []);
 
   const expectedOldBytes = Buffer.byteLength(compactBefore) + Buffer.byteLength(renamedContent) + Buffer.byteLength(removedContent);
   const expectedNewBytes = Buffer.byteLength(compactAfter) + Buffer.byteLength(renamedContent) + binaryContent.byteLength;
@@ -90,6 +98,77 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
     newBytes: expectedNewBytes,
     netBytes: expectedNewBytes - expectedOldBytes
   });
+});
+
+test("create-pr raw complete-PR output validates with merge-base endpoints", (t) => {
+  const repo = createTempDir("create-pr-change-report-wire-");
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  initIsolatedGitRepo(repo);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+
+  fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "base"]);
+  const base = git(repo, ["rev-parse", "HEAD"]);
+
+  fs.writeFileSync(path.join(repo, "feature.txt"), "feature\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "feature head"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const rawFull = JSON.parse(execFileSync(process.execPath, [
+    runtimeScript, "--base", base, "--head", head, "--cwd", repo
+  ], { encoding: "utf8", env: gitSafeEnv() }));
+  const bundle = {
+    version: 3,
+    base,
+    head,
+    full: rawFull
+  };
+
+  assert.equal(rawFull.kind, "merge-base");
+  assert.equal(rawFull.from, base);
+  assert.equal(rawFull.to, head);
+  assert.equal(validateMechanicalReport(bundle).ok, true);
+  assert.equal(validateMechanicalReport({
+    ...bundle,
+    full: { ...rawFull, to: base }
+  }).ok, false);
+  assert.equal(validateMechanicalReport({ ...bundle, head: base }).ok, false);
+});
+
+test("create-pr change report counts diff content beginning with header-like prefixes", (t) => {
+  const repo = createTempDir("create-pr-change-report-prefixes-");
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  initIsolatedGitRepo(repo);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+
+  fs.writeFileSync(path.join(repo, "added.txt"), "before\n");
+  fs.writeFileSync(path.join(repo, "deleted.txt"), "-- deleted content\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "base"]);
+  const base = git(repo, ["rev-parse", "HEAD"]);
+
+  fs.writeFileSync(path.join(repo, "added.txt"), "++ actual content\n");
+  fs.writeFileSync(path.join(repo, "deleted.txt"), "ordinary\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "header-like content"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+
+  const report = JSON.parse(execFileSync(process.execPath, [
+    runtimeScript, "--base", base, "--head", head, "--cwd", repo
+  ], { encoding: "utf8", env: gitSafeEnv() }));
+  const added = report.files.find((file: { newPath: string | null }) => file.newPath === "added.txt");
+  const deleted = report.files.find((file: { newPath: string | null }) => file.newPath === "deleted.txt");
+  assert.deepEqual(added.locations, [
+    { side: "old", startLine: 1, endLine: 1 },
+    { side: "new", startLine: 1, endLine: 1 }
+  ]);
+  assert.deepEqual(deleted.locations, [
+    { side: "old", startLine: 1, endLine: 1 },
+    { side: "new", startLine: 1, endLine: 1 }
+  ]);
 });
 
 test("create-pr installs the same change report calculator as the local skill", () => {

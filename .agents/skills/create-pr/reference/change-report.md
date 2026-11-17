@@ -4,7 +4,7 @@
 {"source":"platform-pr-inspect","diff":"three-dot-find-renames","metrics":["numstat-lines","git-blob-bytes"],"publish":["pr-summary","user-response"]}
 -->
 
-PR 创建或复用成功后，使用 `platform-pr inspect` 返回的权威 `base.sha` 与 `head.sha` 统计完整 PR 差异，不以最后一个 commit 或工作树状态代替。完整 PR 继续使用下文现有 three-dot、merge-base、patch 与 sidecar 身份。任务意图 digest 只覆盖 `# 任务`/`# Task` 到 `## 上下文`/`## Context` 的语义区间，因此生命周期日志、收据和版本元数据不会使同一 head 的 sidecar 失效。
+PR 创建或复用成功后，使用 `platform-pr inspect` 返回的权威 `base.sha` 与 `head.sha` 统计完整 PR 差异，不以最后一个 commit 或工作树状态代替。统计范围是目标分支 merge-base 到当前 PR HEAD。任务意图 digest 只覆盖 `# 任务`/`# Task` 到 `## 上下文`/`## Context` 的语义区间。
 
 ## 证据命令
 
@@ -22,24 +22,22 @@ agent-infra-internal platform-pr change-report {task-id} \
   --precheck-file {precheck-candidate-file}
 ```
 
-core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的 `target-alignment`、`change-composition`、`compatibility-policy`、`legacy-path-cleanup`、`redundancy`、`scope-discipline`。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
+脚本输出作为 mechanical bundle 的 `full` diff。当前 bundle 使用 schema v3，持久化 canonical report 使用 schema v5；两者都只承载完整 PR merge-base→HEAD 比较。core 会校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的六项 precheck。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
 
-生成 candidate 前，先根据任务目标和完整 diff 列出功能变化组；不得把文件职责概述或类别总数当作功能组。每个功能组作为现有 `change-composition` 检查中的 typed `groups[]` 对象，包含 `id`、`target`、`behaviorChange`、`necessity`、`files[]` 和 `tests:{coverage,cost}`。`rationale`/`Evidence[]` 仅补充判断和定位，不能替代组对象。
+生成 candidate 前，先根据任务目标与完整 PR diff 列出功能变化组；不得把文件职责概述或类别总数当作功能组。每个功能组作为现有 `change-composition` 检查中的 typed `groups[]` 对象，包含 `id`、`target`、`behaviorChange`、`necessity`、`files[]`、`locations:{full:[]}` 和 `tests:{coverage,cost}`。`rationale`/`Evidence[]` 仅补充判断和定位，不能替代组对象。每个位置对象包含 canonical `path`、`side`（新增 `new` / 删除 `old`）、`startLine` 和 `endLine`。
 
-- `files[]` 只能引用完整正式 diff 中的 canonical 文件路径（机械报告的 `oldPath ?? newPath`）；rename 仍作为一条机械记录保留 old/new 两端。正式 diff 中每个文件必须恰好归入一个组，不得遗漏、重复或引用 diff 外文件。
-- 不要在 candidate 中填写组级行数。core 从绑定的正式 diff 逐文件 additions/deletions 聚合各组的新增、删除和净增，并将各组加总与正式 diff totals 对账。`null` 行数保持不可计数，文件仍需归组且不能改写为零。
+- `files[]` 只能引用完整 PR 正式 diff 中的 canonical 文件路径（机械报告的 `oldPath ?? newPath`）；同一混合文件可出现在多个功能组。rename 仍作为一条机械记录保留 old/new 两端。
+- `locations.full` 完整覆盖实际变更行。每个位置只能属于一个功能组，或列入 `unassigned:{full:[]}` 并注明 `reason=shared|unconfirmed` 与解释。core 拒绝重复、越界、方向/路径错误和遗漏，并按坐标派生组及未归属项的新增/删除数；并与完整 PR totals 对账。候选不得提交组级数字。
+- binary 的 `numstat=null` 不生成位置；文件继续出现在文件和类别报告中，功能归因标明行数不可计，不得填零或虚构范围。
 - 每条 `Evidence[].detail` 可引用具体代码、测试或文档变更；`tests.coverage` 与 `tests.cost` 分别说明覆盖风险/已有覆盖依据，以及本次新增 fixture / 测试的成本。没有测试变更时说明现有覆盖依据。
-- 完整 PR 与本轮 head-to-head 增量分别列示和对账；上一 head 未确认时不得推算增量数值。
 
 `target-alignment` 只有在每个功能组都能对应任务目标或验收标准时才能判为 `pass`。`change-composition` 的 typed 结构、文件集合和机械计数通过结构校验后，仍须按现有语义判断组别、行为增减、必要性、测试覆盖/成本和证据是否充分；结构或解释缺项、矛盾、无法核实时保持 `needs-review` 并说明缺口，使 core 路由到 `review-code`。不得因结构完整或 CI 通过而自动判定内容充分。
 
 其他四项检查仍分别给出实际结论；证据详情遵循当前已部署技能的语言，中文技能必须使用中文。canonical renderer 会展示全部 rationale 和 evidence。源码行数只说明文本增删；不能据此推断执行次数或流程统一。
 
-## 完整 PR 与本轮增量
+## 完整 PR 范围
 
-完整 PR 统计始终使用当前权威 snapshot 的 `base.sha...head.sha` 和现有 three-dot mechanical report。报告可另外描述最近一次有效 canonical sidecar 的 `identity.head.sha` 到当前 snapshot `head.sha` 的本轮增量。重建报告前，使用现有 `readPrChangeReport` 校验先前 sidecar；仅当其 repository/resource identity 与当前 PR 一致时，才把旧 head 作为增量起点。用 `git diff --find-renames --numstat {previous-head} {current-head}`、`--name-status` 和 `--summary` 的两个端点比较本轮树差异，不使用 merge-base 代替这个范围，不把增量 totals 加到完整 PR totals。
-
-第一次没有旧 sidecar、旧报告无效或 PR identity 不符时，写明“上一 head 不可确认”，不得由完整 PR 统计推算本轮数字，也不得填造零值。两个 SHA 相同则说明 head 未变化，不额外生成统计。rebase 后仍按旧 head 与新 head 两个树端点比较；结果描述树差异，不代表提交数或执行次数变化。旧 sidecar 缺失/无效不阻断完整 PR 报告生成。
+完整 PR 统计使用当前权威 snapshot 的 `base.sha...head.sha` 和 three-dot mechanical report。类别统计表后紧接功能模块数字表，详细行为、必要性、文件和测试说明随后展示。renderer 从 core 校验后的结构化报告生成 canonical 内容。
 
 脚本在 merge base 与 head 之间同时计算 `numstat` 行数和 Git blob 的精确字节数。字节比字符具有稳定口径，也能覆盖二进制文件和同行内缩减；子模块不是 blob，按 0 字节贡献核算。新增文件的旧字节数为 0，删除文件的新字节数为 0，纯 rename 的净字节数为 0，copy 只计新增目标内容。
 

@@ -634,13 +634,10 @@ function currentReportCheck(
     return { ok: false, error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false } };
   }
   const reportMechanical: MechanicalChangeReport = {
-    version: 1,
+    version: 3,
     base: snapshot.base.sha,
     head: snapshot.head.sha,
-    mergeBase: report.diff.mergeBase,
-    patchSha256: report.diff.patchSha256,
-    files: report.diff.files,
-    totals: report.diff.totals
+    full: report.diff.full
   };
   if (!sameMechanical(reportMechanical, mechanical)) return {
     ok: false,
@@ -745,6 +742,10 @@ type ReportWriteInputs =
   | { ok: true; mechanical: MechanicalChangeReport; candidate: PrecheckCandidate }
   | { ok: false; error: NonNullable<PlatformResult['error']> };
 
+type MechanicalRecomputeResult =
+  | { ok: true; mechanical: MechanicalChangeReport }
+  | { ok: false; error: NonNullable<PlatformResult['error']> };
+
 function readReportWriteInputs(repoRoot: string, options: ReportWriteOptions): ReportWriteInputs {
   const mechanicalInput = readJsonInput(path.resolve(repoRoot, options.mechanicalFile));
   if (!mechanicalInput.ok) return mechanicalInput;
@@ -755,6 +756,14 @@ function readReportWriteInputs(repoRoot: string, options: ReportWriteOptions): R
   const candidate = validatePrecheckCandidate(candidateInput.value);
   if (!candidate.ok) return { ok: false, error: platformError(candidate.error) };
   return { ok: true, mechanical: mechanical.value, candidate: candidate.value };
+}
+
+function recomputeReportMechanical(resolved: ResolvedTaskRef, initial: PlatformChangeRequestSnapshot): MechanicalRecomputeResult {
+  try {
+    return { ok: true, mechanical: runMechanicalChangeReport(resolved.repoRoot, initial.base.sha, initial.head.sha) };
+  } catch (error) {
+    return { ok: false, error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false } };
+  }
 }
 
 async function prepareReportWrite(
@@ -770,23 +779,15 @@ async function prepareReportWrite(
   if (!digest.ok) return { ok: false, status: 'failed', error: platformError(digest.error) };
   const inputs = readReportWriteInputs(resolved.repoRoot, options);
   if (!inputs.ok) return { ok: false, status: 'failed', error: inputs.error };
-  let recomputed: MechanicalChangeReport;
-  try {
-    recomputed = runMechanicalChangeReport(resolved.repoRoot, initial.value.base.sha, initial.value.head.sha);
-  } catch (error) {
-    return {
-      ok: false,
-      status: 'failed',
-      error: { code: 'PR_CHANGE_REPORT_GIT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
-    };
-  }
-  if (!sameMechanical(inputs.mechanical, recomputed)) return {
+  const recomputed = recomputeReportMechanical(resolved, initial.value);
+  if (!recomputed.ok) return { ok: false, status: 'failed', error: recomputed.error };
+  const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
+  if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
+  if (!sameMechanical(inputs.mechanical, recomputed.mechanical)) return {
     ok: false,
     status: 'failed',
     error: { code: 'PR_CHANGE_REPORT_MECHANICAL_MISMATCH', message: 'Mechanical report input does not match the current complete diff', retryable: false }
   };
-  const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
-  if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
   return { ok: true, initial: initial.value, report: built.value };
 }
 

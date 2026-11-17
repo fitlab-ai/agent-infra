@@ -126,11 +126,49 @@ function numericLineCount(value) {
   return value === "-" ? null : Number(value);
 }
 
+function changedRanges(patch) {
+  const ranges = [];
+  let oldLine = 0;
+  let newLine = 0;
+  let inHunk = false;
+  for (const line of patch.toString('utf8').split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      inHunk = false;
+      continue;
+    }
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[3]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || line.startsWith('\\')) continue;
+    if (line.startsWith('+')) {
+      appendPosition(ranges, 'new', newLine++);
+    } else if (line.startsWith('-')) {
+      appendPosition(ranges, 'old', oldLine++);
+    } else if (line.startsWith(' ')) {
+      oldLine += 1;
+      newLine += 1;
+    }
+  }
+  return ranges;
+}
+
+function appendPosition(ranges, side, line) {
+  const previous = ranges.at(-1);
+  if (previous && previous.side === side && previous.endLine + 1 === line) previous.endLine = line;
+  else ranges.push({ side, startLine: line, endLine: line });
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const mergeBase = git(["merge-base", options.base, options.head], options).trim();
-  const patch = git(["diff", "--no-ext-diff", "--binary", "--find-renames", mergeBase, options.head], options, null);
-  const diffArgs = ["diff", "--no-ext-diff", "--find-renames", "-z", mergeBase, options.head];
+  const from = mergeBase;
+  const to = options.head;
+  const patch = git(["diff", "--no-ext-diff", "--binary", "--find-renames", from, to], options, null);
+  const diffArgs = ["diff", "--no-ext-diff", "--find-renames", "-z", from, to];
   const files = parseRawDiff(git([...diffArgs.slice(0, 2), "--raw", "--abbrev=64", ...diffArgs.slice(2)], options, null));
   const numstat = parseNumstat(git([...diffArgs.slice(0, 2), "--numstat", ...diffArgs.slice(2)], options, null));
   const sizes = objectSizes(files, options);
@@ -152,6 +190,12 @@ function main() {
       fail(`Unable to resolve blob size for ${file.newPath || file.oldPath}`);
     }
 
+    const filePatch = git(["diff", "--no-ext-diff", "--find-renames", "--unified=0", from, to, "--", ...(file.oldPath && file.newPath && file.oldPath !== file.newPath ? [file.oldPath, file.newPath] : [file.oldPath || file.newPath])], options, null);
+    const locations = lines.additions === '-' && lines.deletions === '-' ? [] : changedRanges(filePatch);
+    const addedPositions = locations.filter((range) => range.side === 'new').reduce((sum, range) => sum + range.endLine - range.startLine + 1, 0);
+    const deletedPositions = locations.filter((range) => range.side === 'old').reduce((sum, range) => sum + range.endLine - range.startLine + 1, 0);
+    if (lines.additions !== '-' && addedPositions !== Number(lines.additions)) fail(`Added position count does not match numstat for ${file.newPath || file.oldPath}`);
+    if (lines.deletions !== '-' && deletedPositions !== Number(lines.deletions)) fail(`Deleted position count does not match numstat for ${file.newPath || file.oldPath}`);
     return {
       status: file.status,
       oldPath: file.oldPath,
@@ -160,7 +204,8 @@ function main() {
       deletions: numericLineCount(lines.deletions),
       oldBytes,
       newBytes,
-      netBytes: newBytes - oldBytes
+      netBytes: newBytes - oldBytes,
+      locations
     };
   });
 
@@ -189,9 +234,9 @@ function main() {
   });
 
   process.stdout.write(`${JSON.stringify({
-    version: 1,
-    base: options.base,
-    head: options.head,
+    kind: "merge-base",
+    from,
+    to,
     mergeBase,
     patchSha256: createHash("sha256").update(patch).digest("hex"),
     files: reportFiles,
