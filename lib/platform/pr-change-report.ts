@@ -305,15 +305,21 @@ function validateFunctionalGroupFields(value: Record<string, unknown>, prefix: s
   return { ok: true, value: null };
 }
 
+function parseAssignedRange(item: unknown, at: string): ValidationResult<AssignedRange> {
+  if (!isRecord(item) || !isSafeRenderedText(item.path) || (item.side !== 'old' && item.side !== 'new') ||
+      !Number.isSafeInteger(item.startLine) || Number(item.startLine) < 1 || !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine)) return invalid(`${at} is invalid`);
+  return { ok: true, value: { path: item.path.trim(), side: item.side, startLine: Number(item.startLine), endLine: Number(item.endLine) } };
+}
+
 function parseFunctionalGroupLocations(value: unknown, prefix: string): ValidationResult<FunctionalGroup['locations']> {
   if (!isRecord(value)) return invalid(`${prefix}.locations must provide full and increment allocations`);
   const parseRanges = (input: unknown, at: string): ValidationResult<Array<AssignedRange>> => {
     if (!Array.isArray(input)) return invalid(`${at} must be an array`);
     const ranges: AssignedRange[] = [];
     for (const [index, item] of input.entries()) {
-      if (!isRecord(item) || !isSafeRenderedText(item.path) || (item.side !== 'old' && item.side !== 'new') ||
-          !Number.isSafeInteger(item.startLine) || Number(item.startLine) < 1 || !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine)) return invalid(`${at}[${index}] is invalid`);
-      ranges.push({ path: item.path.trim(), side: item.side, startLine: Number(item.startLine), endLine: Number(item.endLine) });
+      const range = parseAssignedRange(item, `${at}[${index}]`);
+      if (!range.ok) return range;
+      ranges.push(range.value);
     }
     return { ok: true, value: ranges };
   };
@@ -500,12 +506,13 @@ function parseCheck(value: unknown, index: number, prefix: string): ValidationRe
   if (!isRecord(rawUnassigned)) return invalid(`${at}.unassigned must provide full and increment ranges`);
   const parseUnassigned = (input: unknown, prefix: string): ValidationResult<Array<AssignedRange & { reason: 'shared' | 'unconfirmed'; explanation: string }>> => {
     if (!Array.isArray(input)) return invalid(`${prefix} must be an array`);
-    const result = [];
+    const result: Array<AssignedRange & { reason: 'shared' | 'unconfirmed'; explanation: string }> = [];
     for (const [index, item] of input.entries()) {
-      if (!isRecord(item) || !isSafeRenderedText(item.path) || (item.side !== 'old' && item.side !== 'new') ||
-          !Number.isSafeInteger(item.startLine) || Number(item.startLine) < 1 || !Number.isSafeInteger(item.endLine) || Number(item.endLine) < Number(item.startLine) ||
-          (item.reason !== 'shared' && item.reason !== 'unconfirmed') || !isSafeRenderedText(item.explanation)) return invalid(`${prefix}[${index}] is invalid`);
-      result.push({ path: item.path.trim(), side: item.side as 'old' | 'new', startLine: Number(item.startLine), endLine: Number(item.endLine), reason: item.reason as 'shared' | 'unconfirmed', explanation: item.explanation.trim() });
+      if (!isRecord(item)) return invalid(`${prefix}[${index}] is invalid`);
+      const range = parseAssignedRange(item, `${prefix}[${index}]`);
+      if (!range.ok) return range;
+      if ((item.reason !== 'shared' && item.reason !== 'unconfirmed') || !isSafeRenderedText(item.explanation)) return invalid(`${prefix}[${index}] is invalid`);
+      result.push({ ...range.value, reason: item.reason, explanation: item.explanation.trim() });
     }
     return { ok: true, value: result };
   };
@@ -526,13 +533,6 @@ function parseChecks(value: unknown, prefix = 'precheck.checks', diff?: { full: 
   }
   if (diff) return validateGroupMembership(checks, diff.full, diff.increment);
   return { ok: true, value: checks };
-}
-
-function validateScopedMechanicalMetadata(value: Record<string, unknown>): ValidationResult<null> {
-  if (value.version !== undefined && value.version !== 2) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.base !== undefined && !isSha(value.base)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (value.head !== undefined && !isSha(value.head)) return invalid('mechanical report version, commit SHA, or patch SHA is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  return { ok: true, value: null };
 }
 
 type ScopedIdentity = { kind: 'merge-base' | 'head-to-head'; from: string; to: string; mergeBase: string | null; patchSha256: string };
@@ -572,10 +572,6 @@ function withErrorCode<T>(result: ValidationResult<T>, code: string): Validation
   return result.ok ? result : { ...result, error: { ...result.error, code } };
 }
 
-function normalizeScopedMechanicalDiff(value: Record<string, unknown>): Record<string, unknown> {
-  return value.to === undefined ? { ...value, to: value.head } : value;
-}
-
 function parseScopedDiffContents(
   value: Record<string, unknown>,
   expectedKind: 'merge-base' | 'head-to-head' | null,
@@ -596,27 +592,15 @@ function parseScopedDiffContents(
   return { ok: true, value: { ...identity.value, files, totals: totals.value } };
 }
 
-function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff & { version?: 2; base?: string; head?: string }> {
+function validateScopedMechanical(value: unknown): ValidationResult<ScopedDiff> {
   if (!isRecord(value)) return invalid('mechanical report must be an object', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const metadata = validateScopedMechanicalMetadata(value);
-  if (!metadata.ok) return metadata;
-  const scoped = parseScopedDiffContents(normalizeScopedMechanicalDiff(value), null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  if (!scoped.ok) return scoped;
-  return {
-    ok: true,
-    value: {
-      ...(value.version === undefined ? {} : { version: 2 as const }),
-      ...scoped.value,
-      ...(value.base === undefined ? {} : { base: value.base as string }),
-      ...(value.head === undefined ? {} : { head: value.head as string })
-    } as ScopedDiff & { version?: 2; base?: string; head?: string }
-  };
+  return parseScopedDiffContents(value, null, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
 }
 
-function validateMechanicalFull(value: unknown, base: string, head: string): ValidationResult<ScopedDiff & { version?: 2; base?: string; head?: string }> {
+function validateMechanicalFull(value: unknown, head: string): ValidationResult<ScopedDiff> {
   const full = validateScopedMechanical(value);
   if (!full.ok) return full;
-  if (full.value.kind !== 'merge-base' || full.value.to !== head || (full.value.base !== undefined && full.value.base !== base) || (full.value.head !== undefined && full.value.head !== head)) return invalid('mechanical full diff identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
+  if (full.value.kind !== 'merge-base' || full.value.to !== head) return invalid('mechanical full diff identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   return full;
 }
 
@@ -634,15 +618,8 @@ function parseIncrementInput(value: unknown, head: string, errorCode: string): V
 }
 
 function parseAvailableIncrement(value: IncrementInput, head: string, errorCode: string): ValidationResult<IncrementDiff> {
-  let diff = value.diff;
-  if (errorCode === 'PR_CHANGE_REPORT_MECHANICAL_INVALID' && isRecord(value.diff)) {
-    const metadata = validateScopedMechanicalMetadata(value.diff);
-    if (!metadata.ok) return metadata;
-    if (value.diff.head !== undefined && value.diff.head !== head) return invalid('increment endpoints are invalid', errorCode);
-    diff = normalizeScopedMechanicalDiff(value.diff);
-  }
-  if (!isRecord(diff)) return invalid('increment scoped diff is invalid', errorCode);
-  const parsed = parseScopedDiffContents(diff, 'head-to-head', errorCode);
+  if (!isRecord(value.diff)) return invalid('increment scoped diff is invalid', errorCode);
+  const parsed = parseScopedDiffContents(value.diff, 'head-to-head', errorCode);
   if (!parsed.ok) return parsed;
   if (!isSha(value.fromHead) || !isSha(value.sourceReportSha256) || parsed.value.from !== value.fromHead || parsed.value.to !== head) {
     return invalid('increment endpoints or source identity are invalid', errorCode);
@@ -668,12 +645,11 @@ function parseIncrement(value: unknown, head: string, errorCode: string): Valida
 
 function validateMechanicalReport(value: unknown): ValidationResult<MechanicalChangeReport> {
   if (!isRecord(value) || value.version !== 2 || !isSha(value.base) || !isSha(value.head)) return invalid('mechanical bundle version or PR identity is invalid', 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
-  const full = validateMechanicalFull(value.full, value.base, value.head);
+  const full = validateMechanicalFull(value.full, value.head);
   if (!full.ok) return full;
   const increment = parseIncrement(value.increment, value.head, 'PR_CHANGE_REPORT_MECHANICAL_INVALID');
   if (!increment.ok) return increment;
-  const { version: _version, base: _base, head: _head, ...fullDiff } = full.value;
-  return { ok: true, value: { version: 2, base: value.base, head: value.head, full: fullDiff, increment: increment.value } };
+  return { ok: true, value: { version: 2, base: value.base, head: value.head, full: full.value, increment: increment.value } };
 }
 
 function validatePrecheckCandidate(value: unknown): ValidationResult<PrecheckCandidate> {
@@ -1003,10 +979,14 @@ function shortSha(value: string): string {
   return value.slice(0, 7);
 }
 
+function renderLineCountTriple(added: number, deleted: number): [string, string, string] {
+  return [String(added), String(deleted), signedNumber(added - deleted)];
+}
+
 function renderScopeLineCounts(ranges: AssignedRange[]): [string, string, string] {
   const added = countLocations(ranges.filter((range) => range.side === 'new'));
   const deleted = countLocations(ranges.filter((range) => range.side === 'old'));
-  return [String(added), String(deleted), signedNumber(added - deleted)];
+  return renderLineCountTriple(added, deleted);
 }
 
 function renderIncrementLineCounts(status: IncrementDiff['status'], ranges: AssignedRange[]): [string, string, string] {
@@ -1036,32 +1016,25 @@ function renderUnassignedSummaryRows(unassigned: Precheck['unassigned'], increme
 function renderFunctionalGroupTotals(report: PrChangeReport): string {
   const fullTotals = report.diff.full.totals;
   const increment = report.diff.increment;
-  let incrementAdditions: string;
-  let incrementDeletions: string;
-  let incrementNet: string;
+  let incrementCounts: [string, string, string];
   let incrementUnknownFiles: string;
   switch (increment.status) {
     case 'available':
-      incrementAdditions = String(increment.diff!.totals.additions);
-      incrementDeletions = String(increment.diff!.totals.deletions);
-      incrementNet = signedNumber(increment.diff!.totals.additions - increment.diff!.totals.deletions);
+      incrementCounts = renderLineCountTriple(increment.diff!.totals.additions, increment.diff!.totals.deletions);
       incrementUnknownFiles = `${increment.diff!.files.filter((file) => file.additions === null).length} 个文件`;
       break;
     case 'unchanged':
-      incrementAdditions = '0';
-      incrementDeletions = '0';
-      incrementNet = '0';
+      incrementCounts = ['0', '0', '0'];
       incrementUnknownFiles = '0';
       break;
     case 'unconfirmed':
-      incrementAdditions = '未确认';
-      incrementDeletions = '未确认';
-      incrementNet = '未确认';
+      incrementCounts = ['未确认', '未确认', '未确认'];
       incrementUnknownFiles = '未确认';
       break;
   }
   const fullUnknownFiles = report.diff.full.files.filter((file) => file.additions === null).length;
-  return `| **合计（机械统计）** | ${fullTotals.additions} | ${fullTotals.deletions} | ${signedNumber(fullTotals.additions - fullTotals.deletions)} | ${incrementAdditions} | ${incrementDeletions} | ${incrementNet} | ${fullUnknownFiles} 个文件 / ${incrementUnknownFiles} |`;
+  const fullCounts = renderLineCountTriple(fullTotals.additions, fullTotals.deletions);
+  return `| **合计（机械统计）** | ${fullCounts[0]} | ${fullCounts[1]} | ${fullCounts[2]} | ${incrementCounts[0]} | ${incrementCounts[1]} | ${incrementCounts[2]} | ${fullUnknownFiles} 个文件 / ${incrementUnknownFiles} |`;
 }
 
 function renderIncrementScopeDescription(increment: IncrementDiff): string {

@@ -235,11 +235,9 @@ function main() {
   });
 
   process.stdout.write(`${JSON.stringify({
-    version: 2,
     kind: options.kind,
-    base: options.base,
-    head: options.head,
     from,
+    to,
     mergeBase,
     patchSha256: createHash("sha256").update(patch).digest("hex"),
     files: reportFiles,

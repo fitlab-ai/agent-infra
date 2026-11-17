@@ -74,8 +74,8 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
       { side: "new", startLine: 1, endLine: 1 }
     ]
   });
-  assert.equal(report.version, 2);
   assert.equal(report.kind, "merge-base");
+  assert.equal(report.to, head);
   assert.equal(renamed.status, "R100");
   assert.equal(renamed.oldBytes, Buffer.byteLength(renamedContent));
   assert.equal(renamed.newBytes, Buffer.byteLength(renamedContent));
@@ -85,12 +85,6 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
   assert.equal(binary.oldBytes, 0);
   assert.equal(binary.newBytes, binaryContent.byteLength);
   assert.deepEqual(binary.locations, []);
-
-  const compactPositions = report.files.find((file: { newPath: string | null }) => file.newPath === "compact.txt").locations;
-  assert.deepEqual(compactPositions, [
-    { side: "old", startLine: 1, endLine: 1 },
-    { side: "new", startLine: 1, endLine: 1 }
-  ]);
 
   const expectedOldBytes = Buffer.byteLength(compactBefore) + Buffer.byteLength(renamedContent) + Buffer.byteLength(removedContent);
   const expectedNewBytes = Buffer.byteLength(compactAfter) + Buffer.byteLength(renamedContent) + binaryContent.byteLength;
@@ -106,7 +100,7 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
   });
 });
 
-test("create-pr raw full and head-to-head outputs validate with head-only scope identity", (t) => {
+test("create-pr raw full and head-to-head outputs validate with explicit scoped endpoints", (t) => {
   const repo = createTempDir("create-pr-change-report-wire-");
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   initIsolatedGitRepo(repo);
@@ -149,18 +143,18 @@ test("create-pr raw full and head-to-head outputs validate with head-only scope 
     }
   };
 
-  assert.equal("to" in rawFull, false);
-  assert.equal("to" in rawIncrement, false);
-  assert.equal(rawIncrement.head, head);
+  assert.equal(rawFull.to, head);
+  assert.equal(rawIncrement.to, head);
   assert.equal(validateMechanicalReport(bundle).ok, true);
   assert.equal(validateMechanicalReport({
     ...bundle,
-    increment: { ...bundle.increment, diff: { ...rawIncrement, head: fromHead } }
+    full: { ...rawFull, to: base }
   }).ok, false);
   assert.equal(validateMechanicalReport({
     ...bundle,
     increment: { ...bundle.increment, diff: { ...rawIncrement, to: fromHead } }
   }).ok, false);
+  assert.equal(validateMechanicalReport({ ...bundle, head: fromHead }).ok, false);
 });
 
 test("create-pr change report counts diff content beginning with header-like prefixes", (t) => {
@@ -223,7 +217,7 @@ test("head-to-head report compares two non-ancestor trees directly", (t) => {
   ], { encoding: "utf8", env: gitSafeEnv() }));
   assert.equal(report.kind, "head-to-head");
   assert.equal(report.from, oldHead);
-  assert.equal(report.head, newHead);
+  assert.equal(report.to, newHead);
   assert.equal(report.mergeBase, null);
   assert.ok(report.files.some((file: { oldPath: string | null; additions: number | null; deletions: number | null }) => file.oldPath === "old-only.txt" && file.deletions === 1));
   assert.ok(report.files.some((file: { newPath: string | null; additions: number | null }) => file.newPath === "new-only.txt" && file.additions === 1));

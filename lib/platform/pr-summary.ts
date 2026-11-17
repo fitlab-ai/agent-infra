@@ -796,16 +796,9 @@ function matchesSameRequestReplay(
 
 function isSameReportReplay(
   old: PrChangeReport | null,
-  initial: PlatformChangeRequestSnapshot,
-  taskIntentSha256: string,
   built: PrChangeReport
 ): boolean {
-  return old !== null && old.identity.repository === initial.repository &&
-    resourceIdentityEquals(old.identity.resource, initial.identity) &&
-    JSON.stringify(old.identity.base) === JSON.stringify(initial.base) &&
-    old.identity.head.sha === initial.head.sha &&
-    old.inputs.taskIntentSha256 === taskIntentSha256 &&
-    JSON.stringify(old) === JSON.stringify(built);
+  return old !== null && JSON.stringify(old) === JSON.stringify(built);
 }
 
 async function prepareReportWrite(
@@ -825,7 +818,7 @@ async function prepareReportWrite(
   if (!recomputed.ok) return { ok: false, status: 'failed', error: recomputed.error };
   const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, inputs.mechanical, inputs.candidate);
   if (!built.ok) return { ok: false, status: 'failed', error: platformError(built.error) };
-  const sameReplayIdentity = isSameReportReplay(recomputed.oldReport, initial.value, digest.value.sha256, built.value);
+  const sameReplayIdentity = isSameReportReplay(recomputed.oldReport, built.value);
   let sameRequestReplay = false;
   if (sameReplayIdentity) {
     const replay = matchesSameRequestReplay(resolved, initial.value, inputs.mechanical);
