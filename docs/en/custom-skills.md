@@ -82,10 +82,10 @@ Behavior:
 
 When `update-agent-infra` runs:
 
-- Unregistered skills in the project-managed `.agents/skills/` directory are removed. While a stale skill directory exists, commands mapped from its name by the client adapter manifest are also removed, including edited files or files without a baseline
+- Unregistered skills in the project-managed `.agents/skills/` directory are removed. Client commands continue to follow the existing managed-baseline rules: only unchanged files with a matching baseline are removed; edited files and files without a baseline are kept
 - If only an orphan command remains after its skill directory is gone, sync does not guess ownership from its name; the ordinary client managed-file baseline rules apply
 - Files synced from external custom sources are copied into `.agents/skills/`
-- `ai skill remove` unregisters the skill and leaves its source directory at removal time. A later full sync removes an unregistered skill directory under the project-managed `.agents/skills/` tree and its derivable client commands. External source roots are outside this cleanup
+- `ai skill remove` unregisters the skill and leaves its source directory at removal time. A later full sync removes an unregistered skill directory under the project-managed `.agents/skills/` tree. Client commands continue to follow the existing managed-baseline rules. External source roots are outside this cleanup
 - For synced skills that still exist in a configured source, files removed from the source are also removed locally during the next sync
 - Built-in skills always win over custom sources; if a source defines a skill with the same name as a built-in skill, agent-infra skips that custom source skill instead of overriding the built-in one
 - If you truly need to replace a built-in skill or command, use the existing `ejected` mechanism and own that file in the project

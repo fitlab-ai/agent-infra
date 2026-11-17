@@ -270,7 +270,6 @@ function scanRegisteredSkillSources(projectRoot, registrations, sources, templat
 }
 
 function valueBaseline(value) {
-  if (trustedBaseline(value)) return { hash: value, source: null };
   if (value && typeof value === 'object' && trustedBaseline(value.hash) && typeof value.source === 'string') {
     return { hash: value.hash, source: path.resolve(expandHome(value.source)) };
   }
@@ -425,42 +424,6 @@ function listTemplateSkillNames(templateRoot) {
       })
       .map((entry) => entry.name)
   );
-}
-
-function listUnregisteredManagedSkillNames(projectRoot, templateSkillNames, registrations, managed, merged, ejected) {
-  const skillsDir = safeProjectTarget(projectRoot, '.agents/skills');
-  if (!skillsDir) return [];
-  try {
-    const rootStat = fs.lstatSync(skillsDir);
-    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return [];
-  } catch (error) {
-    if (error?.code === 'ENOENT') return [];
-    return [];
-  }
-
-  const registered = new Set(registrations.map((entry) => entry?.name));
-  return fs.readdirSync(skillsDir, { withFileTypes: true })
-    .filter((entry) => {
-      const skillDir = `.agents/skills/${entry.name}/`;
-      const skillFile = `${skillDir}SKILL.md`;
-      return entry.isDirectory()
-        && !templateSkillNames.has(entry.name)
-        && !registered.has(entry.name)
-        && isManagedPath(skillDir, managed)
-        && !matchesAnyPath(skillFile, [...merged, ...ejected]);
-    })
-    .filter((entry) => {
-      const skillPath = `.agents/skills/${entry.name}/SKILL.md`;
-      const absolute = safeProjectTarget(projectRoot, skillPath);
-      if (!absolute) return false;
-      try {
-        const stat = fs.lstatSync(absolute);
-        return stat.isFile() && !stat.isSymbolicLink();
-      } catch {
-        return false;
-      }
-    })
-    .map((entry) => entry.name);
 }
 
 function isCustomProtected(targetPath, customSkills, customCommandTargets) {
@@ -642,30 +605,9 @@ function generateCustomCommands(
   }
 }
 
-function matchesAnyPath(rel, patterns) {
-  return patterns.some((pattern) => assetMatches(pattern, rel) || globMatch(pattern, rel));
-}
-
-function isManagedPath(rel, managed) {
-  return managed.some((entry) => assetMatches(entry, rel) || globMatch(entry, rel));
-}
-
-function isProjectSkillsPath(rel) {
-  const normalized = norm(rel).replace(/\/+$/, '');
-  return normalized === '.agents/skills' || normalized.startsWith('.agents/skills/');
-}
-
-function safeProjectSkillsFileTarget(projectRoot, relativePath) {
-  if (!isProjectSkillsPath(relativePath)) return null;
-  const absolute = safeProjectTarget(projectRoot, relativePath);
-  if (!absolute) return null;
-  try {
-    const stat = fs.lstatSync(absolute, { throwIfNoEntry: false });
-    if (stat && (!stat.isFile() || stat.isSymbolicLink())) return null;
-  } catch {
-    return null;
-  }
-  return absolute;
+function matchesAny(rel, patterns) {
+  const normalized = norm(rel);
+  return patterns.some((pattern) => norm(pattern) === normalized || globMatch(pattern, normalized));
 }
 
 function renderContent(text, vars) {
@@ -990,48 +932,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     configUpdated: false
   };
   const customCommandTargets = buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs);
-  let unsafeProjectSkillsRoot = false;
-  const projectSkillsRoot = safeProjectTarget(projectRoot, '.agents/skills');
-  let projectSkillsStat;
-  try {
-    projectSkillsStat = projectSkillsRoot
-      ? fs.lstatSync(projectSkillsRoot, { throwIfNoEntry: false })
-      : null;
-  } catch {
-    projectSkillsStat = null;
-  }
-  if (projectSkillsRoot && projectSkillsStat
-    && (!projectSkillsStat.isDirectory() || projectSkillsStat.isSymbolicLink())) {
-    unsafeProjectSkillsRoot = true;
-  } else if (!projectSkillsRoot && fs.existsSync(path.join(projectRoot, '.agents/skills'))) {
-    unsafeProjectSkillsRoot = true;
-  }
-  if (unsafeProjectSkillsRoot) {
-    report.managed.protected.push({
-      target: '.agents/skills/',
-      reason: 'unsafe-path',
-      baseline: null,
-      local: null,
-      template: null
-    });
-  }
-
-  const unregisteredManagedSkillNames = unsafeProjectSkillsRoot ? [] : listUnregisteredManagedSkillNames(
-    projectRoot,
-    templateSkillNames,
-    activeRegistrations,
-    managed,
-    merged,
-    ejected
-  );
-  const staleSkillCommandTargets = new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
-    if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
-    return unregisteredManagedSkillNames.flatMap((skillName) => {
-      const target = norm(adapter.customCommand.target.replaceAll('${skillName}', skillName));
-      const adapterOwnsTarget = adapter.managed.some((entry) => assetMatches(entry, target));
-      return adapterOwnsTarget ? [target] : [];
-    });
-  }));
 
   for (const category of ['managed', 'merged', 'ejected']) {
     const before = currentRegistry[category];
@@ -1050,58 +950,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       'merged'
     )
   );
-
-  const protectedStaleSkillCommandTargets = new Set();
-  for (const target of staleSkillCommandTargets) {
-    if (matchesAnyPath(target, merged)) {
-      report.managed.skippedMerged.push(target);
-      protectedStaleSkillCommandTargets.add(target);
-      continue;
-    }
-    if (matchesAnyPath(target, ejected)) {
-      report.ejected.skipped.push(target);
-      protectedStaleSkillCommandTargets.add(target);
-      continue;
-    }
-    if (!isManagedPath(target, managed)) {
-      protectedStaleSkillCommandTargets.add(target);
-      continue;
-    }
-    const absolute = safeProjectTarget(projectRoot, target);
-    let stat;
-    try {
-      stat = absolute ? fs.lstatSync(absolute, { throwIfNoEntry: false }) : null;
-    } catch {
-      stat = null;
-    }
-    if (!absolute) {
-      report.managed.protected.push({
-        target,
-        reason: 'unsafe-path',
-        baseline: trustedBaseline(managedBaselines[target]),
-        local: null,
-        template: null
-      });
-      protectedStaleSkillCommandTargets.add(target);
-      continue;
-    }
-    if (!stat) continue;
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      report.managed.protected.push({
-        target,
-        reason: 'unsafe-path',
-        baseline: trustedBaseline(managedBaselines[target]),
-        local: null,
-        template: null
-      });
-      protectedStaleSkillCommandTargets.add(target);
-      continue;
-    }
-    fs.unlinkSync(absolute);
-    delete managedBaselines[target];
-    report.managed.removed.push(target);
-    removeEmptyDirs(path.dirname(absolute));
-  }
 
   for (const [entry, historicalTemplateHashes] of retiredManaged) {
     const target = path.join(projectRoot, entry.endsWith('/') ? entry.slice(0, -1) : entry);
@@ -1438,7 +1286,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.managed.skippedPlatform.push(entry);
       continue;
     }
-    if (isProjectSkillsPath(entry) && unsafeProjectSkillsRoot) continue;
     const isDir = entry.endsWith('/');
     let entryRels;
     const expectedTargets = isDir ? new Set() : null;
@@ -1473,23 +1320,9 @@ function syncTemplates(projectRoot, templateRootOverride) {
         continue;
       }
 
-      if (matchesAnyPath(tgt, merged) || matchesAnyPath(tgt, ejected)) {
+      if (matchesAny(tgt, merged) || matchesAny(tgt, ejected)) {
         report.managed.skippedMerged.push(tgt);
         continue;
-      }
-
-      if (isProjectSkillsPath(tgt)) {
-        const safeTarget = unsafeProjectSkillsRoot ? null : safeProjectSkillsFileTarget(projectRoot, tgt);
-        if (!safeTarget) {
-          report.managed.protected.push({
-            target: tgt,
-            reason: 'unsafe-path',
-            baseline: trustedBaseline(managedBaselines[tgt]),
-            local: null,
-            template: null
-          });
-          continue;
-        }
       }
 
       const srcRoot = sourceMap.get(src) || templateRoot;
@@ -1539,23 +1372,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
           if (isCustomProtected(projFile, protectedCustomSkills, customCommandTargets)) continue;
-          if (matchesAnyPath(projFile, merged) || matchesAnyPath(projFile, ejected)) continue;
-          if (protectedStaleSkillCommandTargets.has(projFile)) continue;
-          let safeSkillTarget = null;
-          if (isProjectSkillsPath(projFile)) {
-            safeSkillTarget = unsafeProjectSkillsRoot ? null : safeProjectSkillsFileTarget(projectRoot, projFile);
-            if (!safeSkillTarget) {
-              report.managed.protected.push({
-                target: projFile,
-                reason: 'unsafe-path',
-                baseline: trustedBaseline(managedBaselines[projFile]),
-                local: null,
-                template: null
-              });
-              continue;
-            }
-          }
-          const projectFile = safeSkillTarget || path.join(projectRoot, projFile);
+          if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
+          const projectFile = path.join(projectRoot, projFile);
           if (assetPlan.enabledManaged.includes(entry)) {
             const baseline = trustedBaseline(managedBaselines[projFile]);
             const localHash = sha256(fs.readFileSync(projectFile));
