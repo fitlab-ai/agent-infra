@@ -174,7 +174,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 当生成的 TUI 命令需要禁用模型调用时，将通用可选字段 `disable-model-invocation` 设为 `true`；各 TUI 适配器按自身能力决定是否消费。多行 `description` 如需保留换行，使用 YAML literal block（`|`）；同步器会为各 TUI 输出对应的多行元数据格式。
 
-新增或修改自定义 skill 后，再执行一次 `update-agent-infra`。同步过程会自动检测非内置 skill，为 Claude Code 和 OpenCode 生成对应命令；Antigravity CLI 则直接发现共享 skill。
+在 `.agents/skills/<name>/` 创建或修改本地 skill 后，先运行 `ai skill add <name>` 显式登记，再运行 `update-agent-infra` 同步文件并生成客户端命令。只有已登记的 skill 会进入 agent-infra 的同步和命令生成流程。Antigravity CLI 对原位共享目录的直接发现由客户端自身决定，不属于同步器生成行为。
 
 ### 共享 skill 源
 
@@ -194,8 +194,8 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 ### 同步行为
 
-- `.agents/skills/` 中手动创建的项目自定义 skill 不会被 managed 文件清理删除
-- 多个 source 按声明顺序应用；后面的自定义 source 会覆盖前面的自定义 source 文件
+- `.agents/skills/` 中未登记的项目 skill 受未知文件保护；只有通过 `ai skill add` 登记后才会同步物化并生成命令
+- `skills.sources` 仅用于发现候选；同名候选不合并，也不会按声明顺序覆盖，使用 `ai skill add` 选择具体来源
 - 对于仍存在于配置 source 中的 skill，如果源里删掉文件，下次同步时会删除本地对应残留文件
 - 自定义 source 不能覆盖内置 skill；如果与内置 skill 同名，会跳过该 source skill
 - 如果项目必须接管某个内置 skill 或命令，请使用 `files.ejected`

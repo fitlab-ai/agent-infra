@@ -1462,8 +1462,8 @@ test("registered local skills use source baselines and preserve unowned same-byt
   }
 });
 
-test("legacy skill migration defers on unreadable sources and explicit empty registration never revives", async () => {
-  const tmpDir = createTempDir("ai-collab-skill-migration-");
+test("unregistered source candidates stay inactive during sync", async () => {
+  const tmpDir = createTempDir("ai-collab-unregistered-skill-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const sourceRoot = path.join(tmpDir, "sources");
@@ -1475,51 +1475,18 @@ test("legacy skill migration defers on unreadable sources and explicit empty reg
       files: { managed: [], merged: [], ejected: [] }
     });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const deferred = syncTemplates(projectRoot, templateRoot);
-    assert.match(deferred.error ?? "", /migration deferred/u);
-    assert.equal("registrations" in JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8")).skills, false);
-    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/workspace")), false);
 
+    const unavailable = syncTemplates(projectRoot, templateRoot);
+    assert.equal(unavailable.error, undefined);
     writeFile(sourceRoot, "guide/SKILL.md", "---\nname: guide\n---\nGuide\n");
-    const migrated = syncTemplates(projectRoot, templateRoot);
-    assert.equal(migrated.error, undefined);
-    let config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(config.skills.registrations.map((entry: { name: string }) => entry.name), ["guide"]);
-    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md"), "utf8"), "---\nname: guide\n---\nGuide\n");
-    assert.ok(migrated.custom.commands.generated.includes(".claude/commands/guide.md"));
-    const repeated = syncTemplates(projectRoot, templateRoot);
-    assert.deepEqual(repeated.custom.generated, []);
-    assert.deepEqual(repeated.custom.commands.generated, []);
-    config.skills.registrations = [];
-    writeJson(projectRoot, ".agents/.airc.json", config);
-    syncTemplates(projectRoot, templateRoot);
-    config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(config.skills.registrations, []);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
 
-test("retired run-task remains when readable external sources conflict by name", async () => {
-  const tmpDir = createTempDir("ai-collab-retired-run-task-source-conflict-");
-  try {
-    const projectRoot = path.join(tmpDir, "project");
-    const firstSource = path.join(tmpDir, "first-source");
-    const secondSource = path.join(tmpDir, "second-source");
-    const { templateRoot } = createTemplateInstall(tmpDir);
-    const legacy = fs.readFileSync(path.resolve("tests/fixtures/skills/legacy-run-task/SKILL.md"), "utf8");
-    writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo", org: "acme", language: "en", platform: { type: "none" },
-      skills: { sources: [{ type: "local", path: firstSource }, { type: "local", path: secondSource }] },
-      files: { managed: [".agents/skills/"], merged: [], ejected: [] }
-    });
-    writeFile(firstSource, "run-task/SKILL.md", legacy);
-    writeFile(secondSource, "run-task/SKILL.md", legacy);
-    writeFile(projectRoot, ".agents/skills/run-task/SKILL.md", legacy);
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
-    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/run-task/SKILL.md"), "utf8"), legacy);
-    assert.ok(report.managed.protected.some((entry) => entry.target === ".agents/skills/run-task/SKILL.md"));
+    const config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
+    assert.equal(report.error, undefined);
+    assert.equal(config.skills.registrations, undefined);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md")), false);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".claude/commands/guide.md")), false);
+    assert.equal(fs.readFileSync(path.join(sourceRoot, "guide/SKILL.md"), "utf8"), "---\nname: guide\n---\nGuide\n");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1554,10 +1521,15 @@ test("retired run-task cleanup requires the exact managed inventory and unchange
     const { templateRoot } = createTemplateInstall(tmpDir);
     const legacy = fs.readFileSync(path.resolve("tests/fixtures/skills/legacy-run-task/SKILL.md"), "utf8");
     const roots = Object.fromEntries(["official", "modified", "extra", "ejected"].map((name) => [name, path.join(tmpDir, name)]));
+    const sourceRoots = [path.join(tmpDir, "unregistered-source-a"), path.join(tmpDir, "unregistered-source-b")];
+    for (const sourceRoot of sourceRoots) writeFile(sourceRoot, "run-task/SKILL.md", legacy);
     for (const [name, root] of Object.entries(roots)) {
       const config = {
         project: name, org: "acme", language: "en", platform: { type: "none" },
-        skills: { sources: [], registrations: [] },
+        skills: {
+          sources: name === "official" ? sourceRoots.map((sourceRoot) => ({ type: "local", path: sourceRoot })) : [],
+          registrations: []
+        },
         files: {
           managed: [".agents/skills/"], merged: [],
           ejected: name === "ejected" ? [".agents/skills/run-task/SKILL.md"] : []
@@ -1570,6 +1542,9 @@ test("retired run-task cleanup requires the exact managed inventory and unchange
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const reports = Object.fromEntries(Object.entries(roots).map(([name, root]) => [name, syncTemplates(root, templateRoot)]));
     assert.equal(fs.existsSync(path.join(roots.official!, ".agents/skills/run-task/SKILL.md")), false);
+    for (const sourceRoot of sourceRoots) {
+      assert.equal(fs.readFileSync(path.join(sourceRoot, "run-task/SKILL.md"), "utf8"), legacy);
+    }
     for (const name of ["modified", "extra", "ejected"]) {
       assert.equal(fs.existsSync(path.join(roots[name]!, ".agents/skills/run-task/SKILL.md")), true, `${name} content should be preserved`);
     }

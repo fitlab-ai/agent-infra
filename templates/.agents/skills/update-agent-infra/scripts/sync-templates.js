@@ -491,12 +491,6 @@ function scanRegisteredSkillSources(projectRoot, registrations, sources, templat
       }
     }
   }
-  const byName = new Map();
-  for (const candidate of found.values()) {
-    const current = byName.get(candidate.name) || [];
-    current.push(candidate);
-    byName.set(candidate.name, current);
-  }
   const selected = new Map();
   const names = new Set();
   for (const registration of registrations) {
@@ -529,7 +523,7 @@ function scanRegisteredSkillSources(projectRoot, registrations, sources, templat
     }
     selected.set(registration.name, { ...registration, path: dir, project: false, files: candidate.files });
   }
-  return { selected, candidates: byName, errors, invalidRegistration };
+  return { selected, errors, invalidRegistration };
 }
 
 function valueBaseline(value) {
@@ -1064,29 +1058,19 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const { project, org, language: lang = 'en' } = cfg;
   const templateSkillNames = listTemplateSkillNames(templateRoot);
-  const hadRegistrations = Object.prototype.hasOwnProperty.call(cfg.skills || {}, 'registrations');
-  if (hadRegistrations && !Array.isArray(cfg.skills.registrations)) {
+  const skillSettings = cfg.skills || {};
+  const hasConfiguredRegistrations = Object.prototype.hasOwnProperty.call(skillSettings, 'registrations');
+  if (hasConfiguredRegistrations && !Array.isArray(skillSettings.registrations)) {
     return { error: 'Invalid skills.registrations; expected an array.' };
   }
-  const sourceRoots = Array.isArray(cfg.skills?.sources) ? cfg.skills.sources : [];
-  const registrations = hadRegistrations ? cfg.skills.registrations : [];
-  const scannedSkills = scanRegisteredSkillSources(projectRoot, registrations, sourceRoots, templateSkillNames);
-  if (hadRegistrations && scannedSkills.invalidRegistration) {
+  const sourceRoots = Array.isArray(skillSettings.sources) ? skillSettings.sources : [];
+  const registrations = hasConfiguredRegistrations ? skillSettings.registrations : [];
+  const registeredSourceRoots = registrations.some((registration) => registration?.type === 'local')
+    ? sourceRoots
+    : [];
+  const scannedSkills = scanRegisteredSkillSources(projectRoot, registrations, registeredSourceRoots, templateSkillNames);
+  if (scannedSkills.invalidRegistration) {
     return { error: 'Invalid skills.registrations; repair the names, types, paths, or duplicates before updating.' };
-  }
-  if (!hadRegistrations) {
-    if (scannedSkills.errors.length > 0) {
-      return { error: 'Legacy skill registration migration deferred because one or more configured sources could not be fully read.', custom: { sourceErrors: scannedSkills.errors } };
-    }
-    const migrated = [];
-    for (const [name, candidates] of scannedSkills.candidates) {
-      if (candidates.length !== 1) continue;
-      const candidate = candidates[0];
-      const registration = { name, type: 'local', path: candidate.path };
-      migrated.push(registration);
-      scannedSkills.selected.set(name, { ...registration, project: false, files: candidate.files });
-    }
-    cfg.skills = { ...(cfg.skills || {}), registrations: migrated };
   }
   ensureRuntimeWorkspace(cfg.project);
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
@@ -1337,7 +1321,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     const assets = retiredAssets.filter((asset) => asset.group === groupName);
     const skillName = groupName;
     const protectedByRegistration = activeRegistrations.some((entry) => entry.name === skillName);
-    const conflictingSources = (scannedSkills.candidates.get(skillName) || []).length > 1;
     const knownTargets = new Set(assets.map((asset) => norm(asset.target)));
     const safeTargets = new Map(assets.map((asset) => {
       const target = norm(asset.target);
@@ -1352,7 +1335,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       else inventory = walkDir(skillDir).map((file) => norm(path.relative(projectRoot, file)));
       if (inventory.some((target) => !knownTargets.has(target))) inventoryValid = false;
     }
-    const eligible = !protectedByRegistration && !conflictingSources && inventoryValid && assets.every((asset) => {
+    const eligible = !protectedByRegistration && inventoryValid && assets.every((asset) => {
       const target = norm(asset.target);
       const full = safeTargets.get(target);
       if (!full) return false;
@@ -1383,7 +1366,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         }
         if (fs.existsSync(full)) report.managed.protected.push({
           target,
-          reason: protectedByRegistration ? 'registered-custom' : conflictingSources ? 'conflicting-custom-sources' : 'unknown-origin-or-modified',
+          reason: protectedByRegistration ? 'registered-custom' : 'unknown-origin-or-modified',
           baseline: trustedBaseline(managedBaselines[asset.target]),
           local: fs.lstatSync(full).isFile() && !fs.lstatSync(full).isSymbolicLink() ? sha256(fs.readFileSync(full)) : null,
           template: null

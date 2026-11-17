@@ -175,7 +175,7 @@ Write `description` as "one-line responsibility + scenario clause": after the sh
 
 Set the generic optional `disable-model-invocation` field to `true` when generated TUI commands should disable model invocation; each TUI adapter consumes it according to its capabilities. To preserve line breaks in a multiline `description`, use a YAML literal block (`|`); sync emits the corresponding multiline metadata format for each TUI.
 
-After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills, generates matching commands for Claude Code and OpenCode, and lets Antigravity CLI discover the shared skills directly.
+After creating or updating a local skill under `.agents/skills/<name>/`, run `ai skill add <name>` to register it explicitly, then run `update-agent-infra` to sync its files and generate client commands. Only registered skills enter agent-infra synchronization and command generation. Antigravity CLI direct discovery of in-place shared skills is controlled by the client, outside sync-generated behavior.
 
 ### Shared skill sources
 
@@ -195,8 +195,8 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 
 ### Sync behavior
 
-- Custom project skills in `.agents/skills/` are protected from managed-file cleanup
-- Source entries are applied in order; later custom sources overwrite earlier custom sources
+- Unregistered project skills in `.agents/skills/` are protected as unknown files; only `ai skill add` registrations are synchronized and generate commands
+- `skills.sources` only discovers candidates; same-name candidates are not merged or selected by source order, so use `ai skill add` to choose an exact source
 - Files deleted from an existing configured source are removed locally on the next sync for that sourced skill
 - Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
 - Use `files.ejected` if the project must take ownership of a built-in skill or command
