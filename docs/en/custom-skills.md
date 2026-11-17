@@ -74,7 +74,7 @@ Expected source layout:
 
 Behavior:
 
-- Sources are applied in list order; later sources overwrite earlier custom sources when they define the same file
+- Sources are scanned for candidates. Register a skill from one selected source path; same-name candidates are shown as conflicts and are neither merged nor applied in source-list order
 - `type: "local"` is the only supported source type today; the structure leaves room for future source types
 - `~` in source paths is expanded to the current user's home directory
 

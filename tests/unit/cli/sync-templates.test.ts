@@ -1218,6 +1218,43 @@ test("syncTemplates removes unregistered managed skills and manifest-derived com
   }
 });
 
+test("syncTemplates respects directory-level managed exclusions for stale skill assets", async () => {
+  const tmpDir = createTempDir("ai-collab-stale-skill-directory-exclusions-");
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const adapter = createAgentClientManifest().find((entry) => entry.id === "claude-code")!;
+    const skillName = "old-guide";
+    const commandTarget = adapter.customCommand!.target.replaceAll("${skillName}", skillName);
+    const cases = [
+      { name: "ejected command directory", files: { ejected: [".claude/commands/"] }, keepSkill: false, keepCommand: true },
+      { name: "merged command tree", files: { merged: [".claude/commands/**/*"] }, keepSkill: false, keepCommand: true },
+      { name: "ejected skill directory", files: { ejected: [".agents/skills/"] }, keepSkill: true, keepCommand: true },
+      { name: "merged skill tree", files: { merged: [".agents/skills/**/*"] }, keepSkill: true, keepCommand: true }
+    ];
+    writeFile(templateRoot, ".agents/skills/current/SKILL.en.md", "---\nname: current\n---\nBuiltin\n");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+
+    for (const item of cases) {
+      const projectRoot = path.join(tmpDir, item.name.replaceAll(" ", "-"));
+      writeJson(projectRoot, ".agents/.airc.json", {
+        project: item.name, org: "acme", language: "en", platform: { type: "none" },
+        skills: { sources: [], registrations: [] },
+        files: { managed: [".agents/skills/"], merged: [], ejected: [], ...item.files }
+      });
+      writeFile(projectRoot, `.agents/skills/${skillName}/SKILL.md`, `---\nname: ${skillName}\n---\nStale\n`);
+      writeFile(projectRoot, commandTarget, "User-owned command\n");
+
+      const report = syncTemplates(projectRoot, templateRoot);
+
+      assert.equal(fs.existsSync(path.join(projectRoot, `.agents/skills/${skillName}/SKILL.md`)), item.keepSkill, item.name);
+      assert.equal(fs.existsSync(path.join(projectRoot, commandTarget)), item.keepCommand, item.name);
+      if (item.keepCommand) assert.equal(report.managed.removed.includes(commandTarget), false, item.name);
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates preserves stale files that match merged glob patterns", async () => {
   const tmpDir = createTempDir("ai-collab-sync-glob-");
 
@@ -1579,12 +1616,15 @@ test("manifest-derived stale skill command cleanup rejects symlinked parents", o
     writeJson(linkedSkillRoot, ".agents/.airc.json", {
       project: "linked-skill-root", org: "acme", language: "en", platform: { type: "none" },
       skills: { sources: [], registrations: [] },
-      files: { managed: [".agents/skills/"], merged: [], ejected: [] }
+      files: { managed: [".agents/"], merged: [], ejected: [] }
     });
     writeFile(outsideSkills, "stale-guide/SKILL.md", "---\nname: stale-guide\n---\nOutside\n");
+    writeFile(templateRoot, ".agents/skills/current/SKILL.en.md", "---\nname: current\n---\nBuiltin\n");
     fs.symlinkSync(outsideSkills, path.join(linkedSkillRoot, ".agents/skills"), "dir");
     const linkedSkillReport = syncTemplates(linkedSkillRoot, templateRoot);
     assert.equal(fs.readFileSync(path.join(outsideSkills, "stale-guide/SKILL.md"), "utf8"), "---\nname: stale-guide\n---\nOutside\n");
+    assert.equal(fs.existsSync(path.join(outsideSkills, "current/SKILL.md")), false, JSON.stringify(linkedSkillReport.managed));
+    assert.equal(fs.lstatSync(path.join(linkedSkillRoot, ".agents/skills")).isSymbolicLink(), true);
     assert.ok(linkedSkillReport.managed.protected.some((entry) =>
       entry.target === ".agents/skills/" && entry.reason === "unsafe-path"
     ));

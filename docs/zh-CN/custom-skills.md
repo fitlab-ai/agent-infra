@@ -74,7 +74,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 行为说明：
 
-- 多个 source 按数组顺序应用；后面的 source 如果定义了同名文件，会覆盖前面的自定义 source 文件
+- source 用于发现候选。登记 skill 时需选择一个具体来源路径；多个 source 中的同名候选会显示为冲突，不会合并文件，也不会按数组顺序覆盖
 - 当前只支持 `type: "local"`；配置结构已为未来扩展其他来源类型预留
 - source 路径中的 `~` 会自动展开为当前用户的 home 目录
 

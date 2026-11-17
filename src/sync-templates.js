@@ -427,7 +427,7 @@ function listTemplateSkillNames(templateRoot) {
   );
 }
 
-function listUnregisteredManagedSkillNames(projectRoot, templateSkillNames, registrations) {
+function listUnregisteredManagedSkillNames(projectRoot, templateSkillNames, registrations, managed, merged, ejected) {
   const skillsDir = safeProjectTarget(projectRoot, '.agents/skills');
   if (!skillsDir) return [];
   try {
@@ -440,7 +440,15 @@ function listUnregisteredManagedSkillNames(projectRoot, templateSkillNames, regi
 
   const registered = new Set(registrations.map((entry) => entry?.name));
   return fs.readdirSync(skillsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !templateSkillNames.has(entry.name) && !registered.has(entry.name))
+    .filter((entry) => {
+      const skillDir = `.agents/skills/${entry.name}/`;
+      const skillFile = `${skillDir}SKILL.md`;
+      return entry.isDirectory()
+        && !templateSkillNames.has(entry.name)
+        && !registered.has(entry.name)
+        && isManagedPath(skillDir, managed)
+        && !matchesAnyPath(skillFile, [...merged, ...ejected]);
+    })
     .filter((entry) => {
       const skillPath = `.agents/skills/${entry.name}/SKILL.md`;
       const absolute = safeProjectTarget(projectRoot, skillPath);
@@ -634,9 +642,30 @@ function generateCustomCommands(
   }
 }
 
-function matchesAny(rel, patterns) {
-  const n = norm(rel);
-  return patterns.some(p => norm(p) === n || globMatch(p, n));
+function matchesAnyPath(rel, patterns) {
+  return patterns.some((pattern) => assetMatches(pattern, rel) || globMatch(pattern, rel));
+}
+
+function isManagedPath(rel, managed) {
+  return managed.some((entry) => assetMatches(entry, rel) || globMatch(entry, rel));
+}
+
+function isProjectSkillsPath(rel) {
+  const normalized = norm(rel).replace(/\/+$/, '');
+  return normalized === '.agents/skills' || normalized.startsWith('.agents/skills/');
+}
+
+function safeProjectSkillsFileTarget(projectRoot, relativePath) {
+  if (!isProjectSkillsPath(relativePath)) return null;
+  const absolute = safeProjectTarget(projectRoot, relativePath);
+  if (!absolute) return null;
+  try {
+    const stat = fs.lstatSync(absolute, { throwIfNoEntry: false });
+    if (stat && (!stat.isFile() || stat.isSymbolicLink())) return null;
+  } catch {
+    return null;
+  }
+  return absolute;
 }
 
 function renderContent(text, vars) {
@@ -857,12 +886,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     ...projectCustomSkills,
     ...activeRegistrations.map((entry) => ({ dirName: entry.name }))
   ];
-  const unregisteredManagedSkillNames = listUnregisteredManagedSkillNames(
-    projectRoot,
-    templateSkillNames,
-    activeRegistrations
-  );
-
   cfg.files ||= {};
   const currentRegistry = {
     managed: [...(cfg.files.managed || [])],
@@ -903,13 +926,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       .filter((adapter) => enabledTUIs.has(adapter.id) && adapter.customCommand)
       .map((adapter) => adapter.customCommand.target.replaceAll('${skillName}', registration.name));
     return adapterTargets;
-  }));
-  const staleSkillCommandTargets = new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
-    if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
-    return unregisteredManagedSkillNames.flatMap((skillName) => {
-      const target = norm(adapter.customCommand.target.replaceAll('${skillName}', skillName));
-      return adapter.managed.some((entry) => assetMatches(entry, target)) ? [target] : [];
-    });
   }));
   const managedBaselines = cfg.files.managedBaselines && typeof cfg.files.managedBaselines === 'object'
     && !Array.isArray(cfg.files.managedBaselines)
@@ -1000,6 +1016,23 @@ function syncTemplates(projectRoot, templateRootOverride) {
     });
   }
 
+  const unregisteredManagedSkillNames = unsafeProjectSkillsRoot ? [] : listUnregisteredManagedSkillNames(
+    projectRoot,
+    templateSkillNames,
+    activeRegistrations,
+    managed,
+    merged,
+    ejected
+  );
+  const staleSkillCommandTargets = new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
+    if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
+    return unregisteredManagedSkillNames.flatMap((skillName) => {
+      const target = norm(adapter.customCommand.target.replaceAll('${skillName}', skillName));
+      const adapterOwnsTarget = adapter.managed.some((entry) => assetMatches(entry, target));
+      return adapterOwnsTarget ? [target] : [];
+    });
+  }));
+
   for (const category of ['managed', 'merged', 'ejected']) {
     const before = currentRegistry[category];
     const after = assetPlan.registry[category];
@@ -1020,13 +1053,17 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const protectedStaleSkillCommandTargets = new Set();
   for (const target of staleSkillCommandTargets) {
-    if (matchesAny(target, merged)) {
+    if (matchesAnyPath(target, merged)) {
       report.managed.skippedMerged.push(target);
       protectedStaleSkillCommandTargets.add(target);
       continue;
     }
-    if (matchesAny(target, ejected)) {
+    if (matchesAnyPath(target, ejected)) {
       report.ejected.skipped.push(target);
+      protectedStaleSkillCommandTargets.add(target);
+      continue;
+    }
+    if (!isManagedPath(target, managed)) {
       protectedStaleSkillCommandTargets.add(target);
       continue;
     }
@@ -1401,7 +1438,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.managed.skippedPlatform.push(entry);
       continue;
     }
-    if (norm(entry) === '.agents/skills/' && unsafeProjectSkillsRoot) continue;
+    if (isProjectSkillsPath(entry) && unsafeProjectSkillsRoot) continue;
     const isDir = entry.endsWith('/');
     let entryRels;
     const expectedTargets = isDir ? new Set() : null;
@@ -1436,9 +1473,23 @@ function syncTemplates(projectRoot, templateRootOverride) {
         continue;
       }
 
-      if (matchesAny(tgt, merged) || matchesAny(tgt, ejected)) {
+      if (matchesAnyPath(tgt, merged) || matchesAnyPath(tgt, ejected)) {
         report.managed.skippedMerged.push(tgt);
         continue;
+      }
+
+      if (isProjectSkillsPath(tgt)) {
+        const safeTarget = unsafeProjectSkillsRoot ? null : safeProjectSkillsFileTarget(projectRoot, tgt);
+        if (!safeTarget) {
+          report.managed.protected.push({
+            target: tgt,
+            reason: 'unsafe-path',
+            baseline: trustedBaseline(managedBaselines[tgt]),
+            local: null,
+            template: null
+          });
+          continue;
+        }
       }
 
       const srcRoot = sourceMap.get(src) || templateRoot;
@@ -1488,18 +1539,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
           if (isCustomProtected(projFile, protectedCustomSkills, customCommandTargets)) continue;
-          if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
+          if (matchesAnyPath(projFile, merged) || matchesAnyPath(projFile, ejected)) continue;
           if (protectedStaleSkillCommandTargets.has(projFile)) continue;
-          const isManagedSkillPath = norm(entry) === '.agents/skills/';
-          if (isManagedSkillPath) {
-            const absolute = safeProjectTarget(projectRoot, projFile);
-            let stat;
-            try {
-              stat = absolute ? fs.lstatSync(absolute) : null;
-            } catch {
-              stat = null;
-            }
-            if (!stat?.isFile() || stat.isSymbolicLink()) {
+          let safeSkillTarget = null;
+          if (isProjectSkillsPath(projFile)) {
+            safeSkillTarget = unsafeProjectSkillsRoot ? null : safeProjectSkillsFileTarget(projectRoot, projFile);
+            if (!safeSkillTarget) {
               report.managed.protected.push({
                 target: projFile,
                 reason: 'unsafe-path',
@@ -1510,11 +1555,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
               continue;
             }
           }
+          const projectFile = safeSkillTarget || path.join(projectRoot, projFile);
           if (assetPlan.enabledManaged.includes(entry)) {
             const baseline = trustedBaseline(managedBaselines[projFile]);
-            const localHash = sha256(fs.readFileSync(path.join(projectRoot, projFile)));
+            const localHash = sha256(fs.readFileSync(projectFile));
             if (baseline !== null && localHash === baseline) {
-              fs.unlinkSync(path.join(projectRoot, projFile));
+              fs.unlinkSync(projectFile);
               delete managedBaselines[projFile];
               report.managed.removed.push(projFile);
             } else {
