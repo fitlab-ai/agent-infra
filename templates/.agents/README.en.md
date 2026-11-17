@@ -195,8 +195,9 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 
 ### Sync behavior
 
-- Unregistered project skills in `.agents/skills/` are protected as unknown files; only `ai skill add` registrations are synchronized and generate commands
+- Only built-in skills and custom skills explicitly registered with `ai skill add` participate in sync. A full sync removes unregistered skills from the managed `.agents/skills/` tree and client commands derived from their skill directories through the adapter manifest, even when those files were edited or have no baseline
 - `skills.sources` only discovers candidates; same-name candidates are not merged or selected by source order, so use `ai skill add` to choose an exact source
+- `ai skill remove` unregisters a skill and leaves its source directory in place at that time. A later full sync removes an unregistered project-managed skill and its derivable commands. If only an orphan command remains without its skill directory, sync does not guess its ownership from the command name
 - Files deleted from an existing configured source are removed locally on the next sync for that sourced skill
 - Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
 - Use `files.ejected` if the project must take ownership of a built-in skill or command

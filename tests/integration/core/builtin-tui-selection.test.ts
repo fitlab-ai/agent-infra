@@ -206,7 +206,13 @@ test("syncTemplates: Antigravity uses shared skills without client-owned project
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { agentClients: canonicalAgentClients(["claude-code", "antigravity-cli"]) });
+    makeProject(projectRoot, {
+      agentClients: canonicalAgentClients(["claude-code", "antigravity-cli"]),
+      skills: {
+        sources: [],
+        registrations: [{ name: "local-check", type: "project", path: ".agents/skills/local-check" }]
+      }
+    });
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
@@ -347,7 +353,13 @@ test("syncTemplates: disabling Antigravity leaves shared skills untouched", asyn
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { agentClients: canonicalAgentClients(["antigravity-cli"]) });
+    makeProject(projectRoot, {
+      agentClients: canonicalAgentClients(["antigravity-cli"]),
+      skills: {
+        sources: [],
+        registrations: [{ name: "local-check", type: "project", path: ".agents/skills/local-check" }]
+      }
+    });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
     );

@@ -194,8 +194,9 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 ### 同步行为
 
-- `.agents/skills/` 中未登记的项目 skill 受未知文件保护；只有通过 `ai skill add` 登记后才会同步物化并生成命令
+- 只有内置 skill 和通过 `ai skill add` 显式登记的自定义 skill 会参与同步。完整同步会清理 `.agents/skills/` 托管目录中的未登记技能，以及能根据技能目录和 adapter manifest 推导出的客户端命令；即使这些文件已修改或没有基线也会清理
 - `skills.sources` 仅用于发现候选；同名候选不合并，也不会按声明顺序覆盖，使用 `ai skill add` 选择具体来源
+- `ai skill remove` 会先解除登记并在当时保留源目录；之后的完整同步会清理未登记的项目托管技能及其可推导命令。若只剩没有对应技能目录的孤立命令，同步器不会按命令名称猜测归属并删除
 - 对于仍存在于配置 source 中的 skill，如果源里删掉文件，下次同步时会删除本地对应残留文件
 - 自定义 source 不能覆盖内置 skill；如果与内置 skill 同名，会跳过该 source skill
 - 如果项目必须接管某个内置 skill 或命令，请使用 `files.ejected`

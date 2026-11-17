@@ -34,7 +34,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 多行 `description` 如需保留换行，使用 YAML literal block（`|`）；同步器会为各 TUI 输出对应的多行元数据格式。
 
-添加 skill 后，再执行一次 `update-agent-infra`：
+使用 `ai skill add <name>` 显式登记一次，再执行 `update-agent-infra` 同步：
 
 | TUI | 命令 |
 |-----|------|
@@ -43,7 +43,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 | Antigravity CLI | `/update-agent-infra` |
 | OpenCode | `/update-agent-infra` |
 
-同步时会自动检测 `.agents/skills/` 下的非内置 skill 目录，为 Claude Code 和 OpenCode 生成对应命令；Antigravity CLI 则直接发现共享 skill。
+只有内置 skill 和显式登记的自定义 skill 会参与同步并生成客户端命令。修改已登记 skill 后，直接执行 `update-agent-infra`，不要重复添加。Antigravity CLI 对共享目录的直接发现由客户端自身决定，不属于同步器行为。
 
 ## 从共享源同步自定义 skills
 
@@ -82,8 +82,10 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 执行 `update-agent-infra` 时：
 
-- 手动放在 `.agents/skills/` 下的自定义 skill 不会被 managed 文件清理删除
+- 项目托管目录 `.agents/skills/` 下的未登记 skill 会被删除。只要旧技能目录仍存在，同步器也会按客户端 adapter manifest 从技能名推导命令目标并清理，包括已修改或没有基线的文件
+- 如果对应技能目录已不存在、只剩孤立命令，同步器不会按命令名称猜测来源；该文件继续遵守客户端 managed 文件的基线规则
 - 外部 source 中的 skill 会同步复制到 `.agents/skills/`
+- `ai skill remove` 会解除登记并在执行时保留源目录。之后的完整同步会清理项目托管 `.agents/skills/` 中未登记的技能及其可推导命令；外部 source 根目录不在清理范围内
 - 对于仍存在于配置 source 中的 skill，如果源里删掉某个文件，下次同步时本地对应残留文件也会被删除
 - 内置 skill 始终优先于自定义 source；如果 source 里出现与内置 skill 同名的目录，agent-infra 会跳过该 source skill，而不是覆盖内置实现
 - 如果你确实需要替换内置 skill 或命令，请使用现有的 `ejected` 机制，让项目自己接管该文件

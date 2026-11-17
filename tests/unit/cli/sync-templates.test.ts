@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 
 import { createTempDir, loadFreshEsm, onPlatforms, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
+import { createAgentClientManifest } from "../../../lib/agent-clients/registry.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
@@ -1145,46 +1146,73 @@ test("syncTemplates keeps an ejected entry that has no template source under a m
   }
 });
 
-test("syncTemplates preserves custom skills when the template has only an empty same-name directory", async () => {
-  const tmpDir = createTempDir("ai-collab-sync-empty-skill-dir-");
+test("syncTemplates removes unregistered managed skills and manifest-derived commands", async () => {
+  const tmpDir = createTempDir("ai-collab-unregistered-managed-skill-");
 
   try {
     const projectRoot = path.join(tmpDir, "project");
+    const sourceRoot = path.join(tmpDir, "sources");
     const { templateRoot } = createTemplateInstall(tmpDir);
+    const adapters = createAgentClientManifest().filter((adapter) => adapter.customCommand);
+    const staleName = "local-check";
+    const generatedCommandTargets = adapters.map((adapter) =>
+      adapter.customCommand!.target.replaceAll("${skillName}", staleName)
+    );
+    const protectedCommand = generatedCommandTargets[0]!;
+    const expectedRemovedCommands = generatedCommandTargets.slice(1);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(path.join(templateRoot, ".agents/skills/local-check/reference"), { recursive: true });
     writeFile(templateRoot, ".agents/skills/builtin-check/SKILL.en.md", "---\nname: builtin-check\ndescription: Built in\n---\n");
+    writeFile(templateRoot, ".claude/commands/template-command.md", "Template command\n");
+    writeFile(sourceRoot, `${staleName}/SKILL.md`, "---\nname: local-check\n---\nExternal candidate\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
       platform: { type: "github" },
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [] },
       files: {
         managed: [".agents/skills/"],
-        merged: [],
-        ejected: []
+        merged: [protectedCommand],
+        ejected: [".agents/skills/local-check/owned.txt"]
       }
     });
 
-    writeFile(projectRoot, ".agents/skills/local-check/SKILL.md", "---\nname: local-check\ndescription: Local\n---\n");
-    writeFile(projectRoot, ".agents/skills/local-check/reference/checklist.md", "keep local\n");
+    writeFile(projectRoot, ".agents/skills/local-check/SKILL.md", "---\nname: local-check\ndescription: Local edit\n---\n");
+    writeFile(projectRoot, ".agents/skills/local-check/notes.txt", "user data under the managed skill\n");
+    writeFile(projectRoot, ".agents/skills/local-check/owned.txt", "ejected skill data\n");
+    for (const target of generatedCommandTargets) {
+      writeFile(projectRoot, target, "locally modified generated command\n");
+    }
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".agents/skills/local-check/SKILL.md"), "utf8"),
-      "---\nname: local-check\ndescription: Local\n---\n"
-    );
-    assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".agents/skills/local-check/reference/checklist.md"), "utf8"),
-      "keep local\n"
-    );
-    assert.ok(report.custom.detected.includes("local-check"));
-    assert.ok(!report.managed.removed.includes(".agents/skills/local-check/SKILL.md"));
-    assert.ok(!report.managed.removed.includes(".agents/skills/local-check/reference/checklist.md"));
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/local-check/SKILL.md")), false);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/local-check/notes.txt")), false);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/local-check/owned.txt"), "utf8"), "ejected skill data\n");
+    assert.equal(fs.readFileSync(path.join(projectRoot, protectedCommand), "utf8"), "locally modified generated command\n");
+    for (const target of expectedRemovedCommands) {
+      assert.equal(fs.existsSync(path.join(projectRoot, target)), false, `${target} should be removed without a baseline`);
+      assert.ok(report.managed.removed.includes(target));
+    }
+    assert.ok(report.managed.skippedMerged.includes(protectedCommand));
+    assert.ok(report.ejected.skipped.includes(".agents/skills/local-check/owned.txt"));
+    assert.equal(fs.readFileSync(path.join(sourceRoot, `${staleName}/SKILL.md`), "utf8"), "---\nname: local-check\n---\nExternal candidate\n");
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/builtin-check/SKILL.md")), true);
+
+    const orphanRoot = path.join(tmpDir, "orphan-command");
+    const orphanCommand = generatedCommandTargets[0]!;
+    writeJson(orphanRoot, ".agents/.airc.json", {
+      project: "orphan", org: "acme", language: "en", platform: { type: "github" },
+      skills: { sources: [], registrations: [] },
+      files: { managed: [".agents/skills/", ...adapters.flatMap((adapter) => adapter.managed)], merged: [], ejected: [] }
+    });
+    writeFile(orphanRoot, orphanCommand, "orphan command with unknown ownership\n");
+    const orphanReport = syncTemplates(orphanRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(orphanRoot, orphanCommand), "utf8"), "orphan command with unknown ownership\n");
+    assert.ok(orphanReport.managed.protected.some((entry) => entry.target === orphanCommand && entry.reason === "unknown-origin"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1492,103 +1520,74 @@ test("unregistered source candidates stay inactive during sync", async () => {
   }
 });
 
-test("explicit custom run-task registration protects byte-identical historical files", async () => {
-  const tmpDir = createTempDir("ai-collab-retired-run-task-custom-");
+test("explicit custom skill registration protects its project copy", async () => {
+  const tmpDir = createTempDir("ai-collab-registered-skill-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const sourceRoot = path.join(tmpDir, "sources");
     const { templateRoot } = createTemplateInstall(tmpDir);
-    const legacy = fs.readFileSync(path.resolve("tests/fixtures/skills/legacy-run-task/SKILL.md"));
-    writeFile(sourceRoot, "run-task/SKILL.md", legacy.toString("utf8"));
+    const skill = "---\nname: guide\ndescription: Guide\n---\nRegistered source\n";
+    writeFile(sourceRoot, "guide/SKILL.md", skill);
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo", org: "acme", language: "en", platform: { type: "none" },
-      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "run-task", type: "local", path: path.join(sourceRoot, "run-task") }] },
-      files: { managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"], merged: [], ejected: [] }
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: path.join(sourceRoot, "guide") }] },
+      files: { managed: [".agents/skills/"], merged: [], ejected: [] }
     });
-    writeFile(projectRoot, ".agents/skills/run-task/SKILL.md", legacy.toString("utf8"));
+    writeFile(projectRoot, ".agents/skills/guide/SKILL.md", skill);
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const report = syncTemplates(projectRoot, templateRoot);
-    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/run-task/SKILL.md"), "utf8"), legacy.toString("utf8"));
-    assert.ok(report.managed.protected.some((entry) => entry.target === ".agents/skills/run-task/SKILL.md" && entry.reason === "registered-custom"));
+    syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md"), "utf8"), skill);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("retired run-task cleanup requires the exact managed inventory and unchanged files", async () => {
-  const tmpDir = createTempDir("ai-collab-retired-run-task-inventory-");
+test("manifest-derived stale skill command cleanup rejects symlinked parents", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = createTempDir("ai-collab-stale-skill-command-paths-");
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
-    const legacy = fs.readFileSync(path.resolve("tests/fixtures/skills/legacy-run-task/SKILL.md"), "utf8");
-    const roots = Object.fromEntries(["official", "modified", "extra", "ejected"].map((name) => [name, path.join(tmpDir, name)]));
-    const sourceRoots = [path.join(tmpDir, "unregistered-source-a"), path.join(tmpDir, "unregistered-source-b")];
-    for (const sourceRoot of sourceRoots) writeFile(sourceRoot, "run-task/SKILL.md", legacy);
-    for (const [name, root] of Object.entries(roots)) {
-      const config = {
-        project: name, org: "acme", language: "en", platform: { type: "none" },
-        skills: {
-          sources: name === "official" ? sourceRoots.map((sourceRoot) => ({ type: "local", path: sourceRoot })) : [],
-          registrations: []
-        },
-        files: {
-          managed: [".agents/skills/"], merged: [],
-          ejected: name === "ejected" ? [".agents/skills/run-task/SKILL.md"] : []
-        }
-      };
-      writeJson(root, ".agents/.airc.json", config);
-      writeFile(root, ".agents/skills/run-task/SKILL.md", name === "modified" ? `${legacy}\nlocal edit\n` : legacy);
-      if (name === "extra") writeFile(root, ".agents/skills/run-task/notes.txt", "user data\n");
-    }
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const reports = Object.fromEntries(Object.entries(roots).map(([name, root]) => [name, syncTemplates(root, templateRoot)]));
-    assert.equal(fs.existsSync(path.join(roots.official!, ".agents/skills/run-task/SKILL.md")), false);
-    for (const sourceRoot of sourceRoots) {
-      assert.equal(fs.readFileSync(path.join(sourceRoot, "run-task/SKILL.md"), "utf8"), legacy);
-    }
-    for (const name of ["modified", "extra", "ejected"]) {
-      assert.equal(fs.existsSync(path.join(roots[name]!, ".agents/skills/run-task/SKILL.md")), true, `${name} content should be preserved`);
-    }
-    assert.equal(fs.readFileSync(path.join(roots.extra!, ".agents/skills/run-task/notes.txt"), "utf8"), "user data\n");
-    assert.ok(reports.extra?.managed.protected.some((entry) => entry.target === ".agents/skills/run-task/SKILL.md"));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("retired command cleanup rejects symlinked parents and removes the official file on a normal path", onPlatforms("linux", "darwin"), async () => {
-  const tmpDir = createTempDir("ai-collab-retired-command-paths-");
-  try {
-    const { templateRoot } = createTemplateInstall(tmpDir);
-    const retiredCommand = fs.readFileSync(path.resolve("tests/fixtures/retired-assets/run-task-command.md"), "utf8");
+    const adapter = createAgentClientManifest().find((entry) => entry.id === "claude-code")!;
+    const commandTarget = adapter.customCommand!.target.replaceAll("${skillName}", "stale-guide");
     const linkedRoot = path.join(tmpDir, "linked");
+    const linkedSkillRoot = path.join(tmpDir, "linked-skill-root");
     const outside = path.join(tmpDir, "outside");
-    const normalRoot = path.join(tmpDir, "normal");
+    const outsideSkills = path.join(tmpDir, "outside-skills");
     fs.mkdirSync(outside, { recursive: true });
+    fs.mkdirSync(outsideSkills, { recursive: true });
 
-    for (const root of [linkedRoot, normalRoot]) {
-      writeJson(root, ".agents/.airc.json", {
-        project: path.basename(root), org: "acme", language: "en", platform: { type: "none" },
-        skills: { sources: [], registrations: [] },
-        files: { managed: [".claude/commands/"], merged: [], ejected: [] }
-      });
-    }
+    writeJson(linkedRoot, ".agents/.airc.json", {
+      project: "linked", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [], registrations: [] },
+      files: { managed: [".agents/skills/", ...adapter.managed], merged: [], ejected: [] }
+    });
+    writeFile(linkedRoot, ".agents/skills/stale-guide/SKILL.md", "---\nname: stale-guide\n---\nStale\n");
 
     fs.mkdirSync(path.join(linkedRoot, ".claude"), { recursive: true });
-    fs.symlinkSync(outside, path.join(linkedRoot, ".claude/commands"), "dir");
-    writeFile(outside, "run-task.md", retiredCommand);
-    writeFile(normalRoot, ".claude/commands/run-task.md", retiredCommand);
+    const commandDir = path.dirname(path.join(linkedRoot, commandTarget));
+    fs.symlinkSync(outside, commandDir, "dir");
+    writeFile(outside, path.basename(commandTarget), "stale generated command\n");
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const linkedReport = syncTemplates(linkedRoot, templateRoot);
-    const normalReport = syncTemplates(normalRoot, templateRoot);
 
-    assert.equal(fs.readFileSync(path.join(outside, "run-task.md"), "utf8"), retiredCommand);
+    assert.equal(fs.readFileSync(path.join(outside, path.basename(commandTarget)), "utf8"), "stale generated command\n");
     assert.ok(linkedReport.managed.protected.some((entry) =>
-      entry.target === ".claude/commands/run-task.md" && entry.reason === "unsafe-path"
+      entry.target === commandTarget && entry.reason === "unsafe-path"
+    ), JSON.stringify(linkedReport.managed));
+    assert.equal(linkedReport.managed.removed.includes(commandTarget), false);
+
+    writeJson(linkedSkillRoot, ".agents/.airc.json", {
+      project: "linked-skill-root", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [], registrations: [] },
+      files: { managed: [".agents/skills/"], merged: [], ejected: [] }
+    });
+    writeFile(outsideSkills, "stale-guide/SKILL.md", "---\nname: stale-guide\n---\nOutside\n");
+    fs.symlinkSync(outsideSkills, path.join(linkedSkillRoot, ".agents/skills"), "dir");
+    const linkedSkillReport = syncTemplates(linkedSkillRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(outsideSkills, "stale-guide/SKILL.md"), "utf8"), "---\nname: stale-guide\n---\nOutside\n");
+    assert.ok(linkedSkillReport.managed.protected.some((entry) =>
+      entry.target === ".agents/skills/" && entry.reason === "unsafe-path"
     ));
-    assert.equal(linkedReport.managed.removed.includes(".claude/commands/run-task.md"), false);
-    assert.equal(fs.existsSync(path.join(normalRoot, ".claude/commands/run-task.md")), false);
-    assert.ok(normalReport.managed.removed.includes(".claude/commands/run-task.md"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

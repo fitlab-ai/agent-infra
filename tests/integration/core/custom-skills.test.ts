@@ -184,7 +184,8 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
           { type: "local", path: sourceRoot }
         ],
         registrations: [
-          { name: "shared-rules", type: "local", path: path.join(sourceRoot, "shared-rules") }
+          { name: "shared-rules", type: "local", path: path.join(sourceRoot, "shared-rules") },
+          { name: "manual-only", type: "project", path: ".agents/skills/manual-only" }
         ]
       },
       files: {
