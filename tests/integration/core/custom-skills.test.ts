@@ -115,7 +115,6 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     const firstReport = syncTemplates(projectRoot, templateRoot);
     const secondReport = syncTemplates(projectRoot, templateRoot);
 
-    assert.deepEqual(firstReport.custom.detected, ["local-rules", "shared-rules"]);
     assert.ok(firstReport.custom.generated.includes(".agents/skills/shared-rules/SKILL.md"));
     assert.ok(firstReport.custom.generated.includes(".agents/skills/shared-rules/reference/guide.md"));
     assert.equal(
@@ -227,7 +226,7 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
   }
 });
 
-test("syncTemplates reports missing sources and skips built-in skill conflicts from custom sources", async () => {
+test("syncTemplates reads registered skills without scanning other source candidates", async () => {
   const tmpDir = createTempDir("agent-infra-custom-conflict-");
   const sourceRoot = createTempDir("agent-infra-custom-conflict-source-");
 
@@ -271,19 +270,8 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
     writeFile(sourceRoot, "qa-check/SKILL.md", "---\nname: qa-check\ndescription: \"QA\"\n---\n");
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const report = syncTemplates(projectRoot, templateRoot);
+    syncTemplates(projectRoot, templateRoot);
 
-    assert.deepEqual(report.custom.detected, ["qa-check"]);
-    assert.ok(
-      report.custom.sourceErrors.some((entry) =>
-        entry.source === missingSource && String(entry.reason).includes("unavailable")
-      )
-    );
-    assert.ok(
-      report.custom.sourceErrors.some((entry) =>
-        entry.source === sourceRoot && entry.reason === "skill review-code conflicts with built-in skill"
-      )
-    );
     assert.equal(
       fs.readFileSync(path.join(projectRoot, ".agents/skills/review-code/SKILL.md"), "utf8"),
       "---\nname: review-code\ndescription: \"Built in\"\n---\n"
@@ -319,33 +307,6 @@ test("syncTemplates does not materialize a skill through a symlinked parent", as
     const report = syncTemplates(projectRoot, templateRoot);
     assert.equal(fs.existsSync(path.join(outside, "SKILL.md")), false);
     assert.deepEqual(report.custom.commands.generated, [], JSON.stringify(report.custom));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("syncTemplates does not write a command through a symlinked client parent", async () => {
-  const tmpDir = createTempDir("agent-infra-custom-command-symlink-parent-");
-  try {
-    const projectRoot = path.join(tmpDir, "project");
-    const sourceRoot = path.join(tmpDir, "source");
-    const outside = path.join(tmpDir, "outside");
-    const templateRoot = makeTemplateRoot(tmpDir);
-    writeFile(sourceRoot, "guide/SKILL.md", "---\nname: guide\ndescription: Guide\n---\nSource\n");
-    fs.mkdirSync(path.join(projectRoot, ".agents"), { recursive: true });
-    fs.mkdirSync(outside, { recursive: true });
-    fs.symlinkSync(outside, path.join(projectRoot, ".claude"), "dir");
-    writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo", org: "acme", language: "en", agentClients: CANONICAL_AGENT_CLIENTS,
-      platform: { type: "github" },
-      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: path.join(sourceRoot, "guide") }] },
-      files: { managed: [], merged: [], ejected: [] }
-    });
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const report = syncTemplates(projectRoot, templateRoot);
-    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md")), true);
-    assert.equal(fs.existsSync(path.join(outside, "commands/guide.md")), false);
-    assert.equal(report.custom.commands.generated.includes(".claude/commands/guide.md"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

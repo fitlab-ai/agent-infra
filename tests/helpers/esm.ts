@@ -38,7 +38,6 @@ type SyncTemplatesReport = {
     skipped: string[];
   };
   custom: {
-    detected: string[];
     generated: string[];
     removed: string[];
     sourceErrors: Array<Record<string, unknown>>;

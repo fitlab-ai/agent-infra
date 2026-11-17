@@ -1521,6 +1521,22 @@ test("registered local skills use source baselines and preserve unowned same-byt
     const commandTarget = path.join(projectRoot, ".claude/commands/guide.md");
     assert.equal(fs.existsSync(commandTarget), true);
     const commandBeforeUnavailable = fs.readFileSync(commandTarget, "utf8");
+    const adoptedRoot = path.join(tmpDir, "adopted");
+    const commandRelative = ".claude/commands/guide.md";
+    writeJson(adoptedRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: sourcePath }] },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+    writeFile(adoptedRoot, commandRelative, commandBeforeUnavailable);
+    const adopted = syncTemplates(adoptedRoot, templateRoot);
+    const adoptedConfig = JSON.parse(fs.readFileSync(path.join(adoptedRoot, ".agents/.airc.json"), "utf8"));
+    assert.ok(adopted.custom.commands.unchanged.includes(commandRelative));
+    assert.equal(
+      adoptedConfig.files.managedBaselines[commandRelative],
+      `sha256:${createHash("sha256").update(commandBeforeUnavailable).digest("hex")}`
+    );
+
     const ownedBeforeUnavailable = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
     fs.rmSync(skillRoot, { recursive: true, force: true });
     const unavailable = syncTemplates(projectRoot, templateRoot);
@@ -1628,13 +1644,36 @@ test("unregistered source candidates stay inactive during sync", async () => {
     const unavailable = syncTemplates(projectRoot, templateRoot);
     assert.equal(unavailable.error, undefined);
     writeFile(sourceRoot, "guide/SKILL.md", "---\nname: guide\n---\nGuide\n");
+    writeFile(sourceRoot, "active/SKILL.md", "---\nname: active\n---\nRegistered\n");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "github" },
+      skills: {
+        sources: [{ type: "local", path: sourceRoot }],
+        registrations: [{ name: "active", type: "local", path: path.join(sourceRoot, "active") }]
+      },
+      files: { managed: [], merged: [], ejected: [] }
+    });
 
-    const report = syncTemplates(projectRoot, templateRoot);
+    const candidateFile = path.resolve(sourceRoot, "guide/SKILL.md");
+    const candidateReads: string[] = [];
+    const originalReadFileSync = fs.readFileSync;
+    fs.readFileSync = function (this: typeof fs, filePath, ...args) {
+      if (String(filePath) === candidateFile) candidateReads.push(candidateFile);
+      return originalReadFileSync.call(this, filePath, ...args);
+    } as typeof fs.readFileSync;
+    let report: ReturnType<SyncTemplatesModule["syncTemplates"]>;
+    try {
+      report = syncTemplates(projectRoot, templateRoot);
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+    }
     const config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
     assert.equal(report.error, undefined);
-    assert.equal(config.skills.registrations, undefined);
+    assert.deepEqual(candidateReads, []);
+    assert.deepEqual(config.skills.registrations, [{ name: "active", type: "local", path: path.join(sourceRoot, "active") }]);
     assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/guide/SKILL.md")), false);
     assert.equal(fs.existsSync(path.join(projectRoot, ".claude/commands/guide.md")), false);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/active/SKILL.md")), true);
     assert.equal(fs.readFileSync(path.join(sourceRoot, "guide/SKILL.md"), "utf8"), "---\nname: guide\n---\nGuide\n");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

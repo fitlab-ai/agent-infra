@@ -389,48 +389,13 @@ function trustedBaseline(value) {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value) ? value : null;
 }
 
-function scanRegisteredSkillSources(projectRoot, registrations, sources, templateSkillNames) {
-  const found = new Map();
+function readRegisteredSkillSources(projectRoot, registrations, sources, templateSkillNames) {
+  const configuredRoots = sources
+    .filter((source) => source?.type === 'local' && typeof source.path === 'string' && source.path.trim())
+    .map((source) => path.resolve(expandHome(source.path)));
+  const selected = new Map();
   const errors = [];
   let invalidRegistration = false;
-  for (const source of sources) {
-    if (source?.type !== 'local' || typeof source.path !== 'string' || !source.path.trim()) {
-      errors.push({ source: String(source?.path || ''), reason: 'invalid path' });
-      continue;
-    }
-    const root = expandHome(source.path);
-    let entries;
-    try {
-      if (!fs.statSync(root).isDirectory()) throw new Error('not a directory');
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      errors.push({ source: source.path, reason: 'directory unavailable or unreadable' });
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (templateSkillNames.has(entry.name)) {
-        errors.push({ source: source.path, reason: `skill ${entry.name} conflicts with built-in skill` });
-        continue;
-      }
-      const dir = path.join(root, entry.name);
-      let skillFiles;
-      try {
-        skillFiles = walkDir(dir);
-        if (!skillFiles.some((file) => path.basename(file) === 'SKILL.md')) continue;
-        for (const file of skillFiles) {
-          const stat = fs.lstatSync(file);
-          if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('non-regular skill file');
-        }
-        const files = new Map(skillFiles.map((file) => [norm(path.relative(dir, file)), fs.readFileSync(file)]));
-        const key = `${entry.name}\0${path.resolve(dir)}`;
-        found.set(key, { name: entry.name, path: path.resolve(dir), files });
-      } catch {
-        errors.push({ source: source.path, reason: `skill ${entry.name} is incomplete or unreadable` });
-      }
-    }
-  }
-  const selected = new Map();
   const names = new Set();
   for (const registration of registrations) {
     if (!registration || !['project', 'local'].includes(registration.type) || typeof registration.name !== 'string' || typeof registration.path !== 'string') {
@@ -455,12 +420,27 @@ function scanRegisteredSkillSources(projectRoot, registrations, sources, templat
       continue;
     }
     const dir = path.resolve(expandHome(registration.path));
-    const candidate = found.get(`${registration.name}\0${dir}`);
-    if (!candidate) {
+    const roots = new Set(configuredRoots.filter((root) =>
+      path.dirname(dir) === root && path.basename(dir) === registration.name
+    ));
+    if (roots.size !== 1) {
       errors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable or not configured in skills.sources` });
       continue;
     }
-    selected.set(registration.name, { ...registration, path: dir, project: false, files: candidate.files });
+    try {
+      const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+      if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error('not a regular directory');
+      const skillFiles = walkDir(dir);
+      if (!skillFiles.some((file) => path.basename(file) === 'SKILL.md')) throw new Error('missing SKILL.md');
+      for (const file of skillFiles) {
+        const fileStat = fs.lstatSync(file);
+        if (!fileStat.isFile() || fileStat.isSymbolicLink()) throw new Error('non-regular skill file');
+      }
+      const files = new Map(skillFiles.map((file) => [norm(path.relative(dir, file)), fs.readFileSync(file)]));
+      selected.set(registration.name, { ...registration, path: dir, project: false, files });
+    } catch {
+      errors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable or unreadable` });
+    }
   }
   return { selected, errors, invalidRegistration };
 }
@@ -622,13 +602,15 @@ function listTemplateSkillNames(templateRoot) {
   );
 }
 
-function isCustomProtected(targetPath, customSkills, customCommandTargets) {
+function isCustomProtected(targetPath, registeredSkillNames, customCommandTargets) {
   const normalized = norm(targetPath);
+  const skillPrefix = '.agents/skills/';
+  const skillName = normalized.startsWith(skillPrefix)
+    ? normalized.slice(skillPrefix.length).split('/')[0]
+    : '';
 
-  return customSkills.some(({ dirName }) => (
-    normalized === `.agents/skills/${dirName}`
-    || normalized.startsWith(`.agents/skills/${dirName}/`)
-  )) || customCommandTargets.has(normalized)
+  return registeredSkillNames.has(skillName)
+    || customCommandTargets.has(normalized)
     || [...customCommandTargets].some((target) => target.startsWith(`${normalized}/`));
 }
 
@@ -769,11 +751,11 @@ function generateAgentClientCommand(skill, lang, descriptor) {
   return `${lines.join('\n')}\n`;
 }
 
-function buildBuiltinCustomCommandTargets(customSkills, enabledTUIs) {
+function buildBuiltinCustomCommandTargets(registeredSkillNames, enabledTUIs) {
   return new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
     if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
-    return customSkills.map((skill) =>
-      adapter.customCommand.target.replaceAll('${skillName}', skill.dirName)
+    return [...registeredSkillNames].map((name) =>
+      adapter.customCommand.target.replaceAll('${skillName}', name)
     );
   }));
 }
@@ -783,7 +765,7 @@ function generateCustomCommands(
   lang,
   report,
   enabledTUIs,
-  managedWriter
+  writeProtectedManaged
 ) {
   for (const skill of customSkills) {
     for (const adapter of AGENT_CLIENT_MANIFEST) {
@@ -792,7 +774,7 @@ function generateCustomCommands(
         ...adapter.customCommand,
         invocation: adapter.invocation.replaceAll('${skillName}', skill.dirName)
       };
-      managedWriter(
+      writeProtectedManaged(
         adapter.customCommand.target.replaceAll('${skillName}', skill.dirName),
         generateAgentClientCommand(skill, lang, descriptor),
         report.custom.commands
@@ -996,7 +978,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const registeredSourceRoots = registrations.some((registration) => registration?.type === 'local')
     ? sourceRoots
     : [];
-  const scannedSkills = scanRegisteredSkillSources(projectRoot, registrations, registeredSourceRoots, templateSkillNames);
+  const scannedSkills = readRegisteredSkillSources(projectRoot, registrations, registeredSourceRoots, templateSkillNames);
   if (scannedSkills.invalidRegistration) {
     return { error: 'Invalid skills.registrations; repair the names, types, paths, or duplicates before updating.' };
   }
@@ -1012,7 +994,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   materializeAgentClientConfig(cfg, enabledResolution);
   const vars = { project, org };
   const activeRegistrations = Array.isArray(cfg.skills?.registrations) ? cfg.skills.registrations : [];
-  const protectedCustomSkills = activeRegistrations.map((entry) => ({ dirName: entry.name }));
+  const registeredSkillNames = new Set(activeRegistrations.map((entry) => entry.name));
   cfg.files ||= {};
   const currentRegistry = {
     managed: [...(cfg.files.managed || [])],
@@ -1048,16 +1030,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const ejected = [...assetPlan.registry.ejected];
   const guardedManaged = new Set((DEFAULTS.files.guardedManaged || []).map(norm));
   const allClientManaged = adapterAssets(AGENT_CLIENT_MANIFEST, 'managed');
-  const registeredCommandTargets = new Set(activeRegistrations.flatMap((registration) => {
-    const adapterTargets = AGENT_CLIENT_MANIFEST
-      .filter((adapter) => enabledTUIs.has(adapter.id) && adapter.customCommand)
-      .map((adapter) => adapter.customCommand.target.replaceAll('${skillName}', registration.name));
-    return adapterTargets;
-  }));
   const managedBaselines = cfg.files.managedBaselines && typeof cfg.files.managedBaselines === 'object'
     && !Array.isArray(cfg.files.managedBaselines)
     ? { ...cfg.files.managedBaselines }
     : {};
+  const customCommandTargets = buildBuiltinCustomCommandTargets(registeredSkillNames, enabledTUIs);
 
 
   for (const target of Object.keys(managedBaselines)) {
@@ -1074,7 +1051,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       !guardedManaged.has(norm(target))
       && !retiredManagedForTarget(target)
       && !allClientManaged.some((entry) => assetMatches(entry, target))
-      && !registeredCommandTargets.has(target)
+      && !customCommandTargets.has(target)
     ) {
       delete managedBaselines[target];
     }
@@ -1104,7 +1081,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       removed: []
     },
     custom: {
-      detected: [],
       generated: [],
       updated: [],
       unchanged: [],
@@ -1116,7 +1092,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     merged:  { pending: [] },
     configUpdated: false
   };
-  const customCommandTargets = buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs);
 
   for (const category of ['managed', 'merged', 'ejected']) {
     const before = currentRegistry[category];
@@ -1556,7 +1531,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
-          if (isCustomProtected(projFile, protectedCustomSkills, customCommandTargets)) continue;
+          if (isCustomProtected(projFile, registeredSkillNames, customCommandTargets)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
           const projectFile = path.join(projectRoot, projFile);
           if (assetPlan.enabledManaged.includes(entry)) {
@@ -1707,42 +1682,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
     if (safeToGenerateCommands) customSkills.push(customSkill);
   }
-  report.custom.detected = [...new Set([
-    ...activeRegistrations.map((registration) => registration.name),
-    ...customSkills.map((skill) => skill.dirName),
-    ...protectedCustomSkills.map((skill) => skill.dirName)
-  ])].sort();
-  const customCommandWriter = (target, content, bucket) => {
-    const absolute = safeProjectTarget(projectRoot, target);
-    if (!absolute) {
-      report.custom.sourceErrors.push({ source: target, reason: 'unsafe command parent preserved' });
-      return false;
-    }
-    const existed = fs.existsSync(absolute);
-    const baseline = trustedBaseline(managedBaselines[target]);
-    const local = existed && fs.lstatSync(absolute).isFile() && !fs.lstatSync(absolute).isSymbolicLink()
-      ? sha256(fs.readFileSync(absolute)) : null;
-    const template = sha256(content);
-    if (existed && (local === null || baseline === null)) {
-      report.custom.sourceErrors.push({ source: target, reason: 'unowned generated command preserved' });
-      return false;
-    }
-    if (baseline !== null && local !== baseline && local !== template) {
-      report.custom.sourceErrors.push({ source: target, reason: 'modified generated command preserved' });
-      return false;
-    }
-    if (local === template) {
-      if (baseline !== null) managedBaselines[target] = template;
-      bucket.unchanged.push(target);
-      return false;
-    }
-    fs.mkdirSync(path.dirname(absolute), { recursive: true });
-    fs.writeFileSync(absolute, content);
-    managedBaselines[target] = template;
-    (existed ? bucket.updated : bucket.generated).push(target);
-    return true;
-  };
-  generateCustomCommands(customSkills, lang, report, enabledTUIs, customCommandWriter);
+  generateCustomCommands(customSkills, lang, report, enabledTUIs, writeProtectedManaged);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);
@@ -1775,7 +1715,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const addMergedTarget = (target, source) => {
     if (
       isOwnedByDisabledAgentClient(target, enabledTUIs)
-      && !isCustomProtected(target, protectedCustomSkills, customCommandTargets)
+      && !isCustomProtected(target, registeredSkillNames, customCommandTargets)
     ) {
       return;
     }

@@ -55,7 +55,6 @@ test("syncTemplates generates built-in commands for custom skills", async () => 
     );
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.deepEqual(report.custom.detected, ["local-check"]);
     assert.ok(report.custom.commands.generated.includes(".claude/commands/local-check.md"));
     assert.ok(report.custom.commands.generated.includes(".opencode/commands/local-check.md"));
   } finally {
