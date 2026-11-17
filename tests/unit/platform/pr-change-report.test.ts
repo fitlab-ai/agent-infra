@@ -30,13 +30,11 @@ function withLocations<T extends Omit<ChangeFile, 'locations'>>(files: T[]) {
 }
 
 function bundle(base: string, head: string, files: ReturnType<typeof withLocations>, totals: MechanicalChangeReport['full']['totals']): MechanicalChangeReport {
-  return { version: 2, base, head, full: { kind: 'merge-base', from: sha('a'), to: head, mergeBase: sha('a'), patchSha256: 'e'.repeat(64), files, totals },
-    increment: { status: 'unconfirmed', fromHead: null, toHead: head, sourceReportSha256: null, diff: null } };
+  return { version: 3, base, head, full: { kind: 'merge-base', from: sha('a'), to: head, mergeBase: sha('a'), patchSha256: 'e'.repeat(64), files, totals } };
 }
 
 function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
   const full = diff.full.files;
-  const increment = diff.increment.diff?.files ?? [];
   const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
@@ -47,17 +45,16 @@ function candidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandi
       rationale: 'The complete diff is within the approved scope.',
       ...(id === 'change-composition' ? { groups: [{
         id: 'summary-content', target: 'Structure managed comment content', behaviorChange: 'Validate and render typed content.',
-        necessity: 'Keep required content complete.', files: [...new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!))],
-        locations: { full: allocations(full), increment: allocations(increment) },
+        necessity: 'Keep required content complete.', files: [...new Set(full.map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full) },
         tests: { coverage: 'Existing unit and integration contracts cover the change.', cost: 'No new fixture beyond this candidate.' }
-      }], unassigned: { full: [], increment: [] } } : {})
+      }], unassigned: { full: [] } } : {})
     }))
   };
 }
 
 function detailedCandidate(taskIntentSha256: string, diff = mechanical()): PrecheckCandidate {
   const full = diff.full.files;
-  const increment = diff.increment.diff?.files ?? [];
   const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
@@ -71,10 +68,10 @@ function detailedCandidate(taskIntentSha256: string, diff = mechanical()): Prech
       rationale: `Rationale-${id}-responsibility-${index}`,
       ...(id === 'change-composition' ? { groups: [{
         id: 'summary-content', target: 'Structured content', behaviorChange: 'Add structure validation.', necessity: 'Prevent missing sections.',
-        files: [...new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!))],
-        locations: { full: allocations(full), increment: allocations(increment) },
+        files: [...new Set(full.map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full) },
         tests: { coverage: 'Tests exercise required paths.', cost: 'One shared fixture.' }
-      }], unassigned: { full: [], increment: [] } } : {})
+      }], unassigned: { full: [] } } : {})
     }))
   };
 }
@@ -201,52 +198,34 @@ test('report validation rejects inconsistent totals and verdict facts', () => {
   }
 });
 
-test('mechanical and persisted reports share head-to-head endpoint rules', () => {
+test('mechanical and persisted reports require a merge-base diff ending at the PR head', () => {
   const digest = 'd'.repeat(64);
   const diff = mechanical();
-  diff.increment = {
-    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
-    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64),
-      files: diff.full.files, totals: diff.full.totals }
-  };
-  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(validateMechanicalReport(diff).ok, true);
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest));
   assert.equal(built.ok, true);
   if (!built.ok) return;
-  assert.equal(validateMechanicalReport(diff).ok, true);
   assert.equal(validatePrChangeReport(built.value).ok, true);
-
-  const sameEndpoint = structuredClone(diff);
-  sameEndpoint.increment.diff!.from = sha('c');
-  sameEndpoint.increment.fromHead = sha('c');
-  const sameEndpointReport = structuredClone(built.value);
-  sameEndpointReport.diff.increment.diff!.from = sha('c');
-  sameEndpointReport.diff.increment.fromHead = sha('c');
-  assert.equal(validateMechanicalReport(sameEndpoint).ok, false);
-  assert.equal(validatePrChangeReport(sameEndpointReport).ok, false);
+  const badHead = structuredClone(diff);
+  badHead.full.to = sha('d');
+  assert.equal(validateMechanicalReport(badHead).ok, false);
+  const badMergeBase = structuredClone(built.value);
+  badMergeBase.diff.full.mergeBase = sha('d');
+  assert.equal(validatePrChangeReport(badMergeBase).ok, false);
 });
 
-test('mechanical and persisted scopes share file totals and increment status rules', () => {
+test('mechanical and persisted reports reject file totals that do not match the full diff', () => {
   const digest = 'd'.repeat(64);
   const diff = mechanical();
   const badTotals = structuredClone(diff);
   badTotals.full.totals.additions += 1;
   assert.equal(validateMechanicalReport(badTotals).ok, false);
-
   const built = buildPrChangeReport(identity(), digest, diff, candidate(digest));
   assert.equal(built.ok, true);
   if (!built.ok) return;
   const badReportTotals = structuredClone(built.value);
   badReportTotals.diff.full.totals.additions += 1;
   assert.equal(validatePrChangeReport(badReportTotals).ok, false);
-
-  const badIncrement = structuredClone(diff);
-  badIncrement.increment = {
-    status: 'unchanged', fromHead: sha('b'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64), diff: null
-  };
-  assert.equal(validateMechanicalReport(badIncrement).ok, false);
-  const badReportIncrement = structuredClone(built.value);
-  badReportIncrement.diff.increment = badIncrement.increment;
-  assert.equal(validatePrChangeReport(badReportIncrement).ok, false);
 });
 
 test('summary body requires one placeholder and core renders the canonical report', () => {
@@ -269,57 +248,32 @@ test('summary body requires one placeholder and core renders the canonical repor
   }
 });
 
-test('canonical module summary keeps full and report-to-report counts separate and escapes table pipes', () => {
-  const fullFiles = withLocations([
+test('canonical module summary reports full-PR allocations and escapes table pipes', () => {
+  const files = withLocations([
     { status: 'M', oldPath: 'lib/report.ts', newPath: 'lib/report.ts', additions: 4, deletions: 2, oldBytes: 20, newBytes: 30, netBytes: 10 },
     { status: 'M', oldPath: 'assets/chart.bin', newPath: 'assets/chart.bin', additions: null, deletions: null, oldBytes: 4, newBytes: 8, netBytes: 4 }
   ]);
-  const incrementFiles = withLocations([
-    { status: 'M', oldPath: 'lib/report.ts', newPath: 'lib/report.ts', additions: 1, deletions: 3, oldBytes: 30, newBytes: 25, netBytes: -5 },
-    { status: 'M', oldPath: 'assets/chart.bin', newPath: 'assets/chart.bin', additions: null, deletions: null, oldBytes: 8, newBytes: 8, netBytes: 0 }
-  ]);
-  const diff = bundle(sha('b'), sha('c'), fullFiles, {
-    files: 2, textFiles: 1, binaryFiles: 1, additions: 4, deletions: 2, oldBytes: 24, newBytes: 38, netBytes: 14
-  });
-  diff.increment = {
-    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
-    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64), files: incrementFiles,
-      totals: { files: 2, textFiles: 1, binaryFiles: 1, additions: 1, deletions: 3, oldBytes: 38, newBytes: 33, netBytes: -5 } }
-  };
+  const diff = bundle(sha('b'), sha('c'), files, { files: 2, textFiles: 1, binaryFiles: 1, additions: 4, deletions: 2, oldBytes: 24, newBytes: 38, netBytes: 14 });
   const precheck = candidate('d'.repeat(64), diff);
   const group = precheck.checks.find((check) => check.id === 'change-composition')!.groups![0]!;
-  group.id = 'feature|core';
-  group.target = 'Target | details';
+  group.id = 'feature|core'; group.target = 'Target | details';
   const built = buildPrChangeReport(identity(), 'd'.repeat(64), diff, precheck);
-  assert.equal(built.ok, true);
-  if (!built.ok) return;
-
+  assert.equal(built.ok, true); if (!built.ok) return;
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /完整 PR：目标分支 merge-base `aaaaaaa` → 当前 HEAD `ccccccc`/u);
-  assert.match(rendered, /增量：上一份有效报告 HEAD `ddddddd` → 当前 HEAD `ccccccc` 的直接 head-to-head 差异/u);
-  assert.match(rendered, /\| feature&#124;core — Target &#124; details \| 4 \| 2 \| \+2 \| 1 \| 3 \| -2 \| — \|/u);
-  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 4 \| 2 \| \+2 \| 1 \| 3 \| -2 \| 1 个文件 \/ 1 个文件 \|/u);
-  const summaryEnd = rendered.indexOf('| feature&#124;core — Target &#124; details |');
-  const detailStart = rendered.indexOf('#### 功能模块与验证变化');
-  assert.ok(summaryEnd < detailStart);
-  assert.match(rendered.slice(detailStart), /行为变化：Validate and render typed content\./u);
+  assert.match(rendered, /\| feature&#124;core — Target &#124; details \| 4 \| 2 \| \+2 \| — \|/u);
+  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 4 \| 2 \| \+2 \| 1 个文件 \|/u);
+  assert.ok(rendered.indexOf('| feature&#124;core — Target &#124; details |') < rendered.indexOf('#### 功能模块与验证变化'));
+  assert.match(rendered, /行为变化：Validate and render typed content\./u);
 });
 
-test('canonical module summary labels unknown and unchanged increments without inventing counts', () => {
-  const unknown = buildPrChangeReport(identity(), 'd'.repeat(64), mechanical(), candidate('d'.repeat(64)));
-  assert.equal(unknown.ok, true);
-  if (!unknown.ok) return;
-  const unknownRendered = renderCanonicalChangeReport(unknown.value);
-  assert.match(unknownRendered, /缺少可确认的上一份有效报告 HEAD/u);
-  assert.match(unknownRendered, /\| summary-content — Structure managed comment content \| 2 \| 1 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
-  assert.match(unknownRendered, /\| \*\*合计（机械统计）\*\* \| 2 \| 1 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| 0 个文件 \/ 未确认 \|/u);
-
-  const diff = mechanical();
-  diff.increment = { status: 'unchanged', fromHead: sha('c'), toHead: sha('c'), sourceReportSha256: null, diff: null };
-  const unchanged = buildPrChangeReport(identity(), 'd'.repeat(64), diff, candidate('d'.repeat(64), diff));
-  assert.equal(unchanged.ok, true);
-  if (!unchanged.ok) return;
-  assert.match(renderCanonicalChangeReport(unchanged.value), /\| summary-content — Structure managed comment content \| 2 \| 1 \| \+1 \| 0 \| 0 \| 0 \| — \|/u);
+test('canonical module summary keeps binary full-PR lines unknown', () => {
+  const digest = 'd'.repeat(64); const diff = categorizedMechanical();
+  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
+  assert.equal(built.ok, true); if (!built.ok) return;
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /\| 文档 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/u);
+  assert.match(rendered, /不可计行文件/u);
 });
 
 test('canonical report renders high-level change categories and all six precheck details', () => {
@@ -446,8 +400,8 @@ test('typed functional groups derive counts from exact locations and reject over
   if (!built.ok) return;
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /功能组 summary-content/u);
-  assert.match(rendered, /\| summary-content — Structure managed comment content \| 21 \| 20 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
-  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 21 \| 20 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| 1 个文件 \/ 未确认 \|/u);
+  assert.match(rendered, /\| summary-content — Structure managed comment content \| 21 \| 20 \| \+1 \| — \|/u);
+  assert.match(rendered, /\| \*\*合计（机械统计）\*\* \| 21 \| 20 \| \+1 \| 1 个文件 \|/u);
   assert.match(rendered, /<code>\.agents\/old\.md<\/code> → <code>\.agents\/new\.md<\/code>/u);
 
   const malformed = candidate(digest, diff);
@@ -481,7 +435,7 @@ test('changed positions can split one file across functions and retain shared at
   composition.groups!.push({
     ...first,
     id: 'second-feature', target: 'Another task behavior',
-    locations: { full: [{ path: 'lib/example.ts', side: 'old', startLine: 1, endLine: 1 }], increment: [] }
+    locations: { full: [{ path: 'lib/example.ts', side: 'old', startLine: 1, endLine: 1 }] }
   });
   composition.unassigned!.full = [{ path: 'lib/example.ts', side: 'new', startLine: 2, endLine: 2, reason: 'shared', explanation: 'This added line serves both behaviors.' }];
   const built = buildPrChangeReport(identity(), digest, diff, value);
@@ -490,31 +444,9 @@ test('changed positions can split one file across functions and retain shared at
     const rendered = renderCanonicalChangeReport(built.value);
     assert.match(rendered, /功能组 summary-content/u);
     assert.match(rendered, /功能组 second-feature/u);
-    assert.match(rendered, /\| 未归属（共享） \| 1 \| 0 \| \+1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
+    assert.match(rendered, /\| 未归属（共享） \| 1 \| 0 \| \+1 \| — \|/u);
     assert.match(rendered, /完整 PR 未归属位置说明\*\*：shared：This added line serves both behaviors/u);
   }
-});
-
-test('canonical report renders increment-only text, binary, and renamed files', () => {
-  const digest = 'd'.repeat(64);
-  const diff = mechanical();
-  const incrementFiles = withLocations([
-    { status: 'D', oldPath: 'src/increment-only.ts', newPath: null, additions: 0, deletions: 2, oldBytes: 12, newBytes: 0, netBytes: -12 },
-    { status: 'M', oldPath: 'assets/increment-only.bin', newPath: 'assets/increment-only.bin', additions: null, deletions: null, oldBytes: 4, newBytes: 8, netBytes: 4 },
-    { status: 'R100', oldPath: 'docs/old-name.md', newPath: 'docs/new-name.md', additions: 0, deletions: 0, oldBytes: 9, newBytes: 9, netBytes: 0 }
-  ]);
-  diff.increment = {
-    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
-    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64), files: incrementFiles,
-      totals: { files: 3, textFiles: 2, binaryFiles: 1, additions: 0, deletions: 2, oldBytes: 25, newBytes: 17, netBytes: -8 } }
-  };
-  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
-  assert.equal(built.ok, true);
-  if (!built.ok) return;
-  const rendered = renderCanonicalChangeReport(built.value);
-  assert.match(rendered, /<code>src\/increment-only\.ts<\/code>/u);
-  assert.match(rendered, /<code>assets\/increment-only\.bin<\/code>/u);
-  assert.match(rendered, /<code>docs\/old-name\.md<\/code> → <code>docs\/new-name\.md<\/code>/u);
 });
 
 test('functional groups reject files that disagree with their allocated locations', () => {
@@ -530,8 +462,8 @@ test('functional groups reject files that disagree with their allocated location
   const composition = value.checks.find((check) => check.id === 'change-composition')!;
   const original = composition.groups![0]!;
   composition.groups = [
-    { ...original, id: 'added-feature', files: ['src/added.ts'], locations: { full: [{ path: 'src/deleted.ts', side: 'old', startLine: 1, endLine: 1 }], increment: [] } },
-    { ...original, id: 'deleted-feature', files: ['src/deleted.ts'], locations: { full: [{ path: 'src/added.ts', side: 'new', startLine: 1, endLine: 1 }], increment: [] } }
+    { ...original, id: 'added-feature', files: ['src/added.ts'], locations: { full: [{ path: 'src/deleted.ts', side: 'old', startLine: 1, endLine: 1 }] } },
+    { ...original, id: 'deleted-feature', files: ['src/deleted.ts'], locations: { full: [{ path: 'src/added.ts', side: 'new', startLine: 1, endLine: 1 }] } }
   ];
   const built = buildPrChangeReport(identity(), digest, diff, value);
   assert.equal(built.ok, false);
@@ -550,7 +482,7 @@ test('a text file with every changed line explicitly unassigned need not belong 
   const composition = value.checks.find((check) => check.id === 'change-composition')!;
   composition.groups![0]!.files = ['src/assigned.ts'];
   composition.groups![0]!.locations = {
-    full: [{ path: 'src/assigned.ts', side: 'new', startLine: 1, endLine: 1 }], increment: []
+    full: [{ path: 'src/assigned.ts', side: 'new', startLine: 1, endLine: 1 }]
   };
   composition.unassigned!.full = [{
     path: 'src/unassigned.ts', side: 'old', startLine: 1, endLine: 1,
@@ -561,31 +493,9 @@ test('a text file with every changed line explicitly unassigned need not belong 
   assert.equal(built.ok, true, built.ok ? undefined : JSON.stringify(built.error));
   if (built.ok) {
     const rendered = renderCanonicalChangeReport(built.value);
-    assert.match(rendered, /\| 未归属（待确认） \| 0 \| 1 \| -1 \| 未确认 \| 未确认 \| 未确认 \| — \|/u);
+    assert.match(rendered, /\| 未归属（待确认） \| 0 \| 1 \| -1 \| — \|/u);
     assert.match(rendered, /完整 PR 未归属位置说明\*\*：unconfirmed：This file cannot be reliably attributed/u);
   }
-});
-
-test('full and head-to-head allocations remain independently identified and validated', () => {
-  const digest = 'd'.repeat(64);
-  const diff = mechanical();
-  const incrementFiles = withLocations([{ status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts', additions: 1, deletions: 0, oldBytes: 20, newBytes: 22, netBytes: 2 }]);
-  diff.increment = {
-    status: 'available', fromHead: sha('d'), toHead: sha('c'), sourceReportSha256: 'f'.repeat(64),
-    diff: { kind: 'head-to-head', from: sha('d'), to: sha('c'), mergeBase: null, patchSha256: 'a'.repeat(64), files: incrementFiles,
-      totals: { files: 1, textFiles: 1, binaryFiles: 0, additions: 1, deletions: 0, oldBytes: 20, newBytes: 22, netBytes: 2 } }
-  };
-  const built = buildPrChangeReport(identity(), digest, diff, candidate(digest, diff));
-  assert.equal(built.ok, true);
-  if (!built.ok) return;
-  assert.equal(built.value.diff.increment.status, 'available');
-  assert.equal(built.value.diff.increment.diff?.from, sha('d'));
-  assert.equal(built.value.diff.full.totals.additions, 2);
-  assert.equal(built.value.diff.increment.diff?.totals.additions, 1);
-  assert.equal(validatePrChangeReport(built.value).ok, true);
-  const tampered = JSON.parse(JSON.stringify(built.value)) as Record<string, any>;
-  tampered.diff.increment.diff.from = sha('e');
-  assert.equal(validatePrChangeReport(tampered).ok, false);
 });
 
 test('typed group structure requires nested test coverage and rejects hand-entered counts', () => {

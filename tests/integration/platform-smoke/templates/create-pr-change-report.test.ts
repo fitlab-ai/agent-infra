@@ -100,7 +100,7 @@ test("create-pr change report reconciles line counts and blob byte sizes", (t) =
   });
 });
 
-test("create-pr raw full and head-to-head outputs validate with explicit scoped endpoints", (t) => {
+test("create-pr raw complete-PR output validates with merge-base endpoints", (t) => {
   const repo = createTempDir("create-pr-change-report-wire-");
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   initIsolatedGitRepo(repo);
@@ -112,49 +112,29 @@ test("create-pr raw full and head-to-head outputs validate with explicit scoped 
   git(repo, ["commit", "-qm", "base"]);
   const base = git(repo, ["rev-parse", "HEAD"]);
 
-  git(repo, ["switch", "-q", "-c", "prior", base]);
-  fs.writeFileSync(path.join(repo, "prior.txt"), "prior\n");
-  git(repo, ["add", "."]);
-  git(repo, ["commit", "-qm", "prior head"]);
-  const fromHead = git(repo, ["rev-parse", "HEAD"]);
-
-  git(repo, ["switch", "-q", "-c", "feature", base]);
   fs.writeFileSync(path.join(repo, "feature.txt"), "feature\n");
   git(repo, ["add", "."]);
   git(repo, ["commit", "-qm", "feature head"]);
   const head = git(repo, ["rev-parse", "HEAD"]);
-  const run = (kind: "merge-base" | "head-to-head") => JSON.parse(execFileSync(process.execPath, [
-    runtimeScript, "--base", base, "--head", head, "--kind", kind,
-    ...(kind === "head-to-head" ? ["--from-head", fromHead] : []), "--cwd", repo
+  const rawFull = JSON.parse(execFileSync(process.execPath, [
+    runtimeScript, "--base", base, "--head", head, "--cwd", repo
   ], { encoding: "utf8", env: gitSafeEnv() }));
-  const rawFull = run("merge-base");
-  const rawIncrement = run("head-to-head");
   const bundle = {
-    version: 2,
+    version: 3,
     base,
     head,
-    full: rawFull,
-    increment: {
-      status: "available",
-      fromHead,
-      toHead: head,
-      sourceReportSha256: "a".repeat(64),
-      diff: rawIncrement
-    }
+    full: rawFull
   };
 
+  assert.equal(rawFull.kind, "merge-base");
+  assert.equal(rawFull.from, base);
   assert.equal(rawFull.to, head);
-  assert.equal(rawIncrement.to, head);
   assert.equal(validateMechanicalReport(bundle).ok, true);
   assert.equal(validateMechanicalReport({
     ...bundle,
     full: { ...rawFull, to: base }
   }).ok, false);
-  assert.equal(validateMechanicalReport({
-    ...bundle,
-    increment: { ...bundle.increment, diff: { ...rawIncrement, to: fromHead } }
-  }).ok, false);
-  assert.equal(validateMechanicalReport({ ...bundle, head: fromHead }).ok, false);
+  assert.equal(validateMechanicalReport({ ...bundle, head: base }).ok, false);
 });
 
 test("create-pr change report counts diff content beginning with header-like prefixes", (t) => {
@@ -189,38 +169,6 @@ test("create-pr change report counts diff content beginning with header-like pre
     { side: "old", startLine: 1, endLine: 1 },
     { side: "new", startLine: 1, endLine: 1 }
   ]);
-});
-
-test("head-to-head report compares two non-ancestor trees directly", (t) => {
-  const repo = createTempDir("create-pr-change-report-heads-");
-  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
-  initIsolatedGitRepo(repo);
-  git(repo, ["config", "user.email", "test@example.com"]);
-  git(repo, ["config", "user.name", "Test"]);
-  fs.writeFileSync(path.join(repo, "shared.txt"), "base\n");
-  git(repo, ["add", "."]);
-  git(repo, ["commit", "-qm", "base"]);
-  const base = git(repo, ["rev-parse", "HEAD"]);
-  fs.writeFileSync(path.join(repo, "shared.txt"), "old\n");
-  fs.writeFileSync(path.join(repo, "old-only.txt"), "old\n");
-  git(repo, ["add", "."]);
-  git(repo, ["commit", "-qm", "old head"]);
-  const oldHead = git(repo, ["rev-parse", "HEAD"]);
-  git(repo, ["switch", "-q", "-c", "new-head", base]);
-  fs.writeFileSync(path.join(repo, "shared.txt"), "new\n");
-  fs.writeFileSync(path.join(repo, "new-only.txt"), "new\n");
-  git(repo, ["add", "."]);
-  git(repo, ["commit", "-qm", "new head"]);
-  const newHead = git(repo, ["rev-parse", "HEAD"]);
-  const report = JSON.parse(execFileSync(process.execPath, [
-    runtimeScript, "--base", base, "--head", newHead, "--kind", "head-to-head", "--from-head", oldHead, "--cwd", repo
-  ], { encoding: "utf8", env: gitSafeEnv() }));
-  assert.equal(report.kind, "head-to-head");
-  assert.equal(report.from, oldHead);
-  assert.equal(report.to, newHead);
-  assert.equal(report.mergeBase, null);
-  assert.ok(report.files.some((file: { oldPath: string | null; additions: number | null; deletions: number | null }) => file.oldPath === "old-only.txt" && file.deletions === 1));
-  assert.ok(report.files.some((file: { newPath: string | null; additions: number | null }) => file.newPath === "new-only.txt" && file.additions === 1));
 });
 
 test("create-pr installs the same change report calculator as the local skill", () => {

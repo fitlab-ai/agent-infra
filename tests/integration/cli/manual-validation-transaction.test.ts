@@ -70,7 +70,6 @@ function approvedReviewArtifact(): string {
 
 function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): PrecheckCandidate {
   const full = diff.full.files;
-  const increment = diff.increment.diff?.files ?? [];
   const allocations = (files: typeof full) => files.flatMap((file) => file.locations.map((location) => ({ path: file.oldPath ?? file.newPath!, ...location })));
   return {
     taskIntentSha256,
@@ -83,10 +82,10 @@ function candidate(taskIntentSha256: string, diff: MechanicalChangeReport): Prec
         id: 'manual-validation-transaction', target: 'Preserve manual-validation transaction safety',
         behaviorChange: 'Keep receipt and PR head binding through summary refresh.',
         necessity: 'Protect the final coordinator transaction.',
-        files: [...new Set([...full, ...increment].map((file) => file.oldPath ?? file.newPath!))],
-        locations: { full: allocations(full), increment: allocations(increment) },
+        files: [...new Set(full.map((file) => file.oldPath ?? file.newPath!))],
+        locations: { full: allocations(full) },
         tests: { coverage: 'This integration fixture exercises transaction, receipt and PR head paths.', cost: 'Existing fixture and cases are reused.' }
-      }], unassigned: { full: [], increment: [] } } : {})
+      }], unassigned: { full: [] } } : {})
     }))
   };
 }

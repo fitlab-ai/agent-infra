@@ -4,13 +4,12 @@
 {"source":"platform-pr-inspect","diff":"three-dot-find-renames","metrics":["numstat-lines","git-blob-bytes"],"publish":["pr-summary","user-response"]}
 -->
 
-After a PR is created or uniquely reused, use the authoritative `base.sha` and `head.sha` returned by `platform-pr inspect` to measure the complete PR diff. Do not substitute the last commit or current worktree state. The complete PR keeps the existing three-dot, merge-base, patch, and sidecar identity. The task-intent digest covers only the semantic section from `# Task`/`# 任务` through `## Context`/`## 上下文`, so lifecycle logs, receipts, and version metadata do not stale a sidecar for the same head.
+After a PR is created or reused, use the authoritative `base.sha` and `head.sha` returned by `platform-pr inspect` to measure the complete PR diff. Do not substitute the last commit or current worktree state. The scope is the target branch merge-base through the current PR HEAD. The task-intent digest covers only the semantic section from `# Task`/`# 任务` through `## Context`/`## 上下文`.
 
 ## Evidence Commands
 
 ```bash
-node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head {head-sha} --kind merge-base
-node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head {head-sha} --kind head-to-head --from-head {previous-head-sha}
+node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head {head-sha}
 git diff --find-renames --name-status {base-sha}...{head-sha}
 git diff --find-renames --summary {base-sha}...{head-sha}
 ```
@@ -25,26 +24,22 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 The core validates the task-intent digest, PR identity, complete patch SHA, totals, and the ordered checks `target-alignment`, `change-composition`, `compatibility-policy`, `legacy-path-cleanup`, `redundancy`, and `scope-discipline`. A `needs-review` check routes to `review-code`; `formalReview` remains `false`.
 
-Put the `--kind merge-base` output under `full`. When a valid prior sidecar exists, put the `--kind head-to-head --from-head {previous-head}` output under `increment.diff`, and bind its `identity.head.sha`, current head, and raw sidecar SHA-256 as `fromHead`, `toHead`, and `sourceReportSha256`. Without a valid prior sidecar use `status=unconfirmed` with null source and diff. For the same head use `status=unchanged`, identical endpoints, no source hash, and `diff:null`. Core independently validates the source and recomputes the bundle; hand-entered mechanics or coordinates are rejected.
+The script output is the mechanical bundle's `full` diff. The bundle uses schema v3 and the persisted canonical report uses schema v5; both carry only the complete PR merge-base→HEAD comparison. Core validates the task-intent digest, PR identity, full patch SHA, totals, and the six prechecks in fixed order. Any `needs-review` item routes to `review-code`; `formalReview` remains `false`.
 
-The mechanical-file uses schema v2 with PR `base/head`, a `full` comparison, and an `increment` status. `full` uses `kind=merge-base`. A confirmed increment includes `kind=head-to-head`, `fromHead/toHead`, and source sidecar SHA-256. Without a valid same-PR sidecar, use `status=unconfirmed` and `diff:null`; identical heads use `status=unchanged` and `diff:null`. Core verifies the prior sidecar before replacement and recomputes both scopes.
+Before generating the candidate, list functional change groups from the task goal and complete PR diff; file descriptions or category totals cannot stand in for functional groups. Represent each group in `change-composition.groups[]` with `id`, `target`, `behaviorChange`, `necessity`, `files[]`, `locations:{full:[]}`, and `tests:{coverage,cost}`. `rationale` and `Evidence[]` may support the judgment and locations but cannot replace group objects. Each location has canonical `path`, `side` (`new` for additions, `old` for deletions), `startLine`, and `endLine`.
 
-Before generating the candidate, list functional change groups from the task goal and both diffs. Represent each group in `change-composition.groups[]` with `id`, `target`, `behaviorChange`, `necessity`, `files[]`, `locations:{full:[],increment:[]}`, and `tests:{coverage,cost}`. Each location has canonical `path`, `side` (`new` for additions, `old` for deletions), `startLine`, and `endLine`. `rationale` and `Evidence[]` may support the judgment but cannot replace group objects.
-
-- `files[]` references canonical paths (`oldPath ?? newPath`) from either scope. A mixed file may appear in multiple groups; a rename stays one record with both paths.
-- `locations.full` and `locations.increment` must cover each changed line exactly once per scope, either in one group or under `unassigned` with `reason=shared|unconfirmed` and an explanation. Core rejects duplicates, gaps, wrong path/direction, and out-of-range coordinates, then derives counts and reconciles each scope with its own totals. Binary files have no locations and remain uncountable; do not invent zeroes or ranges.
-- `Evidence[].detail` may cite relevant code, test, or documentation changes. Use `tests.coverage` and `tests.cost` for existing/new test coverage and fixture/test cost. If no test changed, state why existing coverage is sufficient.
-- List and reconcile complete-PR changes separately from the current head-to-head increment. Do not infer increment values when the previous head is unconfirmed.
+- `files[]` may reference only canonical paths in the complete PR diff (`oldPath ?? newPath`); a mixed file may appear in multiple groups. A rename remains one mechanical record with both paths.
+- `locations.full` must cover each changed line exactly once, either in one group or under `unassigned:{full:[]}` with `reason=shared|unconfirmed` and an explanation. Core rejects duplicates, gaps, wrong path/direction, and out-of-range coordinates, then derives group and unassigned additions/deletions from positions and reconciles them with complete PR totals. Candidates must not submit group counts.
+- Binary files with `numstat=null` have no locations; keep them in file and category totals, mark their line counts as unknown, and do not invent zeroes or ranges.
+- Each `Evidence[].detail` may cite specific code, tests, or documentation. `tests.coverage` and `tests.cost` describe coverage risk/evidence and the cost of any new fixture or test. When no tests change, state the existing coverage basis.
 
 `target-alignment` passes only when every group maps to a task goal or acceptance criterion. Typed structure, file membership, and derived counts are structural checks; the existing semantic review still decides whether groups, behavior added/removed, necessity, test coverage/cost, and evidence are adequately explained. Missing, contradictory, or unverifiable structure or explanation remains `needs-review`; state the gap so the core routes to `review-code`. Complete structure or green CI does not establish sufficient explanation.
 
 State the actual finding for each of the other four checks. Use the deployed skill's language for evidence; Chinese deployments must use Chinese. The canonical renderer displays every rationale and evidence item. Source line counts describe text additions/deletions only; they do not prove execution counts or workflow unification.
 
-## Complete PR and Per-Round Increment
+## Complete PR Scope
 
-Complete-PR statistics always use the current authoritative snapshot's `base.sha...head.sha` and the existing three-dot mechanical report. The report may separately describe the increment from the last valid canonical sidecar's `identity.head.sha` to the current snapshot's `head.sha`. Before rebuilding the report, validate the prior sidecar with the existing `readPrChangeReport`; use its head only when repository/resource identity matches the current PR. Compare the two trees for the increment with `git diff --find-renames --numstat {previous-head} {current-head}`, `--name-status`, and `--summary`. Do not substitute a merge-base diff for these endpoints or add increment totals to complete-PR totals.
-
-If there is no prior sidecar, it is invalid, or its PR identity differs, state that the previous head is unconfirmed. Do not infer per-round numbers from the complete PR or fabricate zeroes. If both SHAs are identical, state that the head did not change and omit extra statistics. After a rebase, compare the old and new head trees directly; this describes tree changes, not commit counts or execution counts. A missing/invalid prior sidecar does not block the complete-PR report.
+Complete PR statistics use the current authoritative snapshot's `base.sha...head.sha` and the three-dot mechanical report. The functional module numbers table immediately follows the category statistics table; detailed behavior, necessity, files, and test notes follow both. The renderer generates canonical content from the core-validated structured report.
 
 The script calculates both `numstat` line counts and exact Git blob byte sizes between the merge base and head. Bytes provide a stable unit, cover binary files, and reveal same-line compaction; submodules are not blobs and contribute zero bytes. Added files have zero old bytes, deleted files have zero new bytes, pure renames have zero net bytes, and copies count only the new destination content.
 

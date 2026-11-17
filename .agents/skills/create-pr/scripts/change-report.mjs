@@ -7,13 +7,13 @@ function fail(message) {
 }
 
 function parseArgs(argv) {
-  const options = { cwd: process.cwd(), kind: "merge-base" };
+  const options = { cwd: process.cwd() };
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const value = argv[index + 1];
 
-    if ((argument === "--base" || argument === "--head" || argument === "--cwd" || argument === "--from-head" || argument === "--kind") && value) {
+    if ((argument === "--base" || argument === "--head" || argument === "--cwd") && value) {
       options[argument.slice(2)] = value;
       index += 1;
       continue;
@@ -23,9 +23,8 @@ function parseArgs(argv) {
   }
 
   if (!options.base || !options.head) {
-    fail("Usage: change-report.mjs --base <sha> --head <sha> [--kind merge-base|head-to-head] [--from-head <sha>] [--cwd <repository>]");
+    fail("Usage: change-report.mjs --base <sha> --head <sha> [--cwd <repository>]");
   }
-  if (!['merge-base', 'head-to-head'].includes(options.kind) || (options.kind === 'head-to-head' && !options['from-head']) || (options.kind === 'merge-base' && options['from-head'])) fail('Invalid comparison kind or from-head argument');
 
   return options;
 }
@@ -165,8 +164,8 @@ function appendPosition(ranges, side, line) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  const mergeBase = options.kind === 'merge-base' ? git(["merge-base", options.base, options.head], options).trim() : null;
-  const from = options.kind === 'merge-base' ? mergeBase : options['from-head'];
+  const mergeBase = git(["merge-base", options.base, options.head], options).trim();
+  const from = mergeBase;
   const to = options.head;
   const patch = git(["diff", "--no-ext-diff", "--binary", "--find-renames", from, to], options, null);
   const diffArgs = ["diff", "--no-ext-diff", "--find-renames", "-z", from, to];
@@ -235,7 +234,7 @@ function main() {
   });
 
   process.stdout.write(`${JSON.stringify({
-    kind: options.kind,
+    kind: "merge-base",
     from,
     to,
     mergeBase,

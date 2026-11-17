@@ -48,20 +48,9 @@ description: >
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。每次覆盖当前报告前，先用 core 导出的 reader 验证并暂存现有报告的身份与 head；文件不存在或验证失败即记为无上一 head：
+进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。
 
-```bash
-node --experimental-strip-types --input-type=module -e '
-import { readPrChangeReport } from "./lib/platform/pr-change-report.ts";
-const report = readPrChangeReport(`<task-workspace>/active/${process.argv[1]}/pr-change-report.json`);
-const previous = report.ok
-  ? { repository: report.value.identity.repository, resource: report.value.identity.resource, head: report.value.identity.head.sha }
-  : { status: "unavailable" };
-process.stdout.write(`${JSON.stringify(previous)}\n`);
-' {task-id}
-```
-
-随后调用 `platform-pr summary-context`，比较暂存的 repository/resource identity 与当前权威 snapshot；不匹配时丢弃旧 head 并标记增量未确认。按共享 PR change-report contract 用当前权威 PR head 重建任务绑定的 `pr-change-report.json`，用结构化摘要 JSON 调用 `summary-sync --change-report-file ... --result no_op --strict` 刷新同一条摘要；保留测试、Review 和人工校验的真实状态，不能依赖后续事件或最终验证。完整 PR 仍使用当前 base/head/merge-base/patch 与现有 totals。只有在上一报告有效、PR identity 相同且两个 head 不同的情况下，才用 `git diff --find-renames --numstat {previous-head} {current-head}`、`--name-status`、`--summary` 描述独立的 head→head 树差异；不使用 merge-base 替代该范围，不把增量 totals 加入完整 PR。无有效上一 head 时写明未确认，不从完整 PR 推算或填零；head 相同只说明没有新的 head 转换。
+随后调用 `platform-pr summary-context` 获取当前权威 PR snapshot，按共享 PR change-report contract 重建完整 PR 的 `pr-change-report.json`，再用结构化摘要 JSON 调用 `summary-sync --change-report-file ... --result no_op --strict` 刷新同一条摘要。保留测试、Review 和人工校验的真实状态；不得依赖后续事件或最终验证。报告始终绑定当前 base/head/merge-base/patch。
 
 `--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不得把 warning 当作成功；刷新失败时不得进入 ready/complete 出口，按步骤 4 记录阻塞。刷新成功后，消费 `summary-sync` 结构化结果的 `nextAction`：`review-code` 立即结束 readiness/self-heal 路径，按步骤 7 的代码审查分支退出；`watch-pr` 才继续调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`。缺失或 invalid `nextAction` 按刷新失败处理，不推断为 `watch-pr`。readiness 只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
 
