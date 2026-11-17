@@ -1012,18 +1012,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   materializeAgentClientConfig(cfg, enabledResolution);
   const vars = { project, org };
   const activeRegistrations = Array.isArray(cfg.skills?.registrations) ? cfg.skills.registrations : [];
-  const projectCustomSkills = activeRegistrations
-    .filter((entry) => entry?.type === 'project')
-    .map((entry) => {
-      const dirName = path.basename(entry.path);
-      const meta = parseSkillFrontmatter(path.join(projectRoot, entry.path, 'SKILL.md'));
-      return { dirName, name: meta.name || entry.name, description: meta.description || '', args: meta.args || null, disableModelInvocation: meta['disable-model-invocation'] === 'true' };
-    })
-    .filter((entry) => fs.existsSync(path.join(projectRoot, '.agents/skills', entry.dirName, 'SKILL.md')));
-  const protectedCustomSkills = [
-    ...projectCustomSkills,
-    ...activeRegistrations.map((entry) => ({ dirName: entry.name }))
-  ];
+  const protectedCustomSkills = activeRegistrations.map((entry) => ({ dirName: entry.name }));
   cfg.files ||= {};
   const currentRegistry = {
     managed: [...(cfg.files.managed || [])],
@@ -1600,7 +1589,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   report.custom.sourceErrors.push(...scannedSkills.errors);
   const customSkills = [];
-  const currentSkillTargets = new Map();
   for (const registration of activeRegistrations) {
     const selected = scannedSkills.selected.get(registration.name);
     if (!selected) continue;
@@ -1609,14 +1597,24 @@ function syncTemplates(projectRoot, templateRootOverride) {
     let skill;
     let safeToGenerateCommands = true;
     try {
-      const sourceDir = selected.project ? selected.path : selected.path;
+      const sourceDir = selected.path;
       if (selected.project) {
         const target = safeProjectTarget(projectRoot, registration.path);
         const stat = target && fs.lstatSync(target, { throwIfNoEntry: false });
-        if (!target || !stat?.isDirectory() || stat.isSymbolicLink()) throw new Error('unsafe project skill path');
+        if (!target) throw new Error('unsafe project skill path');
+        if (!stat) {
+          report.custom.sourceErrors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable` });
+          continue;
+        }
+        if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('unsafe project skill path');
         const skillFile = safeProjectTarget(projectRoot, path.join(registration.path, 'SKILL.md'));
         const skillStat = skillFile && fs.lstatSync(skillFile, { throwIfNoEntry: false });
-        if (!skillFile || !skillStat?.isFile() || skillStat.isSymbolicLink()) throw new Error('unsafe project skill file');
+        if (!skillFile) throw new Error('unsafe project skill file');
+        if (!skillStat) {
+          report.custom.sourceErrors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable` });
+          continue;
+        }
+        if (!skillStat.isFile() || skillStat.isSymbolicLink()) throw new Error('unsafe project skill file');
       }
       skill = parseSkillFrontmatter(path.join(sourceDir, 'SKILL.md'));
     } catch {
@@ -1634,7 +1632,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       const source = selected.path;
       const files = selected.files;
       const expected = new Set();
-      currentSkillTargets.set(dirName, { source, expected });
       for (const [relative, content] of files) {
         const target = norm(path.join('.agents', 'skills', dirName, relative));
         expected.add(target);
@@ -1715,7 +1712,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     ...customSkills.map((skill) => skill.dirName),
     ...protectedCustomSkills.map((skill) => skill.dirName)
   ])].sort();
-  const availableNames = new Set(customSkills.map((skill) => skill.dirName));
   const customCommandWriter = (target, content, bucket) => {
     const absolute = safeProjectTarget(projectRoot, target);
     if (!absolute) {
@@ -1746,8 +1742,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     (existed ? bucket.updated : bucket.generated).push(target);
     return true;
   };
-  const availableSkills = customSkills.filter((skill) => availableNames.has(skill.dirName));
-  generateCustomCommands(availableSkills, lang, report, enabledTUIs, customCommandWriter);
+  generateCustomCommands(customSkills, lang, report, enabledTUIs, customCommandWriter);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);

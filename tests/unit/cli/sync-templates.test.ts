@@ -1550,6 +1550,67 @@ test("registered local skills use source baselines and preserve unowned same-byt
   }
 });
 
+test("registered project skill with missing metadata preserves registration and existing copies", async () => {
+  const tmpDir = createTempDir("ai-collab-project-skill-unavailable-");
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const registration = { name: "manual", type: "project", path: ".agents/skills/manual" };
+    writeFile(projectRoot, ".agents/skills/manual/notes.md", "Existing project skill data\n");
+    writeFile(projectRoot, ".claude/commands/manual.md", "Existing project command\n");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [], registrations: [registration] },
+      files: { managed: [".agents/skills/", ".claude/commands/"], merged: [], ejected: [] }
+    });
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    const config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
+
+    assert.equal(report.error, undefined);
+    assert.ok(report.custom.sourceErrors.some((entry) => String(entry.reason).includes("unavailable")));
+    assert.deepEqual(config.skills.registrations, [registration]);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/manual/notes.md"), "utf8"), "Existing project skill data\n");
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".claude/commands/manual.md"), "utf8"), "Existing project command\n");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("registered project skill symlink is rejected before its metadata is read", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = createTempDir("ai-collab-project-skill-symlink-");
+  const realReadFileSync = fs.readFileSync;
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const outsideRoot = path.join(tmpDir, "outside");
+    const skillFile = path.join(projectRoot, ".agents/skills/manual/SKILL.md");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    writeFile(outsideRoot, "SKILL.md", "---\nname: outside\n---\nOutside content\n");
+    fs.mkdirSync(path.dirname(path.dirname(skillFile)), { recursive: true });
+    fs.symlinkSync(outsideRoot, path.dirname(skillFile), "dir");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [], registrations: [{ name: "manual", type: "project", path: ".agents/skills/manual" }] },
+      files: { managed: [".agents/skills/", ".claude/commands/"], merged: [], ejected: [] }
+    });
+
+    let reads = 0;
+    fs.readFileSync = function (this: typeof fs, filePath, ...args) {
+      if (String(filePath) === skillFile) reads += 1;
+      return realReadFileSync.call(this, filePath, ...args);
+    } as typeof fs.readFileSync;
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(reads, 0);
+    assert.ok(report.custom.sourceErrors.some((entry) => String(entry.reason).includes("unsafe project path")));
+  } finally {
+    fs.readFileSync = realReadFileSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("unregistered source candidates stay inactive during sync", async () => {
   const tmpDir = createTempDir("ai-collab-unregistered-skill-");
   try {
