@@ -175,7 +175,7 @@ Write `description` as "one-line responsibility + scenario clause": after the sh
 
 Set the generic optional `disable-model-invocation` field to `true` when generated TUI commands should disable model invocation; each TUI adapter consumes it according to its capabilities. To preserve line breaks in a multiline `description`, use a YAML literal block (`|`); sync emits the corresponding multiline metadata format for each TUI.
 
-After creating or updating a local skill under `.agents/skills/<name>/`, run `ai skill add <name>` to register it explicitly, then run `update-agent-infra` to sync its files and generate client commands. Only registered skills enter agent-infra synchronization and command generation. Antigravity CLI direct discovery of in-place shared skills is controlled by the client, outside sync-generated behavior.
+To register a new local skill under `.agents/skills/<name>/`, run `ai skill add <name>` once, then run `update-agent-infra` to sync its files and generate client commands. For later content changes to an already registered skill, run `update-agent-infra` directly; do not run `ai skill add` again. Only registered skills enter agent-infra synchronization and command generation. Antigravity CLI direct discovery of in-place shared skills is controlled by the client, outside sync-generated behavior.
 
 ### Shared skill sources
 

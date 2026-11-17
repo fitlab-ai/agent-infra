@@ -174,7 +174,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 当生成的 TUI 命令需要禁用模型调用时，将通用可选字段 `disable-model-invocation` 设为 `true`；各 TUI 适配器按自身能力决定是否消费。多行 `description` 如需保留换行，使用 YAML literal block（`|`）；同步器会为各 TUI 输出对应的多行元数据格式。
 
-在 `.agents/skills/<name>/` 创建或修改本地 skill 后，先运行 `ai skill add <name>` 显式登记，再运行 `update-agent-infra` 同步文件并生成客户端命令。只有已登记的 skill 会进入 agent-infra 的同步和命令生成流程。Antigravity CLI 对原位共享目录的直接发现由客户端自身决定，不属于同步器生成行为。
+首次登记 `.agents/skills/<name>/` 中的本地 skill 时，先运行 `ai skill add <name>`，再运行 `update-agent-infra` 同步文件并生成客户端命令。后续修改已登记 skill 的内容后，直接运行 `update-agent-infra`；不要重复执行 `ai skill add`。只有已登记的 skill 会进入 agent-infra 的同步和命令生成流程。Antigravity CLI 对原位共享目录的直接发现由客户端自身决定，不属于同步器生成行为。
 
 ### 共享 skill 源
 
