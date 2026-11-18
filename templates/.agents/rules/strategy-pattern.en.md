@@ -1,25 +1,21 @@
-# Strategy Pattern
+# Strategy and Template Method
 
-This rule applies during technical design and implementation. When behavior differs by platform, client, protocol, workflow, business rule, or algorithm, use interfaces to isolate implementations so shared flows can reuse them instead of creating a dedicated path for every scenario.
+During design and implementation, trace the rule being changed through its callers. Identify where the decision belongs and which callers only consume its result. Keep stable behavior direct. Use a variation already present in the code or required by the task to justify an extension point.
 
-## Design Steps
+## Strategy for interchangeable behavior
 
-1. **Separate shared flows from different implementations**: identify common steps and the behavior that differs by platform, client, protocol, workflow, business rule, algorithm, or lifecycle.
-2. **Define the interface contract**: specify the inputs, outputs, error semantics, and invocation timing shared by implementations. The common flow depends on the interface, not a concrete implementation.
-3. **Apply the Strategy Pattern**: provide an implementation for each behavior and select a strategy at registration or assembly. The common flow orchestrates shared steps without spreading conditions that identify concrete implementations.
-4. **Verify substitutability**: a new implementation should connect through registration or assembly. Write shared tests for the interface contract and the necessary tests for strategy selection and full assembly.
+- When the requirement establishes interchangeable behaviors, make the shared flow depend on a strategy contract even if only one implementation exists today. Define the contract shared by the implementations, including inputs, outputs, error behavior, and when the operation is called. Reuse an existing contract where possible. A function signature can be sufficient.
+- When an explicit key selects an implementation, prefer a registry such as a typed record or map from key to strategy. Resolve it at the assembly boundary and call the selected implementation through its contract. Handle unknown keys according to the current contract.
+- Adding an implementation should normally require implementing the behavior and registering it once. If selection depends on ordered predicates, preserve their precedence in one selector. Keep validation and state transitions explicit when their branches express business rules.
+- Verify the shared contract across implementations and the selection of the intended strategy at the boundary.
 
-## Implementation Requirements
+## Template Method for a shared sequence
 
-- When the requirement clearly includes multiple behaviors, prefer the Strategy Pattern even if there is currently one implementation; the interface should express their stable shared contract.
-- When adding behavior, prefer adding a strategy implementation and registering or assembling it in one place. Do not copy a full business flow or repeat the same branch across callers.
-- If branches that identify implementations are already scattered across paths, consolidate those decisions at strategy selection and make callers depend on the interface.
-- Reuse existing interfaces and domain terms. Do not rename code to apply a pattern or add interfaces to stable behavior that has no meaningful alternatives.
-- Keep stable, single-purpose behavior direct when there is no evidence it will vary. Do not mechanically add interfaces, configuration, or extension points.
+- When implementations must perform the same business steps in the same order and only particular steps vary, define the sequence once in a template method. The base class owns sequencing and shared guarantees. Subclasses implement the varying steps.
+- For example, if every importer must validate before writing, the template owns both calls and the rule that validation failure prevents the write. A subclass can decode its own format without taking over that sequence.
+- If the existing design uses functions, a shared orchestrator with injected step functions can preserve the same sequence. If variants repeatedly skip or reorder required steps, reconsider which sequence they actually share.
+- Verify the common ordering and failure behavior at the template entry point. Test the differing steps in their implementations.
 
-## Design Review Questions
+## Review a concrete change
 
-- Which steps are shared by all implementations, and which behaviors differ by platform, client, or business rule?
-- Does the interface express the contract shared by the implementations?
-- Can a new behavior be added by implementing a strategy and assembling it in one place? If several call paths must change, is centralized strategy selection missing?
-- Can the same interface tests validate the shared contract while strategy differences are tested independently?
+Trace one variation supported by the requirement. For a new strategy, locate its implementation and registration. For a shared sequencing change, locate the template and check which subclasses would need edits. If several callers must independently reinterpret the same rule, identify what diverges when one is missed. A lower complexity score alone does not demonstrate that the decision has a single owner.

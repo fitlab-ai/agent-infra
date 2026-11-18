@@ -91,7 +91,7 @@ Use it to understand:
 
 ### 5. Design the Technical Plan
 
-Before designing, read `.agents/rules/strategy-pattern.md`. Identify shared flows and behavior differences by platform, client, protocol, workflow, business rule, or algorithm; make the core flow depend on interfaces and put differences in strategy implementations instead of adding a dedicated branch to every path.
+Read `.agents/rules/strategy-pattern.md` before designing. For an identified variation, name the rule owner and the callers that consume its result.
 
 Follow the `technical-design` step in `.agents/workflows/feature-development.yaml`:
 
@@ -107,7 +107,7 @@ When this round introduces a new key design decision, first run `agent-infra-int
 
 **Design principles**:
 1. **Architectural soundness**: choose the structurally correct approach; diff size is not the primary criterion. Do not pile changes onto an unsound structure just to keep the diff small
-2. **Strategy Pattern**: identify shared flows and different behaviors; make the core flow depend on interfaces, not concrete implementations, and select or assemble strategies in one place
+2. **Design for variation**. Prefer strategies for interchangeable behavior and a template method when implementations share a required sequence with varying steps.
 3. **Simplicity**: given a sound architecture, prefer the simplest approach; do not add strategy interfaces mechanically when behavior is stable and has no meaningful alternatives
 4. **Consistency**: follow existing code patterns and conventions
 5. **Testability**: design for straightforward testing
