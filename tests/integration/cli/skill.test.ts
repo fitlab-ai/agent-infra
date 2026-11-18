@@ -176,9 +176,13 @@ test("skill add registers one external candidate and remove preserves its source
       { name: "team-guide", type: "local", path: path.join(sourceRoot, "team-guide") }
     ]);
     assert.match(run(root, "list").stdout, /registered\tavailable\tlocal\tteam-guide/u);
+    const projectLink = path.join(root, ".agents/skills/team-guide");
+    fs.mkdirSync(path.dirname(projectLink), { recursive: true });
+    fs.symlinkSync(path.join(sourceRoot, "team-guide"), projectLink, process.platform === "win32" ? "junction" : "dir");
     const removed = run(root, "remove", "team-guide");
     assert.equal(removed.status, 0, removed.stderr);
     assert.equal(fs.existsSync(path.join(sourceRoot, "team-guide/SKILL.md")), true);
+    assert.equal(fs.lstatSync(projectLink, { throwIfNoEntry: false }), undefined);
     assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")).skills.registrations, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

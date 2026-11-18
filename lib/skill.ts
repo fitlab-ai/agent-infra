@@ -112,18 +112,6 @@ function removeEmptyDirs(dir: string, stop: string): void {
   }
 }
 
-function hasRegistrationSource(baseline: unknown, registration: Registration): baseline is { source: string } {
-  if (!baseline || typeof baseline !== 'object' || !('source' in baseline)) return false;
-  const record = baseline as { source?: unknown };
-  return typeof record.source === 'string' && resolveLocal(record.source) === resolveLocal(registration.path);
-}
-
-function isOwnedSkillBaseline(baseline: unknown, registration: Registration): baseline is { hash: string; source: string } {
-  return hasRegistrationSource(baseline, registration)
-    && 'hash' in baseline
-    && typeof (baseline as { hash?: unknown }).hash === 'string';
-}
-
 function removeUnchangedSkillFile(absolute: string, baseline: string): boolean {
   try {
     const stat = fs.lstatSync(absolute);
@@ -134,34 +122,21 @@ function removeUnchangedSkillFile(absolute: string, baseline: string): boolean {
   return false;
 }
 
-function removeOwnedSkillFiles(
-  skillRoot: string,
-  registration: Registration,
-  baselines: Record<string, unknown>,
-  removed: string[]
-): void {
-  for (const target of Object.keys(baselines)) {
-    const absolute = safeProjectTarget(target);
-    if (!absolute || !absolute.startsWith(`${skillRoot}${path.sep}`)) continue;
-    const baseline = baselines[target];
-    if (!isOwnedSkillBaseline(baseline, registration)) continue;
-    if (!removeUnchangedSkillFile(absolute, baseline.hash)) continue;
-    delete baselines[target];
-    removed.push(norm(path.relative(process.cwd(), absolute)));
-  }
-}
-
-function cleanupLocalSkillFiles(
+function cleanupLocalSkillLink(
   name: string,
   registration: Registration,
-  baselines: Record<string, unknown>,
   removed: string[]
 ): void {
   const skillRoot = safeProjectTarget(path.join('.agents', 'skills', name));
-  const skillRootStat = skillRoot ? fs.lstatSync(skillRoot, { throwIfNoEntry: false }) : undefined;
-  if (registration.type !== 'local' || !skillRoot || !skillRootStat?.isDirectory() || skillRootStat.isSymbolicLink()) return;
-  removeOwnedSkillFiles(skillRoot, registration, baselines, removed);
-  removeEmptyDirs(skillRoot, path.resolve('.agents/skills'));
+  if (registration.type !== 'local' || !skillRoot) return;
+  const skillRootStat = fs.lstatSync(skillRoot, { throwIfNoEntry: false });
+  if (!skillRootStat?.isSymbolicLink()) return;
+  try {
+    const linkedPath = path.resolve(path.dirname(skillRoot), fs.readlinkSync(skillRoot));
+    if (linkedPath !== resolveLocal(registration.path)) return;
+    fs.unlinkSync(skillRoot);
+    removed.push(norm(path.relative(process.cwd(), skillRoot)));
+  } catch { /* only an exact, readable project link is removable */ }
 }
 
 function cleanupClientCommand(name: string, adapter: ReturnType<typeof listAgentClientAdapters>[number], baselines: Record<string, unknown>, removed: string[]): void {
@@ -183,7 +158,6 @@ function cleanupClientCommands(name: string, baselines: Record<string, unknown>,
 
 function clearRegistrationBaselines(
   name: string,
-  registration: Registration,
   baselines: Record<string, unknown>
 ): void {
   const commandTargets = new Set(listAgentClientAdapters().flatMap((adapter) => {
@@ -191,19 +165,18 @@ function clearRegistrationBaselines(
     return descriptor ? [descriptor.target.replaceAll('${skillName}', name)] : [];
   }));
   for (const target of Object.keys(baselines)) {
-    const record = baselines[target];
-    const owned = hasRegistrationSource(record, registration);
-    if (commandTargets.has(target) || owned) delete baselines[target];
+    if (commandTargets.has(target)) delete baselines[target];
   }
 }
 
 function cleanupOwnedOutputs(name: string, registration: Registration, config: SkillConfig): string[] {
-  const baselines = config.files?.managedBaselines;
-  if (!baselines || typeof baselines !== 'object') return [];
   const removed: string[] = [];
-  cleanupLocalSkillFiles(name, registration, baselines, removed);
-  cleanupClientCommands(name, baselines, removed);
-  clearRegistrationBaselines(name, registration, baselines);
+  cleanupLocalSkillLink(name, registration, removed);
+  const baselines = config.files?.managedBaselines;
+  if (baselines && typeof baselines === 'object') {
+    cleanupClientCommands(name, baselines, removed);
+    clearRegistrationBaselines(name, baselines);
+  }
   return removed;
 }
 
@@ -245,7 +218,7 @@ async function addSkill(
   list.push({ name: selected.name, type: selected.type, path: selected.type === 'project' ? norm(path.relative(process.cwd(), selected.path)) : selected.path });
   config.skills!.registrations = list;
   writeConfig(file, config);
-  process.stdout.write(`Registered ${selected.name} from ${selected.path}. Run update-agent-infra to materialize it.\n`);
+  process.stdout.write(`Registered ${selected.name} from ${selected.path}. Run update-agent-infra to link it into the project.\n`);
   return 0;
 }
 

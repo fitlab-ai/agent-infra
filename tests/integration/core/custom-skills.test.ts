@@ -44,7 +44,7 @@ function parseMarkdownFrontmatter(content: string) {
   return parseYaml(frontmatter);
 }
 
-test("syncTemplates preserves manual custom skills and generates commands for manual and sourced skills", async () => {
+test("syncTemplates preserves project skills and links registered external skills for command generation", async () => {
   const tmpDir = createTempDir("agent-infra-custom-skills-");
   const sourceRoot = createTempDir("agent-infra-custom-source-");
 
@@ -115,8 +115,9 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     const firstReport = syncTemplates(projectRoot, templateRoot);
     const secondReport = syncTemplates(projectRoot, templateRoot);
 
-    assert.ok(firstReport.custom.generated.includes(".agents/skills/shared-rules/SKILL.md"));
-    assert.ok(firstReport.custom.generated.includes(".agents/skills/shared-rules/reference/guide.md"));
+    const linkedSkill = path.join(projectRoot, ".agents/skills/shared-rules");
+    assert.equal(fs.lstatSync(linkedSkill).isSymbolicLink(), true);
+    assert.equal(fs.realpathSync(linkedSkill), path.join(sourceRoot, "shared-rules"));
     assert.equal(
       fs.readFileSync(path.join(projectRoot, ".agents/skills/local-rules/reference/checklist.md"), "utf8"),
       "manual checklist\n"
@@ -124,6 +125,11 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     assert.equal(
       fs.readFileSync(path.join(projectRoot, ".agents/skills/shared-rules/reference/guide.md"), "utf8"),
       "source guide\n"
+    );
+    writeFile(sourceRoot, "shared-rules/reference/guide.md", "updated source guide\n");
+    assert.equal(
+      fs.readFileSync(path.join(projectRoot, ".agents/skills/shared-rules/reference/guide.md"), "utf8"),
+      "updated source guide\n"
     );
 
     const claudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/local-rules.md"), "utf8");
@@ -155,70 +161,6 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     assert.equal(secondReport.custom.commands.generated.length, 0);
     assert.ok(secondReport.custom.commands.unchanged.includes(".claude/commands/local-rules.md"));
     assert.ok(fs.existsSync(path.join(projectRoot, ".agents/skills/local-rules/SKILL.md")));
-    assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/shared-rules.md")));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(sourceRoot, { recursive: true, force: true });
-  }
-});
-
-test("syncTemplates cleans stale files from sourced skills without touching manual custom skills", async () => {
-  const tmpDir = createTempDir("agent-infra-custom-cleanup-");
-  const sourceRoot = createTempDir("agent-infra-custom-cleanup-source-");
-
-  try {
-    const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = makeTemplateRoot(tmpDir);
-
-    fs.mkdirSync(projectRoot, { recursive: true });
-
-    writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo",
-      org: "acme",
-      language: "en",
-      agentClients: CANONICAL_AGENT_CLIENTS,
-      platform: { type: "github" },
-      skills: {
-        sources: [
-          { type: "local", path: sourceRoot }
-        ],
-        registrations: [
-          { name: "shared-rules", type: "local", path: path.join(sourceRoot, "shared-rules") },
-          { name: "manual-only", type: "project", path: ".agents/skills/manual-only" }
-        ]
-      },
-      files: {
-        managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
-        merged: [],
-        ejected: []
-      }
-    });
-
-    writeFile(projectRoot, ".agents/skills/manual-only/SKILL.md", "---\nname: manual-only\ndescription: \"Manual only\"\n---\n");
-    writeFile(projectRoot, ".agents/skills/manual-only/notes.md", "keep me\n");
-
-    writeFile(sourceRoot, "shared-rules/SKILL.md", "---\nname: shared-rules\ndescription: \"Shared\"\n---\n");
-    writeFile(sourceRoot, "shared-rules/reference/guide.md", "initial guide\n");
-
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    syncTemplates(projectRoot, templateRoot);
-
-    fs.unlinkSync(path.join(sourceRoot, "shared-rules/reference/guide.md"));
-    writeFile(projectRoot, ".agents/skills/shared-rules/reference/stale.md", "remove me\n");
-
-    const secondReport = syncTemplates(projectRoot, templateRoot);
-
-    assert.deepEqual(
-      secondReport.custom.removed.sort(),
-      [".agents/skills/shared-rules/reference/guide.md"]
-    );
-    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/shared-rules/reference/guide.md")), false);
-    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/skills/shared-rules/reference/stale.md"), "utf8"), "remove me\n");
-    assert.ok(secondReport.custom.sourceErrors.some((entry) => String(entry.reason).includes("unknown target preserved")));
-    assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".agents/skills/manual-only/notes.md"), "utf8"),
-      "keep me\n"
-    );
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/shared-rules.md")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

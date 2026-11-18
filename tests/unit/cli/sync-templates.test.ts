@@ -1486,15 +1486,16 @@ test("syncTemplates preserves project testing discipline as a merged file", asyn
   }
 });
 
-test("registered local skills use source baselines and preserve unowned same-byte copies", async () => {
-  const tmpDir = createTempDir("ai-collab-skill-baseline-");
+test("registered local skills link live sources and retain the link when the source is unavailable", async () => {
+  const tmpDir = createTempDir("ai-collab-skill-link-");
   try {
     const projectRoot = path.join(tmpDir, "project");
     const sourceRoot = path.join(tmpDir, "sources");
     const skillRoot = path.join(sourceRoot, "guide");
     const { templateRoot } = createTemplateInstall(tmpDir);
     const sourcePath = path.resolve(skillRoot);
-    const target = path.join(projectRoot, ".agents/skills/guide/SKILL.md");
+    const target = path.join(projectRoot, ".agents/skills/guide");
+    const skillFile = path.join(target, "SKILL.md");
     const original = "---\nname: guide\ndescription: Guide\n---\nOriginal\n";
     const updated = "---\nname: guide\ndescription: Guide\n---\nUpdated\n";
     fs.mkdirSync(skillRoot, { recursive: true });
@@ -1507,16 +1508,15 @@ test("registered local skills use source baselines and preserve unowned same-byt
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const first = syncTemplates(projectRoot, templateRoot);
     const firstConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
-    assert.equal(fs.readFileSync(target, "utf8"), original);
-    assert.deepEqual(firstConfig.files.managedBaselines[".agents/skills/guide/SKILL.md"], {
-      hash: `sha256:${createHash("sha256").update(original).digest("hex")}`,
-      source: sourcePath
-    });
-    assert.ok(first.custom.generated.includes(".agents/skills/guide/SKILL.md"));
+    assert.equal(fs.lstatSync(target).isSymbolicLink(), true);
+    assert.equal(fs.realpathSync(target), sourcePath);
+    assert.equal(fs.readFileSync(skillFile, "utf8"), original);
+    assert.ok(first.custom.commands.generated.includes(".claude/commands/guide.md"));
+    assert.equal(firstConfig.files.managedBaselines?.[".agents/skills/guide/SKILL.md"], undefined);
 
     fs.writeFileSync(path.join(skillRoot, "SKILL.md"), updated);
     syncTemplates(projectRoot, templateRoot);
-    assert.equal(fs.readFileSync(target, "utf8"), updated);
+    assert.equal(fs.readFileSync(skillFile, "utf8"), updated);
 
     const commandTarget = path.join(projectRoot, ".claude/commands/guide.md");
     assert.equal(fs.existsSync(commandTarget), true);
@@ -1541,26 +1541,41 @@ test("registered local skills use source baselines and preserve unowned same-byt
     fs.rmSync(skillRoot, { recursive: true, force: true });
     const unavailable = syncTemplates(projectRoot, templateRoot);
     const afterUnavailable = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
-    assert.equal(fs.readFileSync(target, "utf8"), updated);
+    assert.equal(fs.lstatSync(target).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(skillFile), false);
     assert.equal(fs.readFileSync(commandTarget, "utf8"), commandBeforeUnavailable);
     assert.deepEqual(afterUnavailable.skills.registrations, ownedBeforeUnavailable.skills.registrations);
     assert.deepEqual(afterUnavailable.files.managedBaselines, ownedBeforeUnavailable.files.managedBaselines);
     assert.ok(unavailable.custom.sourceErrors.some((entry) => String(entry.reason).includes("unavailable")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
-    writeFile(sourceRoot, "guide/SKILL.md", updated);
-    const unownedRoot = path.join(tmpDir, "unowned");
-    const unownedTarget = path.join(unownedRoot, ".agents/skills/guide/SKILL.md");
-    writeJson(unownedRoot, ".agents/.airc.json", {
-      project: "unowned", org: "acme", language: "en", platform: { type: "none" },
-      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: sourcePath }] },
+test("registered local skills preserve an occupied project skill target", async () => {
+  const tmpDir = createTempDir("ai-collab-skill-link-conflict-");
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const sourceRoot = path.join(tmpDir, "sources");
+    const skillRoot = path.join(sourceRoot, "guide");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const target = path.join(projectRoot, ".agents/skills/guide");
+    fs.mkdirSync(skillRoot, { recursive: true });
+    fs.writeFileSync(path.join(skillRoot, "SKILL.md"), "---\nname: guide\n---\nSource\n");
+    writeFile(projectRoot, ".agents/skills/guide/notes.md", "Project-owned content\n");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: path.resolve(skillRoot) }] },
       files: { managed: [], merged: [], ejected: [] }
     });
-    writeFile(unownedRoot, ".agents/skills/guide/SKILL.md", updated);
-    const report = syncTemplates(unownedRoot, templateRoot);
-    const unownedConfig = JSON.parse(fs.readFileSync(path.join(unownedRoot, ".agents/.airc.json"), "utf8"));
-    assert.equal(fs.readFileSync(unownedTarget, "utf8"), updated);
-    assert.equal(unownedConfig.files.managedBaselines?.[".agents/skills/guide/SKILL.md"], undefined);
-    assert.ok(report.custom.sourceErrors.some((entry) => String(entry.reason).includes("unowned target preserved")));
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(fs.lstatSync(target).isDirectory(), true);
+    assert.equal(fs.readFileSync(path.join(target, "notes.md"), "utf8"), "Project-owned content\n");
+    assert.equal(fs.existsSync(path.join(projectRoot, ".claude/commands/guide.md")), false);
+    assert.ok(report.custom.sourceErrors.length > 0);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

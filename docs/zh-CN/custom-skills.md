@@ -84,8 +84,8 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 - 项目托管目录 `.agents/skills/` 下的未登记 skill 会被删除。客户端命令沿用原 managed baseline 规则：只有基线匹配且未修改的文件会被清理，已修改或没有基线的命令会保留
 - 如果对应技能目录已不存在、只剩孤立命令，同步器不会按命令名称猜测来源；该文件继续遵守客户端 managed 文件的基线规则
-- 外部 source 中的 skill 会同步复制到 `.agents/skills/`
-- `ai skill remove` 会解除登记并在执行时保留源目录。之后的完整同步会清理项目托管 `.agents/skills/` 中未登记的技能；客户端命令沿用原 managed baseline 规则，外部 source 根目录不在清理范围内
-- 对于仍存在于配置 source 中的 skill，如果源里删掉某个文件，下次同步时本地对应残留文件也会被删除
+- 外部 source 中登记的 skill 会通过项目链接接入 `.agents/skills/`；同步器直接读取 source 内容，不会复制或管理外部文件
+- `ai skill remove` 会解除登记并移除精确匹配的项目链接，外部 source 目录保持不变；生成的客户端命令继续遵循原 managed baseline 规则
+- 已登记外部 source 的文件变化会立即通过项目链接可见；同步器不会维护或清理另一份本地副本
 - 内置 skill 始终优先于自定义 source；如果 source 里出现与内置 skill 同名的目录，agent-infra 会跳过该 source skill，而不是覆盖内置实现
 - 如果你确实需要替换内置 skill 或命令，请使用现有的 `ejected` 机制，让项目自己接管该文件
