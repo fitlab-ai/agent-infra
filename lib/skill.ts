@@ -199,10 +199,9 @@ async function addSkill(
   if (matches.length > 1) throw new Error(`Skill '${selectedName}' has multiple sources. Run ai skill add interactively and choose an exact path.`);
   const selected = matches[0];
   if (!selected) throw new Error(`Unknown custom skill candidate: ${selectedName}`);
-  if (!NAME.test(selected.name) || builtins.has(selected.name)) throw new Error('The skill name is invalid or reserved by a built-in skill.');
+  if (!NAME.test(selected.name)) throw new Error('The skill name is invalid or reserved by a built-in skill.');
   if (list.some((entry) => entry.name === selected.name)) throw new Error(`Skill '${selected.name}' is already registered. Remove it before changing its source.`);
   list.push({ name: selected.name, type: selected.type, path: selected.type === 'project' ? norm(path.relative(process.cwd(), selected.path)) : selected.path });
-  config.skills!.registrations = list;
   writeConfig(file, config);
   process.stdout.write(`Registered ${selected.name} from ${selected.path}. Run update-agent-infra to link it into the project.\n`);
   return 0;
@@ -221,7 +220,6 @@ async function removeSkill(
   if (builtins.has(name)) throw new Error(`Built-in skill '${name}' cannot be removed.`);
   if (index < 0) throw new Error(`Custom skill '${name}' is not registered.`);
   const [registration] = list.splice(index, 1);
-  config.skills!.registrations = list;
   writeConfig(file, config);
   const removed = cleanupOwnedOutputs(name, registration!, config);
   writeConfig(file, config);

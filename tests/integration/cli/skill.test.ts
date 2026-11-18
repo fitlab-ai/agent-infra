@@ -39,12 +39,17 @@ test("skill add, list, and remove preserve project source files", () => {
     assert.equal(removed.status, 0, removed.stderr);
     assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")).skills.registrations, []);
     assert.equal(fs.existsSync(path.join(root, ".agents/skills/custom-guide/SKILL.md")), true);
+
+    const builtin = run(root, "remove", "update-agent-infra");
+    assert.equal(builtin.status, 1);
+    assert.match(builtin.stderr, /cannot be removed/u);
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")).skills.registrations, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("skill remove retains files reached through a symlinked parent directory", () => {
+test("skill remove retains files reached through a symlinked skill target", () => {
   const root = createTempDir("ai-skill-symlink-remove-");
   const outside = createTempDir("ai-skill-symlink-outside-");
   try {
@@ -163,18 +168,6 @@ test("skill remove continues cleanup when a client command directory cannot be l
   } finally {
     const commands = path.join(root, ".claude/commands");
     if (fs.existsSync(commands)) fs.chmodSync(commands, 0o700);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("skill remove rejects built-in skills", () => {
-  const root = createTempDir("ai-skill-builtin-");
-  try {
-    project(root);
-    const result = run(root, "remove", "update-agent-infra");
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /cannot be removed/u);
-  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
