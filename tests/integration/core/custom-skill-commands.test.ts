@@ -37,6 +37,7 @@ test("syncTemplates generates built-in commands for custom skills", async () => 
       language: "en",
       agentClients: AGENT_CLIENTS,
       platform: { type: "github" },
+      skills: { sources: [], registrations: [{ name: "local-check", type: "project", path: ".agents/skills/local-check" }] },
       files: {
         managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
         merged: [],
@@ -54,7 +55,6 @@ test("syncTemplates generates built-in commands for custom skills", async () => 
     );
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.deepEqual(report.custom.detected, ["local-check"]);
     assert.ok(report.custom.commands.generated.includes(".claude/commands/local-check.md"));
     assert.ok(report.custom.commands.generated.includes(".opencode/commands/local-check.md"));
   } finally {

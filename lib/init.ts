@@ -49,8 +49,10 @@ type AgentConfig = {
   files: FileRegistry;
   agentClients: ReturnType<typeof serializeAgentClients>;
   templates?: { sources: SourceEntry[] };
-  skills?: { sources: SourceEntry[] };
+  skills: { sources: SourceEntry[]; registrations: SkillRegistration[] };
 };
+
+type SkillRegistration = { name: string; type: 'project' | 'local'; path: string };
 
 const defaults = JSON.parse(
   fs.readFileSync(new URL('./defaults.json', import.meta.url), 'utf8')
@@ -256,12 +258,12 @@ async function cmdInit(): Promise<void> {
     delivery: structuredClone(defaults.delivery),
     labels: structuredClone(defaults.labels),
     files: { managed: [], merged: [], ejected: [] },
-    agentClients: serializeAgentClients(defaultState)
+    agentClients: serializeAgentClients(defaultState),
+    skills: { sources: skillSources, registrations: [] }
   };
 
   if (sandboxEngine) config.sandbox.engine = { [currentPlatform]: sandboxEngine };
   if (templateSources.length > 0) config.templates = { sources: templateSources };
-  if (skillSources.length > 0) config.skills = { sources: skillSources };
 
   const workflowPlan = planAgentClientReconciliation({
     config: config as unknown as Record<string, unknown>,

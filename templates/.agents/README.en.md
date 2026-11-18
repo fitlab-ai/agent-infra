@@ -175,7 +175,7 @@ Write `description` as "one-line responsibility + scenario clause": after the sh
 
 Set the generic optional `disable-model-invocation` field to `true` when generated TUI commands should disable model invocation; each TUI adapter consumes it according to its capabilities. To preserve line breaks in a multiline `description`, use a YAML literal block (`|`); sync emits the corresponding multiline metadata format for each TUI.
 
-After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills, generates matching commands for Claude Code and OpenCode, and lets Antigravity CLI discover the shared skills directly.
+To register a new local skill under `.agents/skills/<name>/`, run `ai skill add <name>` once, then run `update-agent-infra` to sync its files and generate client commands. For later content changes to an already registered skill, run `update-agent-infra` directly; do not run `ai skill add` again. Only registered skills enter agent-infra synchronization and command generation. Antigravity CLI direct discovery of in-place shared skills is controlled by the client, outside sync-generated behavior.
 
 ### Shared skill sources
 
@@ -195,9 +195,10 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 
 ### Sync behavior
 
-- Custom project skills in `.agents/skills/` are protected from managed-file cleanup
-- Source entries are applied in order; later custom sources overwrite earlier custom sources
-- Files deleted from an existing configured source are removed locally on the next sync for that sourced skill
+- Only built-in skills and custom skills explicitly registered with `ai skill add` participate in sync. A full sync removes unregistered skills from the managed `.agents/skills/` tree. Client commands continue to follow the existing managed-baseline rules: only unchanged files with a matching baseline are removed; edited files and files without a baseline are kept
+- `skills.sources` only discovers candidates; same-name candidates are not merged or selected by source order, so use `ai skill add` to choose an exact source
+- `ai skill remove` unregisters a skill and removes its exact project link while leaving the external source directory unchanged. Project skills continue to follow the existing managed rules. Client commands still follow the existing managed-baseline rules; if only an orphan command remains without its skill directory, sync does not guess its ownership from the command name
+- Registered external skills are read through their project link under `.agents/skills/`; source changes are visible through the link, and sync does not copy or clean external source contents
 - Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
 - Use `files.ejected` if the project must take ownership of a built-in skill or command
 

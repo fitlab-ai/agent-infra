@@ -73,8 +73,9 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `agentClients` | Canonical configuration for the five built-in AI Coding Agent Clients. |
 | `templates` | Optional external template overlay configuration. |
 | `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
-| `skills` | Optional custom skill sync configuration. |
-| `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
+| `skills` | Custom skill discovery and registration configuration. |
+| `skills.sources` | Optional list of local roots used to discover external skill candidates. Only `type: "local"` is supported. |
+| `skills.registrations` | Explicit skills enabled for materialization and client command generation. Each entry is `{ "name", "type", "path" }`; `type` is `project` or `local`. An empty array is an explicit empty registration set. |
 | `sandbox.tools.ids` | Ordered list of selected sandbox tools. Selected custom tools with a valid `invoke` value appear in lifecycle next-step guidance. |
 | `sandbox.tools.definitions` | Custom sandbox tool definitions keyed by tool ID. Set `invoke` to include the tool in next-step guidance. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
@@ -165,12 +166,17 @@ Use external sources when your team maintains private platform templates, privat
   "skills": {
     "sources": [
       { "type": "local", "path": "~/private-skills" }
-    ]
+    ],
+    "registrations": []
   }
 }
 ```
 
-Template source precedence is built-in templates first, then external sources as supplements. External files with the same path as built-in templates are ignored and reported in `templateSources.conflicts`; between external sources, later entries override earlier entries and conflicts are also reported. Skill sources use the same local-source shape, but custom skills cannot replace built-in skills.
+Use `ai skill add` to select a project skill or one external candidate, `ai skill list` to see built-in, registered, unavailable, and conflicting candidates, and `ai skill remove <name>` to unregister a custom skill. Removal leaves the source directory in place at that time. A later full sync removes an unregistered skill under the project-managed `.agents/skills/` tree. Client commands continue to follow the existing managed-baseline rules: only unchanged files with a matching baseline are removed; edited files and files without a baseline are kept. Built-in skills cannot be removed. External source roots only discover candidates; they do not register every directory automatically and are not part of project cleanup.
+
+New projects write `skills.registrations: []`. In existing projects, a missing field is treated as an empty registration set; configured roots do not register skills automatically. Use `ai skill add` to select and register a project skill or one external candidate. External roots only discover candidates, and same-name candidates require an explicit source selection. A temporarily unavailable registered external source keeps its registration and existing project link; source files remain external and are read through that link.
+
+Template source precedence is built-in templates first, then external sources as supplements. External files with the same path as built-in templates are ignored and reported in `templateSources.conflicts`; between external sources, later entries override earlier entries and conflicts are also reported. Skills with duplicate names are never merged or selected by source order.
 
 External template files and skill scripts can include executable JavaScript or shell commands that AI workflows may run. Only use trusted local paths.
 

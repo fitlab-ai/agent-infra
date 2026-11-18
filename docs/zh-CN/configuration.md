@@ -73,8 +73,9 @@
 | `agentClients` | 五个内建 AI Coding Agent Client 的 canonical 配置。 |
 | `templates` | 可选的外部模板叠加配置。 |
 | `templates.sources` | 可选的外部模板源列表，按顺序应用。当前仅支持 `type: "local"`。 |
-| `skills` | 可选的自定义 skill 同步配置。 |
-| `skills.sources` | 可选的外部自定义 skill 源列表，按顺序应用。当前仅支持 `type: "local"`。 |
+| `skills` | 自定义 skill 候选发现与注册配置。 |
+| `skills.sources` | 用于发现外部 skill 候选的本地目录列表。仅支持 `type: "local"`。 |
+| `skills.registrations` | 允许物化并生成客户端命令的显式技能。每项为 `{ "name", "type", "path" }`；`type` 为 `project` 或 `local`。空数组表示已明确选择不注册任何技能。 |
 | `sandbox.tools.ids` | 已选沙箱工具列表，顺序决定下一步提示中自定义工具的顺序。配置了有效 `invoke` 的自定义工具会出现在生命周期下一步提示中。 |
 | `sandbox.tools.definitions` | 按工具 ID 保存的自定义沙箱工具定义；配置 `invoke` 后，该工具会出现在下一步提示中。 |
 | `files` | 针对具体路径配置 `managed`、`merged`、`ejected` 三类更新策略。 |
@@ -165,12 +166,17 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
   "skills": {
     "sources": [
       { "type": "local", "path": "~/private-skills" }
-    ]
+    ],
+    "registrations": []
   }
 }
 ```
 
-模板源优先级是内置模板优先，外部源作为补充。外部源中与内置模板同路径的文件会被忽略，并记录到 `templateSources.conflicts`；多个外部源之间，后面的条目覆盖前面的条目，冲突同样会记录。Skill 源使用相同的本地源结构，但自定义 skill 不能替换内置 skill。
+使用 `ai skill add` 选择项目内技能或一个外部候选，使用 `ai skill list` 查看内置、已注册、不可用和重名冲突的候选，使用 `ai skill remove <name>` 解除自定义技能登记。移除操作当时会保留源目录；之后的完整同步会清理项目托管 `.agents/skills/` 中未登记的技能。客户端命令沿用原 managed baseline 规则：只有基线匹配且未修改的文件会清理，已修改或没有基线的命令会保留。内置技能不可移除。外部源目录只用于发现候选，不会自动登记其中所有技能，也不会被项目清理流程删除。
+
+新项目会写入 `skills.registrations: []`。现有项目缺少该字段时按空登记集合处理，不会自动登记配置来源中的技能。使用 `ai skill add` 显式选择并登记项目内技能或一个外部候选。外部来源目录只用于发现候选；同名候选必须明确选择来源。已登记外部来源暂时不可用时，会保留登记和现有项目链接；源文件仍由外部目录提供并通过链接读取。
+
+模板源优先级是内置模板优先，外部源作为补充。外部源中与内置模板同路径的文件会被忽略，并记录到 `templateSources.conflicts`；多个外部源之间，后面的条目覆盖前面的条目，冲突同样会记录。重名技能不会合并，也不会按来源顺序自动选择。
 
 外部模板文件和 skill 脚本可能包含 AI 工作流会执行的 JavaScript 或 shell 命令。只使用可信的本地路径。
 
