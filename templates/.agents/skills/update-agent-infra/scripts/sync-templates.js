@@ -431,8 +431,8 @@ function readRegisteredSkillSources(projectRoot, registrations, sources, templat
       const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
       if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error('not a regular directory');
       const skillFile = path.join(dir, 'SKILL.md');
-      const skillStat = fs.lstatSync(skillFile, { throwIfNoEntry: false });
-      if (!skillStat?.isFile() || skillStat.isSymbolicLink()) throw new Error('missing regular SKILL.md');
+      const skillStat = fs.statSync(skillFile, { throwIfNoEntry: false });
+      if (!skillStat?.isFile()) throw new Error('missing regular SKILL.md');
       selected.set(registration.name, { ...registration, path: dir, project: false });
     } catch {
       errors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable or unreadable` });

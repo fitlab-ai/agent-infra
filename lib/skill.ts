@@ -77,12 +77,21 @@ function templateNames(): Set<string> {
     .map((entry) => entry.name));
 }
 
+function isSkillDocument(file: string, followSymlink: boolean): boolean {
+  try {
+    const stat = followSymlink ? fs.statSync(file) : fs.lstatSync(file);
+    return stat.isFile() && (followSymlink || !stat.isSymbolicLink());
+  } catch {
+    return false;
+  }
+}
+
 function localCandidates(config: SkillConfig): { name: string; type: 'project' | 'local'; path: string }[] {
   const result: { name: string; type: 'project' | 'local'; path: string }[] = [];
   const projectDir = path.resolve('.agents/skills');
   if (fs.existsSync(projectDir)) {
     for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
-      if (entry.isDirectory() && fs.existsSync(path.join(projectDir, entry.name, 'SKILL.md'))) {
+      if (entry.isDirectory() && isSkillDocument(path.join(projectDir, entry.name, 'SKILL.md'), false)) {
         result.push({ name: entry.name, type: 'project', path: path.join(projectDir, entry.name) });
       }
     }
@@ -95,7 +104,7 @@ function localCandidates(config: SkillConfig): { name: string; type: 'project' |
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const skillPath = path.join(root, entry.name);
-      if (fs.existsSync(path.join(skillPath, 'SKILL.md'))) {
+      if (isSkillDocument(path.join(skillPath, 'SKILL.md'), true)) {
         result.push({ name: entry.name, type: 'local', path: skillPath });
       }
     }

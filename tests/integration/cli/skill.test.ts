@@ -172,17 +172,27 @@ test("skill remove continues cleanup when a client command directory cannot be l
   }
 });
 
-test("skill add registers one external candidate and remove preserves its source", () => {
+test("skill add registers an external skill document link and rejects non-file candidates", onPlatforms("linux", "darwin"), () => {
   const root = createTempDir("ai-skill-external-");
   const sourceRoot = path.join(root, "private-skills");
   try {
     fs.mkdirSync(path.join(sourceRoot, "team-guide"), { recursive: true });
-    fs.writeFileSync(path.join(sourceRoot, "team-guide/SKILL.md"), "---\nname: team-guide\ndescription: Team guide\n---\nBody\n");
+    const sourceDocument = path.join(sourceRoot, "team-guide-content.md");
+    fs.writeFileSync(sourceDocument, "---\nname: team-guide\ndescription: Team guide\n---\nBody\n");
+    fs.symlinkSync(sourceDocument, path.join(sourceRoot, "team-guide/SKILL.md"), "file");
+    fs.mkdirSync(path.join(sourceRoot, "directory-guide/SKILL.md"), { recursive: true });
+    fs.mkdirSync(path.join(root, ".agents/skills/linked-project"), { recursive: true });
+    fs.symlinkSync(sourceDocument, path.join(root, ".agents/skills/linked-project/SKILL.md"), "file");
     fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agents/.airc.json"), JSON.stringify({
       project: "demo", skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [] }, files: { managedBaselines: {} }
     }, null, 2));
 
+    const listed = run(root, "list");
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.deepEqual(listed.stdout.split("\n")
+      .filter((line) => ["local", "project"].includes(line.split("\t")[2]!))
+      .map((line) => line.split("\t")[3]), ["team-guide"]);
     const added = run(root, "add", "team-guide");
     assert.equal(added.status, 0, added.stderr);
     const configPath = path.join(root, ".agents/.airc.json");
@@ -195,7 +205,7 @@ test("skill add registers one external candidate and remove preserves its source
     fs.symlinkSync(path.join(sourceRoot, "team-guide"), projectLink, process.platform === "win32" ? "junction" : "dir");
     const removed = run(root, "remove", "team-guide");
     assert.equal(removed.status, 0, removed.stderr);
-    assert.equal(fs.existsSync(path.join(sourceRoot, "team-guide/SKILL.md")), true);
+    assert.equal(fs.readFileSync(sourceDocument, "utf8"), "---\nname: team-guide\ndescription: Team guide\n---\nBody\n");
     assert.equal(fs.lstatSync(projectLink, { throwIfNoEntry: false }), undefined);
     assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")).skills.registrations, []);
   } finally {

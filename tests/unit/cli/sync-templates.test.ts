@@ -1495,7 +1495,7 @@ test("syncTemplates preserves project testing discipline as a merged file", asyn
   }
 });
 
-test("registered local skills retain command baselines and links when sources are unavailable", async () => {
+test("registered local skills read linked metadata and retain command baselines when sources are unavailable", onPlatforms("linux", "darwin"), async () => {
   const tmpDir = createTempDir("ai-collab-skill-link-");
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -1507,7 +1507,9 @@ test("registered local skills retain command baselines and links when sources ar
     const skillFile = path.join(target, "SKILL.md");
     const original = "---\nname: guide\ndescription: Guide\n---\nOriginal\n";
     fs.mkdirSync(skillRoot, { recursive: true });
-    fs.writeFileSync(path.join(skillRoot, "SKILL.md"), original);
+    const sourceDocument = path.join(sourceRoot, "guide-content.md");
+    fs.writeFileSync(sourceDocument, original);
+    fs.symlinkSync(sourceDocument, path.join(skillRoot, "SKILL.md"), "file");
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo", org: "acme", language: "en", platform: { type: "none" },
       skills: { sources: [{ type: "local", path: sourceRoot }], registrations: [{ name: "guide", type: "local", path: sourcePath }] },
