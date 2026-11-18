@@ -220,14 +220,14 @@ function readRegisteredSkillSources(projectRoot, registrations, sources, templat
         continue;
       }
       const dir = path.resolve(projectRoot, registration.path);
-      selected.set(registration.name, { ...registration, path: dir, project: true, files: null });
+      selected.set(registration.name, { ...registration, path: dir, project: true });
       continue;
     }
     const dir = path.resolve(expandHome(registration.path));
-    const roots = new Set(configuredRoots.filter((root) =>
+    const configured = configuredRoots.some((root) =>
       path.dirname(dir) === root && path.basename(dir) === registration.name
-    ));
-    if (roots.size !== 1) {
+    );
+    if (!configured) {
       errors.push({ source: registration.path, reason: `registered skill ${registration.name} is unavailable or not configured in skills.sources` });
       continue;
     }
@@ -558,7 +558,7 @@ function generateCustomCommands(
   lang,
   report,
   enabledTUIs,
-  writeProtectedManaged
+  managedWriter
 ) {
   for (const skill of customSkills) {
     for (const adapter of AGENT_CLIENT_MANIFEST) {
@@ -567,7 +567,7 @@ function generateCustomCommands(
         ...adapter.customCommand,
         invocation: adapter.invocation.replaceAll('${skillName}', skill.dirName)
       };
-      writeProtectedManaged(
+      managedWriter(
         adapter.customCommand.target.replaceAll('${skillName}', skill.dirName),
         generateAgentClientCommand(skill, lang, descriptor),
         report.custom.commands
@@ -577,8 +577,8 @@ function generateCustomCommands(
 }
 
 function matchesAny(rel, patterns) {
-  const normalized = norm(rel);
-  return patterns.some((pattern) => norm(pattern) === normalized || globMatch(pattern, normalized));
+  const n = norm(rel);
+  return patterns.some((p) => norm(p) === n || globMatch(p, n));
 }
 
 function renderContent(text, vars) {
@@ -768,10 +768,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   }
   const sourceRoots = Array.isArray(skillSettings.sources) ? skillSettings.sources : [];
   const registrations = hasConfiguredRegistrations ? skillSettings.registrations : [];
-  const registeredSourceRoots = registrations.some((registration) => registration?.type === 'local')
-    ? sourceRoots
-    : [];
-  const scannedSkills = readRegisteredSkillSources(projectRoot, registrations, registeredSourceRoots, templateSkillNames);
+  const scannedSkills = readRegisteredSkillSources(projectRoot, registrations, sourceRoots, templateSkillNames);
   if (scannedSkills.invalidRegistration) {
     return { error: 'Invalid skills.registrations; repair the names, types, paths, or duplicates before updating.' };
   }
@@ -786,8 +783,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   );
   materializeAgentClientConfig(cfg, enabledResolution);
   const vars = { project, org };
-  const activeRegistrations = Array.isArray(cfg.skills?.registrations) ? cfg.skills.registrations : [];
-  const registeredSkillNames = new Set(activeRegistrations.map((entry) => entry.name));
+  const registeredSkillNames = new Set(registrations.map((entry) => entry.name));
   cfg.files ||= {};
   const currentRegistry = {
     managed: [...(cfg.files.managed || [])],
@@ -1344,7 +1340,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   report.custom.sourceErrors.push(...scannedSkills.errors);
   const customSkills = [];
-  for (const registration of activeRegistrations) {
+  for (const registration of registrations) {
     const selected = scannedSkills.selected.get(registration.name);
     if (!selected) continue;
     const dirName = registration.name;

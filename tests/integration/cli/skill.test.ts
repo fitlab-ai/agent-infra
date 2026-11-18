@@ -53,11 +53,7 @@ test("skill remove retains files reached through a symlinked parent directory", 
     fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agents/.airc.json"), JSON.stringify({
       project: "demo",
-      skills: { sources: [], registrations: [{ name: "linked-guide", type: "local", path: path.join(outside, "source") }] },
-      files: { managedBaselines: { ".agents/skills/linked-guide/SKILL.md": {
-        hash: `sha256:${crypto.createHash("sha256").update("keep outside\n").digest("hex")}`,
-        source: path.join(outside, "source")
-      } } }
+      skills: { sources: [], registrations: [{ name: "linked-guide", type: "local", path: path.join(outside, "source") }] }
     }));
     fs.writeFileSync(path.join(outside, "SKILL.md"), "keep outside\n");
 
@@ -67,6 +63,31 @@ test("skill remove retains files reached through a symlinked parent directory", 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("skill remove does not enumerate project skill candidates", () => {
+  const root = createTempDir("ai-skill-remove-no-scan-");
+  const skillsPath = path.join(root, ".agents/skills");
+  try {
+    fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
+    fs.writeFileSync(skillsPath, "candidate root is not a directory\n");
+    const configPath = path.join(root, ".agents/.airc.json");
+    fs.writeFileSync(configPath, JSON.stringify({
+      project: "demo",
+      skills: {
+        sources: [],
+        registrations: [{ name: "external-guide", type: "local", path: path.join(root, "outside/external-guide") }]
+      },
+      files: { managedBaselines: {} }
+    }));
+
+    const removed = run(root, "remove", "external-guide");
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")).skills.registrations, []);
+    assert.equal(fs.readFileSync(skillsPath, "utf8"), "candidate root is not a directory\n");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

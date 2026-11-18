@@ -77,13 +77,13 @@ function templateNames(): Set<string> {
     .map((entry) => entry.name));
 }
 
-function localCandidates(config: SkillConfig): { name: string; type: 'project' | 'local'; path: string; available: boolean }[] {
-  const result: { name: string; type: 'project' | 'local'; path: string; available: boolean }[] = [];
+function localCandidates(config: SkillConfig): { name: string; type: 'project' | 'local'; path: string }[] {
+  const result: { name: string; type: 'project' | 'local'; path: string }[] = [];
   const projectDir = path.resolve('.agents/skills');
   if (fs.existsSync(projectDir)) {
     for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
       if (entry.isDirectory() && fs.existsSync(path.join(projectDir, entry.name, 'SKILL.md'))) {
-        result.push({ name: entry.name, type: 'project', path: path.join(projectDir, entry.name), available: true });
+        result.push({ name: entry.name, type: 'project', path: path.join(projectDir, entry.name) });
       }
     }
   }
@@ -96,7 +96,7 @@ function localCandidates(config: SkillConfig): { name: string; type: 'project' |
       if (!entry.isDirectory()) continue;
       const skillPath = path.join(root, entry.name);
       if (fs.existsSync(path.join(skillPath, 'SKILL.md'))) {
-        result.push({ name: entry.name, type: 'local', path: skillPath, available: true });
+        result.push({ name: entry.name, type: 'local', path: skillPath });
       }
     }
   }
@@ -139,33 +139,20 @@ function cleanupLocalSkillLink(
   } catch { /* only an exact, readable project link is removable */ }
 }
 
-function cleanupClientCommand(name: string, adapter: ReturnType<typeof listAgentClientAdapters>[number], baselines: Record<string, unknown>, removed: string[]): void {
-  const descriptor = adapter.project.customCommand;
-  if (!descriptor) return;
-  const target = descriptor.target.replaceAll('${skillName}', name);
-  const baseline = baselines[target];
-  if (typeof baseline !== 'string' || !baseline.startsWith('sha256:')) return;
-  const absolute = safeProjectTarget(target);
-  if (!absolute || !removeUnchangedSkillFile(absolute, baseline)) return;
-  delete baselines[target];
-  removed.push(target);
-  try { removeEmptyDirs(path.dirname(absolute), process.cwd()); } catch { /* client directory cleanup is best-effort */ }
-}
-
 function cleanupClientCommands(name: string, baselines: Record<string, unknown>, removed: string[]): void {
-  for (const adapter of listAgentClientAdapters()) cleanupClientCommand(name, adapter, baselines, removed);
-}
-
-function clearRegistrationBaselines(
-  name: string,
-  baselines: Record<string, unknown>
-): void {
-  const commandTargets = new Set(listAgentClientAdapters().flatMap((adapter) => {
+  for (const adapter of listAgentClientAdapters()) {
     const descriptor = adapter.project.customCommand;
-    return descriptor ? [descriptor.target.replaceAll('${skillName}', name)] : [];
-  }));
-  for (const target of Object.keys(baselines)) {
-    if (commandTargets.has(target)) delete baselines[target];
+    if (!descriptor) continue;
+    const target = descriptor.target.replaceAll('${skillName}', name);
+    const baseline = baselines[target];
+    if (typeof baseline === 'string' && baseline.startsWith('sha256:')) {
+      const absolute = safeProjectTarget(target);
+      if (absolute && removeUnchangedSkillFile(absolute, baseline)) {
+        removed.push(target);
+        try { removeEmptyDirs(path.dirname(absolute), process.cwd()); } catch { /* client directory cleanup is best-effort */ }
+      }
+    }
+    delete baselines[target];
   }
 }
 
@@ -175,7 +162,6 @@ function cleanupOwnedOutputs(name: string, registration: Registration, config: S
   const baselines = config.files?.managedBaselines;
   if (baselines && typeof baselines === 'object') {
     cleanupClientCommands(name, baselines, removed);
-    clearRegistrationBaselines(name, baselines);
   }
   return removed;
 }
@@ -252,9 +238,8 @@ export async function cmdSkill(args: string[]): Promise<number> {
   try {
     const { file, config } = readConfig();
     const builtins = templateNames();
-    const candidates = localCandidates(config);
-    if (action === 'list') return listSkills(builtins, candidates, config.skills?.registrations);
-    if (action === 'add') return await addSkill(file, config, candidates, builtins, requestedName);
+    if (action === 'list') return listSkills(builtins, localCandidates(config), config.skills?.registrations);
+    if (action === 'add') return await addSkill(file, config, localCandidates(config), builtins, requestedName);
     return await removeSkill(file, config, builtins, requestedName);
   } catch (error) {
     closePrompt();
