@@ -19,9 +19,9 @@
 3. **持续测试**：实现过程中持续运行 **fast smoke 子集**（参见 `test` skill）
 4. **保持简单**：不要加入未计划的功能
 
-## 策略模式与模板方法模式
+## 实现与重构
 
-实现前读取 `.agents/rules/strategy-pattern.md`。准备在第二条路径重复判断或复制流程时，先确认两处是否受同一业务规则或步骤顺序约束。仅在本轮实现范围内提取共用行为，并从受影响的入口验证结果。
+涉及可替换行为或共用流程时，按 `.agents/rules/strategy-pattern.md` 组织实现。测试通过后，按 `.agents/rules/testing-discipline.md` 的 REFACTOR 步骤对照实际改动检查业务决策的归属和影响范围。
 
 ## 运行测试验证
 

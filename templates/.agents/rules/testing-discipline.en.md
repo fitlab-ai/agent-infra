@@ -29,7 +29,9 @@ During implementation, turn the requirement into a test for observable behavior 
 
 1. **RED**: First write a failing test that reproduces the requirement or defect, and confirm that it really fails. The test should cover business behavior, inputs and outputs, or user-visible results, not internal implementation details.
 2. **GREEN**: Write the smallest amount of code needed to make the failing test pass. Do not expand behavior that is not covered by the test or the requirement.
-3. **REFACTOR**: After the tests are green, clean up names, structure, or duplication; keep the same test set passing before and after the refactor.
+3. **REFACTOR**: Once tests pass, trace the business decision affected by the actual diff. If several locations must independently apply the same rule, put that decision in the code responsible for it. Behaviors that change for independent reasons should remain independently editable even when their implementations look alike. Limit restructuring to the current change. Stop when the decision has a clear owner, its effects match the requirement, and the same behavioral tests pass before and after refactoring.
+
+For example, if only the preview should display a missing resource as an empty result, interpret that outcome at the preview entry point. The shared reader must still let other callers distinguish a missing resource from an existing, empty one.
 
 This mirrors "Goal-Driven Execution" in AGENTS.md: define a verifiable success criterion first, then make the implementation satisfy it.
 

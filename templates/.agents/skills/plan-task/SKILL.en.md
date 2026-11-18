@@ -91,7 +91,7 @@ Use it to understand:
 
 ### 5. Design the Technical Plan
 
-Read `.agents/rules/strategy-pattern.md` before designing. For an identified variation, name the rule owner and the callers that consume its result.
+Identify the decision changed by the requirement, the module responsible for it, and the callers it should affect. For interchangeable behavior or a shared workflow, use `.agents/rules/strategy-pattern.md` to select the implementation approach.
 
 Follow the `technical-design` step in `.agents/workflows/feature-development.yaml`:
 

@@ -54,7 +54,7 @@ Line-by-line diff reading does not replace necessary call-chain, state-transitio
 | dependency-direction | Whether dependencies point toward approved stable boundaries |
 | abstraction-fit | Whether abstractions match real variation without being deficient or excessive |
 | pattern-cost | Whether the problem, applicability, cost, and simpler alternative justify a pattern |
-| change-locality | For a behavior variant or shared workflow, trace a requirement-backed change using `.agents/rules/strategy-pattern.md`. For other changes, inspect the scope of the current change directly. Which locations must independently change the same decision or sequence, and what happens if one is missed? |
+| change-locality | Trace the affected decision through real callers. If several locations must change for one rule, what diverges if one is missed? If a shared implementation serves independent rules, which caller would be affected by changing another rule? For Strategy or Template Method, consult `.agents/rules/strategy-pattern.md`. |
 | testability | Whether key behavior and failure paths can be observed and controlled reliably |
 | architecture-boundary | Whether implementation follows the approved architecture without reopening major selection during code review |
 

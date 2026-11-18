@@ -92,7 +92,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 
 ### 5. 设计技术方案
 
-设计方案前先读取 `.agents/rules/strategy-pattern.md`。针对已明确的行为差异，指出哪个模块负责业务判断，哪些调用方使用结果。
+指出本次需求改变的业务决策、负责该决策的模块，以及哪些调用方应受影响。涉及可替换行为或共用流程时，按 `.agents/rules/strategy-pattern.md` 选择实现方式。
 
 仅当方案阶段实际判断候选资格、约束依赖或人工裁决资格时，才按 `.agents/rules/decision-qualification.md` 复核规范化约束和候选，并在方案产物记录完整资格审计；否则省略整个审计段。来源不明或未人工确认的约束不得自动排除候选。
 

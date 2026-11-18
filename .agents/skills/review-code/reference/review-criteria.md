@@ -54,7 +54,7 @@
 | dependency-direction | 依赖是否指向已批准的稳定边界 |
 | abstraction-fit | 抽象是否匹配实际变化点，避免不足或过度抽象 |
 | pattern-cost | 模式解决的问题、适用条件、成本和更简单替代是否相称 |
-| change-locality | 若需求涉及行为变体或共用流程，参照 `.agents/rules/strategy-pattern.md` 推演其中一项变化。其他改动直接检查本次业务变化的影响范围。哪些位置必须分别修改同一判断或步骤顺序？漏改一处会产生什么行为差异？ |
+| change-locality | 沿实际调用链核对业务决策的影响范围。若同一规则需要多处同步修改，漏改一处会出现什么差异？若共享实现承载了不同规则，修改其中一条会影响哪个本应独立的调用方？涉及策略或模板方法时参照 `.agents/rules/strategy-pattern.md`。 |
 | testability | 关键行为和失败路径能否被可靠观察与控制 |
 | architecture-boundary | 实现是否遵守已批准架构，不在代码审查阶段首次重选重大架构 |
 

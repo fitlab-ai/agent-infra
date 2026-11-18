@@ -19,9 +19,9 @@ Follow the `code` step in `.agents/workflows/feature-development.yaml`.
 3. **Keep testing continuously**: run the **fast smoke subset** continuously as work progresses (see the `test` skill)
 4. **Keep it simple**: do not add unplanned features
 
-## Strategy and Template Method
+## Implementation and refactoring
 
-Read `.agents/rules/strategy-pattern.md` before implementation. Before repeating a decision or copying a sequence into another path, check whether both paths follow the same business rule or required ordering. Extract shared behavior only within the scope of the current implementation round and verify the result through the affected entry points.
+For interchangeable behavior or a shared workflow, follow `.agents/rules/strategy-pattern.md` during implementation. Once tests pass, apply the REFACTOR step in `.agents/rules/testing-discipline.md` to check the ownership and scope of the decisions in the actual diff.
 
 ## Run Test Verification
 
