@@ -831,15 +831,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
 
   for (const target of Object.keys(managedBaselines)) {
-    const skillPath = norm(target).match(/^\.agents\/skills\/([^/]+)\//);
-    if (skillPath && managedBaselines[target] && typeof managedBaselines[target] === 'object') {
-      const registration = activeRegistrations.find((entry) => entry?.name === skillPath[1] && entry.type === 'local');
-      const record = managedBaselines[target];
-      if (registration && typeof record.source === 'string'
-        && path.resolve(expandHome(record.source)) === path.resolve(expandHome(registration.path))) continue;
-      delete managedBaselines[target];
-      continue;
-    }
     if (
       !guardedManaged.has(norm(target))
       && !retiredManagedForTarget(target)
