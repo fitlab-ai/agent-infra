@@ -243,6 +243,7 @@ test('PR review recovery recognizes an accepted review before retrying its queue
     assert.equal(recovered.status, 'applied');
     assert.deepEqual(mock.postedBodies, []);
     assert.equal(persisted?.state, 'succeeded');
+    assert.deepEqual(readPlatformOperationJournal(taskId, root).operations.map((item) => item.id), [operation.id]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -252,9 +252,9 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
+      "file": "lib/platform/pull-requests-execution.ts",
       "ruleId": "complexity",
-      "stableId": "91a91a93493b4c41096222f62b2b10a398f3a27202b68cbb73c05d42654908a6",
+      "stableId": "13d0fc6fcf00ec43d08c92cd82a71114dba54b3a9b1c68861714593966100496",
       "displayName": "createExternalPullRequest",
       "metric": 34,
       "normalizedMessage": "complexity=34",
@@ -639,12 +639,12 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
+      "file": "lib/platform/pull-requests-execution.ts",
       "ruleId": "complexity",
-      "stableId": "7261515a20bdb4149a020ddf6e297ecdd2e3b0f07fd25b18fd7bfec8f7a6dc35",
+      "stableId": "475215b3f02ba33bf28820757564149dba565f1a71c622de7452de2a9d405ee0",
       "displayName": "recoverCreatedPullRequest",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
+      "metric": 33,
+      "normalizedMessage": "complexity=33",
       "count": 1
     },
     {
@@ -864,18 +864,18 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
+      "file": "lib/platform/pull-requests-execution.ts",
       "ruleId": "complexity",
-      "stableId": "d990fe66d72e785e43feecfa119b73274d0f53b0fe7e47d6ddf2dab98b6d37fd",
+      "stableId": "e18b3845ea2007139f0b7280bf170d257111fb164bf650913f240f009d87fb84",
       "displayName": "syncPlatformPullRequestImpl",
       "metric": 58,
       "normalizedMessage": "complexity=58",
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
+      "file": "lib/platform/pull-requests-execution.ts",
       "ruleId": "complexity",
-      "stableId": "46a1fe4469cb7610595a54a1feaf1ff67aaa8b5a07da2d4e594298737e1f01bc",
+      "stableId": "1ea00db4a988619e983b4026a7a52d39d2a4dcd078291adcb3d412af2b3aa2a2",
       "displayName": "syncPlatformPullRequestInLabels",
       "metric": 77,
       "normalizedMessage": "complexity=77",

@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
-
 // Paths excluded from the post-review coverage gate. Fail-closed: the gate
 // covers ALL tracked changes by default. This default denylist is EMPTY —
 // projects opt into exclusions explicitly via review.post_review_exclude_globs.
@@ -33,21 +31,6 @@ export function resolvePostReviewGlobs(
   ];
   const excludes = [...new Set([...DEFAULT_POST_REVIEW_EXCLUDES, ...projectExcludes])];
   return [":/", ...excludes.map((p) => `:(top,exclude)${p}`)];
-}
-
-export function findAuthoritativeReviewCodeArtifact(taskDir: string) {
-  const inventory = inspectArtifactDirectory(taskDir, 'review-code');
-  if (inventory.status !== 'ready' || !inventory.latest) {
-    return { ok: false, round: 0, fileName: null, path: null, error: null };
-  }
-  const { round, name: fileName } = inventory.latest;
-  return {
-    ok: true,
-    round,
-    fileName,
-    path: path.join(taskDir, fileName),
-    error: null
-  };
 }
 
 export function extractReviewBaseline(content: string): string {
