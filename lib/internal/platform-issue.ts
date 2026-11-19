@@ -3,10 +3,9 @@ import path from 'node:path';
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
   bindPlatformIssue,
-  createPlatformIssue,
-  inspectPlatformIssue,
-  syncPlatformIssue
+  inspectPlatformIssue
 } from '../platform/issues.ts';
+import { createPlatformIssue, syncPlatformIssue } from '../platform/coordinated-writes.ts';
 import type { IssueResult } from '../platform/issues.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 

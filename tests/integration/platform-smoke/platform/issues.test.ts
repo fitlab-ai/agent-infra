@@ -6,11 +6,10 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import {
-  createPlatformIssue,
   inspectPlatformIssue,
-  requirementSectionAnchors,
-  syncPlatformIssue
+  requirementSectionAnchors
 } from '../../../../lib/platform/issues.ts';
+import { createPlatformIssue, syncPlatformIssue } from '../../../../lib/platform/coordinated-writes.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { createTempDir } from '../../../helpers.ts';
 

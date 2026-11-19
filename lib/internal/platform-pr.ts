@@ -3,16 +3,15 @@ import path from 'node:path';
 
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
-  bindPlatformPullRequest,
-  createPlatformPullRequest,
   inspectPlatformPullRequest,
   resolveExternalPullRequest,
   skipPlatformPullRequestFact,
-  syncPlatformPullRequest,
   syncPlatformPullRequestInLabels
 } from '../platform/pull-requests.ts';
+import { bindPlatformPullRequest, createPlatformPullRequest, syncPlatformPullRequest } from '../platform/coordinated-writes.ts';
 import type { PullRequestResult } from '../platform/pull-requests.ts';
-import { reportWrite, summaryContext, syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { reportWrite, summaryContext } from '../platform/pr-summary.ts';
+import { syncPullRequestSummary } from '../platform/coordinated-writes.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 

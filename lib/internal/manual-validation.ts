@@ -12,7 +12,8 @@ import { archiveManualValidationGeneration, createManualValidationTransaction, r
 import type { ManualValidationTransaction, ManualValidationTransactionResult } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationReceipt } from '../task/manual-validation-receipt.ts';
 import { sha256File } from '../task/artifact-receipts.ts';
-import { summaryCommentState, syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { summaryCommentState } from '../platform/pr-summary.ts';
+import { syncPullRequestSummary } from '../platform/coordinated-writes.ts';
 import type { PlatformClient } from '../platform/context.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 

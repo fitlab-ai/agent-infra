@@ -1,5 +1,5 @@
-import { syncPlatformComment } from '../platform/issue-comments.ts';
-import { createPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
+import { syncPlatformComment } from '../platform/coordinated-writes.ts';
+import { createPlatformIssue, syncPlatformIssue } from '../platform/coordinated-writes.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { VERSION } from '../version.ts';
 import { applyWorkflowWarningIntent } from './workflow-warning-intents.ts';

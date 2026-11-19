@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-import { inspectPlatformPullRequestByNumber, selectExternalPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels, warningResultForPrimary } from '../../../../lib/platform/pull-requests.ts';
+import { inspectPlatformPullRequestByNumber, selectExternalPullRequest, syncPlatformPullRequestInLabels, warningResultForPrimary } from '../../../../lib/platform/pull-requests.ts';
+import { syncPlatformPullRequest } from '../../../../lib/platform/coordinated-writes.ts';
 import { inspectGitHubIssueClosingChangeRequests, normalizePullRequest } from '../../../../lib/platform/github-data.ts';
 import type { GitHubClient, RequestOptions } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';

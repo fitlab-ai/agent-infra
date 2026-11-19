@@ -8,7 +8,7 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { getOpenWorkflowWarnings } from '../task/workflow-warnings.ts';
 import { applyWorkflowWarningIntent } from '../task/workflow-warning-intents.ts';
 import { captureTaskWriteMetadata } from '../task/write.ts';
-import { syncPlatformComment } from './issue-comments.ts';
+import { syncPlatformComment } from './coordinated-writes.ts';
 import type { PlatformClient } from './context.ts';
 import { providerErrorRetryable } from './provider-validation.ts';
 import { platformResult } from './types.ts';

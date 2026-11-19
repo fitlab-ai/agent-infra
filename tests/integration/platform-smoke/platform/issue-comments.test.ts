@@ -14,10 +14,10 @@ import {
   renderTaskComment,
   renderTaskCommentResult,
   normalizeCommentContent,
-  syncPlatformComment,
   inspectPlatformCommentOperation,
   validateRelatedMarkerSet
 } from '../../../../lib/platform/issue-comments.ts';
+import { syncPlatformComment } from '../../../../lib/platform/coordinated-writes.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { sanitizeMarkdownDocument } from '../../../../lib/platform/comment-safety.ts';
 import { createTempDir } from '../../../helpers.ts';

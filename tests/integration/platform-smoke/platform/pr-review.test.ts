@@ -8,10 +8,10 @@ import { execFileSync } from 'node:child_process';
 
 import {
   listPrReviews,
-  publishPrReview,
   reviewMarker,
   reviewedCommitMarker
 } from '../../../../lib/platform/pr-review.ts';
+import { publishPrReview } from '../../../../lib/platform/coordinated-writes.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
 import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
