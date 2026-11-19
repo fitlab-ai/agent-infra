@@ -42,7 +42,7 @@ import {
 import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber, serializeResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { CoordinatePlatformWrite, CoordinatedWrite, DryRunWrite, ReplayWrite } from './operation-coordination-types.ts';
 import type { PlatformPullRequestIntent } from '../task/platform-operation-journal.ts';
 import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot, IssueSnapshot as ProviderIssueSnapshot } from './provider-contract.ts';
 
@@ -66,7 +66,7 @@ type PullRequestResult = PlatformResult & {
   }>;
 };
 type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
-type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string; skipQueue?: boolean };
+type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string; skipQueue?: boolean; coordinate?: CoordinatePlatformWrite };
 type CreateOptions = SharedOptions & {
   agent: string;
   base: string;
@@ -155,7 +155,10 @@ async function journalPullRequestOperation(
   const operation = { kind: 'pull-request' as const, target: intent.action === 'sync' ? `bound-pr:${resolved.taskId}` : target, expectedDigest };
   const dependency = intent.action === 'sync' ? 'deferred' : 'required';
   if (options.skipQueue) return execute();
-  return coordinatePlatformWrite({
+  if (typeof options.coordinate !== 'function') return result('failed', resolved.taskId, null, null, {
+    error: { code: 'PLATFORM_COORDINATOR_REQUIRED', message: 'Platform write coordinator is required', retryable: false }
+  });
+  return options.coordinate({
     operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, pullRequest: intent, dependency },
     agent: options.agent,
     execute,
@@ -1594,7 +1597,7 @@ async function syncPlatformPullRequestImpl(taskRef: string, options: SyncOptions
   }
 }
 
-async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
+async function syncPlatformPullRequest(taskRef: string, options: SyncOptions & (CoordinatedWrite | DryRunWrite | ReplayWrite)): Promise<PullRequestResult> {
   const intent: PlatformPullRequestIntent = { action: 'sync', metadata: options.metadata === true, closingIssue: options.closingIssue === true };
   return journalPullRequestOperation(taskRef, options, intent, `bound-pr:${taskRef}`, {
     metadata: options.metadata === true, closingIssue: options.closingIssue === true
@@ -1699,10 +1702,10 @@ function withActivityWarnings<T extends PullRequestResult>(taskRef: string, cwd:
   const warnings: OperationWarning[] = logWarnings.map((item) => ({ ...item, retryable: true, step: 'pr', target: resolved.taskId, severity: 'IMPORTANT' }));
   return { ...output, warnings: mergeOperationWarnings(output.warnings, warnings) };
 }
-async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+async function bindPlatformPullRequest(taskRef: string, options: BindOptions & (CoordinatedWrite | DryRunWrite | ReplayWrite)): Promise<PullRequestResult> {
   return withActivityWarnings(taskRef, options.cwd, await bindPlatformPullRequestWithProjection(taskRef, options));
 }
-async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
+async function createPlatformPullRequest(taskRef: string, options: CreateOptions & (CoordinatedWrite | DryRunWrite)): Promise<PullRequestResult> {
   return withActivityWarnings(taskRef, options.cwd, await createPlatformPullRequestWithProjection(taskRef, options));
 }
 async function resolveExternalPullRequestWithWarnings(taskRef: string, options: ResolveExternalOptions): Promise<ExternalPullRequestResult> {

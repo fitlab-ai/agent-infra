@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts';
-import { listPrReviews, publishPrReview } from '../platform/pr-review.ts';
+import { listPrReviews } from '../platform/pr-review.ts';
+import { publishPrReview } from '../platform/coordinated-writes.ts';
 import type { PrReviewEvent } from '../platform/pr-review.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "lint": "node run-lint.mjs",
+    "lint:cycles": "node check-cycles.mjs",
     "lint:unused": "cd ../.. && eslint --config tools/eslint/eslint-unused.config.mjs . && knip",
     "test": "node --test tests/*.test.mjs"
   },

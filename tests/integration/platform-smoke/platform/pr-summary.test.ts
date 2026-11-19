@@ -11,10 +11,10 @@ import {
   reportWrite,
   summaryCommentState,
   summaryContext,
-  syncPullRequestSummary as syncTypedPullRequestSummary,
   warningResultForPrimary,
   prepareAndRenderPrSummaryContent
 } from '../../../../lib/platform/pr-summary.ts';
+import { syncPullRequestSummary as syncTypedPullRequestSummary } from '../../../../lib/platform/coordinated-writes.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import type { MechanicalChangeReport, PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
 import { parsePrSummaryContent, renderPrSummaryContent } from '../../../../lib/platform/pr-summary-content.ts';

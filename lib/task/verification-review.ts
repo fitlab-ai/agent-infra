@@ -1,8 +1,8 @@
+export { findAuthoritativeReviewCodeArtifact } from './review-artifact.ts';
 export {
   extractReviewTargetHead,
   extractReviewedHead,
   extractReviewDiffBase,
-  findAuthoritativeReviewCodeArtifact,
   loadPostReviewConfig,
   parseReviewVerdict,
   resolvePostReviewGlobs

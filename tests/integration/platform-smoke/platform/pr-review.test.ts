@@ -8,10 +8,10 @@ import { execFileSync } from 'node:child_process';
 
 import {
   listPrReviews,
-  publishPrReview,
   reviewMarker,
   reviewedCommitMarker
 } from '../../../../lib/platform/pr-review.ts';
+import { publishPrReview } from '../../../../lib/platform/coordinated-writes.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
 import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
@@ -243,6 +243,7 @@ test('PR review recovery recognizes an accepted review before retrying its queue
     assert.equal(recovered.status, 'applied');
     assert.deepEqual(mock.postedBodies, []);
     assert.equal(persisted?.state, 'succeeded');
+    assert.deepEqual(readPlatformOperationJournal(taskId, root).operations.map((item) => item.id), [operation.id]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

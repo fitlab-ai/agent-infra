@@ -39,7 +39,7 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString, serializeResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { CoordinatePlatformWrite, CoordinatedWrite, DryRunWrite, ReplayWrite } from './operation-coordination-types.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
 type IssueResult = Omit<PlatformResult, 'operations'> & {
@@ -47,7 +47,7 @@ type IssueResult = Omit<PlatformResult, 'operations'> & {
   task: { id: string | null; issueNumber: number | null };
   issue: IssueSnapshot | null;
 };
-type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
+type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string; coordinate?: CoordinatePlatformWrite };
 type CreateOptions = SharedOptions & { agent: string; dryRun?: boolean };
 type BindOptions = SharedOptions & { issue: string | number; agent: string; dryRun?: boolean };
 type SyncOptions = SharedOptions & {
@@ -386,7 +386,10 @@ async function executePlatformIssueCreate(base: ResolvedPlatformContext, payload
       milestone: typeof payload.milestone === 'string' ? payload.milestone : null
     })).digest('hex')
   };
-  return coordinatePlatformWrite({
+  if (typeof options.coordinate !== 'function') return result('failed', base.resolved.taskId, null, {
+    error: { code: 'PLATFORM_COORDINATOR_REQUIRED', message: 'Platform write coordinator is required', retryable: false }
+  });
+  return options.coordinate({
     operation: { taskRef: base.resolved.taskId, cwd: base.resolved.repoRoot, ...operation, issueCreate, dependency: 'required' },
     agent: options.agent,
     execute,
@@ -395,7 +398,7 @@ async function executePlatformIssueCreate(base: ResolvedPlatformContext, payload
   });
 }
 
-async function createPlatformIssue(taskRef: string, options: CreateOptions): Promise<IssueResult> {
+async function createPlatformIssue(taskRef: string, options: CreateOptions & (CoordinatedWrite | DryRunWrite)): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (base.issueIdentity) return inspectPlatformIssue(taskRef, options);
@@ -817,7 +820,10 @@ async function coordinateIssueSync(
   const dependency = options.dependency ?? (options.state === 'closed' && options.closeReason === 'not_planned' ? 'required' : 'deferred');
   const execute = () => syncPlatformIssueImpl(taskRef, options);
   if (options.skipQueue) return execute();
-  return coordinatePlatformWrite({
+  if (typeof options.coordinate !== 'function') return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+    error: { code: 'PLATFORM_COORDINATOR_REQUIRED', message: 'Platform write coordinator is required', retryable: false }
+  });
+  return options.coordinate({
     operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency },
     agent: options.agent,
     execute,
@@ -826,7 +832,7 @@ async function coordinateIssueSync(
   });
 }
 
-async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+async function syncPlatformIssue(taskRef: string, options: SyncOptions & (CoordinatedWrite | DryRunWrite | ReplayWrite)): Promise<IssueResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok || options.dryRun) return syncPlatformIssueImpl(taskRef, options);
   const evidence = deriveSyncTaskEvidence(resolved, options);

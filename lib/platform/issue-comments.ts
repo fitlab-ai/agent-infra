@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { CoordinatePlatformWrite, CoordinatedWrite } from './operation-coordination-types.ts';
 import type { PlatformOperation as JournalOperation, RecordOperationInput } from '../task/platform-operation-journal.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { LoadedContext, PlatformClient } from './context.ts';
@@ -61,6 +61,7 @@ type SyncOptions = {
   summaryAuthorization?: { sha256: string };
   dependency?: 'deferred' | 'required';
   queuedOperation?: JournalOperation;
+  coordinate?: CoordinatePlatformWrite;
   taskProjection?: { content: string; sha256: string };
 };
 type CommentPlanStrategy = Readonly<{
@@ -84,12 +85,16 @@ type CommentPlanStrategy = Readonly<{
 async function syncCommentPlan(
   strategy: CommentPlanStrategy,
   operation: Omit<RecordOperationInput, 'state' | 'lastCode'>,
-  queuedOperation?: JournalOperation
+  queuedOperation?: JournalOperation,
+  coordinate?: CoordinatePlatformWrite
 ): Promise<PlatformResult> {
   const execute = () => executeCommentPlan(strategy, strategy.client);
   if (strategy.dryRun) return execute();
   if (queuedOperation) return execute();
-  return coordinatePlatformWrite({ operation, agent: strategy.agent, client: strategy.client, execute,
+  if (typeof coordinate !== 'function') return platformResult('failed', {
+    error: { code: 'PLATFORM_COORDINATOR_REQUIRED', message: 'Platform write coordinator is required', retryable: false }
+  });
+  return coordinate({ operation, agent: strategy.agent, client: strategy.client, execute,
     block: (error) => platformResult('blocked', { error }),
     persistenceFailure: (error) => platformResult('failed', { error }) });
 }
@@ -930,7 +935,7 @@ async function executeCommentPlan(
   });
 }
 
-function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+function syncPlatformComment(taskRef: string, options: SyncOptions & (CoordinatedWrite | { queuedOperation: JournalOperation })): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return Promise.resolve(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
   const readStrategy = (): CommentPlanStrategy => {
@@ -973,7 +978,7 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<Pla
     const value = error as { code?: string; message?: string };
     return Promise.resolve(platformResult('failed', { error: { code: value.code || 'COMMENT_PAYLOAD_INVALID', message: value.message || String(error), retryable: false } }));
   }
-  return syncCommentPlan(strategy, operation, options.queuedOperation);
+  return syncCommentPlan(strategy, operation, options.queuedOperation, options.coordinate);
 }
 
 function inspectPlatformCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string; id: string } | null {

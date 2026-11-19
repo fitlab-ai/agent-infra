@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
-import { syncPlatformComment } from '../platform/issue-comments.ts';
+import { syncPlatformComment } from '../platform/coordinated-writes.ts';
 import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
 import { backfillCompletionComments, inspectCompletionBackfillEligibility } from '../platform/completion-backfill.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
-import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
+import { inspectPlatformIssue } from '../platform/issues.ts';
+import { syncPlatformIssue } from '../platform/coordinated-writes.ts';
 import type { IssueResult, SyncOptions as IssueSyncOptions } from '../platform/issues.ts';
 import { resourceIdentityEquals } from '../platform/resource-identity.ts';
 import { activityWarnings } from './activity-log.ts';

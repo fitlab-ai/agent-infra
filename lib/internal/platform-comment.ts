@@ -6,9 +6,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
   checkPlatformCommentOwner,
-  listPlatformComments,
-  syncPlatformComment
+  listPlatformComments
 } from '../platform/issue-comments.ts';
+import { syncPlatformComment } from '../platform/coordinated-writes.ts';
 import type { CommentKind } from '../platform/issue-comments.ts';
 import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
 import { platformResult } from '../platform/types.ts';

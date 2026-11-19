@@ -37,6 +37,9 @@ jobs:
       - name: Check lint baseline
         run: npm run lint --prefix tools/eslint
 
+      - name: Check dependency cycles
+        run: npm run lint:cycles --prefix tools/eslint
+
       - name: Check unused code
         run: npm run lint:unused --prefix tools/eslint
 
