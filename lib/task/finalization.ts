@@ -1064,7 +1064,7 @@ function backfillException(taskId: string, repoRoot: string, receipt: TaskFinali
   });
 }
 
-function recordBackfillSuccess(repoRoot: string, receipt: TaskFinalizationReceipt, result: PlatformResult): TaskFinalizationReceipt {
+function resolveBackfillWarnings(repoRoot: string, receipt: TaskFinalizationReceipt): TaskFinalizationReceipt {
 
   if (receipt.warnings.some((warning) => warning.step === 'backfill' && warning.status === 'open')) {
     const warnings = receipt.warnings.map((warning) => warning.step === 'backfill' && warning.status === 'open'
@@ -1072,10 +1072,7 @@ function recordBackfillSuccess(repoRoot: string, receipt: TaskFinalizationReceip
       : warning);
     receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: null });
   }
-  if (result.changed && receipt.taskComment !== 'pending') {
-    receipt = updateReceipt(repoRoot, receipt, { taskComment: 'pending' });
-  }
-return receipt;
+  return receipt;
 }
 
 function backfillFailure(taskId: string, repoRoot: string, receipt: TaskFinalizationReceipt, changed: boolean, result: PlatformResult, backfillResult: TaskFinalizationStep): TaskFinalizationResult | null {
@@ -1121,7 +1118,10 @@ async function prepareBackfill(taskId: string, request: TaskFinalizationRequest,
     const failure = backfillFailure(taskId, repoRoot, receipt, changed, result, backfillResult);
     if (failure) return failure;
     changed = result.changed;
-    receipt = recordBackfillSuccess(repoRoot, receipt, result);
+    receipt = resolveBackfillWarnings(repoRoot, receipt);
+    if (result.changed && receipt.taskComment !== 'pending') {
+      receipt = updateReceipt(repoRoot, receipt, { taskComment: 'pending' });
+    }
   } catch (error) {
     return backfillException(taskId, repoRoot, receipt, changed, error);
   } else backfillResult = { status: 'no-op', changed: false, error: null };
