@@ -108,24 +108,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/capabilities.ts",
-      "ruleId": "complexity",
-      "stableId": "1817c805c8ac4f72314ba5a08524a0558858886fbae2654999b54489380f83fc",
-      "displayName": "buildLifecycleFacts",
-      "metric": 78,
-      "normalizedMessage": "complexity=78",
-      "count": 1
-    },
-    {
-      "file": "lib/task/capabilities.ts",
-      "ruleId": "complexity",
-      "stableId": "ef17c7b98d592ec2d11b64e9b83636cef67e10263eb264121226cd4a6c7d2d9c",
-      "displayName": "canStart",
-      "metric": 91,
-      "normalizedMessage": "complexity=91",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/index.ts",
       "ruleId": "complexity",
       "stableId": "0b058968fd8a5212b9f3ca46b76dbfc7881868d0d8a5c853e18ea45a18fb9e63",
@@ -600,15 +582,6 @@
       "displayName": "readStableFileSync",
       "metric": 17,
       "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
-      "file": "lib/task/capabilities.ts",
-      "ruleId": "complexity",
-      "stableId": "393f0cfbe27b01cc52234802587e032f7272ba0d6f964da8eafd2582a3adf05b",
-      "displayName": "recommendNext",
-      "metric": 65,
-      "normalizedMessage": "complexity=65",
       "count": 1
     },
     {
