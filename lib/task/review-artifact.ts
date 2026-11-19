@@ -15,4 +15,3 @@ export function findAuthoritativeReviewCodeArtifact(taskDir: string) {
     error: null
   };
 }
-

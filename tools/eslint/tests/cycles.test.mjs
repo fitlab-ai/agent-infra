@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const script = fileURLToPath(new URL('../check-cycles.mjs', import.meta.url));
 function check(files) {
@@ -62,10 +63,18 @@ test('resolves index and js references while ignoring existing files outside the
   assert.match(result.stdout, /3 TypeScript files/);
 });
 
-test('ignores import and re-export declarations containing only type specifiers', () => {
-  const result = check({
-    'lib/a.ts': "import { type B } from './b';",
-    'lib/b.ts': "export { type A } from './a';"
-  });
-  assert.equal(result.status, 0, result.stderr);
+test('tracks inline type references retained by TypeScript emit', () => {
+  const files = {
+    'lib/a.ts': "import { type B } from './b.ts'; export type A = B;",
+    'lib/b.ts': "export { type A } from './a.ts'; export type B = string;"
+  };
+  const options = { module: ts.ModuleKind.NodeNext, verbatimModuleSyntax: true, rewriteRelativeImportExtensions: true };
+  const emittedA = ts.transpileModule(files['lib/a.ts'], { compilerOptions: options, fileName: 'a.mts' }).outputText;
+  const emittedB = ts.transpileModule(files['lib/b.ts'], { compilerOptions: options, fileName: 'b.mts' }).outputText;
+  assert.match(emittedA, /import\s*\{\s*\}\s*from ['"]\.\/b\.js['"]/);
+  assert.match(emittedB, /export\s*\{\s*\}\s*from ['"]\.\/a\.js['"]/);
+  const result = check(files);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /lib\/a\.ts -> lib\/b\.ts/);
+  assert.match(result.stderr, /lib\/b\.ts -> lib\/a\.ts/);
 });

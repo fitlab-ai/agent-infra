@@ -28,7 +28,6 @@ for (const file of files) {
   for (const node of ast.body) {
     if (!['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(node.type) || !node.source) continue;
     if (node.importKind === 'type' || node.exportKind === 'type') continue;
-    if (node.specifiers?.length && node.specifiers.every(spec => spec.importKind === 'type' || spec.exportKind === 'type')) continue;
     const specifier = node.source.value;
     if (typeof specifier !== 'string' || !specifier.startsWith('.')) continue;
     const base = path.resolve(path.dirname(file), specifier);
