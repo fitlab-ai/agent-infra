@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { CoordinatePlatformWrite } from './operation-coordination-types.ts';
+import type { CoordinatePlatformWrite, CoordinatedWrite, DryRunWrite, ReplayWrite } from './operation-coordination-types.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { providerErrorRetryable } from './provider-validation.ts';
@@ -236,7 +236,11 @@ async function queueTaskScopedReview(
     artifactFile: options.recoveryArtifact,
     bodyDigest
   };
-  return options.coordinate!({
+  if (typeof options.coordinate !== 'function') return platformResult('failed', {
+    platform: context.platform, capabilities: context.capabilities, resource,
+    error: { code: 'PLATFORM_COORDINATOR_REQUIRED', message: 'Platform write coordinator is required', retryable: false }
+  });
+  return options.coordinate({
     operation: {
       taskRef: options.identity.scope,
       cwd: options.cwd || process.cwd(),
@@ -344,7 +348,10 @@ async function publishDirectReview(
   });
 }
 
-export async function publishPrReview(options: PublishPrReviewOptions): Promise<PlatformResult> {
+export async function publishPrReview(options: PublishPrReviewOptions & (CoordinatedWrite | DryRunWrite | ReplayWrite)): Promise<PlatformResult> {
+  if (!options.dryRun && !options.skipQueue && typeof options.coordinate !== 'function') return platformResult('failed', {
+    error: { code: 'PLATFORM_COORDINATOR_REQUIRED', message: 'Platform write coordinator is required', retryable: false }
+  });
   const resolved = await resolveReviewTarget(options);
   if ('result' in resolved) return resolved.result;
   const { loaded, context, providerScopeId, identity, identityNumber } = resolved.target;

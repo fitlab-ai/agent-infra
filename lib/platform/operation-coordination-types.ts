@@ -22,3 +22,6 @@ export type CoordinateInput<T extends OperationResult> = Readonly<{
 }>;
 
 export type CoordinatePlatformWrite = <T extends OperationResult>(input: CoordinateInput<T>) => Promise<T>;
+export type CoordinatedWrite = { coordinate: CoordinatePlatformWrite };
+export type DryRunWrite = { dryRun: true };
+export type ReplayWrite = { skipQueue: true };

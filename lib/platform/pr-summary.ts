@@ -1,4 +1,4 @@
-import type { CoordinatePlatformWrite } from './operation-coordination-types.ts';
+import type { CoordinatePlatformWrite, CoordinatedWrite, DryRunWrite } from './operation-coordination-types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -177,7 +177,8 @@ function basePlatformResult(
 }
 
 function isHardSummaryFailure(error: PlatformResult['error']): boolean {
-  return error?.code === 'PR_SUMMARY_HEAD_RACE'
+  return error?.code === 'PLATFORM_COORDINATOR_REQUIRED'
+    || error?.code === 'PR_SUMMARY_HEAD_RACE'
     || error?.code === 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED'
     || error?.code === 'PR_SUMMARY_RACE_COMPENSATION_FAILED';
 }
@@ -890,7 +891,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: PullRequestSummarySyncOptions
+  options: PullRequestSummarySyncOptions & (CoordinatedWrite | DryRunWrite | { queuedOperation: JournalOperation })
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;

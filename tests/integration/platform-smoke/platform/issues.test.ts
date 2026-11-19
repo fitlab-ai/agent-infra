@@ -6,12 +6,36 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import {
+  createPlatformIssue as executePlatformIssueCreate,
   inspectPlatformIssue,
   requirementSectionAnchors
 } from '../../../../lib/platform/issues.ts';
 import { createPlatformIssue, syncPlatformIssue } from '../../../../lib/platform/coordinated-writes.ts';
+import { syncPlatformIssue as executeIssueSync } from '../../../../lib/platform/issues.ts';
+import { syncPlatformComment as executeComment } from '../../../../lib/platform/issue-comments.ts';
+import { bindPlatformPullRequest as executePrBind, createPlatformPullRequest as executePrCreate, syncPlatformPullRequest as executePrSync } from '../../../../lib/platform/pull-requests.ts';
+import { publishPrReview as executeReview } from '../../../../lib/platform/pr-review.ts';
+import { syncPullRequestSummary as executeSummary } from '../../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { createTempDir } from '../../../helpers.ts';
+
+// Compile-time contract checks; the actual recovery calls are exercised by their integration tests.
+if (false) {
+  // @ts-expect-error Normal issue sync needs coordination.
+  void executeIssueSync('task', { agent: 'codex' });
+  // @ts-expect-error Comment sync has no dry-run bypass.
+  void executeComment('task', { agent: 'codex', kind: 'task', dryRun: true });
+  // @ts-expect-error Normal PR binding needs coordination.
+  void executePrBind('task', { agent: 'codex', pr: 1 });
+  // @ts-expect-error PR creation has no direct replay bypass.
+  void executePrCreate('task', { agent: 'codex', base: 'main', head: 'branch', title: 'x', body: 'x', skipQueue: true });
+  // @ts-expect-error Normal PR sync needs coordination.
+  void executePrSync('task', { agent: 'codex', primaryResult: 'no_op' });
+  // @ts-expect-error Normal review publication needs coordination.
+  void executeReview({ prNumber: 1, identity: { scope: 'pr1', round: 1, commitSha: 'abc' }, event: 'COMMENT', body: 'x' });
+  // @ts-expect-error Summary sync has no skipQueue bypass.
+  void executeSummary('task', { agent: 'codex', body: 'x', primaryResult: 'no_op', skipQueue: true });
+}
 
 function fixture(issueNumber = '') {
   const root = createTempDir('platform-issue-');
@@ -65,6 +89,27 @@ function contextResponse(args: string[]) {
   }
   return null;
 }
+
+test('issue creation without coordination fails closed before any write', async () => {
+  const root = fixture();
+  let posts = 0;
+  const client = clientFor((args) => {
+    if (args.includes('POST')) posts += 1;
+    return contextResponse(args) || [];
+  });
+  // @ts-expect-error Normal writes require a coordinator.
+  const output = await executePlatformIssueCreate('TASK-20260101-000001', { cwd: root, agent: 'codex', client });
+  assert.equal(output.status, 'failed');
+  assert.equal(output.error?.code, 'PLATFORM_COORDINATOR_REQUIRED');
+  assert.equal(posts, 0);
+});
+
+test('direct review publication without coordination fails before contacting the provider', async () => {
+  // @ts-expect-error Normal writes require a coordinator.
+  const output = await executeReview({ prNumber: 1, identity: { scope: 'pr1', round: 1, commitSha: 'abc' }, event: 'COMMENT', body: 'x' });
+  assert.equal(output.status, 'failed');
+  assert.equal(output.error?.code, 'PLATFORM_COORDINATOR_REQUIRED');
+});
 
 test('issue inspection normalizes stable remote identity and metadata', async () => {
   const root = fixture('7');
