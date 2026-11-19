@@ -131,21 +131,14 @@ function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'>, error
   };
 }
 
-function normalizedRequest(request: TaskLifecycleRequest): TaskLifecycleRequest | LifecycleError {
-  if (!request || typeof request !== 'object' || !lifecycleIntentCatalog.includes(request.intent as TaskLifecycleIntent)) {
-    return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: 'intent is not in the lifecycle catalog' };
+function singleLine(name: string, value: unknown): string | LifecycleError {
+  if (typeof value !== 'string' || !value.trim() || /[\r\n]/.test(value)) {
+    return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: `${name} must be a non-empty single line` };
   }
-  if (typeof request.taskRef !== 'string' || !request.taskRef || typeof request.agent !== 'string' || !request.agent.trim()) {
-    return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: 'taskRef and agent are required' };
-  }
-  const singleLine = (name: string, value: unknown): string | LifecycleError => {
-    if (typeof value !== 'string' || !value.trim() || /[\r\n]/.test(value)) {
-      return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: `${name} must be a non-empty single line` };
-    }
-    return value.trim();
-  };
-  const agent = singleLine('agent', request.agent);
-  if (typeof agent !== 'string') return agent;
+  return value.trim();
+}
+
+function normalizeIntentFields(request: TaskLifecycleRequest, agent: string): TaskLifecycleRequest | LifecycleError {
   if (request.intent === 'block') {
     const reason = singleLine('reason', request.reason);
     const unblockCondition = singleLine('unblockCondition', request.unblockCondition);
@@ -165,13 +158,25 @@ function normalizedRequest(request: TaskLifecycleRequest): TaskLifecycleRequest 
     }
     return { ...request, agent, reason };
   }
+  return { ...request, agent };
+}
+
+function normalizedRequest(request: TaskLifecycleRequest): TaskLifecycleRequest | LifecycleError {
+  if (!request || typeof request !== 'object' || !lifecycleIntentCatalog.includes(request.intent as TaskLifecycleIntent)) {
+    return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: 'intent is not in the lifecycle catalog' };
+  }
+  if (typeof request.taskRef !== 'string' || !request.taskRef || typeof request.agent !== 'string' || !request.agent.trim()) {
+    return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: 'taskRef and agent are required' };
+  }
+  const agent = singleLine('agent', request.agent);
+  if (typeof agent !== 'string') return agent;
   if (request.intent === 'restore') {
     if (typeof request.stagingDir !== 'string' || !request.stagingDir || !Number.isSafeInteger(request.issueNumber) || request.issueNumber < 1) {
       return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: 'restore requires stagingDir and a positive issueNumber' };
     }
     return { ...request, agent };
   }
-  return { ...request, agent };
+  return normalizeIntentFields(request, agent);
 }
 
 function intentIdentity(request: TaskLifecycleRequest, taskId: string): string {
@@ -392,35 +397,7 @@ function matchingCompletion(content: string, request: TaskLifecycleRequest, rest
   return completionKeys(content).some((entry) => entry.action === identity.action && entry.agent === request.agent && entry.note === identity.note);
 }
 
-function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent: 'restore' }>, repoRoot: string, taskId: string): LifecycleError | { stagingDir: string; fileCount: number } {
-  let workspace: string;
-  let stagingDir: string;
-  try {
-    workspace = fs.realpathSync.native(resolveProjectTaskWorkspaceRoot(repoRoot));
-    stagingDir = fs.realpathSync.native(path.resolve(request.stagingDir));
-  } catch (error) {
-    return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) };
-  }
-  const relative = path.relative(workspace, stagingDir);
-  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || path.basename(stagingDir) === taskId) {
-    return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging must be a non-final directory inside the project task workspace' };
-  }
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(stagingDir, { withFileTypes: true }); }
-  catch (error) { return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) }; }
-  for (const entry of entries) {
-    const stat = fs.lstatSync(path.join(stagingDir, entry.name));
-    if (stat.isSymbolicLink() || !stat.isFile() || (entry.name !== 'task.md' && entry.name !== '.task-lifecycle.json' && !parseArtifactName(entry.name))) {
-      return { code: 'LIFECYCLE_STAGING_INVALID', message: `unsupported restore entry '${entry.name}'` };
-    }
-  }
-  try {
-    if (fs.statSync(workspace).dev !== fs.statSync(stagingDir).dev) {
-      return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging and active workspace must share a filesystem' };
-    }
-  } catch (error) {
-    return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) };
-  }
+function validateStagingContents(request: Extract<TaskLifecycleRequest, { intent: 'restore' }>, stagingDir: string, taskId: string): LifecycleError | null {
   const taskFile = path.join(stagingDir, 'task.md');
   if (!fs.existsSync(taskFile)) return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging has no task.md' };
   try {
@@ -439,6 +416,46 @@ function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent:
       return { code: 'LIFECYCLE_STAGING_INVALID', message: `restore artifact topology is invalid for ${family.family}` };
     }
   }
+  return null;
+}
+
+function validateStagingEntries(stagingDir: string, entries: fs.Dirent[]): LifecycleError | null {
+  for (const entry of entries) {
+    const stat = fs.lstatSync(path.join(stagingDir, entry.name));
+    if (stat.isSymbolicLink() || !stat.isFile() || (entry.name !== 'task.md' && entry.name !== '.task-lifecycle.json' && !parseArtifactName(entry.name))) {
+      return { code: 'LIFECYCLE_STAGING_INVALID', message: `unsupported restore entry '${entry.name}'` };
+    }
+  }
+  return null;
+}
+
+function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent: 'restore' }>, repoRoot: string, taskId: string): LifecycleError | { stagingDir: string; fileCount: number } {
+  let workspace: string;
+  let stagingDir: string;
+  try {
+    workspace = fs.realpathSync.native(resolveProjectTaskWorkspaceRoot(repoRoot));
+    stagingDir = fs.realpathSync.native(path.resolve(request.stagingDir));
+  } catch (error) {
+    return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) };
+  }
+  const relative = path.relative(workspace, stagingDir);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || path.basename(stagingDir) === taskId) {
+    return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging must be a non-final directory inside the project task workspace' };
+  }
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(stagingDir, { withFileTypes: true }); }
+  catch (error) { return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) }; }
+  const entryError = validateStagingEntries(stagingDir, entries);
+  if (entryError) return entryError;
+  try {
+    if (fs.statSync(workspace).dev !== fs.statSync(stagingDir).dev) {
+      return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging and active workspace must share a filesystem' };
+    }
+  } catch (error) {
+    return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) };
+  }
+  const contentError = validateStagingContents(request, stagingDir, taskId);
+  if (contentError) return contentError;
   return { stagingDir, fileCount: entries.filter((entry) => !entry.name.startsWith('.')).length };
 }
 
@@ -570,6 +587,28 @@ export function readLifecycleJournalEvidence(repoRoot: string, taskId: string): 
   } catch { return { exists: true, completedSteps: [], failure: 'SANDBOX_CONTROL_LIFECYCLE_JOURNAL_INVALID' }; }
 }
 
+function isRecoverableState(state: HotState, content: string, status: unknown, request: TaskLifecycleRequest, journal: LifecycleJournal, directoryMoved: boolean, registryCommitted: boolean, hasShortId: boolean): boolean {
+  if (state === 'active' && (directoryMoved || !hasShortId)) return false;
+  if (state === 'completed' && (!journal.completedSteps.includes('task-written')
+    || !matchingCompletion(content, request) || registryCommitted || !hasShortId)) return false;
+  if (status !== state
+    && !(state === 'active' && status === 'completed' && matchingCompletion(content, request))) {
+    return false;
+  }
+  return true;
+}
+
+function isRecoverableProgress(journal: LifecycleJournal, request: TaskLifecycleRequest, taskId: string, state: HotState, content: string, status: unknown, repoRoot: string): boolean {
+  if (journal.taskId !== taskId || journal.intent !== 'complete'
+    || journal.intentDigest !== intentIdentity(request, taskId)
+    || journal.sourceState !== 'active' || journal.targetState !== 'completed') return false;
+  if (journal.completedSteps.some((step, index) => stepsForIntent(journal.intent)[index] !== step)) return false;
+  const directoryMoved = journal.completedSteps.includes('directory-moved');
+  const registryCommitted = journal.completedSteps.includes('registry-committed');
+  const hasShortId = loadShortIdByTaskId(repoRoot).has(taskId);
+  return isRecoverableState(state, content, status, request, journal, directoryMoved, registryCommitted, hasShortId);
+}
+
 export function inspectTaskLifecycleProgress(
   repoRoot: string, taskId: string, agent: string
 ): 'not-started' | 'started-recoverable' | 'unknown' {
@@ -588,20 +627,7 @@ export function inspectTaskLifecycleProgress(
     }
     const journal = parseJournal(fs.readFileSync(journalPath, 'utf8'));
     const request: TaskLifecycleRequest = { taskRef: taskId, intent: 'complete', agent };
-    if (journal.taskId !== taskId || journal.intent !== 'complete'
-      || journal.intentDigest !== intentIdentity(request, taskId)
-      || journal.sourceState !== 'active' || journal.targetState !== 'completed') return 'unknown';
-    if (journal.completedSteps.some((step, index) => stepsForIntent(journal.intent)[index] !== step)) return 'unknown';
-    const directoryMoved = journal.completedSteps.includes('directory-moved');
-    const registryCommitted = journal.completedSteps.includes('registry-committed');
-    const hasShortId = loadShortIdByTaskId(repoRoot).has(taskId);
-    if (state === 'active' && (directoryMoved || !hasShortId)) return 'unknown';
-    if (state === 'completed' && (!journal.completedSteps.includes('task-written')
-      || !matchingCompletion(content, request) || registryCommitted || !hasShortId)) return 'unknown';
-    if (frontmatter.status !== state
-      && !(state === 'active' && frontmatter.status === 'completed' && matchingCompletion(content, request))) {
-      return 'unknown';
-    }
+    if (!isRecoverableProgress(journal, request, taskId, state, content, frontmatter.status, repoRoot)) return 'unknown';
     return 'started-recoverable';
   } catch {
     return 'unknown';
@@ -614,283 +640,336 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   const request = normalized;
   const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
   const io = { ...DEFAULT_IO, ...options.fileSystem };
-  let taskId: string;
-  if (request.intent === 'restore') {
-    if (!TASK_ID_RE.test(request.taskRef)) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'restore requires a full TASK-id' });
-    taskId = request.taskRef;
-  } else {
-    const resolved = resolveTaskRef(request.taskRef, { repoRoot });
-    if (!resolved.ok) return failed(request, { code: resolved.code, message: resolved.message }, { taskId: resolved.taskId });
-    taskId = resolved.taskId;
+  let taskId!: string;
+  let spec!: ReturnType<typeof transition>;
+  let sourceState!: SourceState;
+  let sourcePath!: string;
+  let restoredFiles!: number;
+  function locateLifecycleSource(): TaskLifecycleResult | undefined {
+    function resolveLifecycleIdentity(): TaskLifecycleResult | undefined {
+      if (request.intent === 'restore') {
+        if (!TASK_ID_RE.test(request.taskRef)) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'restore requires a full TASK-id' });
+        taskId = request.taskRef;
+      } else {
+        const resolved = resolveTaskRef(request.taskRef, { repoRoot });
+        if (!resolved.ok) return failed(request, { code: resolved.code, message: resolved.message }, { taskId: resolved.taskId });
+        taskId = resolved.taskId;
+      }
+    }
+    const resolveLifecycleIdentityResult = resolveLifecycleIdentity();
+    if (resolveLifecycleIdentityResult) return resolveLifecycleIdentityResult;
+    spec = transition(request);
+    const hot = locateHotTaskDirs(repoRoot, taskId);
+    const activeSource = hot.find((candidate) => candidate.state === 'active');
+    const completedTarget = hot.find((candidate) => candidate.state === 'completed');
+    const transferInProgress = request.intent === 'complete' && Boolean(activeSource && completedTarget)
+      && targetContainsTask(completedTarget!.taskDir, taskId, request)
+      && fs.existsSync(path.join(activeSource!.taskDir, '.task-lifecycle.json'));
+    if (hot.length > 1 && !transferInProgress) return failed(request, { code: 'LIFECYCLE_IDENTITY_CONFLICT', message: `task ${taskId} exists in multiple hot states` }, { taskId });
+    if (request.intent === 'restore' && hot.length === 0) {
+      const validation = validateRestoreStaging(request, repoRoot, taskId);
+      if ('code' in validation) return failed(request, validation, { taskId });
+      sourceState = 'staging'; sourcePath = validation.stagingDir; restoredFiles = validation.fileCount;
+    } else if (activeSource && request.intent === 'complete') {
+      sourceState = activeSource.state; sourcePath = activeSource.taskDir;
+      restoredFiles = fs.readdirSync(sourcePath).filter((name) => !name.startsWith('.')).length;
+    } else if (hot[0]) {
+      sourceState = hot[0].state; sourcePath = hot[0].taskDir;
+      restoredFiles = fs.readdirSync(sourcePath).filter((name) => !name.startsWith('.')).length;
+    } else {
+      return failed(request, { code: 'LIFECYCLE_TASK_NOT_FOUND', message: `task ${taskId} has no lifecycle source` }, { taskId });
+    }
   }
-  const spec = transition(request);
-  const hot = locateHotTaskDirs(repoRoot, taskId);
-  const activeSource = hot.find((candidate) => candidate.state === 'active');
-  const completedTarget = hot.find((candidate) => candidate.state === 'completed');
-  const transferInProgress = request.intent === 'complete' && Boolean(activeSource && completedTarget)
-    && targetContainsTask(completedTarget!.taskDir, taskId, request)
-    && fs.existsSync(path.join(activeSource!.taskDir, '.task-lifecycle.json'));
-  if (hot.length > 1 && !transferInProgress) return failed(request, { code: 'LIFECYCLE_IDENTITY_CONFLICT', message: `task ${taskId} exists in multiple hot states` }, { taskId });
-  let sourceState: SourceState;
-  let sourcePath: string;
-  let restoredFiles: number;
-  if (request.intent === 'restore' && hot.length === 0) {
-    const validation = validateRestoreStaging(request, repoRoot, taskId);
-    if ('code' in validation) return failed(request, validation, { taskId });
-    sourceState = 'staging'; sourcePath = validation.stagingDir; restoredFiles = validation.fileCount;
-  } else if (activeSource && request.intent === 'complete') {
-    sourceState = activeSource.state; sourcePath = activeSource.taskDir;
-    restoredFiles = fs.readdirSync(sourcePath).filter((name) => !name.startsWith('.')).length;
-  } else if (hot[0]) {
-    sourceState = hot[0].state; sourcePath = hot[0].taskDir;
-    restoredFiles = fs.readdirSync(sourcePath).filter((name) => !name.startsWith('.')).length;
-  } else {
-    return failed(request, { code: 'LIFECYCLE_TASK_NOT_FOUND', message: `task ${taskId} has no lifecycle source` }, { taskId });
-  }
+  const locateLifecycleSourceResult = locateLifecycleSource();
+  if (locateLifecycleSourceResult) return locateLifecycleSourceResult;
   const targetPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), spec.target, taskId);
   const requiredSteps = stepsForIntent(request.intent);
   const movingTaskDirectory = sourcePath !== targetPath;
   const currentTaskFile = path.join(sourcePath, 'task.md');
   const existingJournal = fs.existsSync(path.join(sourcePath, '.task-lifecycle.json'));
-  if (sourceState === spec.target && !existingJournal) {
-    const content = io.readFileSync(currentTaskFile);
-    if (matchingCompletion(content, request, restoredFiles)) {
-      const frontmatter = parseTypedTaskFrontmatter(content);
-      return {
-        ...failed(request, { code: '', message: '' }), status: 'no-op', error: null, taskId,
-        sourceState, targetState: spec.target, sourcePath, targetPath, pendingSteps: [],
-        completedSteps: requiredSteps, timestamp: typeof frontmatter.updated_at === 'string' ? frontmatter.updated_at : null,
-        agentInfraVersion: typeof frontmatter.agent_infra_version === 'string' ? frontmatter.agent_infra_version : null
-      };
+  let content!: string;
+  let registeredKey: string | undefined;
+  function validateLifecycleSource(): TaskLifecycleResult | undefined {
+    function validateLifecycleTransition(): TaskLifecycleResult | undefined {
+      if (sourceState === spec.target && !existingJournal) {
+        const content = io.readFileSync(currentTaskFile);
+        if (matchingCompletion(content, request, restoredFiles)) {
+          const frontmatter = parseTypedTaskFrontmatter(content);
+          return {
+            ...failed(request, { code: '', message: '' }), status: 'no-op', error: null, taskId,
+            sourceState, targetState: spec.target, sourcePath, targetPath, pendingSteps: [],
+            completedSteps: requiredSteps, timestamp: typeof frontmatter.updated_at === 'string' ? frontmatter.updated_at : null,
+            agentInfraVersion: typeof frontmatter.agent_infra_version === 'string' ? frontmatter.agent_infra_version : null
+          };
+        }
+        return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: `task ${taskId} is already ${spec.target} with a different lifecycle intent` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
+      if (!spec.sources.includes(sourceState) && !existingJournal) {
+        return failed(request, { code: 'LIFECYCLE_SOURCE_INVALID', message: `${request.intent} is not allowed from ${sourceState}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
+      if (sourcePath !== targetPath && fs.existsSync(targetPath) && !existingJournal
+        && !(request.intent === 'complete' && targetContainsTask(targetPath, taskId, request))) {
+        return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
     }
-    return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: `task ${taskId} is already ${spec.target} with a different lifecycle intent` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+    const validateLifecycleTransitionResult = validateLifecycleTransition();
+    if (validateLifecycleTransitionResult) return validateLifecycleTransitionResult;
+    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, true);
+    if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+    content = io.readFileSync(currentTaskFile);
+    let frontmatter;
+    try { frontmatter = parseTypedTaskFrontmatter(content); }
+    catch (error) { return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
+    if (frontmatter.id !== taskId) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'task.md id does not match its lifecycle task id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+    if (spec.target === 'active') {
+      const contract = validateCurrentTaskContract(content);
+      if (!contract.ok) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contract.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+    }
+    function validateLifecycleRegistry(): TaskLifecycleResult | undefined {
+      const registryRequest = executeShortIdCommand({
+        operation: 'list', activeDir: path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active'),
+        shortIdLength: configuredShortIdLength(repoRoot)
+      });
+      if (registryRequest.status === 'failed') {
+        return failed(request, registryRequest.error!, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
+      const registry = JSON.parse(registryRequest.output || '{"version":1,"ids":{}}') as { ids: Record<string, string> };
+      registeredKey = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId)?.[0];
+      if ((spec.registry === 'release' || request.intent === 'complete') && sourceState === 'active' && !registeredKey) {
+        return failed(request, { code: 'LIFECYCLE_SHORT_ID_PRECONDITION', message: 'active source has no short-id registry entry' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
+      if (spec.registry === 'alloc' && !registeredKey && Object.keys(registry.ids).length >= 10 ** configuredShortIdLength(repoRoot) - 1) {
+        return failed(request, { code: 'SHORT_ID_CAPACITY_EXCEEDED', message: 'short-id registry has no free slot' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
+    }
+    const validateLifecycleRegistryResult = validateLifecycleRegistry();
+    if (validateLifecycleRegistryResult) return validateLifecycleRegistryResult;
   }
-  if (!spec.sources.includes(sourceState) && !existingJournal) {
-    return failed(request, { code: 'LIFECYCLE_SOURCE_INVALID', message: `${request.intent} is not allowed from ${sourceState}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  }
-  if (sourcePath !== targetPath && fs.existsSync(targetPath) && !existingJournal
-    && !(request.intent === 'complete' && targetContainsTask(targetPath, taskId, request))) {
-    return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  }
-  const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, true);
-  if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  const content = io.readFileSync(currentTaskFile);
-  let frontmatter;
-  try { frontmatter = parseTypedTaskFrontmatter(content); }
-  catch (error) { return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
-  if (frontmatter.id !== taskId) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'task.md id does not match its lifecycle task id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  if (spec.target === 'active') {
-    const contract = validateCurrentTaskContract(content);
-    if (!contract.ok) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contract.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  }
-  const registryRequest = executeShortIdCommand({
-    operation: 'list', activeDir: path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active'),
-    shortIdLength: configuredShortIdLength(repoRoot)
-  });
-  if (registryRequest.status === 'failed') {
-    return failed(request, registryRequest.error!, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  }
-  const registry = JSON.parse(registryRequest.output || '{"version":1,"ids":{}}') as { ids: Record<string, string> };
-  const registeredKey = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId)?.[0];
-  if ((spec.registry === 'release' || request.intent === 'complete') && sourceState === 'active' && !registeredKey) {
-    return failed(request, { code: 'LIFECYCLE_SHORT_ID_PRECONDITION', message: 'active source has no short-id registry entry' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  }
-  if (spec.registry === 'alloc' && !registeredKey && Object.keys(registry.ids).length >= 10 ** configuredShortIdLength(repoRoot) - 1) {
-    return failed(request, { code: 'SHORT_ID_CAPACITY_EXCEEDED', message: 'short-id registry has no free slot' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  }
+  const validateLifecycleSourceResult = validateLifecycleSource();
+  if (validateLifecycleSourceResult) return validateLifecycleSourceResult;
   const digest = intentIdentity(request, taskId);
   const initialJournalPath = path.join(sourcePath, '.task-lifecycle.json');
-  let journal: LifecycleJournal;
+  let journal!: LifecycleJournal;
   let journalPath = initialJournalPath;
-  if (fs.existsSync(initialJournalPath)) {
-    try { journal = parseJournal(io.readFileSync(initialJournalPath)); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath }); }
-    if (journal.taskId !== taskId || journal.intent !== request.intent) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
-    if (spec.target === 'active' && !isValidAgentInfraVersion(journal.metadata.agentInfraVersion)) {
-      return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: `journal metadata agentInfraVersion must be a valid v-prefixed semver (received ${journal.metadata.agentInfraVersion})` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+  function prepareLifecycleJournal(): TaskLifecycleResult | undefined {
+    if (fs.existsSync(initialJournalPath)) {
+      function recoverJournal(): TaskLifecycleResult | undefined {
+        try { journal = parseJournal(io.readFileSync(initialJournalPath)); }
+        catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath }); }
+        if (journal.taskId !== taskId || journal.intent !== request.intent) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+        if (spec.target === 'active' && !isValidAgentInfraVersion(journal.metadata.agentInfraVersion)) {
+          return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: `journal metadata agentInfraVersion must be a valid v-prefixed semver (received ${journal.metadata.agentInfraVersion})` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+        }
+        if (request.dryRun) {
+          if (!journal.failure) return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: 'existing lifecycle journal has no durable failure evidence for a read-only probe' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+          return failed(request, journal.failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath, completedSteps: journal.completedSteps, pendingSteps: requiredSteps.filter((step) => !journal.completedSteps.includes(step)) });
+        }
+        if (journal.intentDigest !== digest) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+      }
+      return recoverJournal();
+    } else {
+      let metadata: TaskWriteMetadata;
+      try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
+      catch (error) { return failed(request, { code: 'LIFECYCLE_METADATA_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
+      if (spec.target === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion)) {
+        return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: `metadata agentInfraVersion must be a valid v-prefixed semver (received ${metadata.agentInfraVersion})` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+      }
+      journal = { version: 1, taskId, intent: request.intent, intentDigest: digest, sourceState, targetState: spec.target, metadata, completedSteps: [] };
+      function planLifecycle(): TaskLifecycleResult {
+        const plannedMutations = mutationsFor(request, content, metadata, restoredFiles, false);
+        if ('code' in plannedMutations) return failed(request, plannedMutations, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+        const taskPlan = writeTask(
+          { taskRef: taskId, expectedState: sourceState === 'blocked' ? 'blocked' : 'active', mutations: plannedMutations, dryRun: true },
+          {
+            repoRoot, metadataProvider: () => metadata,
+            taskLocation: sourceState === 'staging' ? { repoRoot, taskId, taskMdPath: path.join(sourcePath, 'task.md'), state: 'active' } : undefined
+          }
+        );
+        if (taskPlan.status === 'failed') return failed(request, taskPlan.error, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, task: { operations: taskPlan.operations } });
+        return {
+          ...failed(request, { code: '', message: '' }), status: 'planned', changed: true, error: null,
+          taskId, sourceState, targetState: spec.target, sourcePath, targetPath, task: { operations: taskPlan.operations },
+          directory: { effect: 'move', changed: true },
+          shortId: {
+            effect: spec.registry === 'alloc' ? (registeredKey ? 'unchanged' : 'allocated') : spec.registry === 'release' ? (registeredKey ? 'released' : 'unchanged') : 'unchanged',
+            shortId: registeredKey ?? null,
+            changed: spec.registry === 'alloc' ? !registeredKey : spec.registry === 'release' ? Boolean(registeredKey) : false
+          },
+          timestamp: metadata.timestamp, agentInfraVersion: metadata.agentInfraVersion,
+          journalPath: initialJournalPath
+        };
+      }
+      if (request.dryRun) return planLifecycle();
+      try { writeJournal(initialJournalPath, journal, io, true); }
+      catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
     }
-    if (request.dryRun) {
-      if (!journal.failure) return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: 'existing lifecycle journal has no durable failure evidence for a read-only probe' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
-      return failed(request, journal.failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath, completedSteps: journal.completedSteps, pendingSteps: requiredSteps.filter((step) => !journal.completedSteps.includes(step)) });
+  }
+  const prepareLifecycleJournalResult = prepareLifecycleJournal();
+  if (prepareLifecycleJournalResult) return prepareLifecycleJournalResult;
+  const completed = new Set(journal.completedSteps);
+  function reconcileLifecycleProgress(): void {
+    if (sourceState === spec.target && journal.sourceState !== spec.target) completed.add('directory-moved');
+    const currentMappings = loadShortIdByTaskId(repoRoot);
+    if (requiredSteps.includes('registry-committed')
+      && ((spec.target === 'active' && currentMappings.has(taskId)) || (spec.target !== 'active' && !currentMappings.has(taskId)))) {
+      if (completed.has('directory-moved')) completed.add('registry-committed');
     }
-    if (journal.intentDigest !== digest) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
-  } else {
-    let metadata: TaskWriteMetadata;
-    try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_METADATA_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
-    if (spec.target === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion)) {
-      return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: `metadata agentInfraVersion must be a valid v-prefixed semver (received ${metadata.agentInfraVersion})` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+  }
+  reconcileLifecycleProgress();
+  let taskOperations: readonly TaskOperationSummary[] = [];
+  function writeLifecycleTask(): TaskLifecycleResult | undefined {
+    if (options.prepareOnly && !matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) {
+      return {
+        ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
+        taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
+        task: { operations: [] }, directory: { effect: 'unchanged', changed: false },
+        shortId: { effect: 'unchanged', shortId: null, changed: false },
+        timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
+        journalPath, completedSteps: [...completed], pendingSteps: requiredSteps.filter((step) => !completed.has(step))
+      };
     }
-    journal = { version: 1, taskId, intent: request.intent, intentDigest: digest, sourceState, targetState: spec.target, metadata, completedSteps: [] };
-    if (request.dryRun) {
-      const plannedMutations = mutationsFor(request, content, metadata, restoredFiles, false);
-      if ('code' in plannedMutations) return failed(request, plannedMutations, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-      const taskPlan = writeTask(
-        { taskRef: taskId, expectedState: sourceState === 'blocked' ? 'blocked' : 'active', mutations: plannedMutations, dryRun: true },
+    if (matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) completed.add('task-written');
+    if (!completed.has('task-written')) {
+      const current = io.readFileSync(path.join(sourcePath, 'task.md'));
+      const mutations = mutationsFor(request, current, journal.metadata, restoredFiles, false);
+      if ('code' in mutations) return failed(request, mutations, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0 });
+      const writeResult = writeTask(
+        { taskRef: taskId, expectedState: sourceState === 'blocked' ? 'blocked' : 'active', mutations },
         {
-          repoRoot, metadataProvider: () => metadata,
+          repoRoot, metadataProvider: () => journal.metadata,
+          fileSystem: options.taskFileSystem,
           taskLocation: sourceState === 'staging' ? { repoRoot, taskId, taskMdPath: path.join(sourcePath, 'task.md'), state: 'active' } : undefined
         }
       );
-      if (taskPlan.status === 'failed') return failed(request, taskPlan.error, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, task: { operations: taskPlan.operations } });
+      taskOperations = writeResult.operations;
+      if (writeResult.status === 'failed') return failed(request, writeResult.error, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+      completed.add('task-written'); journal.completedSteps = [...completed];
+      try { writeJournal(journalPath, journal, io); }
+      catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+    }
+    if (options.prepareOnly && !completed.has('directory-moved')) {
       return {
-        ...failed(request, { code: '', message: '' }), status: 'planned', changed: true, error: null,
-        taskId, sourceState, targetState: spec.target, sourcePath, targetPath, task: { operations: taskPlan.operations },
-        directory: { effect: 'move', changed: true },
-        shortId: {
-          effect: spec.registry === 'alloc' ? (registeredKey ? 'unchanged' : 'allocated') : spec.registry === 'release' ? (registeredKey ? 'released' : 'unchanged') : 'unchanged',
-          shortId: registeredKey ?? null,
-          changed: spec.registry === 'alloc' ? !registeredKey : spec.registry === 'release' ? Boolean(registeredKey) : false
-        },
-        timestamp: metadata.timestamp, agentInfraVersion: metadata.agentInfraVersion,
-        journalPath: initialJournalPath
+        ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
+        taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
+        task: { operations: taskOperations }, directory: { effect: 'unchanged', changed: false },
+        shortId: { effect: 'unchanged', shortId: null, changed: false },
+        timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
+        journalPath, completedSteps: [...completed], pendingSteps: requiredSteps.filter((step) => !completed.has(step))
       };
     }
-    try { writeJournal(initialJournalPath, journal, io, true); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
   }
-  const completed = new Set(journal.completedSteps);
-  if (sourceState === spec.target && journal.sourceState !== spec.target) completed.add('directory-moved');
-  const currentMappings = loadShortIdByTaskId(repoRoot);
-  if (requiredSteps.includes('registry-committed')
-    && ((spec.target === 'active' && currentMappings.has(taskId)) || (spec.target !== 'active' && !currentMappings.has(taskId)))) {
-    if (completed.has('directory-moved')) completed.add('registry-committed');
-  }
-  let taskOperations: readonly TaskOperationSummary[] = [];
-  if (options.prepareOnly && !matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) {
-    return {
-      ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
-      taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
-      task: { operations: [] }, directory: { effect: 'unchanged', changed: false },
-      shortId: { effect: 'unchanged', shortId: null, changed: false },
-      timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
-      journalPath, completedSteps: [...completed], pendingSteps: requiredSteps.filter((step) => !completed.has(step))
-    };
-  }
-  if (matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) completed.add('task-written');
-  if (!completed.has('task-written')) {
-    const current = io.readFileSync(path.join(sourcePath, 'task.md'));
-    const mutations = mutationsFor(request, current, journal.metadata, restoredFiles, false);
-    if ('code' in mutations) return failed(request, mutations, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0 });
-    const writeResult = writeTask(
-      { taskRef: taskId, expectedState: sourceState === 'blocked' ? 'blocked' : 'active', mutations },
-      {
-        repoRoot, metadataProvider: () => journal.metadata,
-        fileSystem: options.taskFileSystem,
-        taskLocation: sourceState === 'staging' ? { repoRoot, taskId, taskMdPath: path.join(sourcePath, 'task.md'), state: 'active' } : undefined
-      }
-    );
-    taskOperations = writeResult.operations;
-    if (writeResult.status === 'failed') return failed(request, writeResult.error, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-    completed.add('task-written'); journal.completedSteps = [...completed];
-    try { writeJournal(journalPath, journal, io); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
-  }
-  if (options.prepareOnly && !completed.has('directory-moved')) {
-    return {
-      ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
-      taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
-      task: { operations: taskOperations }, directory: { effect: 'unchanged', changed: false },
-      shortId: { effect: 'unchanged', shortId: null, changed: false },
-      timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
-      journalPath, completedSteps: [...completed], pendingSteps: requiredSteps.filter((step) => !completed.has(step))
-    };
-  }
-  if (fs.existsSync(targetPath) && !fs.existsSync(path.join(sourcePath, 'task.md'))) completed.add('directory-moved');
-  if (!completed.has('directory-moved')) {
-    const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, false);
-    if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    if (request.intent === 'complete') {
-      try {
-        if (!fs.existsSync(targetPath)) fs.mkdirSync(targetPath, { recursive: false, mode: 0o700 });
-        if (!targetContainsTask(targetPath, taskId, request)) {
-          throw new Error('completed target has no matching task identity');
+  const writeLifecycleTaskResult = writeLifecycleTask();
+  if (writeLifecycleTaskResult) return writeLifecycleTaskResult;
+  function moveLifecycleDirectory(): TaskLifecycleResult | undefined {
+    if (fs.existsSync(targetPath) && !fs.existsSync(path.join(sourcePath, 'task.md'))) completed.add('directory-moved');
+    if (!completed.has('directory-moved')) {
+      const moveSafety = runtimeMoveSafety(request, movingTaskDirectory, options, taskId, repoRoot, false);
+      if (moveSafety) return failed(request, moveSafety, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0, timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      if (request.intent === 'complete') {
+        function transferCompletedTask(): TaskLifecycleResult | undefined {
+          try {
+            if (!fs.existsSync(targetPath)) fs.mkdirSync(targetPath, { recursive: false, mode: 0o700 });
+            if (!targetContainsTask(targetPath, taskId, request)) {
+              throw new Error('completed target has no matching task identity');
+            }
+            transferTaskContents(sourcePath, targetPath);
+            for (const name of fs.readdirSync(sourcePath).filter((entry) => entry !== '.task-lifecycle.json' && entry !== 'task.md').sort()) {
+              fs.rmSync(path.join(sourcePath, name), { recursive: true, force: false });
+            }
+            fs.rmSync(path.join(sourcePath, 'task.md'), { force: false });
+            fs.rmSync(path.join(sourcePath, '.task-lifecycle.json'), { force: false });
+          } catch (error) {
+            const failure = { code: 'LIFECYCLE_DIRECTORY_TRANSFER_FAILED', message: String(error) } as const;
+            const sourceJournalPath = path.join(sourcePath, '.task-lifecycle.json');
+            rememberJournalFailure(sourceJournalPath, journal, io, failure);
+            return failed(request, failure, {
+              taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
+              journalPath: sourceJournalPath, task: { operations: taskOperations },
+              changed: true, completedSteps: [...completed].filter((step) => step !== 'directory-moved'),
+              pendingSteps: requiredSteps.filter((step) => !completed.has(step) || step === 'directory-moved'),
+              timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
+            });
+          }
+          completed.add('directory-moved');
+          journal.completedSteps = [...completed];
+          journalPath = path.join(targetPath, '.task-lifecycle.json');
+          try { writeJournal(journalPath, journal, io); }
+          catch (error) {
+            return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, {
+              taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath,
+              task: { operations: taskOperations }, directory: { effect: 'move', changed: true },
+              changed: true, completedSteps: [...completed].filter((step) => step !== 'directory-moved'),
+              pendingSteps: requiredSteps.filter((step) => step !== 'task-written'),
+              timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
+            });
+          }
         }
-        transferTaskContents(sourcePath, targetPath);
-        for (const name of fs.readdirSync(sourcePath).filter((entry) => entry !== '.task-lifecycle.json' && entry !== 'task.md').sort()) {
-          fs.rmSync(path.join(sourcePath, name), { recursive: true, force: false });
-        }
-        fs.rmSync(path.join(sourcePath, 'task.md'), { force: false });
-        fs.rmSync(path.join(sourcePath, '.task-lifecycle.json'), { force: false });
-      } catch (error) {
-        const failure = { code: 'LIFECYCLE_DIRECTORY_TRANSFER_FAILED', message: String(error) } as const;
-        const sourceJournalPath = path.join(sourcePath, '.task-lifecycle.json');
-        rememberJournalFailure(sourceJournalPath, journal, io, failure);
-        return failed(request, failure, {
-          taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
-          journalPath: sourceJournalPath, task: { operations: taskOperations },
-          changed: true, completedSteps: [...completed].filter((step) => step !== 'directory-moved'),
-          pendingSteps: requiredSteps.filter((step) => !completed.has(step) || step === 'directory-moved'),
-          timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
-        });
-      }
-      completed.add('directory-moved');
-      journal.completedSteps = [...completed];
-      journalPath = path.join(targetPath, '.task-lifecycle.json');
-      try { writeJournal(journalPath, journal, io); }
-      catch (error) {
-        return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, {
-          taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath,
-          task: { operations: taskOperations }, directory: { effect: 'move', changed: true },
-          changed: true, completedSteps: [...completed].filter((step) => step !== 'directory-moved'),
-          pendingSteps: requiredSteps.filter((step) => step !== 'task-written'),
-          timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
-        });
-      }
-    } else {
-      if (fs.existsSync(targetPath)) return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-      try { (options.directoryRenameSync ?? io.renameSync)(sourcePath, targetPath); }
-      catch (error) {
-        const failure = { code: 'LIFECYCLE_DIRECTORY_RENAME_FAILED', message: String(error) } as const;
-        rememberJournalFailure(journalPath, journal, io, failure);
-        return failed(request, failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-      }
-      if (completed.has('directory-moved') && !fs.existsSync(sourcePath)) {
-        journalPath = path.join(targetPath, '.task-lifecycle.json');
-      } else if (!completed.has('directory-moved')) {
-        completed.add('directory-moved'); journal.completedSteps = [...completed]; journalPath = path.join(targetPath, '.task-lifecycle.json');
-        try { writeJournal(journalPath, journal, io); }
-        catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
-      }
-    }
-  }
-  const activeTaskPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId);
-  if (request.intent === 'complete' && fs.existsSync(activeTaskPath)) {
-    try {
-      let sourceIsVirtiofsMount = false;
-      try { sourceIsVirtiofsMount = isVirtiofsMountPoint(activeTaskPath, io.readMountInfoSync()); }
-      catch { /* Platforms without mountinfo retain the ordinary directory cleanup path. */ }
-      if (sourceIsVirtiofsMount) {
-        if (io.readdirSync(activeTaskPath).length > 0) {
-          throw new Error('virtiofs source directory is not empty after task contents were transferred');
-        }
+        return transferCompletedTask();
       } else {
-        io.rmdirSync(activeTaskPath);
+        if (fs.existsSync(targetPath)) return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+        try { (options.directoryRenameSync ?? io.renameSync)(sourcePath, targetPath); }
+        catch (error) {
+          const failure = { code: 'LIFECYCLE_DIRECTORY_RENAME_FAILED', message: String(error) } as const;
+          rememberJournalFailure(journalPath, journal, io, failure);
+          return failed(request, failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+        }
+        if (completed.has('directory-moved') && !fs.existsSync(sourcePath)) {
+          journalPath = path.join(targetPath, '.task-lifecycle.json');
+        } else if (!completed.has('directory-moved')) {
+          completed.add('directory-moved'); journal.completedSteps = [...completed]; journalPath = path.join(targetPath, '.task-lifecycle.json');
+          try { writeJournal(journalPath, journal, io); }
+          catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+        }
       }
     }
-    catch (error) {
-      return failed(request, { code: 'LIFECYCLE_SOURCE_DIRECTORY_CLEANUP_FAILED', message: String(error) }, {
-        taskId, sourceState, targetState: spec.target, sourcePath: activeTaskPath, targetPath, journalPath,
-        task: { operations: taskOperations }, directory: { effect: 'move', changed: true },
-        changed: true, completedSteps: [...completed], pendingSteps: [],
-        timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
-      });
+  }
+  const moveLifecycleDirectoryResult = moveLifecycleDirectory();
+  if (moveLifecycleDirectoryResult) return moveLifecycleDirectoryResult;
+  function cleanupLifecycleSource(): TaskLifecycleResult | undefined {
+    const activeTaskPath = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), 'active', taskId);
+    if (request.intent === 'complete' && fs.existsSync(activeTaskPath)) {
+      try {
+        let sourceIsVirtiofsMount = false;
+        try { sourceIsVirtiofsMount = isVirtiofsMountPoint(activeTaskPath, io.readMountInfoSync()); }
+        catch { /* Platforms without mountinfo retain the ordinary directory cleanup path. */ }
+        if (sourceIsVirtiofsMount) {
+          if (io.readdirSync(activeTaskPath).length > 0) {
+            throw new Error('virtiofs source directory is not empty after task contents were transferred');
+          }
+        } else {
+          io.rmdirSync(activeTaskPath);
+        }
+      }
+      catch (error) {
+        return failed(request, { code: 'LIFECYCLE_SOURCE_DIRECTORY_CLEANUP_FAILED', message: String(error) }, {
+          taskId, sourceState, targetState: spec.target, sourcePath: activeTaskPath, targetPath, journalPath,
+          task: { operations: taskOperations }, directory: { effect: 'move', changed: true },
+          changed: true, completedSteps: [...completed], pendingSteps: [],
+          timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion
+        });
+      }
     }
   }
+  const cleanupLifecycleSourceResult = cleanupLifecycleSource();
+  if (cleanupLifecycleSourceResult) return cleanupLifecycleSourceResult;
   let shortId: TaskLifecycleResult['shortId'] = { effect: 'unchanged', shortId: request.intent === 'complete' ? registeredKey ?? null : null, changed: false };
-  if (requiredSteps.includes('registry-committed') && !completed.has('registry-committed')) {
-    try { shortId = mutateShortIdRegistry(repoRoot, taskId, spec.registry); }
-    catch (error) { return failed(request, { code: (error as { code?: string }).code ?? 'LIFECYCLE_SHORT_ID_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
-    completed.add('registry-committed'); journal.completedSteps = [...completed];
-    try { writeJournal(journalPath, journal, io); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+  function finishLifecycle(): TaskLifecycleResult | undefined {
+    if (requiredSteps.includes('registry-committed') && !completed.has('registry-committed')) {
+      try { shortId = mutateShortIdRegistry(repoRoot, taskId, spec.registry); }
+      catch (error) { return failed(request, { code: (error as { code?: string }).code ?? 'LIFECYCLE_SHORT_ID_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+      completed.add('registry-committed'); journal.completedSteps = [...completed];
+      try { writeJournal(journalPath, journal, io); }
+      catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+    }
+    const mappings = loadShortIdByTaskId(repoRoot);
+    if (spec.target === 'active' && !mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'active lifecycle target has no short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+    if (request.intent !== 'complete' && spec.target !== 'active' && mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'non-active lifecycle target retained a short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+    try { io.unlinkSync(journalPath); }
+    catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_CLEANUP_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
   }
-  const mappings = loadShortIdByTaskId(repoRoot);
-  if (spec.target === 'active' && !mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'active lifecycle target has no short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-  if (request.intent !== 'complete' && spec.target !== 'active' && mappings.has(taskId)) return failed(request, { code: 'LIFECYCLE_FINAL_STATE_INVALID', message: 'non-active lifecycle target retained a short id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
-  try { io.unlinkSync(journalPath); }
-  catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_CLEANUP_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, shortId, changed: true, completedSteps: [...completed], pendingSteps: [], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+  const finishLifecycleResult = finishLifecycle();
+  if (finishLifecycleResult) return finishLifecycleResult;
   return {
     ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
     taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
