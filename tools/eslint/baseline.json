@@ -63,15 +63,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "8a3f112aa4593a045b5bc3bc97a1f4db045f4a76e9a627fa2e54053cf9256d29",
-      "displayName": "applyTaskLifecycle",
-      "metric": 130,
-      "normalizedMessage": "complexity=130",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/native-file-lock.ts",
       "ruleId": "complexity",
       "stableId": "9422a81d6ab7114b964b5b411b10140efb67a173b2b6077c04857a7d43ed93b2",
@@ -378,15 +369,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "a6b5c1d8255d64d661d820b77328fb39d438f379369632349bbefeb689cff08c",
-      "displayName": "inspectTaskLifecycleProgress",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
-      "count": 1
-    },
-    {
       "file": "lib/internal/cli-route-inventory.ts",
       "ruleId": "complexity",
       "stableId": "c5e2051a9c901d3c54bcdbb38c1b760f3c39b92d22b98d9f9d179993e9a873b4",
@@ -447,15 +429,6 @@
       "displayName": "normalizeStarted",
       "metric": 23,
       "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "e319d54f29511d67b8e748c842e805ea7ac849918f36b992e9583495ba888d10",
-      "displayName": "normalizedRequest",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
       "count": 1
     },
     {
@@ -1032,15 +1005,6 @@
       "displayName": "validateQualificationAudit",
       "metric": 35,
       "normalizedMessage": "complexity=35",
-      "count": 1
-    },
-    {
-      "file": "lib/task/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "426fd7503ea9cbc012ef9d1d8bcd12d6edd335e99d5e7871952b842b6bfc1ada",
-      "displayName": "validateRestoreStaging",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
       "count": 1
     },
     {
