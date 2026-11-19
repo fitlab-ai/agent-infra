@@ -36,15 +36,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/events.ts",
-      "ruleId": "complexity",
-      "stableId": "bcab53c92ea4cee21a68902cd5051898e62ad1d0fd0c70405346d7a89c5e5f0e",
-      "displayName": "applyTaskEvent",
-      "metric": 160,
-      "normalizedMessage": "complexity=160",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/native-file-lock.ts",
       "ruleId": "complexity",
       "stableId": "9422a81d6ab7114b964b5b411b10140efb67a173b2b6077c04857a7d43ed93b2",
@@ -60,15 +51,6 @@
       "displayName": "boundPullRequestFixture.anonymous-object-1.method:json",
       "metric": 33,
       "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
-      "file": "lib/task/events.ts",
-      "ruleId": "complexity",
-      "stableId": "9bef858ba64098c714dcbd46a5366dabeb8e146ec1c2ee90e4d5fe1f8630f0e9",
-      "displayName": "buildCompletionReceipt",
-      "metric": 39,
-      "normalizedMessage": "complexity=39",
       "count": 1
     },
     {
@@ -357,15 +339,6 @@
       "displayName": "mockClient.json",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/task/events.ts",
-      "ruleId": "complexity",
-      "stableId": "1339308d9f11e395dba73f210ae6f12a01531c74d386e6c6004d0472fae0cc86",
-      "displayName": "normalizeStarted",
-      "metric": 23,
-      "normalizedMessage": "complexity=23",
       "count": 1
     },
     {
@@ -843,15 +816,6 @@
       "displayName": "validateQualificationAudit",
       "metric": 35,
       "normalizedMessage": "complexity=35",
-      "count": 1
-    },
-    {
-      "file": "lib/task/events.ts",
-      "ruleId": "complexity",
-      "stableId": "20c26879af25a365fda5ab1e541557ead39a73b9a3e0f5c4c264dd6c55f6a29d",
-      "displayName": "validateTaskEventRequest",
-      "metric": 66,
-      "normalizedMessage": "complexity=66",
       "count": 1
     },
     {
