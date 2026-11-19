@@ -239,39 +239,50 @@ function validWarning(value: unknown): value is FinalizationWarning {
     && (warning.resolvedAt === null || typeof warning.resolvedAt === 'string');
 }
 
+function validReceiptError(value: unknown): boolean {
+  return value === null || (typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value as object).sort().join('\0') === ['code', 'message', 'retryable'].join('\0')
+    && typeof (value as Record<string, unknown>).code === 'string'
+    && typeof (value as Record<string, unknown>).message === 'string'
+    && typeof (value as Record<string, unknown>).retryable === 'boolean');
+}
+
+function validReceiptControlBinding(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const binding = value as Record<string, unknown>;
+  return Object.keys(binding).sort().join('\0') === ['generation', 'requestId'].join('\0')
+    && typeof binding.generation === 'string' && binding.generation.length > 0
+    && typeof binding.requestId === 'string' && /^[a-f0-9-]{16,64}$/u.test(binding.requestId);
+}
+
+function validReceiptStates(receipt: Record<string, unknown>): boolean {
+  const states = ['pending', 'done', 'skipped'];
+  return states.includes(receipt.lifecycle as string) && states.includes(receipt.taskComment as string)
+    && states.includes(receipt.verification as string) && states.includes(receipt.summary as string)
+    && ['pending', 'done'].includes(receipt.warningProjection as string)
+    && Array.isArray(receipt.warnings) && !receipt.warnings.some((warning) => !validWarning(warning));
+}
+
+function validReceiptIdentity(receipt: Record<string, unknown>, taskId: string): boolean {
+  return receipt.version === RECEIPT_VERSION && receipt.taskId === taskId && receipt.intent === 'complete'
+    && typeof receipt.receiptId === 'string' && receipt.receiptId.length > 0
+    && Number.isSafeInteger(receipt.revision) && Number(receipt.revision) >= 0;
+}
+
 export function validateTaskFinalizationReceipt(value: unknown, taskId: string): TaskFinalizationReceipt {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('receipt must be an object');
   const receipt = value as Record<string, unknown>;
-  const controlBinding = receipt.controlBinding as Record<string, unknown> | null | undefined;
-  const states = ['pending', 'done', 'skipped'];
   const requiredKeys = [
     'version', 'taskId', 'intent', 'receiptId', 'revision', 'lifecycle', 'taskComment',
     'verification', 'summary', 'warningProjection', 'warnings', 'updatedAt', 'lastError'
   ];
   if (receipt.controlBinding !== undefined) requiredKeys.push('controlBinding');
-  if (
-    Object.keys(receipt).sort().join('\0') !== requiredKeys.sort().join('\0')
-    ||
-    receipt.version !== RECEIPT_VERSION || receipt.taskId !== taskId || receipt.intent !== 'complete'
-    || typeof receipt.receiptId !== 'string' || receipt.receiptId.length === 0
-    || !Number.isSafeInteger(receipt.revision) || Number(receipt.revision) < 0
-    || !states.includes(receipt.lifecycle as string)
-    || !states.includes(receipt.taskComment as string)
-    || !states.includes(receipt.verification as string)
-    || !states.includes(receipt.summary as string)
-    || !['pending', 'done'].includes(receipt.warningProjection as string)
-    || !Array.isArray(receipt.warnings) || receipt.warnings.some((warning) => !validWarning(warning))
+  if (Object.keys(receipt).sort().join('\0') !== requiredKeys.sort().join('\0')
+    || !validReceiptIdentity(receipt, taskId)
+    || !validReceiptStates(receipt)
     || typeof receipt.updatedAt !== 'string' || receipt.updatedAt.length === 0
-    || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)
-      || Object.keys(receipt.lastError).sort().join('\0') !== ['code', 'message', 'retryable'].join('\0')
-      || typeof (receipt.lastError as Record<string, unknown>).code !== 'string'
-      || typeof (receipt.lastError as Record<string, unknown>).message !== 'string'
-      || typeof (receipt.lastError as Record<string, unknown>).retryable !== 'boolean'))
-    || (receipt.controlBinding !== undefined && (!controlBinding || typeof controlBinding !== 'object'
-      || Array.isArray(controlBinding)
-      || Object.keys(controlBinding).sort().join('\0') !== ['generation', 'requestId'].join('\0')
-      || typeof controlBinding.generation !== 'string' || controlBinding.generation.length === 0
-      || typeof controlBinding.requestId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(controlBinding.requestId)))
+    || !validReceiptError(receipt.lastError) || !validReceiptControlBinding(receipt.controlBinding)
   ) throw new Error('receipt schema is invalid');
   return receipt as TaskFinalizationReceipt;
 }
@@ -545,21 +556,7 @@ function mutationKeys(value: FinalizationMutation): string[] {
   return Object.keys(value).sort();
 }
 
-function validateCapabilityMutation(
-  current: TaskFinalizationReceipt,
-  capability: FinalizationCapability,
-  mutation: FinalizationMutation
-): void {
-  if (capability.receiptId !== current.receiptId) throw capabilityError(
-    'FINALIZATION_SCOPE_INVALID',
-    'finalization mutation belongs to a different task receipt'
-  );
-  if (capability.scope !== mutation.scope) {
-    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation scope does not match its capability');
-  }
-  if (mutation.operation !== 'succeeded' && mutation.operation !== 'failed') {
-    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability operation is invalid');
-  }
+function validateMutationScope(current: TaskFinalizationReceipt, mutation: FinalizationMutation): void {
   if (mutation.scope === 'task-comment') {
     if (current.taskComment !== 'pending') throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability scope task-comment is not pending');
     const expected = mutation.operation === 'succeeded' ? ['operation', 'scope', 'state'] : ['error', 'operation', 'scope'];
@@ -576,6 +573,24 @@ function validateCapabilityMutation(
     const expected = mutation.operation === 'succeeded' ? ['operation', 'scope'] : ['error', 'operation', 'scope'];
     if (mutationKeys(mutation).join('\0') !== expected.join('\0')) throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation shape is invalid');
   }
+}
+
+function validateCapabilityMutation(
+  current: TaskFinalizationReceipt,
+  capability: FinalizationCapability,
+  mutation: FinalizationMutation
+): void {
+  if (capability.receiptId !== current.receiptId) throw capabilityError(
+    'FINALIZATION_SCOPE_INVALID',
+    'finalization mutation belongs to a different task receipt'
+  );
+  if (capability.scope !== mutation.scope) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation scope does not match its capability');
+  }
+  if (mutation.operation !== 'succeeded' && mutation.operation !== 'failed') {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability operation is invalid');
+  }
+  validateMutationScope(current, mutation);
   if (mutation.operation === 'failed' && (!mutation.error.code || !mutation.error.message || typeof mutation.error.retryable !== 'boolean')) {
     throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability failure detail is invalid');
   }
@@ -805,6 +820,26 @@ function readDeliverySummary(taskDir: string, taskId: string): { body: string; s
   return { body: canonical.value, sha256: digest };
 }
 
+function recordSummaryFailure(repoRoot: string, receipt: TaskFinalizationReceipt, error: FinalizationError): TaskFinalizationReceipt {
+  const warning = warningFromError('summary', error);
+  const alreadyOpen = receipt.warnings.some((item) => item.step === warning.step && item.code === warning.code && item.target === warning.target && item.status === 'open');
+  const warnings = replaceWarning(receipt, warning, 'open');
+  return updateReceipt(repoRoot, receipt, { summary: 'pending', taskComment: alreadyOpen ? receipt.taskComment : 'pending', warningProjection: 'pending', warnings, lastError: error });
+}
+
+function applySummarySuccess(repoRoot: string, receipt: TaskFinalizationReceipt, result: PlatformResult, step: TaskFinalizationStep): { receipt: TaskFinalizationReceipt; step: TaskFinalizationStep; changed: boolean; error: null } {
+  const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
+  const resolvedWarning = receipt.warnings.some((warning) => warning.step === 'summary' && warning.status === 'open');
+  const warnings = resolveStepWarnings(receipt, 'summary');
+  receipt = updateReceipt(repoRoot, receipt, {
+    summary: skipped ? 'skipped' : 'done',
+    taskComment: resolvedWarning ? 'pending' : receipt.taskComment,
+    warningProjection: warnings.some((warning) => warning.status === 'open') || resolvedWarning ? 'pending' : 'done',
+    warnings, lastError: null
+  });
+  return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
+}
+
 async function syncPendingSummary(input: {
   repoRoot: string;
   taskId: string;
@@ -834,34 +869,38 @@ async function syncPendingSummary(input: {
     });
     const step = commentStep(result);
     if (result.status === 'applied' || result.status === 'no-op') {
-      const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
-      const resolvedWarning = receipt.warnings.some((warning) => warning.step === 'summary' && warning.status === 'open');
-      const warnings = resolveStepWarnings(receipt, 'summary');
-      receipt = updateReceipt(input.repoRoot, receipt, {
-        summary: skipped ? 'skipped' : 'done',
-        taskComment: resolvedWarning ? 'pending' : receipt.taskComment,
-        warningProjection: warnings.some((warning) => warning.status === 'open') || resolvedWarning ? 'pending' : 'done',
-        warnings,
-        lastError: null
-      });
-      return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
+      return applySummarySuccess(input.repoRoot, receipt, result, step);
     }
     const error = step.error ?? { code: 'SUMMARY_SYNC_FAILED', message: 'delivery summary synchronization failed', retryable: true };
-    const warning = warningFromError('summary', error);
-    const alreadyOpen = receipt.warnings.some((item) => item.step === warning.step && item.code === warning.code && item.target === warning.target && item.status === 'open');
-    const warnings = replaceWarning(receipt, warning, 'open');
-    receipt = updateReceipt(input.repoRoot, receipt, { summary: 'pending', taskComment: alreadyOpen ? receipt.taskComment : 'pending', warningProjection: 'pending', warnings, lastError: error });
+    receipt = recordSummaryFailure(input.repoRoot, receipt, error);
     return { receipt, step, changed: result.changed, error };
   } catch (cause) {
     const error = errorOf(cause, 'SUMMARY_SYNC_FAILED', true);
     try {
-      const warning = warningFromError('summary', error);
-      const alreadyOpen = receipt.warnings.some((item) => item.step === warning.step && item.code === warning.code && item.target === warning.target && item.status === 'open');
-      const warnings = replaceWarning(receipt, warning, 'open');
-      receipt = updateReceipt(input.repoRoot, receipt, { summary: 'pending', taskComment: alreadyOpen ? receipt.taskComment : 'pending', warningProjection: 'pending', warnings, lastError: error });
+      receipt = recordSummaryFailure(input.repoRoot, receipt, error);
     } catch { /* preserve primary error */ }
     return { receipt, step: { status: 'blocked', changed: false, error }, changed: false, error };
   }
+}
+
+function terminalClassification(hardError: boolean | undefined, resultError: FinalizationError | null, pendingCount: number, postLifecyclePending: boolean, blocked: boolean): { status: TaskFinalizationResult['status']; result: TaskFinalizationResult['result'] } {
+  if (hardError) {
+    const status = resultError?.retryable ? 'blocked' : 'failed';
+    return { status, result: status };
+  }
+  if (postLifecyclePending) return { status: 'completed', result: 'completed_with_warnings' };
+  if (pendingCount === 0) return { status: 'completed', result: 'completed' };
+  const status = blocked ? 'blocked' : 'failed';
+  return { status, result: status };
+}
+
+function terminalStepDetails(receipt: TaskFinalizationReceipt, steps: Partial<Pick<TaskFinalizationResult, 'backfill' | 'lifecycle' | 'taskComment' | 'verification' | 'summary'>>) {
+  return {
+    blocked: [steps.backfill, steps.lifecycle, steps.taskComment, steps.verification, steps.summary].some((step) => step?.status === 'blocked'),
+    warnings: mergeOperationWarnings(openWarnings(receipt), steps.lifecycle?.warnings ?? [], steps.verification?.warnings ?? []),
+    backfill: steps.backfill ?? null, lifecycle: steps.lifecycle ?? null, taskComment: steps.taskComment ?? null,
+    verification: steps.verification ?? null, summary: steps.summary ?? null
+  };
 }
 
 function terminalResult(
@@ -872,34 +911,25 @@ function terminalResult(
   error: FinalizationError | null = null
 ): TaskFinalizationResult {
   const pending = pendingSteps(receipt);
-  const blocked = [steps.backfill, steps.lifecycle, steps.taskComment, steps.verification, steps.summary].some((step) => step?.status === 'blocked');
-  const warnings = mergeOperationWarnings(openWarnings(receipt), steps.lifecycle?.warnings ?? [], steps.verification?.warnings ?? []);
+  const details = terminalStepDetails(receipt, steps);
   const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
   const terminalVerificationPending = receipt.lifecycle === 'done' && receipt.verification === 'pending';
   const resultError = error ?? (terminalVerificationPending ? steps.verification?.error : null) ?? null;
   const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID'
     || terminalVerificationPending;
   return {
-    status: hardError ? (resultError?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
+    status: terminalClassification(hardError, resultError, pending.length, postLifecyclePending, details.blocked).status,
     changed,
     taskId,
-    backfill: steps.backfill ?? null,
-    lifecycle: steps.lifecycle ?? null,
-    taskComment: steps.taskComment ?? null,
-    verification: steps.verification ?? null,
-    summary: steps.summary ?? null,
+    backfill: details.backfill,
+    lifecycle: details.lifecycle,
+    taskComment: details.taskComment,
+    verification: details.verification,
+    summary: details.summary,
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
-    result: hardError
-      ? (resultError?.retryable ? 'blocked' : 'failed')
-      : postLifecyclePending
-        ? 'completed_with_warnings'
-        : pending.length === 0
-          ? 'completed'
-          : blocked
-            ? 'blocked'
-            : 'failed',
-    warnings,
+    result: terminalClassification(hardError, resultError, pending.length, postLifecyclePending, details.blocked).result,
+    warnings: details.warnings,
     error: hardError ? resultError : postLifecyclePending ? null : resultError
   };
 }
@@ -922,28 +952,187 @@ function preparedResult(
   };
 }
 
-async function prepareTaskFinalizationCore(
-  request: TaskFinalizationRequest,
-  taskId: string,
-  options: TaskFinalizationOptions
-): Promise<TaskFinalizationResult> {
-  const repoRoot = path.resolve(options.repoRoot);
-  const lifecycle = options.lifecycle ?? ((lifecycleRequest, lifecycleOptions) => (
-    applyTaskLifecycle(lifecycleRequest, lifecycleOptions ?? { repoRoot })
-  ));
-  const backfill = options.backfill ?? backfillCompletionComments;
-  const commentSync = options.commentSync ?? syncPlatformComment;
+function validateIssueSync(taskId: string, synced: IssueResult): TaskFinalizationResult | null {
+  const issueOperations = synced.operations as Array<{ name: string; status: string; reasonCode: string | null; value?: unknown }>;
+  const badOperation = issueOperations?.find((operation) =>
+    ['requirements', 'issue-type', 'fields'].includes(operation.name)
+    && operation.status !== 'applied' && operation.status !== 'no-op'
+    && !(operation.name === 'requirements' && operation.status === 'skipped' && operation.reasonCode === 'NO_REQUIREMENTS_ANCHOR')
+    && !(!synced.capabilities.push && ['issue-type', 'fields'].includes(operation.name)
+      && operation.status === 'skipped' && operation.reasonCode === 'PUSH_REQUIRED')
+  );
+  if ((synced.status !== 'applied' && synced.status !== 'no-op') || synced.error || badOperation) {
+    const error = synced.error ?? {
+      code: badOperation?.reasonCode || 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
+      message: `Required Issue metadata operation '${badOperation?.name ?? 'sync'}' was not confirmed`,
+      retryable: true
+    };
+    return failed(taskId, errorOf(error, 'FINALIZATION_ISSUE_METADATA_FAILED', true));
+  }
+  if (!synced.capabilities.push) {
+    const missingCapabilitySkip = ['issue-type', 'fields'].find((name) => !issueOperations?.some((operation) =>
+      operation.name === name && operation.status === 'skipped' && operation.reasonCode === 'PUSH_REQUIRED'
+    ));
+    if (missingCapabilitySkip) return failed(taskId, {
+      code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
+      message: `Issue metadata operation '${missingCapabilitySkip}' did not report the required PUSH_REQUIRED capability skip`,
+      retryable: true
+    });
+  }
+  return null;
+}
+
+function issueFieldsExpected(value: unknown, fallback: NonNullable<IssueResult['issue']>['fields'] | undefined) {
+  return value && typeof value === 'object' ? value as Record<string, string | number> : fallback;
+}
+
+function validateIssueRereadField(taskId: string, name: string, operation: { value?: unknown }, synced: IssueResult, remote: NonNullable<IssueResult['issue']>): TaskFinalizationResult | null {
+  const before = synced.issue;
+  if (name === 'requirements') {
+    const expected = typeof operation.value === 'string' ? operation.value : before?.body;
+    if (expected === undefined || remote.body !== expected) return failed(taskId, {
+      code: 'FINALIZATION_ISSUE_REQUIREMENTS_UNCONFIRMED', message: 'Issue requirements did not match the verified target', retryable: true
+    });
+  } else if (name === 'issue-type') {
+    const expected = typeof operation.value === 'string' ? operation.value : before?.issueType;
+    if (!expected || remote.issueType !== expected) return failed(taskId, {
+      code: 'FINALIZATION_ISSUE_TYPE_UNCONFIRMED', message: 'Issue Type did not match the verified target', retryable: true
+    });
+  } else {
+    const expected = issueFieldsExpected(operation.value, before?.fields);
+    if (!expected || Object.entries(expected).some(([field, value]) => remote.fields[field] !== value)) return failed(taskId, {
+      code: 'FINALIZATION_ISSUE_FIELDS_UNCONFIRMED', message: 'Pinned Issue fields did not match the verified target', retryable: true
+    });
+  }
+  return null;
+}
+
+function validateIssueReread(taskId: string, synced: IssueResult, remote: NonNullable<IssueResult['issue']>): TaskFinalizationResult | null {
+  const issueOperations = synced.operations as Array<{ name: string; status: string; reasonCode: string | null; value?: unknown }>;
+  const rereadNames = synced.capabilities.push ? ['requirements', 'issue-type', 'fields'] : ['requirements'];
+  for (const name of rereadNames) {
+    const operation = issueOperations?.find((candidate) => candidate.name === name);
+    if (!operation) return failed(taskId, {
+      code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
+      message: `Required Issue metadata operation '${name}' was not reported`, retryable: true
+    });
+    const fieldError = validateIssueRereadField(taskId, name, operation, synced, remote);
+    if (fieldError) return fieldError;
+  }
+  return null;
+}
+
+async function syncFinalizationIssue(taskId: string, request: TaskFinalizationRequest, repoRoot: string, issueIdentity: NonNullable<ReturnType<typeof taskIssueIdentity>>, issueSync: typeof syncPlatformIssue, issueInspect: typeof inspectPlatformIssue): Promise<TaskFinalizationResult | null> {
+  let synced: IssueResult;
+  try {
+    synced = await issueSync(taskId, {
+      agent: request.agent, cwd: repoRoot, requirements: true, issueType: true, fields: true, dependency: 'required'
+    } satisfies IssueSyncOptions);
+  } catch (error) {
+    const detail = errorOf(error, 'FINALIZATION_ISSUE_METADATA_FAILED', true);
+    return failed(taskId, detail);
+  }
+  const syncError = validateIssueSync(taskId, synced);
+  if (syncError) return syncError;
+  let inspected: IssueResult;
+  try { inspected = await issueInspect(taskId, { cwd: repoRoot }); }
+  catch (error) { return failed(taskId, errorOf(error, 'FINALIZATION_ISSUE_INSPECT_FAILED', true)); }
+  if (inspected.status !== 'no-op' || inspected.error || !inspected.issue
+    || !resourceIdentityEquals(inspected.issue.identity, issueIdentity)) {
+    return failed(taskId, inspected.error ?? {
+      code: 'FINALIZATION_ISSUE_IDENTITY_UNCONFIRMED',
+      message: 'Required Issue metadata could not be reread under the bound Issue identity',
+      retryable: true
+    });
+  }
+  return validateIssueReread(taskId, synced, inspected.issue);
+}
+
+function backfillException(taskId: string, repoRoot: string, receipt: TaskFinalizationReceipt, changed: boolean, error: unknown): TaskFinalizationResult {
+  const detail = errorOf(error, 'COMPLETION_BACKFILL_FAILED', true);
+  if (receipt.lifecycle === 'done') {
+    const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
+    receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
+    return terminalResult(taskId, receipt, {
+      backfill: { status: 'blocked', changed: false, error: detail }
+    }, changed, detail);
+  }
+  return failed(taskId, detail, {
+    backfill: { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail },
+    completedSteps: completedSteps(receipt),
+    pendingSteps: pendingSteps(receipt)
+  });
+}
+
+function resolveBackfillWarnings(repoRoot: string, receipt: TaskFinalizationReceipt): TaskFinalizationReceipt {
+
+  if (receipt.warnings.some((warning) => warning.step === 'backfill' && warning.status === 'open')) {
+    const warnings = receipt.warnings.map((warning) => warning.step === 'backfill' && warning.status === 'open'
+      ? { ...warning, status: 'resolved' as const, resolvedAt: now() }
+      : warning);
+    receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: null });
+  }
+  return receipt;
+}
+
+function backfillFailure(taskId: string, repoRoot: string, receipt: TaskFinalizationReceipt, changed: boolean, result: PlatformResult, backfillResult: TaskFinalizationStep): TaskFinalizationResult | null {
+  const issueNotLinked = result.status === 'no-op' && result.error?.code === 'ISSUE_NOT_LINKED';
+  if (!issueNotLinked && (result.status !== 'applied' && result.status !== 'no-op' || result.error)) {
+    const detail = backfillResult.error ?? {
+      code: 'COMPLETION_BACKFILL_FAILED', message: 'completion artifact backfill did not reach a successful terminal result', retryable: true
+    };
+    if (receipt.lifecycle !== 'done') return failed(taskId, detail, {
+      backfill: backfillResult,
+      completedSteps: completedSteps(receipt),
+      pendingSteps: pendingSteps(receipt)
+    });
+    const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
+    receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
+    if (!detail.retryable) return failed(taskId, detail, {
+      changed, backfill: backfillResult, completedSteps: completedSteps(receipt),
+      pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+    });
+    return terminalResult(taskId, receipt, { backfill: backfillResult }, changed, detail);
+  }
+return null;
+}
+
+async function prepareBackfill(taskId: string, request: TaskFinalizationRequest, repoRoot: string, receipt: TaskFinalizationReceipt, backfill: typeof backfillCompletionComments): Promise<TaskFinalizationResult | { receipt: TaskFinalizationReceipt; changed: boolean; backfillResult: TaskFinalizationStep | null }> {
+  let changed = false;
+  let backfillResult: TaskFinalizationStep | null;
+  let runBackfill = shouldRunBackfill(receipt);
+  if (!runBackfill && receipt.lifecycle === 'done') {
+    const eligibility = inspectCompletionBackfillEligibility(taskId, { cwd: repoRoot });
+    if (eligibility.status === 'failed') return failed(taskId, eligibility.error!, {
+      completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+    });
+    runBackfill = eligibility.eligible;
+  }
+  if (receipt.lifecycle === 'done' && runBackfill && receipt.summary === 'done') {
+    receipt = updateReceipt(repoRoot, receipt, { summary: 'pending' });
+  }
+  if (runBackfill) try {
+    const result = await backfill(taskId, { agent: request.agent, cwd: repoRoot });
+    backfillResult = commentStep(result);
+    const failure = backfillFailure(taskId, repoRoot, receipt, changed, result, backfillResult);
+    if (failure) return failure;
+    changed = result.changed;
+    receipt = resolveBackfillWarnings(repoRoot, receipt);
+    if (result.changed && receipt.taskComment !== 'pending') {
+      receipt = updateReceipt(repoRoot, receipt, { taskComment: 'pending' });
+    }
+  } catch (error) {
+    return backfillException(taskId, repoRoot, receipt, changed, error);
+  } else backfillResult = { status: 'no-op', changed: false, error: null };
+
+  return { receipt, changed, backfillResult };
+}
+
+async function prepareActiveTask(taskId: string, request: TaskFinalizationRequest, options: TaskFinalizationOptions, repoRoot: string, receipt: TaskFinalizationReceipt): Promise<TaskFinalizationResult | null> {
   const issueSync = options.issueSync ?? syncPlatformIssue;
   const issueInspect = options.issueInspect ?? inspectPlatformIssue;
-  let receipt: TaskFinalizationReceipt;
-  try {
-    const file = receiptPath(repoRoot, taskId);
-    const existed = file !== null && fs.existsSync(file);
-    receipt = readReceipt(repoRoot, taskId) ?? emptyReceipt(taskId, options.controlBinding);
-    if (!existed) writeReceipt(repoRoot, receipt);
-  } catch (error) {
-    return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
-  }
   const preflightState = resolveTaskRef(taskId, { repoRoot });
   if (options.preflight && preflightState.ok && preflightState.state === 'active') {
     try {
@@ -979,145 +1168,15 @@ async function prepareTaskFinalizationCore(
     const taskFrontmatter = parseTaskFrontmatter(taskContent);
     const issueIdentity = taskIssueIdentity(taskFrontmatter);
     if (issueIdentity) {
-      let synced: IssueResult;
-      try {
-        synced = await issueSync(taskId, {
-          agent: request.agent, cwd: repoRoot, requirements: true, issueType: true, fields: true, dependency: 'required'
-        } satisfies IssueSyncOptions);
-      } catch (error) {
-        const detail = errorOf(error, 'FINALIZATION_ISSUE_METADATA_FAILED', true);
-        return failed(taskId, detail);
-      }
-      const issueOperations = synced.operations as Array<{ name: string; status: string; reasonCode: string | null; value?: unknown }>;
-      const badOperation = issueOperations?.find((operation) =>
-        ['requirements', 'issue-type', 'fields'].includes(operation.name)
-        && operation.status !== 'applied' && operation.status !== 'no-op'
-        && !(operation.name === 'requirements' && operation.status === 'skipped' && operation.reasonCode === 'NO_REQUIREMENTS_ANCHOR')
-        && !(!synced.capabilities.push && ['issue-type', 'fields'].includes(operation.name)
-          && operation.status === 'skipped' && operation.reasonCode === 'PUSH_REQUIRED')
-      );
-      if ((synced.status !== 'applied' && synced.status !== 'no-op') || synced.error || badOperation) {
-        const error = synced.error ?? {
-          code: badOperation?.reasonCode || 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
-          message: `Required Issue metadata operation '${badOperation?.name ?? 'sync'}' was not confirmed`,
-          retryable: true
-        };
-        return failed(taskId, errorOf(error, 'FINALIZATION_ISSUE_METADATA_FAILED', true));
-      }
-      if (!synced.capabilities.push) {
-        const missingCapabilitySkip = ['issue-type', 'fields'].find((name) => !issueOperations?.some((operation) =>
-          operation.name === name && operation.status === 'skipped' && operation.reasonCode === 'PUSH_REQUIRED'
-        ));
-        if (missingCapabilitySkip) return failed(taskId, {
-          code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
-          message: `Issue metadata operation '${missingCapabilitySkip}' did not report the required PUSH_REQUIRED capability skip`,
-          retryable: true
-        });
-      }
-      let inspected: IssueResult;
-      try { inspected = await issueInspect(taskId, { cwd: repoRoot }); }
-      catch (error) { return failed(taskId, errorOf(error, 'FINALIZATION_ISSUE_INSPECT_FAILED', true)); }
-      if (inspected.status !== 'no-op' || inspected.error || !inspected.issue
-        || !resourceIdentityEquals(inspected.issue.identity, issueIdentity)) {
-        return failed(taskId, inspected.error ?? {
-          code: 'FINALIZATION_ISSUE_IDENTITY_UNCONFIRMED',
-          message: 'Required Issue metadata could not be reread under the bound Issue identity',
-          retryable: true
-        });
-      }
-      const rereadNames = synced.capabilities.push ? ['requirements', 'issue-type', 'fields'] : ['requirements'];
-      for (const name of rereadNames) {
-        const operation = issueOperations?.find((candidate) => candidate.name === name);
-        if (!operation) return failed(taskId, {
-          code: 'FINALIZATION_ISSUE_METADATA_UNCONFIRMED',
-          message: `Required Issue metadata operation '${name}' was not reported`, retryable: true
-        });
-        const before = synced.issue;
-        const remote = inspected.issue;
-        if (name === 'requirements') {
-          const expected = typeof operation.value === 'string' ? operation.value : before?.body;
-          if (expected === undefined || remote.body !== expected) return failed(taskId, {
-            code: 'FINALIZATION_ISSUE_REQUIREMENTS_UNCONFIRMED', message: 'Issue requirements did not match the verified target', retryable: true
-          });
-        } else if (name === 'issue-type') {
-          const expected = typeof operation.value === 'string' ? operation.value : before?.issueType;
-          if (!expected || remote.issueType !== expected) return failed(taskId, {
-            code: 'FINALIZATION_ISSUE_TYPE_UNCONFIRMED', message: 'Issue Type did not match the verified target', retryable: true
-          });
-        } else {
-          const expected = operation.value && typeof operation.value === 'object'
-            ? operation.value as Record<string, string | number>
-            : before?.fields;
-          if (!expected || Object.entries(expected).some(([field, value]) => remote.fields[field] !== value)) return failed(taskId, {
-            code: 'FINALIZATION_ISSUE_FIELDS_UNCONFIRMED', message: 'Pinned Issue fields did not match the verified target', retryable: true
-          });
-        }
-      }
+      const issueResult = await syncFinalizationIssue(taskId, request, repoRoot, issueIdentity, issueSync, issueInspect);
+      if (issueResult) return issueResult;
     }
   }
 
-  let changed = false;
-  let backfillResult: TaskFinalizationStep | null;
-  let runBackfill = shouldRunBackfill(receipt);
-  if (!runBackfill && receipt.lifecycle === 'done') {
-    const eligibility = inspectCompletionBackfillEligibility(taskId, { cwd: repoRoot });
-    if (eligibility.status === 'failed') return failed(taskId, eligibility.error!, {
-      completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
-    });
-    runBackfill = eligibility.eligible;
-  }
-  if (receipt.lifecycle === 'done' && runBackfill && receipt.summary === 'done') {
-    receipt = updateReceipt(repoRoot, receipt, { summary: 'pending' });
-  }
-  if (runBackfill) try {
-    const result = await backfill(taskId, { agent: request.agent, cwd: repoRoot });
-    backfillResult = commentStep(result);
-    const issueNotLinked = result.status === 'no-op' && result.error?.code === 'ISSUE_NOT_LINKED';
-    if (!issueNotLinked && (result.status !== 'applied' && result.status !== 'no-op' || result.error)) {
-      const detail = backfillResult.error ?? {
-        code: 'COMPLETION_BACKFILL_FAILED', message: 'completion artifact backfill did not reach a successful terminal result', retryable: true
-      };
-      if (receipt.lifecycle !== 'done') return failed(taskId, detail, {
-        backfill: backfillResult,
-        completedSteps: completedSteps(receipt),
-        pendingSteps: pendingSteps(receipt)
-      });
-      const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
-      receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
-      if (!detail.retryable) return failed(taskId, detail, {
-        changed, backfill: backfillResult, completedSteps: completedSteps(receipt),
-        pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
-      });
-      return terminalResult(taskId, receipt, { backfill: backfillResult }, changed, detail);
-    }
-    changed = result.changed;
-    if (receipt.warnings.some((warning) => warning.step === 'backfill' && warning.status === 'open')) {
-      const warnings = receipt.warnings.map((warning) => warning.step === 'backfill' && warning.status === 'open'
-        ? { ...warning, status: 'resolved' as const, resolvedAt: now() }
-        : warning);
-      receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: null });
-    }
-    if (result.changed && receipt.taskComment !== 'pending') {
-      receipt = updateReceipt(repoRoot, receipt, { taskComment: 'pending' });
-    }
-  } catch (error) {
-    const detail = errorOf(error, 'COMPLETION_BACKFILL_FAILED', true);
-    if (receipt.lifecycle === 'done') {
-      const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
-      receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
-      return terminalResult(taskId, receipt, {
-        backfill: { status: 'blocked', changed: false, error: detail }
-      }, changed, detail);
-    }
-    return failed(taskId, detail, {
-      backfill: { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail },
-      completedSteps: completedSteps(receipt),
-      pendingSteps: pendingSteps(receipt)
-    });
-  } else backfillResult = { status: 'no-op', changed: false, error: null };
+  return null;
+}
 
+async function prepareLifecycle(taskId: string, request: TaskFinalizationRequest, options: TaskFinalizationOptions, repoRoot: string, receipt: TaskFinalizationReceipt, changed: boolean, backfillResult: TaskFinalizationStep | null, lifecycle: typeof applyTaskLifecycle): Promise<TaskFinalizationResult | { receipt: TaskFinalizationReceipt; changed: boolean; lifecycleResult: TaskFinalizationStep | null; projection: TaskCompletionProjection | undefined }> {
   let lifecycleResult: TaskFinalizationStep | null = null;
   let projection: TaskCompletionProjection | undefined;
   try {
@@ -1155,6 +1214,10 @@ async function prepareTaskFinalizationCore(
     return failed(taskId, detail, { backfill: backfillResult, lifecycle: lifecycleResult });
   }
 
+  return { receipt, changed, lifecycleResult, projection };
+}
+
+async function finishPreparation(taskId: string, request: TaskFinalizationRequest, repoRoot: string, receipt: TaskFinalizationReceipt, changed: boolean, backfillResult: TaskFinalizationStep | null, lifecycleResult: TaskFinalizationStep | null, projection: TaskCompletionProjection | undefined, commentSync: typeof syncPlatformComment): Promise<TaskFinalizationResult> {
   let taskComment: TaskFinalizationStep | null = null;
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt);
   const currentProjection = (): TaskCompletionProjection | undefined => projection
@@ -1192,6 +1255,44 @@ async function prepareTaskFinalizationCore(
   return preparedResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed);
 }
 
+async function prepareTaskFinalizationCore(
+  request: TaskFinalizationRequest,
+  taskId: string,
+  options: TaskFinalizationOptions
+): Promise<TaskFinalizationResult> {
+  const repoRoot = path.resolve(options.repoRoot);
+  const lifecycle = options.lifecycle ?? ((lifecycleRequest, lifecycleOptions) => (
+    applyTaskLifecycle(lifecycleRequest, lifecycleOptions ?? { repoRoot })
+  ));
+  const backfill = options.backfill ?? backfillCompletionComments;
+  const commentSync = options.commentSync ?? syncPlatformComment;
+  let receipt: TaskFinalizationReceipt;
+  try {
+    const file = receiptPath(repoRoot, taskId);
+    const existed = file !== null && fs.existsSync(file);
+    receipt = readReceipt(repoRoot, taskId) ?? emptyReceipt(taskId, options.controlBinding);
+    if (!existed) writeReceipt(repoRoot, receipt);
+  } catch (error) {
+    return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
+  }
+  const activeError = await prepareActiveTask(taskId, request, options, repoRoot, receipt);
+  if (activeError) return activeError;
+
+  const backfillState = await prepareBackfill(taskId, request, repoRoot, receipt, backfill);
+  if ('status' in backfillState) return backfillState;
+  receipt = backfillState.receipt;
+  let { changed } = backfillState;
+  const { backfillResult } = backfillState;
+
+  const lifecycleState = await prepareLifecycle(taskId, request, options, repoRoot, receipt, changed, backfillResult, lifecycle);
+  if ('status' in lifecycleState) return lifecycleState;
+  receipt = lifecycleState.receipt;
+  changed = lifecycleState.changed;
+  const { lifecycleResult, projection } = lifecycleState;
+
+  return finishPreparation(taskId, request, repoRoot, receipt, changed, backfillResult, lifecycleResult, projection, commentSync);
+}
+
 async function prepareTaskFinalizationInner(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   if (request.intent !== 'complete' || !request.taskRef || !request.agent) {
     return failed(null, { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'complete finalization requires taskRef and agent', retryable: false });
@@ -1207,6 +1308,138 @@ async function prepareTaskFinalizationInner(request: TaskFinalizationRequest, op
   }
 }
 
+function finishFinalizationVerification(repoRoot: string, taskId: string, receipt: TaskFinalizationReceipt, result: TaskLifecycleResult, step: TaskFinalizationStep, verificationResult: TaskVerificationResult): TaskFinalizationResult {
+  const verification = verificationStep(verificationResult);
+  if (verificationResult.status === 'pass') {
+    const resolvedVerificationWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
+    const warnings = applyVerificationWarnings(receipt, verificationResult);
+    const hasOpenWarnings = warnings.some((warning) => warning.status === 'open');
+    let updated: TaskFinalizationReceipt;
+    try {
+      updated = updateReceipt(repoRoot, receipt, {
+        lifecycle: 'done', verification: 'done',
+        taskComment: resolvedVerificationWarning ? 'pending' : receipt.taskComment,
+        warningProjection: hasOpenWarnings ? 'pending' : 'done', warnings, lastError: null
+      });
+    } catch (persistCause) {
+      const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+      persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
+      return failed(taskId, persistError, {
+        changed: result.changed,
+        lifecycle: step,
+        verification,
+        completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+      });
+    }
+    return terminalResult(taskId, updated, { lifecycle: step, verification }, result.changed);
+  }
+
+  const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
+  const warnings = applyVerificationWarnings(receipt, verificationResult);
+  let updated: TaskFinalizationReceipt;
+  try {
+    updated = updateReceipt(repoRoot, receipt, {
+      lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
+      warnings, lastError: detail
+    });
+  } catch (persistCause) {
+    const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+    persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
+    persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
+    return failed(taskId, persistError, {
+      changed: result.changed,
+      lifecycle: step,
+      verification: { status: 'blocked', changed: false, error: persistError },
+      completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+    });
+  }
+  return terminalResult(taskId, updated, { lifecycle: step, verification }, result.changed, detail);
+}
+
+async function commitFinalizationLifecycle(request: TaskFinalizationRequest, options: TaskFinalizationOptions, repoRoot: string, resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>, receipt: TaskFinalizationReceipt): Promise<TaskFinalizationResult> {
+  const registry = inspectShortIdRegistry(repoRoot);
+  if (registry.status !== 'valid') return failed(resolved.taskId, {
+    code: 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE',
+    message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
+    retryable: false
+  });
+  receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
+  const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
+  const lifecycleOptions = {
+    repoRoot,
+    ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
+    ...(options.controlProject ? { controlProject: options.controlProject } : {}),
+    ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
+  };
+  const result = options.lifecycle
+    ? options.lifecycle(lifecycleRequest, lifecycleOptions)
+    : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
+  const step = lifecycleStep(result);
+  if (result.status !== 'applied' && result.status !== 'no-op') {
+    const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
+    return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed, step.error);
+  }
+
+  let verificationResult: TaskVerificationResult;
+  try {
+    verificationResult = await (options.verify ?? verifyTaskEvent)(
+      { taskRef: resolved.taskId, event: 'complete-task.completed' },
+      { repoRoot }
+    );
+  } catch (error) {
+    const detail = errorOf(error, 'VERIFY_FAILED', true);
+    const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
+    let updated: TaskFinalizationReceipt;
+    try {
+      updated = updateReceipt(repoRoot, receipt, {
+        lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
+        warnings, lastError: detail
+      });
+    } catch (persistCause) {
+      const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+      persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
+      persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
+      return failed(resolved.taskId, persistError, {
+        changed: result.changed,
+        lifecycle: step,
+        verification: { status: 'blocked', changed: false, error: persistError },
+        completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+      });
+    }
+    const verification: TaskFinalizationStep = { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail };
+    return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
+  }
+
+  return finishFinalizationVerification(repoRoot, resolved.taskId, receipt, result, step, verificationResult);
+}
+
+function validateCommitManifest(taskId: string, options: TaskFinalizationOptions, repoRoot: string): TaskFinalizationResult | null {
+  if (options.controlBinding && options.manifestPath) {
+    try {
+      const manifest = readSandboxControlManifest(options.manifestPath);
+      const identity = validateSandboxControlIdentity({
+        publicStatusDir: manifest.publicStatusDir,
+        root: path.dirname(path.resolve(options.manifestPath)),
+        mode: manifest.mode,
+        taskId: manifest.taskId,
+        generation: manifest.generation,
+        controlRootId: manifest.controlRootId
+      });
+      if (identity.state !== 'valid' || manifest.taskId !== taskId
+        || manifest.generation !== options.controlBinding.generation
+        || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
+        throw new Error('current sandbox manifest does not match finalization request');
+      }
+    } catch (error) {
+      return failed(taskId, {
+        code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
+        message: error instanceof Error ? error.message : String(error), retryable: false
+      });
+    }
+  }
+  return null;
+}
+
 async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   if (request.intent !== 'complete' || !request.taskRef || !request.agent) {
     return failed(null, { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'complete finalization requires taskRef and agent', retryable: false });
@@ -1216,29 +1449,8 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
     return await (async () => {
-      if (options.controlBinding && options.manifestPath) {
-        try {
-          const manifest = readSandboxControlManifest(options.manifestPath);
-          const identity = validateSandboxControlIdentity({
-            publicStatusDir: manifest.publicStatusDir,
-            root: path.dirname(path.resolve(options.manifestPath)),
-            mode: manifest.mode,
-            taskId: manifest.taskId,
-            generation: manifest.generation,
-            controlRootId: manifest.controlRootId
-          });
-          if (identity.state !== 'valid' || manifest.taskId !== resolved.taskId
-            || manifest.generation !== options.controlBinding.generation
-            || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
-            throw new Error('current sandbox manifest does not match finalization request');
-          }
-        } catch (error) {
-          return failed(resolved.taskId, {
-            code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
-            message: error instanceof Error ? error.message : String(error), retryable: false
-          });
-        }
-      }
+      const manifestError = validateCommitManifest(resolved.taskId, options, repoRoot);
+      if (manifestError) return manifestError;
       let receipt = readReceipt(repoRoot, resolved.taskId);
       if (!receipt) return failed(resolved.taskId, {
         code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation receipt is unavailable', retryable: true
@@ -1263,104 +1475,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
           code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation has pending external steps', retryable: true
         }, { completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt) });
       }
-      const registry = inspectShortIdRegistry(repoRoot);
-      if (registry.status !== 'valid') return failed(resolved.taskId, {
-        code: 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE',
-        message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
-        retryable: false
-      });
-      receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
-      const lifecycleRequest = { taskRef: resolved.taskId, intent: 'complete' as const, agent: request.agent };
-      const lifecycleOptions = {
-        repoRoot,
-        ...(options.controlRoot ? { controlRoot: options.controlRoot } : {}),
-        ...(options.controlProject ? { controlProject: options.controlProject } : {}),
-        ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {})
-      };
-      const result = options.lifecycle
-        ? options.lifecycle(lifecycleRequest, lifecycleOptions)
-        : applyTaskLifecycle(lifecycleRequest, lifecycleOptions);
-      const step = lifecycleStep(result);
-      if (result.status !== 'applied' && result.status !== 'no-op') {
-        const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
-        return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed, step.error);
-      }
-
-      let verificationResult: TaskVerificationResult;
-      try {
-        verificationResult = await (options.verify ?? verifyTaskEvent)(
-          { taskRef: resolved.taskId, event: 'complete-task.completed' },
-          { repoRoot }
-        );
-      } catch (error) {
-        const detail = errorOf(error, 'VERIFY_FAILED', true);
-        const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
-        let updated: TaskFinalizationReceipt;
-        try {
-          updated = updateReceipt(repoRoot, receipt, {
-            lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
-            warnings, lastError: detail
-          });
-        } catch (persistCause) {
-          const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
-          persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
-          persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
-          return failed(resolved.taskId, persistError, {
-            changed: result.changed,
-            lifecycle: step,
-            verification: { status: 'blocked', changed: false, error: persistError },
-            completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
-          });
-        }
-        const verification: TaskFinalizationStep = { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail };
-        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
-      }
-
-      const verification = verificationStep(verificationResult);
-      if (verificationResult.status === 'pass') {
-        const resolvedVerificationWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
-        const warnings = applyVerificationWarnings(receipt, verificationResult);
-        const hasOpenWarnings = warnings.some((warning) => warning.status === 'open');
-        let updated: TaskFinalizationReceipt;
-        try {
-          updated = updateReceipt(repoRoot, receipt, {
-            lifecycle: 'done', verification: 'done',
-            taskComment: resolvedVerificationWarning ? 'pending' : receipt.taskComment,
-            warningProjection: hasOpenWarnings ? 'pending' : 'done', warnings, lastError: null
-          });
-        } catch (persistCause) {
-          const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
-          persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
-          return failed(resolved.taskId, persistError, {
-            changed: result.changed,
-            lifecycle: step,
-            verification,
-            completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
-          });
-        }
-        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed);
-      }
-
-      const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
-      const warnings = applyVerificationWarnings(receipt, verificationResult);
-      let updated: TaskFinalizationReceipt;
-      try {
-        updated = updateReceipt(repoRoot, receipt, {
-          lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
-          warnings, lastError: detail
-        });
-      } catch (persistCause) {
-        const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
-        persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
-        persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
-        return failed(resolved.taskId, persistError, {
-          changed: result.changed,
-          lifecycle: step,
-          verification: { status: 'blocked', changed: false, error: persistError },
-          completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
-        });
-      }
-      return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
+      return await commitFinalizationLifecycle(request, options, repoRoot, resolved, receipt);
     })();
   } catch (error) {
     const detail = errorOf(error, 'TASK_FINALIZATION_FAILED');

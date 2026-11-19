@@ -489,6 +489,40 @@ test('completed finalization does not replay lifecycle for a backfill warning', 
   }
 });
 
+test('backfill retry preserves a resolved warning when the next receipt write fails', async (t) => {
+  const f = fixture();
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  try {
+    await applyTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+    const receiptPath = path.join(taskWorkspaceRoot(f.repoRoot), 'completed', TASK_ID, '.task-finalization.json');
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    fs.writeFileSync(receiptPath, `${JSON.stringify({
+      ...receipt, summary: 'skipped', taskComment: 'done',
+      warnings: [{ code: 'OLD_BACKFILL', message: 'old warning', retryable: true, step: 'backfill', target: 'artifact', severity: 'ACTION_REQUIRED', status: 'open', resolvedAt: null }]
+    })}\n`);
+    let writes = 0;
+    const rename = fs.renameSync;
+    const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
+      t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
+        if (String(to) === receiptPath && ++writes === 2) throw Object.assign(new Error('receipt write failed'), { code: 'EIO' });
+        return rename(from, to);
+      });
+      return platformResult('applied', { changed: true }) as any;
+    };
+    const retry = await prepareTaskFinalization(request, {
+      ...options(f.repoRoot, commentSync, async () => verification('pass')), backfill
+    });
+    const stored = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.ok(writes >= 3);
+    assert.equal(retry.backfill?.status, 'blocked');
+    assert.equal(stored?.warnings.find((warning) => warning.code === 'OLD_BACKFILL')?.status, 'resolved');
+    assert.equal(stored?.warnings.find((warning) => warning.code === 'EIO')?.status, 'open');
+  } finally {
+    t.mock.restoreAll();
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('completed finalization schedules backfill from an eligible task artifact warning', async () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# analysis\n');
