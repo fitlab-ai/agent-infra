@@ -83,21 +83,10 @@ function existingDecision(
   return { recordId, implementationInputId: inputs[0]!.id };
 }
 
-function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOptions = {}): HumanDecisionResult {
-  if (!request.selector || !request.decision.trim()) return failed('DECISION_PAYLOAD_INVALID', 'selector and decision are required');
-  const resolved = resolveTaskContext(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active') return failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
-  let content: string;
-  let rows: LedgerRow[];
-  try {
-    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-    const ledger = parseLedgerDocument(content);
-    if (!ledger.present) return failed(LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, resolved.taskId);
-    rows = ledger.rows as LedgerRow[];
-  }
-  catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId); }
+type DecisionTask = Extract<ReturnType<typeof resolveTaskContext>, { ok: true }>;
+type DecisionSelection = { row: LedgerRow } | HumanDecisionResult;
 
+function selectDecision(request: HumanDecisionRequest, content: string, rows: LedgerRow[], resolved: DecisionTask): DecisionSelection {
   const direct = rows.filter((row) => row.id.toUpperCase() === request.selector.toUpperCase());
   if (!/^-?\d+$/.test(request.selector) && direct.length === 1 && direct[0]!.status === 'human-decided' && isDecisionItem(direct[0]!)) {
     try {
@@ -117,6 +106,12 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   const row = selected.row;
   if (row.stage !== 'code' && request.needsImplementation !== undefined) return failed('DECISION_PAYLOAD_INVALID', '--needs-implementation is only valid for code-stage decisions', resolved.taskId, row.id);
 
+  return { row };
+}
+
+type DecisionInputs = { parsedInputs: ReturnType<typeof parseImplementationInputs> | null; declaredInput: ReturnType<typeof selectDeclaredImplementationInput>; effectiveNeedsImplementation: boolean | undefined } | HumanDecisionResult;
+
+function prepareDecisionInputs(request: HumanDecisionRequest, content: string, row: LedgerRow, resolved: DecisionTask): DecisionInputs {
   let parsedInputs: ReturnType<typeof parseImplementationInputs> | null = null;
   let declaredInput: ReturnType<typeof selectDeclaredImplementationInput> = null;
   let effectiveNeedsImplementation = request.needsImplementation;
@@ -137,6 +132,72 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     }
   }
 
+  return { parsedInputs, declaredInput, effectiveNeedsImplementation };
+}
+
+type DecisionContext = { resolved: DecisionTask; content: string; rows: LedgerRow[] } | HumanDecisionResult;
+
+function readDecisionContext(request: HumanDecisionRequest, options: TaskWriteOptions): DecisionContext {
+  const resolved = resolveTaskContext(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  if (resolved.state !== 'active') return failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  let content: string;
+  let rows: LedgerRow[];
+  try {
+    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    const ledger = parseLedgerDocument(content);
+    if (!ledger.present) return failed(LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, resolved.taskId);
+    rows = ledger.rows as LedgerRow[];
+  }
+  catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId); }
+
+  return { resolved, content, rows };
+}
+
+function addImplementationMutation(row: LedgerRow, content: string, evidence: string, metadata: ReturnType<typeof captureTaskWriteMetadata>, inputs: Exclude<DecisionInputs, HumanDecisionResult>, mutations: TaskMutation[]): string | null {
+  const { parsedInputs, declaredInput, effectiveNeedsImplementation } = inputs;
+  let implementationInputId: string | null = null;
+  if (row.stage === 'code') {
+    const nextInputs = declaredInput
+      ? finalizeImplementationInput(parsedInputs!.rows, declaredInput.id, evidence, metadata.timestamp)
+      : [...parsedInputs!.rows, createImplementationInput(parsedInputs!.rows, {
+          ledgerId: row.id, decisionEvidence: evidence,
+          needsImplementation: effectiveNeedsImplementation!, decidedAt: metadata.timestamp
+        })];
+    implementationInputId = declaredInput?.id ?? nextInputs[nextInputs.length - 1]!.id;
+    mutations.push({
+      kind: 'section', aliases: IMPLEMENTATION_INPUT_ALIASES,
+      heading: findSectionHeading(content, [...IMPLEMENTATION_INPUT_ALIASES]),
+      body: renderImplementationInputs(nextInputs)
+    });
+  }
+  return implementationInputId;
+}
+
+function addReworkMutation(content: string, row: LedgerRow, metadata: ReturnType<typeof captureTaskWriteMetadata>, resolved: DecisionTask, mutations: TaskMutation[]): HumanDecisionResult | null {
+  try {
+    const parsedRework = parseReworkIntentDocument(content);
+    if (!parsedRework.ok) return failed('DECISION_DOCUMENT_INVALID', parsedRework.message, resolved.taskId, row.id);
+    const consumed = consumeHumanDecisionReworkIntents(parsedRework.intents, row.id, metadata.timestamp);
+    if (consumed.changed) mutations.push(reworkIntentMutation(content, consumed.intents));
+  } catch (error) {
+    return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id);
+  }
+  return null;
+}
+
+function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOptions = {}): HumanDecisionResult {
+  if (!request.selector || !request.decision.trim()) return failed('DECISION_PAYLOAD_INVALID', 'selector and decision are required');
+  const context = readDecisionContext(request, options);
+  if ('status' in context) return context;
+  const { resolved, content, rows } = context;
+
+  const selected = selectDecision(request, content, rows, resolved);
+  if ('status' in selected) return selected;
+  const { row } = selected;
+
+  const inputs = prepareDecisionInputs(request, content, row, resolved);
+  if ('status' in inputs) return inputs;
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed('METADATA_CAPTURE_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId, row.id); }
@@ -157,33 +218,13 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
       body: prependBlock(extractSection(content, [...DECISION_ALIASES]), record)
     }
   ];
-  let implementationInputId: string | null = null;
-  if (row.stage === 'code') {
-    const nextInputs = declaredInput
-      ? finalizeImplementationInput(parsedInputs!.rows, declaredInput.id, evidence, metadata.timestamp)
-      : [...parsedInputs!.rows, createImplementationInput(parsedInputs!.rows, {
-          ledgerId: row.id, decisionEvidence: evidence,
-          needsImplementation: effectiveNeedsImplementation!, decidedAt: metadata.timestamp
-        })];
-    implementationInputId = declaredInput?.id ?? nextInputs[nextInputs.length - 1]!.id;
-    mutations.push({
-      kind: 'section', aliases: IMPLEMENTATION_INPUT_ALIASES,
-      heading: findSectionHeading(content, [...IMPLEMENTATION_INPUT_ALIASES]),
-      body: renderImplementationInputs(nextInputs)
-    });
-  }
+  const implementationInputId = addImplementationMutation(row, content, evidence, metadata, inputs, mutations);
   if (activity) mutations.push({
     kind: 'section', aliases: ACTIVITY_ALIASES, heading: activity.heading,
     body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Human Decision', agent: 'human', note: `${row.id} decided → ${recordId}` })
   });
-  try {
-    const parsedRework = parseReworkIntentDocument(content);
-    if (!parsedRework.ok) return failed('DECISION_DOCUMENT_INVALID', parsedRework.message, resolved.taskId, row.id);
-    const consumed = consumeHumanDecisionReworkIntents(parsedRework.intents, row.id, metadata.timestamp);
-    if (consumed.changed) mutations.push(reworkIntentMutation(content, consumed.intents));
-  } catch (error) {
-    return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id);
-  }
+  const reworkError = addReworkMutation(content, row, metadata, resolved, mutations);
+  if (reworkError) return reworkError;
   const writeResult = writeTask({ taskRef: resolved.taskId, expectedState: 'active', mutations, dryRun: request.dryRun }, {
     ...options,
     taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state },

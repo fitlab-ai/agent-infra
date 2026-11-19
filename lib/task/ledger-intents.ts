@@ -145,7 +145,276 @@ function mapWrite(intent: LedgerIntent, entityId: string, before: LedgerRow | nu
   return { status: result.status, changed: result.changed, intent: intent.kind, taskId: result.taskId, entityId, before, after, operations: result.operations, error: null };
 }
 
-function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {}): LedgerIntentResult {
+type ActiveTask = Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>;
+type LedgerContext = { resolved: ActiveTask; content: string; rows: LedgerRow[]; options: TaskWriteOptions };
+
+function writeReworkUpsert(intent: Extract<LedgerIntent, { kind: 'rework-intent-upsert' }>, { resolved, content, options }: LedgerContext, finding: LedgerRow): LedgerIntentResult {
+  const actualHash = createHash('sha256').update(fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact))).digest('hex');
+  if (actualHash !== intent.sourceSha256) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact hash does not match', resolved.taskId, intent.intentId);
+  const parsed = parseReworkIntentDocument(content);
+  if (!parsed.ok) return failed(intent, parsed.code, parsed.message, resolved.taskId, intent.intentId);
+  const reviewContent = fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact), 'utf8');
+  const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
+  if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId, intent.intentId);
+  const evidenceDigest = semanticDigest(evidenceBlock);
+  const factsDigest = taskFactDigest(resolved.taskDir, content);
+  const requestedIntent: ReworkIntent = {
+    intentId: intent.intentId, findingId: intent.findingId, sourceArtifact: intent.sourceArtifact,
+    sourceSha256: intent.sourceSha256, target: CLASSIFICATION_TARGET[intent.classification], classification: intent.classification,
+    evidenceDigest, taskFactDigest: factsDigest, status: 'pending',
+    declaredAt: new Date().toISOString(), consumedAt: ''
+  };
+  if (parsed.intents.some((candidate) => candidate.intentId === intent.intentId)) {
+    const replay = upsertReworkIntent(parsed.intents, requestedIntent);
+    if (!replay.changed) {
+      return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: intent.intentId, before: null, after: null, operations: [], error: null };
+    }
+  }
+  const same = parsed.intents.find((candidate) => candidate.findingId === intent.findingId
+    && candidate.evidenceDigest === evidenceDigest && candidate.taskFactDigest === factsDigest
+    && candidate.classification === intent.classification && candidate.target === CLASSIFICATION_TARGET[intent.classification]);
+  const classification: ReworkClassification = same ? 'insufficient-evidence' : intent.classification;
+  const nextIntent: ReworkIntent = {
+    ...requestedIntent, target: CLASSIFICATION_TARGET[classification], classification
+  };
+  const now = nextIntent.declaredAt;
+  const superseded = parsed.intents.map((candidate) => candidate.status === 'pending'
+    ? { ...candidate, status: 'superseded' as const, consumedAt: now } : candidate);
+  const next = upsertReworkIntent(superseded, nextIntent);
+  if (!next.changed) return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: intent.intentId, before: null, after: null, operations: [], error: null };
+  const result = writeTask({ taskRef: intent.taskRef, expectedState: 'active', dryRun: intent.dryRun, mutations: [reworkIntentMutation(content, next.intents)] }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
+  if (result.status === 'failed') return failed(intent, result.error.code, result.error.message, result.taskId, intent.intentId);
+  return { status: result.status, changed: result.changed, intent: intent.kind, taskId: result.taskId, entityId: intent.intentId, before: null, after: null, operations: result.operations, error: null };
+}
+
+function applyReworkUpsert(intent: Extract<LedgerIntent, { kind: 'rework-intent-upsert' }>, context: LedgerContext): LedgerIntentResult {
+  const { resolved, rows } = context;
+  if (!/^RI-[1-9]\d*$/.test(intent.intentId) || !/^(AN|PL|CD)-[1-9]\d*$/.test(intent.findingId) || !(intent.classification in CLASSIFICATION_TARGET) || !/^[a-f0-9]{64}$/.test(intent.sourceSha256)) {
+    return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rework intent identity, classification, or source hash is invalid', resolved.taskId, intent.intentId);
+  }
+  const finding = rows.find((row) => row.id === intent.findingId);
+  if (!finding || finding.severity === 'decision') return failed(intent, 'LEDGER_NOT_FOUND', `finding '${intent.findingId}' was not found`, resolved.taskId, intent.findingId);
+  if (intent.classification === 'human-decision' && finding.status !== 'needs-human-decision') {
+    return failed(intent, 'LEDGER_TRANSITION_INVALID', 'human-decision classification requires a needs-human-decision finding', resolved.taskId, intent.findingId);
+  }
+  const sourceFromEvidence = finding.evidence.split('#')[0];
+  if (sourceFromEvidence !== intent.sourceArtifact || parseArtifactName(intent.sourceArtifact)?.family !== `review-${finding.stage}`) {
+    return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact does not match finding evidence', resolved.taskId, intent.intentId);
+  }
+  try {
+    return writeReworkUpsert(intent, context, finding);
+  } catch (error) {
+    return failed(intent, 'LEDGER_IDENTITY_CONFLICT', error instanceof Error ? error.message : String(error), resolved.taskId, intent.intentId);
+  }
+}
+
+type RebuildPending = { entityId: string; rebuilt: ReworkIntent } | LedgerIntentResult;
+
+function rebuildPending(intent: Extract<LedgerIntent, { kind: 'rework-intent-rebuild' }>, { resolved, content, rows }: LedgerContext, next: ReworkIntent[], now: string): RebuildPending {
+  let entityId: string;
+  const finding = rows.find((row) => row.id === intent.findingId);
+  if (!finding || finding.severity === 'decision' || finding.evidence.split('#')[0] !== intent.sourceArtifact) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild binding does not match a review finding', resolved.taskId);
+  if (intent.classification === 'human-decision' && finding.status !== 'needs-human-decision') {
+    return failed(intent, 'LEDGER_TRANSITION_INVALID', 'human-decision classification requires a needs-human-decision finding', resolved.taskId);
+  }
+  const sourceIdentity = parseArtifactName(intent.sourceArtifact!);
+  const expectedFamily = `review-${finding.stage}`;
+  const latestSource = inspectArtifactDirectory(resolved.taskDir, expectedFamily as 'review-analysis' | 'review-plan' | 'review-code').latest;
+  if (!sourceIdentity || sourceIdentity.family !== expectedFamily || latestSource?.name !== sourceIdentity.name) {
+    return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact is not the latest review for the finding stage', resolved.taskId);
+  }
+  const sourcePath = path.join(resolved.taskDir, intent.sourceArtifact!);
+  const actualHash = createHash('sha256').update(fs.readFileSync(sourcePath)).digest('hex');
+  if (actualHash !== intent.sourceSha256) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact hash does not match', resolved.taskId);
+  const max = next.reduce((value, row) => Math.max(value, Number(row.intentId.slice(3))), 0);
+  entityId = `RI-${max + 1}`;
+  const reviewContent = fs.readFileSync(sourcePath, 'utf8');
+  const classification = intent.classification!;
+  if (!(classification in CLASSIFICATION_TARGET)) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rebuild classification is invalid', resolved.taskId);
+  const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
+  if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId);
+  const rebuilt: ReworkIntent = {
+    intentId: entityId, findingId: intent.findingId!, sourceArtifact: intent.sourceArtifact!, sourceSha256: intent.sourceSha256!,
+    target: CLASSIFICATION_TARGET[classification], classification,
+    evidenceDigest: semanticDigest(evidenceBlock),
+    taskFactDigest: taskFactDigest(resolved.taskDir, content), status: 'pending', declaredAt: now, consumedAt: ''
+  };
+  return { entityId, rebuilt };
+}
+
+function writeReworkRebuild(intent: Extract<LedgerIntent, { kind: 'rework-intent-rebuild' }>, { resolved, content, options }: LedgerContext, next: ReworkIntent[], entityId: string | null, beforeSha256: string, hasPending: boolean, converted: number): LedgerIntentResult {
+  const result = writeTask({ taskRef: intent.taskRef, expectedState: 'active', dryRun: intent.dryRun, mutations: [reworkIntentMutation(content, next)] }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
+  if (result.status === 'failed') return failed(intent, result.error.code, result.error.message, result.taskId, entityId);
+  const afterContent = result.status === 'applied' || result.status === 'no-op' ? fs.readFileSync(resolved.taskMdPath, 'utf8') : content;
+  return {
+    status: result.status, changed: result.changed, intent: intent.kind, taskId: result.taskId, entityId,
+    before: null, after: null, operations: result.operations, error: null,
+    rebuild: {
+      mode: hasPending ? 'pending-reclassification' : 'format-only',
+      beforeSha256,
+      afterSha256: createHash('sha256').update(afterContent).digest('hex'),
+      converted,
+      newIntentId: entityId
+    }
+  };
+}
+
+function applyReworkRebuild(intent: Extract<LedgerIntent, { kind: 'rework-intent-rebuild' }>, context: LedgerContext): LedgerIntentResult {
+  const { resolved, content } = context;
+  const beforeSha256 = createHash('sha256').update(content).digest('hex');
+  const supplied = [intent.findingId, intent.sourceArtifact, intent.sourceSha256, intent.classification].filter((value) => value !== undefined).length;
+  if (supplied !== 0 && supplied !== 4) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rebuild binding options must be provided together', resolved.taskId);
+  const current = parseReworkIntentDocument(content);
+  if (current.ok && current.present) {
+    if (supplied !== 0) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'current rework intent format does not accept rebuild binding options', resolved.taskId);
+    return {
+      status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: null,
+      before: null, after: null, operations: [], error: null,
+      rebuild: { mode: 'format-only', beforeSha256, afterSha256: beforeSha256, converted: current.intents.length, newIntentId: null }
+    };
+  }
+  const legacy = parseLegacyReworkIntentDocument(content);
+  if (!legacy.ok) return failed(intent, legacy.code, legacy.message, resolved.taskId);
+  const pending = legacy.intents.filter((row) => row.status === 'pending');
+  if (pending.length === 0 && supplied !== 0) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'format-only rebuild does not accept finding or classification options', resolved.taskId);
+  if (pending.length > 0 && supplied !== 4) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'legacy pending intents require finding, review, hash, and classification', resolved.taskId);
+  const now = new Date().toISOString();
+  let next = legacy.intents.map((row) => row.status === 'pending' ? { ...row, status: 'superseded' as const, consumedAt: now } : row);
+  let entityId: string | null = null;
+  if (pending.length > 0) {
+    const pendingResult = rebuildPending(intent, context, next, now);
+    if ('status' in pendingResult) return pendingResult;
+    entityId = pendingResult.entityId;
+    next = [...next, pendingResult.rebuilt];
+  }
+  return writeReworkRebuild(intent, context, next, entityId, beforeSha256, pending.length > 0, legacy.intents.length);
+}
+
+type RowChange = { before: LedgerRow | null; after: LedgerRow };
+type RowResult = RowChange | LedgerIntentResult;
+
+function prepareFinding(intent: Extract<LedgerIntent, { kind: 'finding-upsert' }>, { resolved, rows }: LedgerContext): RowResult {
+  let before: LedgerRow | null;
+  let after: LedgerRow;
+  const identity = parseArtifactName(intent.reviewArtifact);
+  if (identity?.family !== `review-${intent.stage}` || !Number.isInteger(intent.ordinal) || intent.ordinal < 1 || !['blocker', 'major', 'minor'].includes(intent.severity)) {
+    return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'finding identity, stage, ordinal, or severity is invalid', resolved.taskId);
+  }
+  const evidence = normalizedEvidence(intent.evidence);
+  if (!evidence.startsWith(`${intent.reviewArtifact}#`) || /[\r\n]/.test(evidence)) {
+    return failed(intent, 'LEDGER_EVIDENCE_INVALID', 'finding evidence must be a single-line anchor in the review artifact', resolved.taskId);
+  }
+  const artifactRows = rows.filter((row) => row.stage === intent.stage && row.id.startsWith(`${PREFIX[intent.stage]}-`) && row.evidence.startsWith(`${intent.reviewArtifact}#`));
+  if (artifactRows.length < intent.ordinal - 1) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'finding ordinals must be submitted in order', resolved.taskId);
+  before = artifactRows[intent.ordinal - 1] ?? null;
+  if (before) {
+    if (before.severity !== intent.severity || before.evidence !== evidence || before.status !== 'open') {
+      return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'finding identity conflicts with the existing open row', resolved.taskId, before.id);
+    }
+    after = { ...before };
+  } else {
+    const id = nextFindingId(rows, intent.stage);
+    after = {
+      id, stage: intent.stage, round: String(identity.round),
+      severity: intent.severity, status: 'open', evidence, sourceLine: -1
+    };
+  }
+  return { before, after };
+}
+
+function prepareDecision(intent: Extract<LedgerIntent, { kind: 'decision-upsert' }>, { resolved, rows }: LedgerContext): RowResult {
+  let before: LedgerRow | null;
+  let after: LedgerRow;
+  if (!/^HD-[1-9]\d*$/.test(intent.id) || !['analysis', 'plan', 'code'].includes(intent.stage) || parseArtifactName(intent.artifact)?.family !== intent.stage) {
+    return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'decision id, stage, or artifact is invalid', resolved.taskId, intent.id);
+  }
+  const evidence = `${intent.artifact}#${intent.id}`;
+  before = rows.find((row) => row.id === intent.id) ?? null;
+  if (before) {
+    if (before.stage !== intent.stage || before.round !== '-' || before.severity !== 'decision' || before.status !== 'needs-human-decision' || before.evidence !== evidence) {
+      return failed(intent, 'LEDGER_IDENTITY_CONFLICT', `decision id '${intent.id}' conflicts with an existing row`, resolved.taskId, intent.id);
+    }
+    after = { ...before };
+  } else {
+    if (intent.id !== nextHdId(rows)) return failed(intent, 'LEDGER_ID_CONFLICT', `next decision id is ${nextHdId(rows)}`, resolved.taskId, intent.id);
+    after = { id: intent.id, stage: intent.stage, round: '-', severity: 'decision', status: 'needs-human-decision', evidence, sourceLine: -1 };
+  }
+  return { before, after };
+}
+
+function respondFinding(intent: Extract<LedgerIntent, { kind: 'finding-respond' }>, before: LedgerRow, evidence: string, resolved: ActiveTask): RowResult {
+  let after: LedgerRow;
+  if (!RESPONSE.has(intent.status) || !Number.isInteger(intent.round) || intent.round < 1) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'response status or round is invalid', resolved.taskId, intent.id);
+  if (before.status === intent.status && before.round === String(intent.round) && before.evidence === evidence) after = { ...before };
+  else if (before.status !== 'open' || Number(before.round) + 1 !== intent.round) return failed(intent, 'LEDGER_TRANSITION_INVALID', `finding '${intent.id}' cannot accept this response`, resolved.taskId, intent.id);
+  else after = { ...before, round: String(intent.round), status: intent.status, evidence };
+  return { before, after };
+}
+
+function reviewFinding(intent: Extract<LedgerIntent, { kind: 'finding-review' }>, before: LedgerRow, evidence: string, resolved: ActiveTask): RowResult {
+  let after: LedgerRow;
+  if (!DISPOSITION.has(intent.status)) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'review disposition is invalid', resolved.taskId, intent.id);
+  if (before.status === intent.status && before.evidence === evidence) after = { ...before };
+  else {
+    const allowed = before.status === 'accepted'
+      ? new Set(['closed', 'open', 'needs-human-decision'])
+      : before.status === 'adjusted' || before.status === 'refuted'
+        ? new Set(['confirmed', 'open', 'needs-human-decision'])
+        : before.status === 'cannot-judge' ? new Set(['open', 'needs-human-decision']) : new Set<string>();
+    const sameRoundMinorClose = before.status === 'open' && before.severity === 'minor' && intent.status === 'closed';
+    const refreshOpenEvidence = before.status === 'open' && intent.status === 'open';
+    if (!sameRoundMinorClose && !refreshOpenEvidence && !allowed.has(intent.status)) {
+      return failed(intent, 'LEDGER_TRANSITION_INVALID', `finding '${intent.id}' cannot transition from ${before.status} to ${intent.status}`, resolved.taskId, intent.id);
+    }
+    after = { ...before, status: intent.status, evidence };
+  }
+  return { before, after };
+}
+
+function prepareFindingChange(intent: Extract<LedgerIntent, { kind: 'finding-respond' | 'finding-review' }>, { resolved, rows }: LedgerContext): RowResult {
+  let before: LedgerRow | null;
+  before = rows.find((row) => row.id === intent.id) ?? null;
+  if (!before || !/^(AN|PL|CD)-[1-9]\d*$/.test(before.id)) return failed(intent, 'LEDGER_NOT_FOUND', `finding '${intent.id}' was not found`, resolved.taskId, intent.id);
+  const evidence = normalizedEvidence(intent.evidence);
+  if (!evidence || /[\r\n]/.test(evidence)) return failed(intent, 'LEDGER_EVIDENCE_INVALID', 'evidence must be a non-empty single line', resolved.taskId, intent.id);
+  return intent.kind === 'finding-respond'
+    ? respondFinding(intent, before, evidence, resolved) : reviewFinding(intent, before, evidence, resolved);
+}
+
+function buildEscalationMutation(intent: Extract<LedgerIntent, { kind: 'decision-upsert' | 'finding-review' }>, after: LedgerRow, { resolved, content }: LedgerContext): TaskMutation | LedgerIntentResult {
+  try {
+    const parsed = parseImplementationInputs(content);
+    const declaration = declareImplementationInput(parsed.rows, {
+      ledgerId: after.id, decisionEvidence: after.evidence,
+      needsImplementation: intent.needsImplementation!
+    });
+    const nextRows = parsed.rows.includes(declaration) ? parsed.rows : [...parsed.rows, declaration];
+    return implementationInputMutation(content, nextRows);
+  } catch (error) {
+    return failed(intent, 'LEDGER_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, after.id);
+  }
+}
+
+function prepareImplementationMutation(intent: LedgerIntent, after: LedgerRow, context: LedgerContext): TaskMutation | LedgerIntentResult | null {
+  const { resolved } = context;
+  if (intent.kind === 'decision-upsert' || intent.kind === 'finding-review') {
+    const stage = intent.kind === 'decision-upsert' ? intent.stage : after.stage;
+    const escalates = intent.kind === 'decision-upsert' || intent.status === 'needs-human-decision';
+    if (stage === 'code' && escalates && intent.needsImplementation === undefined) {
+      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'code-stage decisions require --needs-implementation true|false', resolved.taskId, after.id);
+    }
+    if ((stage !== 'code' || !escalates) && intent.needsImplementation !== undefined) {
+      return failed(intent, 'LEDGER_PAYLOAD_INVALID', '--needs-implementation is only valid for code-stage escalation', resolved.taskId, after.id);
+    }
+    if (stage === 'code' && escalates) {
+      return buildEscalationMutation(intent, after, context);
+    }
+  }
+
+  return null;
+}
+
+function readLedgerContext(intent: LedgerIntent, options: TaskWriteOptions): LedgerContext | LedgerIntentResult {
   const resolved = resolveTaskRef(intent.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(intent, resolved.code, resolved.message, resolved.taskId);
   if (resolved.state !== 'active') return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
@@ -162,225 +431,29 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
   const invalidRows = validateLedgerRows(rows);
   if (invalidRows) return failed(intent, invalidRows.code, invalidRows.message, resolved.taskId);
 
+  return { resolved, content, rows, options };
+}
+
+function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {}): LedgerIntentResult {
+  const context = readLedgerContext(intent, options);
+  if ('status' in context) return context;
+  const { resolved, rows } = context;
+
   if (intent.kind === 'decision-next-id') {
     return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: nextHdId(rows), before: null, after: null, operations: [], error: null };
   }
 
-  if (intent.kind === 'rework-intent-upsert') {
-    if (!/^RI-[1-9]\d*$/.test(intent.intentId) || !/^(AN|PL|CD)-[1-9]\d*$/.test(intent.findingId) || !(intent.classification in CLASSIFICATION_TARGET) || !/^[a-f0-9]{64}$/.test(intent.sourceSha256)) {
-      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rework intent identity, classification, or source hash is invalid', resolved.taskId, intent.intentId);
-    }
-    const finding = rows.find((row) => row.id === intent.findingId);
-    if (!finding || finding.severity === 'decision') return failed(intent, 'LEDGER_NOT_FOUND', `finding '${intent.findingId}' was not found`, resolved.taskId, intent.findingId);
-    if (intent.classification === 'human-decision' && finding.status !== 'needs-human-decision') {
-      return failed(intent, 'LEDGER_TRANSITION_INVALID', 'human-decision classification requires a needs-human-decision finding', resolved.taskId, intent.findingId);
-    }
-    const sourceFromEvidence = finding.evidence.split('#')[0];
-    if (sourceFromEvidence !== intent.sourceArtifact || parseArtifactName(intent.sourceArtifact)?.family !== `review-${finding.stage}`) {
-      return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact does not match finding evidence', resolved.taskId, intent.intentId);
-    }
-    try {
-      const actualHash = createHash('sha256').update(fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact))).digest('hex');
-      if (actualHash !== intent.sourceSha256) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact hash does not match', resolved.taskId, intent.intentId);
-      const parsed = parseReworkIntentDocument(content);
-      if (!parsed.ok) return failed(intent, parsed.code, parsed.message, resolved.taskId, intent.intentId);
-      const reviewContent = fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact), 'utf8');
-      const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
-      if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId, intent.intentId);
-      const evidenceDigest = semanticDigest(evidenceBlock);
-      const factsDigest = taskFactDigest(resolved.taskDir, content);
-      const requestedIntent: ReworkIntent = {
-        intentId: intent.intentId, findingId: intent.findingId, sourceArtifact: intent.sourceArtifact,
-        sourceSha256: intent.sourceSha256, target: CLASSIFICATION_TARGET[intent.classification], classification: intent.classification,
-        evidenceDigest, taskFactDigest: factsDigest, status: 'pending',
-        declaredAt: new Date().toISOString(), consumedAt: ''
-      };
-      if (parsed.intents.some((candidate) => candidate.intentId === intent.intentId)) {
-        const replay = upsertReworkIntent(parsed.intents, requestedIntent);
-        if (!replay.changed) {
-          return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: intent.intentId, before: null, after: null, operations: [], error: null };
-        }
-      }
-      const same = parsed.intents.find((candidate) => candidate.findingId === intent.findingId
-        && candidate.evidenceDigest === evidenceDigest && candidate.taskFactDigest === factsDigest
-        && candidate.classification === intent.classification && candidate.target === CLASSIFICATION_TARGET[intent.classification]);
-      const classification: ReworkClassification = same ? 'insufficient-evidence' : intent.classification;
-      const nextIntent: ReworkIntent = {
-        ...requestedIntent, target: CLASSIFICATION_TARGET[classification], classification
-      };
-      const now = nextIntent.declaredAt;
-      const superseded = parsed.intents.map((candidate) => candidate.status === 'pending'
-        ? { ...candidate, status: 'superseded' as const, consumedAt: now } : candidate);
-      const next = upsertReworkIntent(superseded, nextIntent);
-      if (!next.changed) return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: intent.intentId, before: null, after: null, operations: [], error: null };
-      const result = writeTask({ taskRef: intent.taskRef, expectedState: 'active', dryRun: intent.dryRun, mutations: [reworkIntentMutation(content, next.intents)] }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
-      if (result.status === 'failed') return failed(intent, result.error.code, result.error.message, result.taskId, intent.intentId);
-      return { status: result.status, changed: result.changed, intent: intent.kind, taskId: result.taskId, entityId: intent.intentId, before: null, after: null, operations: result.operations, error: null };
-    } catch (error) {
-      return failed(intent, 'LEDGER_IDENTITY_CONFLICT', error instanceof Error ? error.message : String(error), resolved.taskId, intent.intentId);
-    }
-  }
+  if (intent.kind === 'rework-intent-upsert') return applyReworkUpsert(intent, context);
+  if (intent.kind === 'rework-intent-rebuild') return applyReworkRebuild(intent, context);
 
-  if (intent.kind === 'rework-intent-rebuild') {
-    const beforeSha256 = createHash('sha256').update(content).digest('hex');
-    const supplied = [intent.findingId, intent.sourceArtifact, intent.sourceSha256, intent.classification].filter((value) => value !== undefined).length;
-    if (supplied !== 0 && supplied !== 4) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rebuild binding options must be provided together', resolved.taskId);
-    const current = parseReworkIntentDocument(content);
-    if (current.ok && current.present) {
-      if (supplied !== 0) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'current rework intent format does not accept rebuild binding options', resolved.taskId);
-      return {
-        status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: null,
-        before: null, after: null, operations: [], error: null,
-        rebuild: { mode: 'format-only', beforeSha256, afterSha256: beforeSha256, converted: current.intents.length, newIntentId: null }
-      };
-    }
-    const legacy = parseLegacyReworkIntentDocument(content);
-    if (!legacy.ok) return failed(intent, legacy.code, legacy.message, resolved.taskId);
-    const pending = legacy.intents.filter((row) => row.status === 'pending');
-    if (pending.length === 0 && supplied !== 0) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'format-only rebuild does not accept finding or classification options', resolved.taskId);
-    if (pending.length > 0 && supplied !== 4) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'legacy pending intents require finding, review, hash, and classification', resolved.taskId);
-    const now = new Date().toISOString();
-    let next = legacy.intents.map((row) => row.status === 'pending' ? { ...row, status: 'superseded' as const, consumedAt: now } : row);
-    let entityId: string | null = null;
-    if (pending.length > 0) {
-      const finding = rows.find((row) => row.id === intent.findingId);
-      if (!finding || finding.severity === 'decision' || finding.evidence.split('#')[0] !== intent.sourceArtifact) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild binding does not match a review finding', resolved.taskId);
-      if (intent.classification === 'human-decision' && finding.status !== 'needs-human-decision') {
-        return failed(intent, 'LEDGER_TRANSITION_INVALID', 'human-decision classification requires a needs-human-decision finding', resolved.taskId);
-      }
-      const sourceIdentity = parseArtifactName(intent.sourceArtifact!);
-      const expectedFamily = `review-${finding.stage}`;
-      const latestSource = inspectArtifactDirectory(resolved.taskDir, expectedFamily as 'review-analysis' | 'review-plan' | 'review-code').latest;
-      if (!sourceIdentity || sourceIdentity.family !== expectedFamily || latestSource?.name !== sourceIdentity.name) {
-        return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact is not the latest review for the finding stage', resolved.taskId);
-      }
-      const sourcePath = path.join(resolved.taskDir, intent.sourceArtifact!);
-      const actualHash = createHash('sha256').update(fs.readFileSync(sourcePath)).digest('hex');
-      if (actualHash !== intent.sourceSha256) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact hash does not match', resolved.taskId);
-      const max = next.reduce((value, row) => Math.max(value, Number(row.intentId.slice(3))), 0);
-      entityId = `RI-${max + 1}`;
-      const reviewContent = fs.readFileSync(sourcePath, 'utf8');
-      const classification = intent.classification!;
-      if (!(classification in CLASSIFICATION_TARGET)) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rebuild classification is invalid', resolved.taskId);
-      const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
-      if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId);
-      next = [...next, {
-        intentId: entityId, findingId: intent.findingId!, sourceArtifact: intent.sourceArtifact!, sourceSha256: intent.sourceSha256!,
-        target: CLASSIFICATION_TARGET[classification], classification,
-        evidenceDigest: semanticDigest(evidenceBlock),
-        taskFactDigest: taskFactDigest(resolved.taskDir, content), status: 'pending', declaredAt: now, consumedAt: ''
-      }];
-    }
-    const result = writeTask({ taskRef: intent.taskRef, expectedState: 'active', dryRun: intent.dryRun, mutations: [reworkIntentMutation(content, next)] }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
-    if (result.status === 'failed') return failed(intent, result.error.code, result.error.message, result.taskId, entityId);
-    const afterContent = result.status === 'applied' || result.status === 'no-op' ? fs.readFileSync(resolved.taskMdPath, 'utf8') : content;
-    return {
-      status: result.status, changed: result.changed, intent: intent.kind, taskId: result.taskId, entityId,
-      before: null, after: null, operations: result.operations, error: null,
-      rebuild: {
-        mode: pending.length > 0 ? 'pending-reclassification' : 'format-only',
-        beforeSha256,
-        afterSha256: createHash('sha256').update(afterContent).digest('hex'),
-        converted: legacy.intents.length,
-        newIntentId: entityId
-      }
-    };
-  }
+  const change = intent.kind === 'finding-upsert' ? prepareFinding(intent, context)
+    : intent.kind === 'decision-upsert' ? prepareDecision(intent, context)
+    : prepareFindingChange(intent, context);
+  if ('status' in change) return change;
+  const { before, after } = change;
 
-  let before: LedgerRow | null;
-  let after: LedgerRow;
-  if (intent.kind === 'finding-upsert') {
-    const identity = parseArtifactName(intent.reviewArtifact);
-    if (identity?.family !== `review-${intent.stage}` || !Number.isInteger(intent.ordinal) || intent.ordinal < 1 || !['blocker', 'major', 'minor'].includes(intent.severity)) {
-      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'finding identity, stage, ordinal, or severity is invalid', resolved.taskId);
-    }
-    const evidence = normalizedEvidence(intent.evidence);
-    if (!evidence.startsWith(`${intent.reviewArtifact}#`) || /[\r\n]/.test(evidence)) {
-      return failed(intent, 'LEDGER_EVIDENCE_INVALID', 'finding evidence must be a single-line anchor in the review artifact', resolved.taskId);
-    }
-    const artifactRows = rows.filter((row) => row.stage === intent.stage && row.id.startsWith(`${PREFIX[intent.stage]}-`) && row.evidence.startsWith(`${intent.reviewArtifact}#`));
-    if (artifactRows.length < intent.ordinal - 1) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'finding ordinals must be submitted in order', resolved.taskId);
-    before = artifactRows[intent.ordinal - 1] ?? null;
-    if (before) {
-      if (before.severity !== intent.severity || before.evidence !== evidence || before.status !== 'open') {
-        return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'finding identity conflicts with the existing open row', resolved.taskId, before.id);
-      }
-      after = { ...before };
-    } else {
-      const id = nextFindingId(rows, intent.stage);
-      after = {
-        id, stage: intent.stage, round: String(identity.round),
-        severity: intent.severity, status: 'open', evidence, sourceLine: -1
-      };
-    }
-  } else if (intent.kind === 'decision-upsert') {
-    if (!/^HD-[1-9]\d*$/.test(intent.id) || !['analysis', 'plan', 'code'].includes(intent.stage) || parseArtifactName(intent.artifact)?.family !== intent.stage) {
-      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'decision id, stage, or artifact is invalid', resolved.taskId, intent.id);
-    }
-    const evidence = `${intent.artifact}#${intent.id}`;
-    before = rows.find((row) => row.id === intent.id) ?? null;
-    if (before) {
-      if (before.stage !== intent.stage || before.round !== '-' || before.severity !== 'decision' || before.status !== 'needs-human-decision' || before.evidence !== evidence) {
-        return failed(intent, 'LEDGER_IDENTITY_CONFLICT', `decision id '${intent.id}' conflicts with an existing row`, resolved.taskId, intent.id);
-      }
-      after = { ...before };
-    } else {
-      if (intent.id !== nextHdId(rows)) return failed(intent, 'LEDGER_ID_CONFLICT', `next decision id is ${nextHdId(rows)}`, resolved.taskId, intent.id);
-      after = { id: intent.id, stage: intent.stage, round: '-', severity: 'decision', status: 'needs-human-decision', evidence, sourceLine: -1 };
-    }
-  } else {
-    before = rows.find((row) => row.id === intent.id) ?? null;
-    if (!before || !/^(AN|PL|CD)-[1-9]\d*$/.test(before.id)) return failed(intent, 'LEDGER_NOT_FOUND', `finding '${intent.id}' was not found`, resolved.taskId, intent.id);
-    const evidence = normalizedEvidence(intent.evidence);
-    if (!evidence || /[\r\n]/.test(evidence)) return failed(intent, 'LEDGER_EVIDENCE_INVALID', 'evidence must be a non-empty single line', resolved.taskId, intent.id);
-    if (intent.kind === 'finding-respond') {
-      if (!RESPONSE.has(intent.status) || !Number.isInteger(intent.round) || intent.round < 1) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'response status or round is invalid', resolved.taskId, intent.id);
-      if (before.status === intent.status && before.round === String(intent.round) && before.evidence === evidence) after = { ...before };
-      else if (before.status !== 'open' || Number(before.round) + 1 !== intent.round) return failed(intent, 'LEDGER_TRANSITION_INVALID', `finding '${intent.id}' cannot accept this response`, resolved.taskId, intent.id);
-      else after = { ...before, round: String(intent.round), status: intent.status, evidence };
-    } else {
-      if (!DISPOSITION.has(intent.status)) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'review disposition is invalid', resolved.taskId, intent.id);
-      if (before.status === intent.status && before.evidence === evidence) after = { ...before };
-      else {
-        const allowed = before.status === 'accepted'
-          ? new Set(['closed', 'open', 'needs-human-decision'])
-          : before.status === 'adjusted' || before.status === 'refuted'
-            ? new Set(['confirmed', 'open', 'needs-human-decision'])
-            : before.status === 'cannot-judge' ? new Set(['open', 'needs-human-decision']) : new Set<string>();
-        const sameRoundMinorClose = before.status === 'open' && before.severity === 'minor' && intent.status === 'closed';
-        const refreshOpenEvidence = before.status === 'open' && intent.status === 'open';
-        if (!sameRoundMinorClose && !refreshOpenEvidence && !allowed.has(intent.status)) {
-          return failed(intent, 'LEDGER_TRANSITION_INVALID', `finding '${intent.id}' cannot transition from ${before.status} to ${intent.status}`, resolved.taskId, intent.id);
-        }
-        after = { ...before, status: intent.status, evidence };
-      }
-    }
-  }
-
-  let implementationMutation: TaskMutation | null = null;
-  if (intent.kind === 'decision-upsert' || intent.kind === 'finding-review') {
-    const stage = intent.kind === 'decision-upsert' ? intent.stage : after.stage;
-    const escalates = intent.kind === 'decision-upsert' || intent.status === 'needs-human-decision';
-    if (stage === 'code' && escalates && intent.needsImplementation === undefined) {
-      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'code-stage decisions require --needs-implementation true|false', resolved.taskId, after.id);
-    }
-    if ((stage !== 'code' || !escalates) && intent.needsImplementation !== undefined) {
-      return failed(intent, 'LEDGER_PAYLOAD_INVALID', '--needs-implementation is only valid for code-stage escalation', resolved.taskId, after.id);
-    }
-    if (stage === 'code' && escalates) {
-      try {
-        const parsed = parseImplementationInputs(content);
-        const declaration = declareImplementationInput(parsed.rows, {
-          ledgerId: after.id, decisionEvidence: after.evidence,
-          needsImplementation: intent.needsImplementation!
-        });
-        const nextRows = parsed.rows.includes(declaration) ? parsed.rows : [...parsed.rows, declaration];
-        implementationMutation = implementationInputMutation(content, nextRows);
-      } catch (error) {
-        return failed(intent, 'LEDGER_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, after.id);
-      }
-    }
-  }
+  const implementationMutation = prepareImplementationMutation(intent, after, context);
+  if (implementationMutation && 'status' in implementationMutation) return implementationMutation;
 
   const result = writeTask({
     taskRef: intent.taskRef, expectedState: 'active',
