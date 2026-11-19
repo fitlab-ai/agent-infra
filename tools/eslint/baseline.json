@@ -36,24 +36,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/decision-intents.ts",
-      "ruleId": "complexity",
-      "stableId": "2cf1a4708703c11f66bcdfd993544501aca823a500eeac791e5fe6d5628d573c",
-      "displayName": "applyHumanDecision",
-      "metric": 41,
-      "normalizedMessage": "complexity=41",
-      "count": 1
-    },
-    {
-      "file": "lib/task/ledger-intents.ts",
-      "ruleId": "complexity",
-      "stableId": "a70b73be22328cc0dc90bc87e7afedf9a5e429178abf04f2e2dba97a14947a15",
-      "displayName": "applyLedgerIntent",
-      "metric": 130,
-      "normalizedMessage": "complexity=130",
-      "count": 1
-    },
-    {
       "file": "lib/task/events.ts",
       "ruleId": "complexity",
       "stableId": "bcab53c92ea4cee21a68902cd5051898e62ad1d0fd0c70405346d7a89c5e5f0e",
