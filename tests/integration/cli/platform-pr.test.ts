@@ -10,6 +10,9 @@ import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../..
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { readPlatformOperationJournal } from '../../../lib/task/platform-operation-journal.ts';
+import { createPlatformPullRequest } from '../../../lib/platform/pull-requests.ts';
+import { createGitHubClient } from '../../../lib/platform/github-client.ts';
+import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
 function factLine(fact: ReturnType<typeof buildUnboundFact> | ReturnType<typeof buildBoundFact>): string {
   return `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(fact))}`;
@@ -351,6 +354,47 @@ test('platform-pr create reports accepted, replay, and uncertain POST outcomes',
     assert.equal(fact.fact.state, 'unbound');
   } finally {
     fs.rmSync(uncertainFixture.root, { recursive: true, force: true });
+  }
+});
+
+test('post-create inspection preserves returned failure and thrown exception classifications', async () => {
+  for (const mode of ['failure', 'throw'] as const) {
+    const f = createFixture();
+    try {
+      const delegate = createGitHubClient({ retryDelaysMs: [], runner(args, options) {
+        const child = spawnSync(process.execPath, [f.env.AGENT_INFRA_GH_ARGS_JSON ? JSON.parse(f.env.AGENT_INFRA_GH_ARGS_JSON)[0] : '', ...args], {
+          cwd: options.cwd, input: options.input, encoding: 'utf8', env: gitSafeEnv({ ...f.env, GH_FAKE_CREATED_HEAD_SHA: f.headSha })
+        });
+        return { status: child.status, stdout: child.stdout || '', stderr: child.stderr || '', error: child.error };
+      } });
+      let posted = false;
+      const client: GitHubClient = {
+        ...delegate,
+        json<T>(args: string[], options = {}) {
+          if (posted && args.some((arg) => /pulls\/1$/.test(arg))) {
+            if (mode === 'throw') throw new Error('inspection exception');
+            return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: 'inspection failure', retryable: false } } as ReturnType<GitHubClient['json']> as ReturnType<GitHubClient['json']> & { ok: false };
+          }
+          const response = delegate.json<T>(args, options);
+          if (args.includes('POST') && args.some((arg) => /\/pulls$/.test(arg))) posted = true;
+          return response;
+        }
+      };
+      const output = await createPlatformPullRequest(f.taskId, {
+        cwd: f.root, agent: 'codex', base: 'main', head: 'feature', title: 'title', body: 'body', client,
+        coordinate: async (input) => input.execute()
+      });
+      assert.equal(posted, true);
+      if (mode === 'failure') {
+        assert.deepEqual(output.creation, { kind: 'created', createdByCurrentOperation: true });
+        assert.equal(output.error?.code, 'PLATFORM_REQUEST_FAILED');
+      } else {
+        assert.deepEqual(output.creation, { kind: 'not-created', reason: 'precondition-failed', createdByCurrentOperation: false });
+        assert.equal(output.error?.code, 'PR_CREATE_FAILED');
+      }
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
   }
 });
 

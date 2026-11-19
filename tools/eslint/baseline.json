@@ -198,15 +198,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "91a91a93493b4c41096222f62b2b10a398f3a27202b68cbb73c05d42654908a6",
-      "displayName": "createExternalPullRequest",
-      "metric": 34,
-      "normalizedMessage": "complexity=34",
-      "count": 1
-    },
-    {
       "file": "lib/platform/github-provider.ts",
       "ruleId": "complexity",
       "stableId": "d22f4157140e0244d0da2896b74133ef12b66de39e4ca57ad2686b8bcfbe81ec",
@@ -540,15 +531,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "7261515a20bdb4149a020ddf6e297ecdd2e3b0f07fd25b18fd7bfec8f7a6dc35",
-      "displayName": "recoverCreatedPullRequest",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "c44aee27f51b773d89109f7e3ce6cede053a3b80eff45261ec642af49240f399",
@@ -735,24 +717,6 @@
       "displayName": "syncGpgKeys",
       "metric": 28,
       "normalizedMessage": "complexity=28",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "d990fe66d72e785e43feecfa119b73274d0f53b0fe7e47d6ddf2dab98b6d37fd",
-      "displayName": "syncPlatformPullRequestImpl",
-      "metric": 58,
-      "normalizedMessage": "complexity=58",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/pull-requests.ts",
-      "ruleId": "complexity",
-      "stableId": "46a1fe4469cb7610595a54a1feaf1ff67aaa8b5a07da2d4e594298737e1f01bc",
-      "displayName": "syncPlatformPullRequestInLabels",
-      "metric": 77,
-      "normalizedMessage": "complexity=77",
       "count": 1
     },
     {
