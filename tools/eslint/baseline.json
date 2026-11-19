@@ -315,15 +315,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/release-workflow.ts",
-      "ruleId": "complexity",
-      "stableId": "ae83e6a237ed8187442a897411902d465ac5fbc5a9f6a1c60e65e5a4234382af",
-      "displayName": "inspectPostReleaseFacts",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
       "file": "lib/internal/cli-route-inventory.ts",
       "ruleId": "complexity",
       "stableId": "c5e2051a9c901d3c54bcdbb38c1b760f3c39b92d22b98d9f9d179993e9a873b4",
@@ -567,15 +558,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/release-workflow.ts",
-      "ruleId": "complexity",
-      "stableId": "2c8cd471e42f3e73a5d6355747c69bc1842d974fa0d22111e95e4b4cd458c77a",
-      "displayName": "releaseWorkflow",
-      "metric": 106,
-      "normalizedMessage": "complexity=106",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "c65ec5ddf8daf531020317eae23c9a1d2a52dcc1216a9fee684011018fc6dec6",
@@ -672,15 +654,6 @@
       "displayName": "runInteractiveWithClipboardBridge",
       "metric": 26,
       "normalizedMessage": "complexity=26",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/release-workflow.ts",
-      "ruleId": "complexity",
-      "stableId": "158c71728d8588814fcc8371fb5fe05e04bf4ed3f1370331aede1e7be1939d59",
-      "displayName": "runOptionalDemo",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
       "count": 1
     },
     {
@@ -897,15 +870,6 @@
       "displayName": "validateClaudeCredentialsBlob",
       "metric": 18,
       "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/demo-promotion.ts",
-      "ruleId": "complexity",
-      "stableId": "9109f40b22165d1e31ff4466240ed24be094491e75c94ea27095b528d4b4aeb6",
-      "displayName": "validatePromotionJournal",
-      "metric": 44,
-      "normalizedMessage": "complexity=44",
       "count": 1
     },
     {

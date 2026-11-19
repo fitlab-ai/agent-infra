@@ -43,26 +43,7 @@ function validGif(filePath: string): boolean {
   return header === 'GIF87a' || header === 'GIF89a';
 }
 
-async function runOptionalDemo(
-  cwd: string,
-  run: CommandRunner = command,
-  collect = collectDemoTranscript
-): Promise<DemoResult> {
-  const recovery = recoverDemoPromotion(cwd);
-  if (recovery?.status === 'failed') {
-    return { status: 'failed', reasonCode: recovery.code === 'DEMO_PROMOTION_CLEANUP_FAILED' ? recovery.code : 'DEMO_PROMOTION_RECOVERY_REQUIRED', message: recovery.message, outputPath: null };
-  }
-  const transcript = await collect(cwd);
-  if (transcript.status === 'failed') {
-    return { status: 'failed', reasonCode: transcript.reasonCode, message: transcript.message, outputPath: null };
-  }
-  const digestPath = path.join(cwd, DEMO_DIGEST_PATH);
-  const priorDigest = fs.existsSync(digestPath) ? fs.readFileSync(digestPath, 'utf8').trim() : '';
-  if (/^[0-9a-f]{64}$/.test(priorDigest) && priorDigest === transcript.sha256) {
-    return { status: 'skipped', reasonCode: 'DEMO_TRANSCRIPT_UNCHANGED', message: null, outputPath: null };
-  }
-  const promotion = createDemoPromotion(cwd, transcript.transcript);
-  const discardPromotion = () => fs.rmSync(promotion.directory, { recursive: true, force: true });
+function checkDemoTools(cwd: string, run: CommandRunner, discardPromotion: () => void): DemoResult | null {
   const lfs = run(cwd, 'git', ['lfs', 'version']);
   if (lfs.status !== 0) {
     discardPromotion();
@@ -93,19 +74,12 @@ async function runOptionalDemo(
       outputPath: null
     };
   }
-  const stagedOutputPath = path.relative(cwd, promotion.staging.gif).replaceAll(path.sep, '/');
-  const demo = run(cwd, 'npm', ['run', 'demo:regen'], { env: { DEMO_OUTPUT_PATH: stagedOutputPath } });
-  if (demo.status !== 0) {
-    discardPromotion();
-    return {
-      status: 'failed',
-      reasonCode: 'DEMO_COMMAND_FAILED',
-      message: String(demo.stderr || demo.stdout),
-      outputPath: null
-    };
-  }
+  return null;
+}
+
+function checkDemoOutput(cwd: string, run: CommandRunner, stagedGif: string, stagedOutputPath: string, discardPromotion: () => void): DemoResult | null {
   const outputPath = DEMO_OUTPUT_PATH;
-  if (!fs.existsSync(promotion.staging.gif)) {
+  if (!fs.existsSync(stagedGif)) {
     discardPromotion();
     return {
       status: 'failed',
@@ -114,7 +88,7 @@ async function runOptionalDemo(
       outputPath: null
     };
   }
-  const absoluteOutput = promotion.staging.gif;
+  const absoluteOutput = stagedGif;
   if (!validGif(absoluteOutput)) {
     discardPromotion();
     return { status: 'failed', reasonCode: 'DEMO_OUTPUT_INVALID', message: `${outputPath} is not a GIF`, outputPath: null };
@@ -128,6 +102,49 @@ async function runOptionalDemo(
     discardPromotion();
     return { status: 'failed', reasonCode: 'DEMO_OUTPUT_INVALID', message: 'Git LFS could not produce a matching pointer', outputPath: null };
   }
+  return null;
+}
+
+function demoTranscriptUnchanged(cwd: string, sha256: string): boolean {
+  const digestPath = path.join(cwd, DEMO_DIGEST_PATH);
+  const priorDigest = fs.existsSync(digestPath) ? fs.readFileSync(digestPath, 'utf8').trim() : '';
+  return /^[0-9a-f]{64}$/.test(priorDigest) && priorDigest === sha256;
+}
+
+async function runOptionalDemo(
+  cwd: string,
+  run: CommandRunner = command,
+  collect = collectDemoTranscript
+): Promise<DemoResult> {
+  const recovery = recoverDemoPromotion(cwd);
+  if (recovery?.status === 'failed') {
+    return { status: 'failed', reasonCode: recovery.code === 'DEMO_PROMOTION_CLEANUP_FAILED' ? recovery.code : 'DEMO_PROMOTION_RECOVERY_REQUIRED', message: recovery.message, outputPath: null };
+  }
+  const transcript = await collect(cwd);
+  if (transcript.status === 'failed') {
+    return { status: 'failed', reasonCode: transcript.reasonCode, message: transcript.message, outputPath: null };
+  }
+  if (demoTranscriptUnchanged(cwd, transcript.sha256)) {
+    return { status: 'skipped', reasonCode: 'DEMO_TRANSCRIPT_UNCHANGED', message: null, outputPath: null };
+  }
+  const promotion = createDemoPromotion(cwd, transcript.transcript);
+  const discardPromotion = () => fs.rmSync(promotion.directory, { recursive: true, force: true });
+  const toolFailure = checkDemoTools(cwd, run, discardPromotion);
+  if (toolFailure) return toolFailure;
+  const stagedOutputPath = path.relative(cwd, promotion.staging.gif).replaceAll(path.sep, '/');
+  const demo = run(cwd, 'npm', ['run', 'demo:regen'], { env: { DEMO_OUTPUT_PATH: stagedOutputPath } });
+  if (demo.status !== 0) {
+    discardPromotion();
+    return {
+      status: 'failed',
+      reasonCode: 'DEMO_COMMAND_FAILED',
+      message: String(demo.stderr || demo.stdout),
+      outputPath: null
+    };
+  }
+  const outputFailure = checkDemoOutput(cwd, run, promotion.staging.gif, stagedOutputPath, discardPromotion);
+  if (outputFailure) return outputFailure;
+  const outputPath = DEMO_OUTPUT_PATH;
   const promoted = promoteDemoAssets(cwd, promotion.staging, `${process.pid}-${Date.now()}`);
   if (promoted.status === 'failed') {
     return { status: 'failed', reasonCode: promoted.code ?? 'DEMO_PROMOTION_FAILED', message: promoted.message, outputPath: null };
@@ -160,17 +177,7 @@ function inspectLocalReleaseFacts(cwd: string, version: string, run: CommandRunn
   return { localTag, localTagAncestor, localTagConflict, postCommit };
 }
 
-function inspectPostReleaseFacts(
-  cwd: string,
-  commit: string | null,
-  run: CommandRunner = command
-): PostReleaseFacts {
-  const inspected = inspectGitWorkflow(cwd);
-  const snapshot = inspected.snapshot;
-  const branch = snapshot?.branch ?? '';
-  const remoteLine = branch ? git(cwd, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], run) : null;
-  const remoteHead = remoteLine?.split(/\s+/)[0] ?? null;
-  const packageJson = commit ? git(cwd, ['show', `${commit}:package.json`], run, false) : null;
+function parsePostVersion(packageJson: string | null): string | null {
   let newVersion: string | null = null;
   if (packageJson) {
     try {
@@ -180,10 +187,24 @@ function inspectPostReleaseFacts(
       newVersion = null;
     }
   }
-  const paths = commit ? git(cwd, ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-z', commit], run, false) : null;
-  const changedPaths = paths ? paths.split('\0').filter(Boolean)
+  return newVersion;
+}
+
+function parsePostPaths(paths: string | null): string[] {
+  return paths ? paths.split('\0').filter(Boolean)
     .sort((left, right) => Buffer.from(left).compare(Buffer.from(right))) : [];
+}
+
+function inspectPostCommit(cwd: string, commit: string | null, run: CommandRunner) {
+  const packageJson = commit ? git(cwd, ['show', `${commit}:package.json`], run, false) : null;
+  const newVersion = parsePostVersion(packageJson);
+  const paths = commit ? git(cwd, ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-z', commit], run, false) : null;
+  const changedPaths = parsePostPaths(paths);
   const digest = commit ? git(cwd, ['show', `${commit}:${DEMO_DIGEST_PATH}`], run) : null;
+  return { newVersion, changedPaths, digest };
+}
+
+function postFacts(commit: string | null, snapshot: ReturnType<typeof inspectGitWorkflow>['snapshot'], branch: string, remoteHead: string | null, newVersion: string | null, changedPaths: string[], digest: string | null): PostReleaseFacts {
   return {
     commit,
     isHead: Boolean(commit && snapshot?.head === commit),
@@ -197,6 +218,20 @@ function inspectPostReleaseFacts(
     worktree: snapshot?.worktree ?? [],
     staged: snapshot?.staged ?? []
   };
+}
+
+function inspectPostReleaseFacts(
+  cwd: string,
+  commit: string | null,
+  run: CommandRunner = command
+): PostReleaseFacts {
+  const inspected = inspectGitWorkflow(cwd);
+  const snapshot = inspected.snapshot;
+  const branch = snapshot?.branch ?? '';
+  const remoteLine = branch ? git(cwd, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], run) : null;
+  const remoteHead = remoteLine?.split(/\s+/)[0] ?? null;
+  const { newVersion, changedPaths, digest } = inspectPostCommit(cwd, commit, run);
+  return postFacts(commit, snapshot, branch, remoteHead, newVersion, changedPaths, digest);
 }
 
 function releaseSmokeStatus(workflows: Array<Record<string, unknown>>, version: string, tagCommit: string | null): ReleaseFacts['smoke'] {
@@ -294,105 +329,102 @@ function optionValues(args: string[], name: string): string[] {
   return values;
 }
 
-async function releaseWorkflow(args: string[] = []): Promise<void> {
-  const [action, rawVersion, ...rest] = args;
-  const version = String(rawVersion || '').replace(/^v/, '');
-  const cwdIndex = rest.indexOf('--cwd');
-  const cwd = path.resolve(cwdIndex >= 0 && rest[cwdIndex + 1] ? rest[cwdIndex + 1]! : process.cwd());
-  if (![
-    internalHandlerRoute('release-workflow', 'inspect', action || ''),
-    internalHandlerRoute('release-workflow', 'prepare', action || ''),
-    internalHandlerRoute('release-workflow', 'publish', action || ''),
-    internalHandlerRoute('release-workflow', 'post-prepare', action || ''),
-    internalHandlerRoute('release-workflow', 'post-publish', action || '')
-  ].some(Boolean) || !semver.valid(version)) {
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'RELEASE_INPUT_INVALID', message: 'Usage: release-workflow inspect|prepare|publish|post-prepare|post-publish <version>' } })}\n`);
-    process.exitCode = 1; return;
-  }
-  if (!ensureInternalHandlerRoute('release-workflow', args)) return;
-  const before = releaseSnapshot(version, await inspectFacts(cwd, version));
-  if (internalHandlerRoute('release-workflow', 'inspect', action || '')) { process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`); return; }
-  if (before.facts.localTagConflict) {
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'GIT_TAG_CONFLICT', message: `Tag v${version} is not reachable from HEAD` } })}\n`);
-    process.exitCode = 1; return;
-  }
-  if (internalHandlerRoute('release-workflow', 'prepare', action || '')) {
-    if (before.phase !== 'unprepared') {
-      const milestones = await reconcileReleaseMilestones(version, { cwd });
-      const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
-      process.stdout.write(`${JSON.stringify({ ...milestones, snapshot })}\n`);
-      process.exitCode = milestones.status === 'failed' ? 1 : milestones.status === 'blocked' ? 2 : 0;
-      return;
-    }
-    const entropyIndex = rest.indexOf('--entropy-report');
-    const entropy = entropyIndex >= 0 ? rest[entropyIndex + 1] : null;
-    if (!entropy || !fs.existsSync(path.resolve(cwd, entropy))) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'ENTROPY_REPORT_REQUIRED', message: '--entropy-report must reference an existing report' } })}\n`); process.exitCode = 1; return; }
-    const entropyContent = fs.readFileSync(path.resolve(cwd, entropy), 'utf8');
-    const blockingCount = Number(/^\|\s*release-blocking\s*\|\s*(\d+)\s*\|/m.exec(entropyContent)?.[1] ?? NaN);
-    if (!Number.isFinite(blockingCount) || blockingCount > 0) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'ENTROPY_REPORT_BLOCKING', message: 'Entropy report is invalid or contains release-blocking findings' } })}\n`); process.exitCode = 1; return; }
-    const inspected = inspectGitWorkflow(cwd);
-    if (!inspected.snapshot || inspected.snapshot.worktree.length || inspected.snapshot.staged.length) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'WORKTREE_DIRTY', message: 'Release prepare requires a clean worktree' } })}\n`); process.exitCode = 1; return; }
-    for (const [exe, commandArgs] of [['npm', ['test']], ['npm', ['version', version, '--no-git-tag-version']], ['npm', ['install', '--package-lock-only']], [process.execPath, ['scripts/build-inline.js']]] as Array<[string, string[]]>) {
-      if (exe === process.execPath) updateReleaseMetadata(cwd, version);
-      const result = command(cwd, exe, commandArgs); if (result.status !== 0) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: 'RELEASE_PREPARE_COMMAND_FAILED', message: String(result.stderr || result.stdout) } })}\n`); process.exitCode = 1; return; }
-    }
-    const committed = commitExplicitPaths({ cwd, paths: changedPaths(cwd), message: `chore: release v${version}` });
-    if (committed.status === 'failed') { process.stdout.write(`${JSON.stringify(committed)}\n`); process.exitCode = 1; return; }
-    const tagged = command(cwd, 'git', ['tag', '-a', `v${version}`, '-m', `Release v${version}`]);
-    const milestones = tagged.status === 0 ? await reconcileReleaseMilestones(version, { cwd }) : null;
-    const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
-    const failed = tagged.status !== 0 || milestones?.status === 'failed';
-    const blocked = milestones?.status === 'blocked';
-    const status = failed ? 'failed' : blocked ? 'blocked' : 'applied';
-    process.stdout.write(`${JSON.stringify({ status, changed: true, snapshot, operations: milestones?.operations ?? [], error: tagged.status !== 0 ? { code: 'GIT_TAG_FAILED', message: String(tagged.stderr) } : milestones?.error ?? null })}\n`);
-    process.exitCode = failed ? 1 : blocked ? 2 : 0; return;
-  }
-  if (internalHandlerRoute('release-workflow', 'publish', action || '')) {
-    if (!before.facts.localTag || !['prepared', 'partially-published'].includes(before.phase)) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_PHASE_INVALID', message: `Cannot publish from ${before.phase}` } })}\n`); process.exitCode = 1; return; }
-    const branch = git(cwd, ['branch', '--show-current']) || '';
-    const refs = [...(!before.facts.remoteBranch ? [branch] : []), ...(!before.facts.remoteTag ? [`refs/tags/v${version}`] : [])];
-    const result = pushGitRefs({ cwd, remote: 'origin', refs });
-    process.stdout.write(`${JSON.stringify({ ...result, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = result.status === 'failed' ? 1 : result.status === 'degraded' ? 2 : 0; return;
-  }
-  if (internalHandlerRoute('release-workflow', 'post-publish', action || '')) {
-    const expectedValues = optionValues(rest, '--expected-sha256');
-    if (expectedValues.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(expectedValues[0]!)) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'post-publish requires one --expected-sha256 sha256:<64 hex>' } })}\n`);
-      process.exitCode = 1; return;
-    }
-    if (before.phase === 'complete') {
-      process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
-      return;
-    }
-    const confirmation = 'postConfirmation' in before ? before.postConfirmation : null;
-    if (before.phase !== 'post-prepared' || !confirmation) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: confirmation ? 'RELEASE_PHASE_INVALID' : 'RELEASE_POST_CONFIRMATION_UNAVAILABLE', message: 'Post-release facts cannot authorize publish' } })}\n`);
-      process.exitCode = 1; return;
-    }
-    if (confirmation.sha256 !== expectedValues[0]) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_POST_SNAPSHOT_MISMATCH', message: 'Post-release confirmation snapshot changed' } })}\n`);
-      process.exitCode = 1; return;
-    }
-    const channelsComplete = before.facts.githubRelease === true && before.facts.npm === true && before.facts.homebrew === true;
-    if (!channelsComplete || before.facts.smoke !== 'success') {
-      process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`);
-      process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
-    }
-    const pushed = pushGitRefs({ cwd, remote: 'origin', refs: [before.facts.post.branch] });
-    const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
-    if (snapshot.phase === 'complete') {
-      process.stdout.write(`${JSON.stringify({ ...pushed, status: 'applied', changed: true, snapshot, error: null })}\n`);
-      return;
-    }
-    const blocked = pushed.status !== 'failed';
-    process.stdout.write(`${JSON.stringify({ ...pushed, status: blocked ? 'blocked' : 'failed', snapshot, error: pushed.error ?? { code: 'RELEASE_PROGRESS_PENDING', message: 'Post-release push is not visible at the expected remote head' } })}\n`);
-    process.exitCode = blocked ? 2 : 1; return;
-  }
+type ReleaseSnapshot = ReturnType<typeof releaseSnapshot>;
 
-  if (!internalHandlerRoute('release-workflow', 'post-prepare', action || '')) {
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'release-workflow action is not registered' } })}\n`);
+function validateReleasePreparation(cwd: string, rest: string[], before: ReleaseSnapshot): boolean {
+  const entropyIndex = rest.indexOf('--entropy-report');
+  const entropy = entropyIndex >= 0 ? rest[entropyIndex + 1] : null;
+  if (!entropy || !fs.existsSync(path.resolve(cwd, entropy))) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'ENTROPY_REPORT_REQUIRED', message: '--entropy-report must reference an existing report' } })}\n`); process.exitCode = 1; return false; }
+  const entropyContent = fs.readFileSync(path.resolve(cwd, entropy), 'utf8');
+  const blockingCount = Number(/^\|\s*release-blocking\s*\|\s*(\d+)\s*\|/m.exec(entropyContent)?.[1] ?? NaN);
+  if (!Number.isFinite(blockingCount) || blockingCount > 0) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'ENTROPY_REPORT_BLOCKING', message: 'Entropy report is invalid or contains release-blocking findings' } })}\n`); process.exitCode = 1; return false; }
+  const inspected = inspectGitWorkflow(cwd);
+  if (!inspected.snapshot || inspected.snapshot.worktree.length || inspected.snapshot.staged.length) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'WORKTREE_DIRTY', message: 'Release prepare requires a clean worktree' } })}\n`); process.exitCode = 1; return false; }
+  return true;
+}
+
+function runReleasePreparation(cwd: string, version: string, before: ReleaseSnapshot): boolean {
+  for (const [exe, commandArgs] of [['npm', ['test']], ['npm', ['version', version, '--no-git-tag-version']], ['npm', ['install', '--package-lock-only']], [process.execPath, ['scripts/build-inline.js']]] as Array<[string, string[]]>) {
+    if (exe === process.execPath) updateReleaseMetadata(cwd, version);
+    const result = command(cwd, exe, commandArgs); if (result.status !== 0) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: 'RELEASE_PREPARE_COMMAND_FAILED', message: String(result.stderr || result.stdout) } })}\n`); process.exitCode = 1; return false; }
+  }
+  return true;
+}
+
+async function tagPreparedRelease(cwd: string, version: string): Promise<void> {
+  const tagged = command(cwd, 'git', ['tag', '-a', `v${version}`, '-m', `Release v${version}`]);
+  const milestones = tagged.status === 0 ? await reconcileReleaseMilestones(version, { cwd }) : null;
+  const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
+  const failed = tagged.status !== 0 || milestones?.status === 'failed';
+  const blocked = milestones?.status === 'blocked';
+  const status = failed ? 'failed' : blocked ? 'blocked' : 'applied';
+  process.stdout.write(`${JSON.stringify({ status, changed: true, snapshot, operations: milestones?.operations ?? [], error: tagged.status !== 0 ? { code: 'GIT_TAG_FAILED', message: String(tagged.stderr) } : milestones?.error ?? null })}\n`);
+  process.exitCode = failed ? 1 : blocked ? 2 : 0; return;
+}
+
+async function prepareRelease(cwd: string, version: string, rest: string[], before: ReleaseSnapshot): Promise<void> {
+  if (before.phase !== 'unprepared') {
+    const milestones = await reconcileReleaseMilestones(version, { cwd });
+    const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
+    process.stdout.write(`${JSON.stringify({ ...milestones, snapshot })}\n`);
+    process.exitCode = milestones.status === 'failed' ? 1 : milestones.status === 'blocked' ? 2 : 0;
+    return;
+  }
+  if (!validateReleasePreparation(cwd, rest, before)) return;
+  if (!runReleasePreparation(cwd, version, before)) return;
+  const committed = commitExplicitPaths({ cwd, paths: changedPaths(cwd), message: `chore: release v${version}` });
+  if (committed.status === 'failed') { process.stdout.write(`${JSON.stringify(committed)}\n`); process.exitCode = 1; return; }
+  return tagPreparedRelease(cwd, version);
+}
+
+async function publishRelease(cwd: string, version: string, before: ReleaseSnapshot): Promise<void> {
+  if (!before.facts.localTag || !['prepared', 'partially-published'].includes(before.phase)) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_PHASE_INVALID', message: `Cannot publish from ${before.phase}` } })}\n`); process.exitCode = 1; return; }
+  const branch = git(cwd, ['branch', '--show-current']) || '';
+  const refs = [...(!before.facts.remoteBranch ? [branch] : []), ...(!before.facts.remoteTag ? [`refs/tags/v${version}`] : [])];
+  const result = pushGitRefs({ cwd, remote: 'origin', refs });
+  process.stdout.write(`${JSON.stringify({ ...result, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = result.status === 'failed' ? 1 : result.status === 'degraded' ? 2 : 0; return;
+}
+
+async function pushPostRelease(cwd: string, version: string, before: ReleaseSnapshot): Promise<void> {
+  const pushed = pushGitRefs({ cwd, remote: 'origin', refs: [before.facts.post.branch] });
+  const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
+  if (snapshot.phase === 'complete') {
+    process.stdout.write(`${JSON.stringify({ ...pushed, status: 'applied', changed: true, snapshot, error: null })}\n`);
+    return;
+  }
+  const blocked = pushed.status !== 'failed';
+  process.stdout.write(`${JSON.stringify({ ...pushed, status: blocked ? 'blocked' : 'failed', snapshot, error: pushed.error ?? { code: 'RELEASE_PROGRESS_PENDING', message: 'Post-release push is not visible at the expected remote head' } })}\n`);
+  process.exitCode = blocked ? 2 : 1; return;
+}
+
+async function publishPostRelease(cwd: string, version: string, rest: string[], before: ReleaseSnapshot): Promise<void> {
+  const expectedValues = optionValues(rest, '--expected-sha256');
+  if (expectedValues.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(expectedValues[0]!)) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'post-publish requires one --expected-sha256 sha256:<64 hex>' } })}\n`);
     process.exitCode = 1; return;
   }
+  if (before.phase === 'complete') {
+    process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
+    return;
+  }
+  const confirmation = 'postConfirmation' in before ? before.postConfirmation : null;
+  if (before.phase !== 'post-prepared' || !confirmation) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: confirmation ? 'RELEASE_PHASE_INVALID' : 'RELEASE_POST_CONFIRMATION_UNAVAILABLE', message: 'Post-release facts cannot authorize publish' } })}\n`);
+    process.exitCode = 1; return;
+  }
+  if (confirmation.sha256 !== expectedValues[0]) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_POST_SNAPSHOT_MISMATCH', message: 'Post-release confirmation snapshot changed' } })}\n`);
+    process.exitCode = 1; return;
+  }
+  const channelsComplete = before.facts.githubRelease === true && before.facts.npm === true && before.facts.homebrew === true;
+  if (!channelsComplete || before.facts.smoke !== 'success') {
+    process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`);
+    process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
+  }
+  return pushPostRelease(cwd, version, before);
+}
+
+async function preparePostRelease(cwd: string, version: string, before: ReleaseSnapshot): Promise<void> {
   if (before.phase === 'complete') {
     process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
     return;
@@ -407,6 +439,10 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   if (!['published', 'post-pending'].includes(before.phase) || !channelsComplete || before.facts.smoke !== 'success') {
     process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`); process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
   }
+  await executePostPreparation(cwd, version, before);
+}
+
+async function executePostPreparation(cwd: string, version: string, before: ReleaseSnapshot): Promise<void> {
   const recovery = recoverDemoPromotion(cwd);
   if (recovery?.status === 'failed') {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: recovery.code, message: recovery.message } })}\n`);
@@ -439,6 +475,48 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     process.exitCode = 1; return;
   }
   process.stdout.write(`${JSON.stringify({ status: 'applied', changed: true, demo, snapshot, error: null })}\n`);
+}
+
+function validateReleaseInput(action: string | undefined, version: string): boolean {
+  if (![
+    internalHandlerRoute('release-workflow', 'inspect', action || ''),
+    internalHandlerRoute('release-workflow', 'prepare', action || ''),
+    internalHandlerRoute('release-workflow', 'publish', action || ''),
+    internalHandlerRoute('release-workflow', 'post-prepare', action || ''),
+    internalHandlerRoute('release-workflow', 'post-publish', action || '')
+  ].some(Boolean) || !semver.valid(version)) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'RELEASE_INPUT_INVALID', message: 'Usage: release-workflow inspect|prepare|publish|post-prepare|post-publish <version>' } })}\n`);
+    process.exitCode = 1; return false;
+  }
+  return true;
+}
+
+async function dispatchReleaseAction(action: string | undefined, cwd: string, version: string, rest: string[], before: ReleaseSnapshot): Promise<void> {
+  if (internalHandlerRoute('release-workflow', 'prepare', action || '')) return prepareRelease(cwd, version, rest, before);
+  if (internalHandlerRoute('release-workflow', 'publish', action || '')) return publishRelease(cwd, version, before);
+  if (internalHandlerRoute('release-workflow', 'post-publish', action || '')) return publishPostRelease(cwd, version, rest, before);
+
+  if (!internalHandlerRoute('release-workflow', 'post-prepare', action || '')) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'release-workflow action is not registered' } })}\n`);
+    process.exitCode = 1; return;
+  }
+  return preparePostRelease(cwd, version, before);
+}
+
+async function releaseWorkflow(args: string[] = []): Promise<void> {
+  const [action, rawVersion, ...rest] = args;
+  const version = String(rawVersion || '').replace(/^v/, '');
+  const cwdIndex = rest.indexOf('--cwd');
+  const cwd = path.resolve(cwdIndex >= 0 && rest[cwdIndex + 1] ? rest[cwdIndex + 1]! : process.cwd());
+  if (!validateReleaseInput(action, version)) return;
+  if (!ensureInternalHandlerRoute('release-workflow', args)) return;
+  const before = releaseSnapshot(version, await inspectFacts(cwd, version));
+  if (internalHandlerRoute('release-workflow', 'inspect', action || '')) { process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`); return; }
+  if (before.facts.localTagConflict) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'GIT_TAG_CONFLICT', message: `Tag v${version} is not reachable from HEAD` } })}\n`);
+    process.exitCode = 1; return;
+  }
+  return dispatchReleaseAction(action, cwd, version, rest, before);
 }
 
 export { changedPaths, inspectFacts, inspectLocalReleaseFacts, inspectPostReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
