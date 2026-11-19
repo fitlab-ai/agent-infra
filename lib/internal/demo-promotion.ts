@@ -114,7 +114,7 @@ function existingStat(filePath: string, io: PromotionFs): fs.Stats | null {
   }
 }
 
-function validatePromotionJournal(cwd: string, journal: PromotionJournal, io: PromotionFs): PromotionJournal {
+function validatePromotionHeader(journal: PromotionJournal): void {
   if (!journal || typeof journal !== 'object') throw new Error('promotion journal is invalid');
   if (journal.version !== 1 || !['prepared', 'promoting', 'committed'].includes(journal.phase)) {
     throw new Error('promotion journal is invalid');
@@ -128,7 +128,9 @@ function validatePromotionJournal(cwd: string, journal: PromotionJournal, io: Pr
   if (!Number.isInteger(journal.currentIndex) || journal.currentIndex < -1 || journal.currentIndex >= journal.entries.length) {
     throw new Error('promotion journal index is invalid');
   }
+}
 
+function validatePromotionDirectory(cwd: string, journal: PromotionJournal, io: PromotionFs): string {
   const assets = path.join(cwd, 'assets');
   const assetsStat = existingStat(assets, io);
   if (!assetsStat || assetsStat.isSymbolicLink() || !assetsStat.isDirectory()) {
@@ -150,31 +152,46 @@ function validatePromotionJournal(cwd: string, journal: PromotionJournal, io: Pr
     throw new Error('promotion journal directory is invalid');
   }
 
+  return directory;
+}
+
+function validatePromotionFiles(assets: string, name: DemoAssetName, target: string, staging: string, backup: string, io: PromotionFs): void {
+  for (const [label, filePath] of [['target', target], ['staging', staging], ['backup', backup]] as const) {
+    if (!pathIsInside(assets, filePath)) throw new Error(`promotion journal path is invalid: ${name}.${label}`);
+    const stat = existingStat(filePath, io);
+    if (stat && (stat.isSymbolicLink() || !stat.isFile())) {
+      throw new Error(`promotion journal path is invalid: ${name}.${label}`);
+    }
+  }
+}
+
+function validatePromotionEntry(journal: PromotionJournal, index: number, name: DemoAssetName, targets: DemoAssetPaths, assets: string, directory: string, io: PromotionFs): void {
+  const entry = journal.entries[index];
+  if (!entry || entry.name !== name || typeof entry.target !== 'string' || typeof entry.staging !== 'string'
+    || typeof entry.backup !== 'string' || typeof entry.existed !== 'boolean'
+    || (entry.oldSha256 !== null && typeof entry.oldSha256 !== 'string')
+    || typeof entry.newSha256 !== 'string') {
+    throw new Error('promotion journal entry is invalid');
+  }
+  const target = targets[name];
+  const staging = path.join(directory, path.basename(target));
+  const backup = path.join(directory, `old-${name}`);
+  if (!samePath(entry.target, target) || !samePath(entry.staging, staging) || !samePath(entry.backup, backup)) {
+    throw new Error(`promotion journal path is invalid: ${name}`);
+  }
+  validatePromotionFiles(assets, name, target, staging, backup, io);
+  if (entry.existed !== (entry.oldSha256 !== null)) {
+    throw new Error(`promotion journal entry is invalid: ${name}`);
+  }
+}
+
+function validatePromotionJournal(cwd: string, journal: PromotionJournal, io: PromotionFs): PromotionJournal {
+  validatePromotionHeader(journal);
+  const directory = validatePromotionDirectory(cwd, journal, io);
+  const assets = path.join(cwd, 'assets');
   const targets = assetTargets(cwd);
   for (const [index, name] of DEMO_ASSET_NAMES.entries()) {
-    const entry = journal.entries[index];
-    if (!entry || entry.name !== name || typeof entry.target !== 'string' || typeof entry.staging !== 'string'
-      || typeof entry.backup !== 'string' || typeof entry.existed !== 'boolean'
-      || (entry.oldSha256 !== null && typeof entry.oldSha256 !== 'string')
-      || typeof entry.newSha256 !== 'string') {
-      throw new Error('promotion journal entry is invalid');
-    }
-    const target = targets[name];
-    const staging = path.join(directory, path.basename(target));
-    const backup = path.join(directory, `old-${name}`);
-    if (!samePath(entry.target, target) || !samePath(entry.staging, staging) || !samePath(entry.backup, backup)) {
-      throw new Error(`promotion journal path is invalid: ${name}`);
-    }
-    for (const [label, filePath] of [['target', target], ['staging', staging], ['backup', backup]] as const) {
-      if (!pathIsInside(assets, filePath)) throw new Error(`promotion journal path is invalid: ${name}.${label}`);
-      const stat = existingStat(filePath, io);
-      if (stat && (stat.isSymbolicLink() || !stat.isFile())) {
-        throw new Error(`promotion journal path is invalid: ${name}.${label}`);
-      }
-    }
-    if (entry.existed !== (entry.oldSha256 !== null)) {
-      throw new Error(`promotion journal entry is invalid: ${name}`);
-    }
+    validatePromotionEntry(journal, index, name, targets, assets, directory, io);
   }
   return journal;
 }
