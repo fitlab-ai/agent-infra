@@ -226,5 +226,14 @@
       "enabled": true,
       "installInSandbox": false
     }
-  ]
+  ],
+  "skills": {
+    "registrations": [
+      {
+        "name": "entropy-check",
+        "type": "project",
+        "path": ".agents/skills/entropy-check"
+      }
+    ]
+  }
 }
