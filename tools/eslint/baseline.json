@@ -162,15 +162,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/github-provider.ts",
-      "ruleId": "complexity",
-      "stableId": "d22f4157140e0244d0da2896b74133ef12b66de39e4ca57ad2686b8bcfbe81ec",
-      "displayName": "createGitHubOperations.releases.method:inspect",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/platform/security-alerts.ts",
       "ruleId": "complexity",
       "stableId": "82dd2ee577b3b979fcae18ca1236533db7bfaa831ccc67c466a9add74607f256",
@@ -249,15 +240,6 @@
       "displayName": "inheritCodexHookTrustState",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/github-data.ts",
-      "ruleId": "complexity",
-      "stableId": "d5c37bb20edb2cbf5cf106d97794a174ff7262d5a144a139ace34cc34a94d393",
-      "displayName": "inspectGitHubIssueClosingChangeRequests",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
       "count": 1
     },
     {
@@ -477,24 +459,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/github-provider.ts",
-      "ruleId": "complexity",
-      "stableId": "ef13f6f65b60fb583a5194b7a0f46828de973c775a5977b589ac56423b95278a",
-      "displayName": "resolveContext",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/change-request-git-evidence.ts",
-      "ruleId": "complexity",
-      "stableId": "b068fb440ed158cbd524d4a60d8a910cbcc245d1f782bdabb4e562f897ebf77b",
-      "displayName": "resolveMaterializedReviewedHeadRelation",
-      "metric": 30,
-      "normalizedMessage": "complexity=30",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/environment.ts",
       "ruleId": "complexity",
       "stableId": "69894de5bce09af98852c4cf3b3bd35cc1fd7bc149ca9189149e0ca97af26c47",
@@ -699,15 +663,6 @@
       "displayName": "test callback[1]#6.anonymous-object-1.method:json",
       "metric": 22,
       "normalizedMessage": "complexity=22",
-      "count": 1
-    },
-    {
-      "file": "lib/platform/provider-validation.ts",
-      "ruleId": "complexity",
-      "stableId": "0e3130384366cef005efcddf28707b228ba3bfd0381e424c8a7598e3aa34c8de",
-      "displayName": "validateChangeRequest",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
       "count": 1
     },
     {

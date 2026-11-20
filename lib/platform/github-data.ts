@@ -254,6 +254,24 @@ function normalizeClosingPullRequest(node: ClosingPullRequestNode, repository: s
   }, repository);
 }
 
+function normalizeClosingPage(page: ClosingPullRequestPage, repository: string) {
+  const connection = page?.data?.repository?.issue?.closedByPullRequestsReferences;
+  if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return {
+    ok: false as const,
+    error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request response is incomplete', retryable: false }
+  };
+  const candidates: PullRequestSnapshot[] = [];
+  for (const node of connection.nodes) {
+    const normalized = normalizeClosingPullRequest(node, repository);
+    if (!normalized) return {
+      ok: false as const,
+      error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request identity is incomplete', retryable: false }
+    };
+    candidates.push(normalized);
+  }
+  return { ok: true as const, value: { candidates, pageInfo: connection.pageInfo } };
+}
+
 function inspectGitHubIssueClosingChangeRequests(
   client: GitHubClient,
   repository: string,
@@ -275,19 +293,10 @@ function inspectGitHubIssueClosingChangeRequests(
     if (cursor) args.push('-F', `cursor=${cursor}`);
     const response = client.json<ClosingPullRequestPage>(args, { cwd });
     if (!response.ok) return response;
-    const connection = response.value?.data?.repository?.issue?.closedByPullRequestsReferences;
-    if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return {
-      ok: false as const,
-      error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request response is incomplete', retryable: false }
-    };
-    for (const node of connection.nodes) {
-      const normalized = normalizeClosingPullRequest(node, repository);
-      if (!normalized) return {
-        ok: false as const,
-        error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request identity is incomplete', retryable: false }
-      };
-      candidates.push(normalized);
-    }
+    const page = normalizeClosingPage(response.value, repository);
+    if (!page.ok) return page;
+    candidates.push(...page.value.candidates);
+    const connection = page.value;
     if (!connection.pageInfo.hasNextPage) return { ok: true as const, value: candidates };
     if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) return {
       ok: false as const,

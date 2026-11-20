@@ -93,6 +93,132 @@ function validMergeIdentity(lastReviewedCommit: string, pullRequest: PullRequest
   return null;
 }
 
+function validateEvidenceSource(source: { remoteUrl: string; reviewedHeadRef: string; targetHeadRef: string; defaultBranch: string }, targetBranch: string): ReviewedHeadRelation | null {
+  if (
+    !source.remoteUrl.trim() ||
+    source.remoteUrl.trimStart().startsWith("-") ||
+    !validRef(source.reviewedHeadRef) ||
+    !validRef(source.targetHeadRef)
+  ) {
+    return blocked(
+      "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE",
+      "Platform returned an invalid PR Git evidence source"
+    );
+  }
+  if (source.defaultBranch !== targetBranch) {
+    return failed("PR_MERGE_IDENTITY_INVALID", "Pull request target is not the repository default branch");
+  }
+
+  return null;
+}
+
+function evidencePhaseFailure(phase: "prepare" | "fetch" | "resolve"): ReviewedHeadRelation {
+  return phase === "fetch"
+      ? blocked(
+          "PR_MERGE_EVIDENCE_FETCH_FAILED",
+          "Unable to fetch PR Git evidence; verify Git credentials and platform refs"
+        )
+      : phase === "resolve"
+        ? blocked(
+            "PR_MERGE_OBJECT_MISSING",
+            "Fetched PR Git evidence is incomplete"
+          )
+        : blocked(
+            "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE",
+            "Unable to prepare isolated PR Git evidence"
+          );
+}
+
+async function resolveEvidenceSource(loaded: LoadedPlatform, pullRequest: PullRequestSnapshot) {
+  const target = isResourceIdentity(pullRequest.identity)
+    ? pullRequest.identity
+    : { kind: 'number' as const, value: pullRequest.number };
+  const operation = loaded.provider.changeRequests?.resolveGitEvidence
+    ? await loaded.provider.changeRequests.resolveGitEvidence({
+      context: providerOperationContext(loaded),
+      target,
+      expected: {
+        baseSha: pullRequest.base.sha,
+        headSha: pullRequest.head.sha,
+        baseRepository: pullRequest.base.repository,
+        targetBranch: pullRequest.base.ref
+      }
+    })
+    : unsupportedProviderOperation(loaded.provider, 'changeRequests.resolveGitEvidence');
+  const source = operation.ok
+    ? operation
+    : { ok: false as const, error: providerError(operation.error, 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE') };
+  return source;
+}
+
+function evidenceSourceFailure(source: Awaited<ReturnType<typeof resolveEvidenceSource>>): ReviewedHeadRelation {
+  return blocked(
+    ('error' in source && source.error?.code) || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE",
+    ('error' in source && source.error?.message) || "Unable to resolve authoritative PR Git evidence"
+  );
+}
+
+async function materializeEvidence(input: { cwd: string; lastReviewedCommit: string; pullRequest: PullRequestSnapshot }, loaded: LoadedPlatform, source: Extract<Awaited<ReturnType<typeof resolveEvidenceSource>>, { ok: true }>['value']): Promise<ReviewedHeadRelation> {
+  let evidenceRoot: string | null = null;
+  let phase: "prepare" | "fetch" | "resolve" = "prepare";
+  let result: ReviewedHeadRelation;
+  try {
+    evidenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-pr-evidence-"));
+    execFileSync("git", ["init", "--bare", "-q", evidenceRoot], {
+      cwd: input.cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    phase = "fetch";
+    git(evidenceRoot, [
+      "fetch",
+      "--no-tags",
+      "--no-write-fetch-head",
+      source.remoteUrl,
+      `+${source.reviewedHeadRef}:${REVIEWED_HEAD_REF}`,
+      `+${source.targetHeadRef}:${TARGET_HEAD_REF}`
+    ]);
+
+    phase = "resolve";
+    const fetchedReviewedHead = git(evidenceRoot, ["rev-parse", `${REVIEWED_HEAD_REF}^{commit}`]);
+    const comparisonHead = git(evidenceRoot, ["rev-parse", `${TARGET_HEAD_REF}^{commit}`]);
+    if (fetchedReviewedHead !== input.pullRequest.head.sha) {
+      result = failed(
+        "PR_MERGE_FETCHED_HEAD_MISMATCH",
+        "Fetched PR head does not match the authoritative platform snapshot"
+      );
+    } else {
+      const domain = resolveMergeDomain(evidenceRoot, input.pullRequest.head.sha, input.pullRequest.mergeCommitSha!);
+      result = domain.status !== "ok"
+        ? domain.relation
+        : await resolveDomainAssociations({
+            loaded: loaded,
+            gitRoot: evidenceRoot,
+            commits: domain.commits,
+            comparisonHead,
+            lastReviewedCommit: input.lastReviewedCommit,
+            pullRequest: input.pullRequest,
+            defaultBranch: source.defaultBranch
+          });
+    }
+  } catch {
+    result = evidencePhaseFailure(phase);
+  } finally {
+    if (evidenceRoot) {
+      try {
+        fs.rmSync(evidenceRoot, { recursive: true, force: true });
+      } catch {
+        result = blocked(
+          "PR_MERGE_EVIDENCE_CLEANUP_FAILED",
+          "Unable to clean up isolated PR Git evidence"
+        );
+      }
+    }
+  }
+  return result;
+}
+
 async function resolveMaterializedReviewedHeadRelation(input: {
   cwd: string;
   platformType: string | null;
@@ -115,116 +241,12 @@ async function resolveMaterializedReviewedHeadRelation(input: {
   if (input.pullRequest.repository !== loaded.value.snapshot.scope.id || input.pullRequest.base.repository !== loaded.value.snapshot.scope.id) {
     return failed("PR_MERGE_IDENTITY_INVALID", "Pull request base repository does not match the configured repository");
   }
-  const target = isResourceIdentity(input.pullRequest.identity)
-    ? input.pullRequest.identity
-    : { kind: 'number' as const, value: input.pullRequest.number };
-  const operation = loaded.value.provider.changeRequests?.resolveGitEvidence
-    ? await loaded.value.provider.changeRequests.resolveGitEvidence({
-      context: providerOperationContext(loaded.value),
-      target,
-      expected: {
-        baseSha: input.pullRequest.base.sha,
-        headSha: input.pullRequest.head.sha,
-        baseRepository: input.pullRequest.base.repository,
-        targetBranch: input.pullRequest.base.ref
-      }
-    })
-    : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.resolveGitEvidence');
-  const source = operation.ok
-    ? operation
-    : { ok: false as const, error: providerError(operation.error, 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE') };
-  if (!source.ok || !source.value) {
-    return blocked(
-      ('error' in source && source.error?.code) || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE",
-      ('error' in source && source.error?.message) || "Unable to resolve authoritative PR Git evidence"
-    );
-  }
-  if (
-    !source.value.remoteUrl.trim() ||
-    source.value.remoteUrl.trimStart().startsWith("-") ||
-    !validRef(source.value.reviewedHeadRef) ||
-    !validRef(source.value.targetHeadRef)
-  ) {
-    return blocked(
-      "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE",
-      "Platform returned an invalid PR Git evidence source"
-    );
-  }
-  if (source.value.defaultBranch !== input.pullRequest.base.ref) {
-    return failed("PR_MERGE_IDENTITY_INVALID", "Pull request target is not the repository default branch");
-  }
+  const source = await resolveEvidenceSource(loaded.value, input.pullRequest);
+  if (!source.ok || !source.value) return evidenceSourceFailure(source);
+  const sourceFailure = validateEvidenceSource(source.value, input.pullRequest.base.ref);
+  if (sourceFailure) return sourceFailure;
 
-  let evidenceRoot: string | null = null;
-  let phase: "prepare" | "fetch" | "resolve" = "prepare";
-  let result: ReviewedHeadRelation;
-  try {
-    evidenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-pr-evidence-"));
-    execFileSync("git", ["init", "--bare", "-q", evidenceRoot], {
-      cwd: input.cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    phase = "fetch";
-    git(evidenceRoot, [
-      "fetch",
-      "--no-tags",
-      "--no-write-fetch-head",
-      source.value.remoteUrl,
-      `+${source.value.reviewedHeadRef}:${REVIEWED_HEAD_REF}`,
-      `+${source.value.targetHeadRef}:${TARGET_HEAD_REF}`
-    ]);
-
-    phase = "resolve";
-    const fetchedReviewedHead = git(evidenceRoot, ["rev-parse", `${REVIEWED_HEAD_REF}^{commit}`]);
-    const comparisonHead = git(evidenceRoot, ["rev-parse", `${TARGET_HEAD_REF}^{commit}`]);
-    if (fetchedReviewedHead !== input.pullRequest.head.sha) {
-      result = failed(
-        "PR_MERGE_FETCHED_HEAD_MISMATCH",
-        "Fetched PR head does not match the authoritative platform snapshot"
-      );
-    } else {
-      const domain = resolveMergeDomain(evidenceRoot, input.pullRequest.head.sha, input.pullRequest.mergeCommitSha!);
-      result = domain.status !== "ok"
-        ? domain.relation
-        : await resolveDomainAssociations({
-            loaded: loaded.value,
-            gitRoot: evidenceRoot,
-            commits: domain.commits,
-            comparisonHead,
-            lastReviewedCommit: input.lastReviewedCommit,
-            pullRequest: input.pullRequest,
-            defaultBranch: source.value.defaultBranch
-          });
-    }
-  } catch {
-    result = phase === "fetch"
-      ? blocked(
-          "PR_MERGE_EVIDENCE_FETCH_FAILED",
-          "Unable to fetch PR Git evidence; verify Git credentials and platform refs"
-        )
-      : phase === "resolve"
-        ? blocked(
-            "PR_MERGE_OBJECT_MISSING",
-            "Fetched PR Git evidence is incomplete"
-          )
-        : blocked(
-            "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE",
-            "Unable to prepare isolated PR Git evidence"
-          );
-  } finally {
-    if (evidenceRoot) {
-      try {
-        fs.rmSync(evidenceRoot, { recursive: true, force: true });
-      } catch {
-        result = blocked(
-          "PR_MERGE_EVIDENCE_CLEANUP_FAILED",
-          "Unable to clean up isolated PR Git evidence"
-        );
-      }
-    }
-  }
-  return result;
+  return materializeEvidence(input, loaded.value, source.value);
 }
 
 export { resolveMaterializedReviewedHeadRelation };
