@@ -299,18 +299,19 @@ test('pushRebasedBranch fails closed at every local, base, ancestry, push, and v
   const input = { cwd: '/repo', remote: 'origin', branch: 'feature', expectedOldHead: oldHead, newHead, baseBranch: 'main', expectedBaseHead: baseHead };
   assert.equal(pushRebasedBranch({ ...input, newHead: 'short' }).error?.code, 'GIT_REBASED_INPUT_INVALID');
 
+  const remoteResponse = (args: readonly string[], stage: string) => {
+    const isBase = args.at(-1) === 'refs/heads/main';
+    const value = isBase ? stage === 'base' ? 'd'.repeat(40) : baseHead : oldHead;
+    return { status: 0, stdout: `${value}\t${args.at(-1)}\n`, stderr: '' };
+  };
+
   const runCase = (stage: 'dirty' | 'identity' | 'base' | 'ancestor' | 'push' | 'verify') => {
     return pushRebasedBranch(input, (args: readonly string[]) => {
     if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${stage === 'identity' ? oldHead : newHead}\n`, stderr: '' };
     if (args[0] === 'branch') return { status: 0, stdout: 'feature\n', stderr: '' };
     if (args[0] === 'status') return { status: 0, stdout: stage === 'dirty' ? '?? local.txt\n' : '', stderr: '' };
     if (args[0] === 'rev-parse') return { status: 1, stdout: '', stderr: '' };
-    if (args[0] === 'ls-remote') {
-      const isBase = args.at(-1) === 'refs/heads/main';
-      const value = isBase ? stage === 'base' ? 'd'.repeat(40) : baseHead
-        : oldHead;
-      return { status: 0, stdout: `${value}\t${args.at(-1)}\n`, stderr: '' };
-    }
+    if (args[0] === 'ls-remote') return remoteResponse(args, stage);
     if (args[0] === 'merge-base') return { status: stage === 'ancestor' ? 1 : 0, stdout: '', stderr: '' };
     if (args[0] === 'push') return { status: stage === 'push' ? 1 : 0, stdout: '', stderr: stage === 'push' ? 'rejected' : '' };
     return { status: 1, stdout: '', stderr: '' };
