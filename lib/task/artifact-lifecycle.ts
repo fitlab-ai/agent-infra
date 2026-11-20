@@ -648,103 +648,129 @@ function resolveCodeContext(
   const inputFamily = pathState.decision.path === 'streamlined' ? 'analysis' : 'plan';
   const source = inspectTaskArtifacts(taskRef, inputFamily, options, resolvedTask);
   if (source.status === 'failed' || !source.latest) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `latest ${inputFamily} artifact is required`);
+  const sourceArtifact = source.latest;
   const reviewCode = inspectTaskArtifacts(taskRef, 'review-code', options, resolvedTask);
-  try {
-    const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
-    const hasPendingImplementation = parseImplementationInputs(taskContent).rows.some((input) => input.needsImplementation && input.status === 'pending');
-    if (hasPendingImplementation && !reviewCode.latest) {
-      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', 'no valid review-code completion fact is available for pending implementation inputs');
+  function validatePending(): ArtifactContextResult | null {
+    try {
+      const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
+      const hasPendingImplementation = parseImplementationInputs(taskContent).rows.some((input) => input.needsImplementation && input.status === 'pending');
+      if (hasPendingImplementation && !reviewCode.latest) {
+        return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', 'no valid review-code completion fact is available for pending implementation inputs');
+      }
+    } catch (error) {
+      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
     }
-  } catch (error) {
-    return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
+    return null;
   }
+  const pendingFailure = validatePending();
+  if (pendingFailure) return pendingFailure;
   const latestCode = inventory.latest;
   const codeMax = inventory.next?.round ? inventory.next.round - 1 : latestCode?.round ?? 0;
   const reviewMax = reviewCode.latest?.round ?? 0;
-  const inputs = [source.latest];
-  const sourceReviewFamily = inputFamily === 'analysis' ? 'review-analysis' : 'review-plan';
-  const sourceReview = inspectTaskArtifacts(taskRef, sourceReviewFamily, options, resolvedTask);
-  if (sourceReview.status === 'ready' && sourceReview.latest && sourceReview.reviewedInput?.name === source.latest.name) inputs.push(sourceReview.latest);
-  if (inventory.openRounds.length > 0) {
+  const inputs = [sourceArtifact];
+  function addSourceReview(): void {
+    const sourceReviewFamily = inputFamily === 'analysis' ? 'review-analysis' : 'review-plan';
+    const sourceReview = inspectTaskArtifacts(taskRef, sourceReviewFamily, options, resolvedTask);
+    if (sourceReview.status === 'ready' && sourceReview.latest && sourceReview.reviewedInput?.name === sourceArtifact.name) inputs.push(sourceReview.latest);
+  }
+  addSourceReview();
+  function openCodeMode(decisionInput: string | null, fixInput: string | null, openVerdict: ReturnType<typeof parseVerdict> | null): 'decision' | 'fix' | 'init' {
+    return decisionInput ? 'decision'
+      : fixInput || (openVerdict?.ok && openVerdict.verdict === 'Changes Requested') ? 'fix'
+        : 'init';
+  }
+  function resumeOpenRound(): ArtifactContextResult {
     try {
       const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
       const openRound = inventory.openRounds[0]!;
-        const review = reviewCode.latest;
-        const openInputs = review ? [...inputs, review] : inputs;
-        const openVerdict = review ? parseVerdict(review.path) : null;
-        const openRow = lifecycleExecutions(taskContent)
-          .find((row) => row.family === 'code' && row.round === openRound);
-        const decisionInput = openRow?.implementationInput ?? null;
-        const fixInput = openRow?.fixFor ?? null;
-        const mode = decisionInput ? 'decision'
-          : fixInput || (openVerdict?.ok && openVerdict.verdict === 'Changes Requested') ? 'fix'
-            : 'init';
-        return withCodeMode(
-          inventory, openInputs, 'ready', mode, codeMax, reviewMax,
-          openVerdict?.ok ? openVerdict.verdict : null, fixInput ?? review?.name ?? null,
-          `Resuming open code round ${openRound}.`,
-          decisionInput
-        );
+      const review = reviewCode.latest;
+      const openInputs = review ? [...inputs, review] : inputs;
+      const openVerdict = review ? parseVerdict(review.path) : null;
+      const openRow = lifecycleExecutions(taskContent)
+        .find((row) => row.family === 'code' && row.round === openRound);
+      const decisionInput = openRow?.implementationInput ?? null;
+      const fixInput = openRow?.fixFor ?? null;
+      const mode = openCodeMode(decisionInput, fixInput, openVerdict);
+      return withCodeMode(
+        inventory, openInputs, 'ready', mode, codeMax, reviewMax,
+        openVerdict?.ok ? openVerdict.verdict : null, fixInput ?? review?.name ?? null,
+        `Resuming open code round ${openRound}.`,
+        decisionInput
+      );
     } catch (error) {
       return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
     }
   }
-  if (!latestCode) {
-    return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, null, null,
-      'No prior code artifact. Starting initial implementation (round 1 -> code.md).');
-  }
-  const codePlanInput = resolveCodePlanInput(inventory.taskDir!, latestCode);
-  if (!codePlanInput) {
-    return withCodeMode(inventory, inputs, 'ready', 'error', codeMax, reviewMax, null, null,
-      `Code input receipt for ${latestCode.name} is unavailable.`);
-  }
-  const currentInputSha256 = sha256File(source.latest.path);
-  if (codePlanInput.input.name !== source.latest.name || codePlanInput.inputSha256 !== currentInputSha256) {
-    return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, null, null,
-      `Latest ${source.latest.name} is not captured by the latest code input receipt. Entering replan-driven init.`);
-  }
-  if (!reviewCode.latest || reviewCode.reviewedInput?.name !== latestCode.name) {
-    const expected = reviewCode.next?.name ?? artifactName('review-code', reviewMax + 1);
-    return withCodeMode(inventory, inputs, 'ready', 'error', codeMax, reviewMax, null, expected,
-      `${expected} is required before another code round`);
-  }
-  const review = reviewCode.latest;
-  if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
-  const verdict = parseVerdict(review.path);
-  if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, review.name);
-  const decision = resolveDecisionImplementationInput(reviewCode, review);
-  if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
-  if (decision.input) {
-    return withCodeMode(
-      inventory, [...inputs, review], 'ready', 'decision', codeMax, reviewMax,
-      verdict.verdict, review.name, `Implementation input ${decision.input.id} requires a new code round.`,
-      decision.input.id, decision.input.ledgerId, decision.input.decisionEvidence
-    );
-  }
-  try {
-    const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
-    const rework = parseReworkIntentDocument(taskContent);
-    const reviewSha256 = sha256File(review.path);
-    if (rework.ok && rework.intents.some((intent) => intent.status === 'pending'
-      && intent.target === 'code'
-      && intent.sourceArtifact === review.name
-      && intent.sourceSha256 === reviewSha256)) {
-      return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict.verdict, review.name,
-        `Pending rework evidence requires a new code round after ${review.name}.`);
+
+  function resolveExistingCode(): ArtifactContextResult {
+    if (!latestCode) {
+      return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, null, null,
+        'No prior code artifact. Starting initial implementation (round 1 -> code.md).');
     }
-  } catch (error) {
-    return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error), review.name);
+    const codePlanInput = resolveCodePlanInput(inventory.taskDir!, latestCode);
+    if (!codePlanInput) {
+      return withCodeMode(inventory, inputs, 'ready', 'error', codeMax, reviewMax, null, null,
+        `Code input receipt for ${latestCode.name} is unavailable.`);
+    }
+    const currentInputSha256 = sha256File(sourceArtifact.path);
+    if (codePlanInput.input.name !== sourceArtifact.name || codePlanInput.inputSha256 !== currentInputSha256) {
+      return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, null, null,
+        `Latest ${sourceArtifact.name} is not captured by the latest code input receipt. Entering replan-driven init.`);
+    }
+    if (!reviewCode.latest || reviewCode.reviewedInput?.name !== latestCode.name) {
+      const expected = reviewCode.next?.name ?? artifactName('review-code', reviewMax + 1);
+      return withCodeMode(inventory, inputs, 'ready', 'error', codeMax, reviewMax, null, expected,
+        `${expected} is required before another code round`);
+    }
+    const review = reviewCode.latest;
+    if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
+    return resolveReviewedCode(review);
   }
-  if (verdict.verdict === 'Approved') {
-    return withCodeMode(inventory, [...inputs, review], 'ready', 'refused', codeMax, reviewMax, verdict.verdict, review.name,
-      `Latest ${review.name} verdict is Approved with no findings. Nothing to fix. Run /commit to proceed.`);
+
+  function resolveReviewedCode(review: ArtifactIdentity): ArtifactContextResult {
+    const verdict = parseVerdict(review.path);
+    if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, review.name);
+    const decision = resolveDecisionImplementationInput(reviewCode, review);
+    if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
+    if (decision.input) {
+      return withCodeMode(
+        inventory, [...inputs, review], 'ready', 'decision', codeMax, reviewMax,
+        verdict.verdict, review.name, `Implementation input ${decision.input.id} requires a new code round.`,
+        decision.input.id, decision.input.ledgerId, decision.input.decisionEvidence
+      );
+    }
+    return resolveReviewedVerdict(review, verdict.verdict);
   }
-  if (verdict.verdict === 'Rejected') {
-    return withCodeMode(inventory, [...inputs, review], 'ready', 'refused', codeMax, reviewMax, verdict.verdict, review.name,
-      `Latest ${review.name} verdict is Rejected. Re-plan before re-running code-task.`);
+
+  function resolveReviewedVerdict(review: ArtifactIdentity, verdict: string): ArtifactContextResult {
+    try {
+      const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
+      const rework = parseReworkIntentDocument(taskContent);
+      const reviewSha256 = sha256File(review.path);
+      if (rework.ok && rework.intents.some((intent) => intent.status === 'pending'
+        && intent.target === 'code'
+        && intent.sourceArtifact === review.name
+        && intent.sourceSha256 === reviewSha256)) {
+        return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict, review.name,
+          `Pending rework evidence requires a new code round after ${review.name}.`);
+      }
+    } catch (error) {
+      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error), review.name);
+    }
+    if (verdict === 'Approved') {
+      return withCodeMode(inventory, [...inputs, review], 'ready', 'refused', codeMax, reviewMax, verdict, review.name,
+        `Latest ${review.name} verdict is Approved with no findings. Nothing to fix. Run /commit to proceed.`);
+    }
+    if (verdict === 'Rejected') {
+      return withCodeMode(inventory, [...inputs, review], 'ready', 'refused', codeMax, reviewMax, verdict, review.name,
+        `Latest ${review.name} verdict is Rejected. Re-plan before re-running code-task.`);
+    }
+    return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict, review.name,
+      `Latest ${review.name} requires or permits fixes. Entering fix mode.`);
   }
-  return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict.verdict, review.name,
-    `Latest ${review.name} requires or permits fixes. Entering fix mode.`);
+
+  if (inventory.openRounds.length > 0) return resumeOpenRound();
+  return resolveExistingCode();
 }
 
 function contextFailure(inventory: ArtifactInventoryResult, code: ArtifactErrorCode, message: string, reviewArtifact: string | null = null): ArtifactContextResult {

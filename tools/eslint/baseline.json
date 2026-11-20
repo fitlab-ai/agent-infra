@@ -180,15 +180,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/git-workflow.ts",
-      "ruleId": "complexity",
-      "stableId": "ac05c17318a3b5510fc813b45d611ba5fd89606eb0a7ab3688505d57911433b1",
-      "displayName": "gitWorkflow",
-      "metric": 45,
-      "normalizedMessage": "complexity=45",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "2bfc5edda456388c9ef4d424858ff7b43a7be1cdb6657b372826f5a60c872ba1",
@@ -222,15 +213,6 @@
       "displayName": "mockClient.json",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "tests/unit/core/requires-pr-gating.test.ts",
-      "ruleId": "complexity",
-      "stableId": "bd1bf76e224ed5009116f2615a5c02769289e8e175e00a2768eca479c3d94573",
-      "displayName": "parseDeliveryStep",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {
@@ -360,15 +342,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/artifact-lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "0b3f6ce54bff447367d6bda75951dc046931b629176a4780e833860dffcbeea2",
-      "displayName": "resolveCodeContext",
-      "metric": 65,
-      "normalizedMessage": "complexity=65",
-      "count": 1
-    },
-    {
       "file": "tests/integration/platform-smoke/platform/pr-summary.test.ts",
       "ruleId": "complexity",
       "stableId": "fbc43b64ff5e76b6145f9929ebc77d3b30a9eea6dc41904cffa0423a40c24d35",
@@ -481,15 +454,6 @@
       "ruleId": "complexity",
       "stableId": "4a9df851e561c5a7886c7010639173f0cda15ee426df5644b4e81ba3cf3c7410",
       "displayName": "test callback[1]#1.client.method:json",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
-      "file": "tests/integration/platform-smoke/git/workflow.test.ts",
-      "ruleId": "complexity",
-      "stableId": "49f38f6eb61f8b4b21ebd3d874c525631b1be3efec7562d1ea5af77342c664cc",
-      "displayName": "test callback[1]#15.runCase.pushRebasedBranch callback[1]#1",
       "metric": 16,
       "normalizedMessage": "complexity=16",
       "count": 1

@@ -8,6 +8,12 @@ type DeliveryStep = {
   prTasks: string[];
 };
 
+function listItem(line: string, listIndent: number): string | null {
+  const itemMatch = line.match(/^( *)-\s+(.+)$/);
+  return itemMatch && (itemMatch[1] ?? "").length > listIndent
+    ? (itemMatch[2] ?? "").trim() : null;
+}
+
 function parseDeliveryStep(yamlText: string): DeliveryStep {
   const lines = yamlText.split("\n");
 
@@ -35,9 +41,8 @@ function parseDeliveryStep(yamlText: string): DeliveryStep {
     }
 
     if (listKey) {
-      const itemMatch = line.match(/^( *)-\s+(.+)$/);
-      if (itemMatch && (itemMatch[1] ?? "").length > listIndent) {
-        const value = (itemMatch[2] ?? "").trim();
+      const value = listItem(line, listIndent);
+      if (value !== null) {
         if (listKey === "tasks") tasks.push(value);
         else prTasks.push(value);
         continue;
