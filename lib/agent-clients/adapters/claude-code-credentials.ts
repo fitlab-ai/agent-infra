@@ -260,6 +260,10 @@ function validateClaudeCredentialsBlob(raw: unknown, blob: string | null = null)
     return { status: 'STALE_ACCESS' };
   }
 
+  return inspectCredentialPayload(parsed, blob, trimmed);
+}
+
+function inspectCredentialPayload(parsed: CredentialPayload, blob: string | null, trimmed: string): CredentialInspection {
   const payload = parsed?.claudeAiOauth ?? parsed;
   const scopes = Array.isArray(payload?.scopes) ? payload.scopes : [];
   const hasRequiredScopes = scopes.includes('user:profile')
@@ -391,32 +395,18 @@ export function writeClaudeCredentialsToHost(home: string, blob: string, options
   const override = claudeCredentialsEnvOverride(envFn());
 
   if (!override && process.platform === 'darwin') {
-    const result = runSecurity([
-      'add-generic-password',
-      '-U',
-      '-a',
-      path.basename(home),
-      '-s',
-      'Claude Code-credentials',
-      '-w',
-      blob
-    ], {
-      stdio: ['ignore', 'ignore', 'pipe']
-    }, execFn);
-    if (result.ok) {
-      return { ok: true };
-    }
-    if (result.classification === 'LOCKED') {
-      return { ok: false, classification: 'LOCKED', error: buildLockedGuidance() };
-    }
-    return {
-      ok: false,
-      classification: result.classification,
-      error: `security command failed: ${result.stderr || 'unknown error'}`
-    };
+    return writeClaudeKeychain(home, blob, execFn);
   }
 
   const targetPath = override?.path ?? path.join(home, '.claude', '.credentials.json');
+  return writeClaudeHostFile(targetPath, blob, { mkdirFn, chmodFn, writeFileFn, renameFn, rmFn, randomFn });
+}
+
+function writeClaudeHostFile(
+  targetPath: string, blob: string,
+  { mkdirFn, chmodFn, writeFileFn, renameFn, rmFn, randomFn }: Required<Pick<WriteHostOptions,
+    'mkdirFn' | 'chmodFn' | 'writeFileFn' | 'renameFn' | 'rmFn' | 'randomFn'>>
+): WriteResult {
   const dir = path.dirname(targetPath);
   const tmpPath = `${targetPath}.tmp.${process.pid}.${randomFn()}`;
 
@@ -439,6 +429,32 @@ export function writeClaudeCredentialsToHost(home: string, blob: string, options
       error: redactCommandError(errorMessage(error))
     };
   }
+}
+
+function writeClaudeKeychain(home: string, blob: string, execFn: ExecFn): WriteResult {
+  const result = runSecurity([
+    'add-generic-password',
+    '-U',
+    '-a',
+    path.basename(home),
+    '-s',
+    'Claude Code-credentials',
+    '-w',
+    blob
+  ], {
+    stdio: ['ignore', 'ignore', 'pipe']
+  }, execFn);
+  if (result.ok) {
+    return { ok: true };
+  }
+  if (result.classification === 'LOCKED') {
+    return { ok: false, classification: 'LOCKED', error: buildLockedGuidance() };
+  }
+  return {
+    ok: false,
+    classification: result.classification,
+    error: `security command failed: ${result.stderr || 'unknown error'}`
+  };
 }
 
 export function formatCredentialWarnings(warnings: Array<string | Warning> = []): string {
@@ -492,6 +508,80 @@ function shouldWriteEndpoint(authoritative: OkCredentialEndpoint, target: Creden
   return false;
 }
 
+function unavailableReconcileResult(endpoints: CredentialEndpoint[], hostEndpoint: CredentialEndpoint): ReconcileResult {
+  const hasStaleEndpoint = endpoints.some((endpoint) => endpoint.status === 'STALE_ACCESS');
+  const unavailableStatus = ['KEYCHAIN_LOCKED', 'KEYCHAIN_ERROR'].includes(hostEndpoint.status)
+    ? hostEndpoint.status
+    : null;
+  return {
+    status: unavailableStatus ?? (hasStaleEndpoint ? 'STALE_ACCESS' : 'MISSING'),
+    authoritative: null,
+    expiresAt: null,
+    hostWritten: false,
+    filesWritten: [],
+    fileErrors: [],
+    warnings: [],
+    detail: 'detail' in hostEndpoint ? hostEndpoint.detail ?? null : null
+  };
+}
+
+function reconcileHost(
+  home: string, authoritative: OkCredentialEndpoint, hostEndpoint: CredentialEndpoint,
+  writeHostFn: NonNullable<ReconcileOptions['writeHostFn']>, execFn: ExecFn, envFn: EnvFn, warnings: Warning[]
+): { hostWritten: boolean; hostWriteFailed: boolean } {
+  let hostWritten = false;
+  let hostWriteFailed = false;
+  if (authoritative.name !== 'host' && shouldWriteEndpoint(authoritative, hostEndpoint)) {
+    const result = writeHostFn(home, authoritative.blob, { execFn, envFn });
+    if (result?.ok) {
+      hostWritten = true;
+    } else {
+      hostWriteFailed = true;
+      warnings.push({
+        source: 'host-keychain',
+        classification: result?.classification ?? 'OTHER',
+        message: result?.error ?? 'unknown error'
+      });
+    }
+  }
+
+  return { hostWritten, hostWriteFailed };
+}
+
+function reconcileFiles(
+  home: string, fileEndpoints: Array<CredentialEndpoint & { project: string }>,
+  authoritative: OkCredentialEndpoint, writeFn: NonNullable<ReconcileOptions['writeFn']>,
+  filesWritten: string[], fileErrors: Array<{ project: string; error: string }>
+): void {
+  for (const endpoint of fileEndpoints) {
+    if (endpoint.name === authoritative.name || !shouldWriteEndpoint(authoritative, endpoint)) {
+      continue;
+    }
+
+    try {
+      writeFn(home, endpoint.project, authoritative.blob);
+      filesWritten.push(endpoint.project);
+    } catch (error) {
+      fileErrors.push({ project: endpoint.project, error: errorMessage(error) });
+    }
+  }
+}
+
+function reconcileResult(
+  authoritative: OkCredentialEndpoint, hostWritten: boolean, hostWriteFailed: boolean,
+  filesWritten: string[], fileErrors: Array<{ project: string; error: string }>, warnings: Warning[]
+): ReconcileResult {
+  return {
+    status: hostWriteFailed ? 'KEYCHAIN_WRITE_FAILED' : 'OK',
+    authoritative: authoritative.name,
+    expiresAt: authoritative.expiresAt ?? null,
+    hostWritten,
+    filesWritten,
+    fileErrors,
+    warnings
+  };
+}
+
 export function reconcileClaudeCredentials(home: string, options: ReconcileOptions = {}): ReconcileResult {
   const {
     execFn = execFileSync,
@@ -520,64 +610,17 @@ export function reconcileClaudeCredentials(home: string, options: ReconcileOptio
   const authoritative = chooseAuthoritativeEndpoint(endpoints);
 
   if (!authoritative) {
-    const hasStaleEndpoint = endpoints.some((endpoint) => endpoint.status === 'STALE_ACCESS');
-    const unavailableStatus = ['KEYCHAIN_LOCKED', 'KEYCHAIN_ERROR'].includes(hostEndpoint.status)
-      ? hostEndpoint.status
-      : null;
-    return {
-      status: unavailableStatus ?? (hasStaleEndpoint ? 'STALE_ACCESS' : 'MISSING'),
-      authoritative: null,
-      expiresAt: null,
-      hostWritten: false,
-      filesWritten: [],
-      fileErrors: [],
-      warnings: [],
-      detail: 'detail' in hostEndpoint ? hostEndpoint.detail ?? null : null
-    };
+    return unavailableReconcileResult(endpoints, hostEndpoint);
   }
 
   const warnings: Warning[] = [];
   const filesWritten: string[] = [];
   const fileErrors: Array<{ project: string; error: string }> = [];
-  let hostWritten = false;
-  let hostWriteFailed = false;
+  const { hostWritten, hostWriteFailed } = reconcileHost(home, authoritative, hostEndpoint, writeHostFn, execFn, envFn, warnings);
 
-  if (authoritative.name !== 'host' && shouldWriteEndpoint(authoritative, hostEndpoint)) {
-    const result = writeHostFn(home, authoritative.blob, { execFn, envFn });
-    if (result?.ok) {
-      hostWritten = true;
-    } else {
-      hostWriteFailed = true;
-      warnings.push({
-        source: 'host-keychain',
-        classification: result?.classification ?? 'OTHER',
-        message: result?.error ?? 'unknown error'
-      });
-    }
-  }
+  reconcileFiles(home, fileEndpoints, authoritative, writeFn, filesWritten, fileErrors);
 
-  for (const endpoint of fileEndpoints) {
-    if (endpoint.name === authoritative.name || !shouldWriteEndpoint(authoritative, endpoint)) {
-      continue;
-    }
-
-    try {
-      writeFn(home, endpoint.project, authoritative.blob);
-      filesWritten.push(endpoint.project);
-    } catch (error) {
-      fileErrors.push({ project: endpoint.project, error: errorMessage(error) });
-    }
-  }
-
-  return {
-    status: hostWriteFailed ? 'KEYCHAIN_WRITE_FAILED' : 'OK',
-    authoritative: authoritative.name,
-    expiresAt: authoritative.expiresAt ?? null,
-    hostWritten,
-    filesWritten,
-    fileErrors,
-    warnings
-  };
+  return reconcileResult(authoritative, hostWritten, hostWriteFailed, filesWritten, fileErrors, warnings);
 }
 
 export function formatRemaining(expiresAt: unknown): string {
@@ -594,6 +637,49 @@ export function formatRemaining(expiresAt: unknown): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function prepareInspectedCredentials(inspection: CredentialInspection, providerAuthAvailable: () => boolean): string | ClaudeCredentialOutcome {
+  switch (inspection.status) {
+    case 'OK':
+      return inspection.blob;
+    case 'MISSING':
+      return providerAuthAvailable() ? { status: 'OK' } : { status: 'SKIPPED' };
+    case 'KEYCHAIN_LOCKED':
+      throw new Error([
+        'Claude Code credentials are stored in the macOS keychain, but the keychain is locked.',
+        '',
+        buildLockedGuidance()
+      ].join('\n'));
+    case 'STALE_ACCESS':
+      if (providerAuthAvailable()) {
+        return { status: 'OK' };
+      }
+      throw new Error([
+        'Claude Code credentials on host are invalid or expired.',
+        '',
+        'The sandbox needs valid Claude Code OAuth credentials so the container can use Claude Code.',
+        '',
+        'To fix:',
+        '  1. On the host, run "claude" once and complete the OAuth login flow.',
+        '  2. Verify with "claude /status" that you see your subscription.',
+        '  3. Re-run "ai sandbox create".'
+      ].join('\n'));
+    case 'KEYCHAIN_ERROR':
+      throw new Error([
+        'Claude Code credentials could not be read from the host keychain.',
+        '',
+        inspection.detail ? `Detail: ${inspection.detail}` : 'Detail: unknown keychain error',
+        '',
+        'To fix:',
+        '  1. Unlock or repair the host keychain, then re-run "ai sandbox create".',
+        '  2. For SSH / CI, set AGENT_INFRA_CLAUDE_CREDENTIALS_FILE to an absolute path containing a valid credentials blob.'
+      ].join('\n'));
+    default: {
+      const _exhaustive: never = inspection;
+      throw new Error(`Unhandled Claude Code credential inspection status: ${(_exhaustive as { status: string }).status}`);
+    }
+  }
 }
 
 export function prepareClaudeCredentials(
@@ -623,47 +709,9 @@ export function prepareClaudeCredentials(
   const hasCustomExtractFn = extractFn !== extractClaudeCredentialsBlob;
   if (hasCustomInspectFn || !hasCustomExtractFn) {
     const inspection = inspectFn(home);
-    switch (inspection.status) {
-      case 'OK':
-        blob = inspection.blob;
-        break;
-      case 'MISSING':
-        return providerAuthAvailable() ? { status: 'OK' } : { status: 'SKIPPED' };
-      case 'KEYCHAIN_LOCKED':
-        throw new Error([
-          'Claude Code credentials are stored in the macOS keychain, but the keychain is locked.',
-          '',
-          buildLockedGuidance()
-        ].join('\n'));
-      case 'STALE_ACCESS':
-        if (providerAuthAvailable()) {
-          return { status: 'OK' };
-        }
-        throw new Error([
-          'Claude Code credentials on host are invalid or expired.',
-          '',
-          'The sandbox needs valid Claude Code OAuth credentials so the container can use Claude Code.',
-          '',
-          'To fix:',
-          '  1. On the host, run "claude" once and complete the OAuth login flow.',
-          '  2. Verify with "claude /status" that you see your subscription.',
-          '  3. Re-run "ai sandbox create".'
-        ].join('\n'));
-      case 'KEYCHAIN_ERROR':
-        throw new Error([
-          'Claude Code credentials could not be read from the host keychain.',
-          '',
-          inspection.detail ? `Detail: ${inspection.detail}` : 'Detail: unknown keychain error',
-          '',
-          'To fix:',
-          '  1. Unlock or repair the host keychain, then re-run "ai sandbox create".',
-          '  2. For SSH / CI, set AGENT_INFRA_CLAUDE_CREDENTIALS_FILE to an absolute path containing a valid credentials blob.'
-        ].join('\n'));
-      default: {
-        const _exhaustive: never = inspection;
-        throw new Error(`Unhandled Claude Code credential inspection status: ${(_exhaustive as { status: string }).status}`);
-      }
-    }
+    const prepared = prepareInspectedCredentials(inspection, providerAuthAvailable);
+    if (typeof prepared !== 'string') return prepared;
+    blob = prepared;
   } else {
     blob = extractFn(home);
     if (!blob) {

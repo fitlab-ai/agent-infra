@@ -35,6 +35,75 @@ export function probeClaudeStatus(spawnFn: typeof runProbe = runProbe): { ok: bo
   };
 }
 
+function reportRefreshFailure(result: ReturnType<typeof reconcileClaudeCredentials>, writeStderr: (chunk: string) => unknown): number | null {
+  if (result.status === 'MISSING') {
+    writeStderr('No Claude Code credentials found on host.\n');
+    writeStderr('Run "claude /login" on the host to authenticate.\n');
+    return 1;
+  }
+
+  if (result.status === 'KEYCHAIN_LOCKED') {
+    writeStderr(`${buildLockedGuidance()}\n`);
+    return 1;
+  }
+
+  if (result.status === 'KEYCHAIN_ERROR') {
+    writeStderr(`Host keychain error: ${redactCommandError(result.detail || 'unknown error')}\n`);
+    writeStderr(`${buildLockedGuidance()}\n`);
+    return 1;
+  }
+
+  if (result.status === 'KEYCHAIN_WRITE_FAILED') {
+    writeStderr(`[host] keychain write failed: ${formatCredentialWarnings(result.warnings) || 'unknown error'}\n`);
+    return 1;
+  }
+
+  if (result.status !== 'OK') {
+    writeStderr('Host credentials still invalid after probe; run "claude /login".\n');
+    return 1;
+  }
+
+  return null;
+}
+
+function reportRefreshSuccess(
+  result: ReturnType<typeof reconcileClaudeCredentials>, projects: string[],
+  writeStdout: (chunk: string) => unknown, writeStderr: (chunk: string) => unknown
+): number {
+  if (result.authoritative && result.authoritative !== 'host' && result.hostWritten) {
+    writeStdout(`[host] reconciled from ${result.authoritative}\n`);
+  }
+
+  for (const project of projects) {
+    const action = result.filesWritten.includes(project) ? 'updated' : 'unchanged';
+    writeStdout(`[${project}] ${action}; expires in ${formatRemaining(result.expiresAt)}\n`);
+  }
+
+  for (const failure of result.fileErrors) {
+    writeStderr(`[${failure.project}] sync failed: ${failure.error}\n`);
+  }
+
+  return result.fileErrors.length > 0 ? 1 : 0;
+}
+
+function retryStaleCredentials(
+  result: ReturnType<typeof reconcileClaudeCredentials>, home: string, reconcileOptions: ReconcileOptions,
+  spawnFn: typeof runProbe, writeStdout: (chunk: string) => unknown, writeStderr: (chunk: string) => unknown
+): ReturnType<typeof reconcileClaudeCredentials> | null {
+  if (result.status === 'STALE_ACCESS' && result.authoritative === null) {
+    writeStdout('Host credentials appear stale; probing claude /status to trigger refresh...\n');
+    const probe = probeClaudeStatus(spawnFn);
+    if (!probe.ok) {
+      writeStderr(`Probe failed: ${redactCommandError(probe.stderr || probe.error || 'unknown error')}\n`);
+      writeStderr('Run "claude /login" on the host to renew credentials.\n');
+      return null;
+    }
+    writeStdout('Probe succeeded; re-inspecting host credentials.\n');
+    result = reconcileClaudeCredentials(home, reconcileOptions);
+  }
+  return result;
+}
+
 export async function runClaudeCodeRefresh(args: string[], deps: RefreshDeps = {}): Promise<number> {
   const {
     spawnFn = runProbe,
@@ -71,58 +140,12 @@ export async function runClaudeCodeRefresh(args: string[], deps: RefreshDeps = {
   }
 
   const reconcileOptions = { execFn, readFn, existsFn, writeFn, writeHostFn, projects };
-  let result = reconcileClaudeCredentials(home, reconcileOptions);
-  if (result.status === 'STALE_ACCESS' && result.authoritative === null) {
-    writeStdout('Host credentials appear stale; probing claude /status to trigger refresh...\n');
-    const probe = probeClaudeStatus(spawnFn);
-    if (!probe.ok) {
-      writeStderr(`Probe failed: ${redactCommandError(probe.stderr || probe.error || 'unknown error')}\n`);
-      writeStderr('Run "claude /login" on the host to renew credentials.\n');
-      return 1;
-    }
-    writeStdout('Probe succeeded; re-inspecting host credentials.\n');
-    result = reconcileClaudeCredentials(home, reconcileOptions);
-  }
+  let result: ReturnType<typeof reconcileClaudeCredentials> | null = reconcileClaudeCredentials(home, reconcileOptions);
+  result = retryStaleCredentials(result, home, reconcileOptions, spawnFn, writeStdout, writeStderr);
+  if (result === null) return 1;
 
-  if (result.status === 'MISSING') {
-    writeStderr('No Claude Code credentials found on host.\n');
-    writeStderr('Run "claude /login" on the host to authenticate.\n');
-    return 1;
-  }
+  const failure = reportRefreshFailure(result, writeStderr);
+  if (failure !== null) return failure;
 
-  if (result.status === 'KEYCHAIN_LOCKED') {
-    writeStderr(`${buildLockedGuidance()}\n`);
-    return 1;
-  }
-
-  if (result.status === 'KEYCHAIN_ERROR') {
-    writeStderr(`Host keychain error: ${redactCommandError(result.detail || 'unknown error')}\n`);
-    writeStderr(`${buildLockedGuidance()}\n`);
-    return 1;
-  }
-
-  if (result.status === 'KEYCHAIN_WRITE_FAILED') {
-    writeStderr(`[host] keychain write failed: ${formatCredentialWarnings(result.warnings) || 'unknown error'}\n`);
-    return 1;
-  }
-
-  if (result.status !== 'OK') {
-    writeStderr('Host credentials still invalid after probe; run "claude /login".\n');
-    return 1;
-  }
-
-  if (result.authoritative && result.authoritative !== 'host' && result.hostWritten) {
-    writeStdout(`[host] reconciled from ${result.authoritative}\n`);
-  }
-
-  for (const project of projects) {
-    const action = result.filesWritten.includes(project) ? 'updated' : 'unchanged';
-    writeStdout(`[${project}] ${action}; expires in ${formatRemaining(result.expiresAt)}\n`);
-  }
-
-  for (const failure of result.fileErrors) {
-    writeStderr(`[${failure.project}] sync failed: ${failure.error}\n`);
-  }
-
-  return result.fileErrors.length > 0 ? 1 : 0;
+  return reportRefreshSuccess(result, projects, writeStdout, writeStderr);
 }
