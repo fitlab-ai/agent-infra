@@ -39,27 +39,31 @@ function assertNoSymlinkAncestors(candidate: string): void {
   }
 }
 
+function readStableDescriptor(descriptor: number, options: Readonly<{ maxBytes: number; expectedSha256?: string }>): StableFile {
+  const before = fs.fstatSync(descriptor, { bigint: true });
+  if (!before.isFile()) conflict('candidate is not a regular file');
+  if (before.size > BigInt(options.maxBytes)) conflict('candidate exceeds the bounded read limit');
+  const bytes = Buffer.alloc(Number(before.size));
+  let offset = 0;
+  while (offset < bytes.length) {
+    const bytesRead = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (bytesRead === 0) conflict('candidate reached EOF before the bounded read completed');
+    offset += bytesRead;
+  }
+  const after = fs.fstatSync(descriptor, { bigint: true });
+  if (!sameStat(before, after)) conflict('candidate identity or metadata changed during read');
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  if (options.expectedSha256 !== undefined && sha256 !== options.expectedSha256) conflict('candidate digest does not match the expected digest');
+  return { bytes, sha256, stat: after };
+}
+
 export function readStableFileSync(candidate: string, options: Readonly<{ maxBytes: number; expectedSha256?: string }>): StableFile {
   if (!path.isAbsolute(candidate)) conflict('candidate path must be absolute and terminal');
   assertNoSymlinkAncestors(candidate);
   let descriptor: number | undefined;
   try {
     descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | NO_FOLLOW | (fs.constants.O_NONBLOCK ?? 0));
-    const before = fs.fstatSync(descriptor, { bigint: true });
-    if (!before.isFile()) conflict('candidate is not a regular file');
-    if (before.size > BigInt(options.maxBytes)) conflict('candidate exceeds the bounded read limit');
-    const bytes = Buffer.alloc(Number(before.size));
-    let offset = 0;
-    while (offset < bytes.length) {
-      const bytesRead = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
-      if (bytesRead === 0) conflict('candidate reached EOF before the bounded read completed');
-      offset += bytesRead;
-    }
-    const after = fs.fstatSync(descriptor, { bigint: true });
-    if (!sameStat(before, after)) conflict('candidate identity or metadata changed during read');
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    if (options.expectedSha256 !== undefined && sha256 !== options.expectedSha256) conflict('candidate digest does not match the expected digest');
-    return { bytes, sha256, stat: after };
+    return readStableDescriptor(descriptor, options);
   } catch (error) {
     if (error instanceof SecureFileError) throw error;
     const code = (error as NodeJS.ErrnoException).code;
