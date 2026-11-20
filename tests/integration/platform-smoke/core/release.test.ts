@@ -70,6 +70,12 @@ function requireActionStep(steps: WorkflowStep[], action: string, label: string)
   return step;
 }
 
+function requireWorkflowNodeVersion(workflowPath: string, jobName: string, label: string) {
+  const workflow = parse(read(workflowPath)) as ReleaseWorkflow;
+  const steps = workflow.jobs?.[jobName]?.steps ?? [];
+  return requireActionStep(steps, "actions/setup-node", label).with?.["node-version"];
+}
+
 test("package metadata supports scoped npm publishing", () => {
   const pkg = JSON.parse(read("package.json"));
 
@@ -133,53 +139,40 @@ test("Node runtime baseline stays aligned across metadata and automation", () =>
     true
   );
 
-  function assertRuntimeAutomation() {
-    const releaseWorkflow = parse(read(".github/workflows/release.yml")) as ReleaseWorkflow;
-    const releaseSteps = releaseWorkflow.jobs?.["npm-publish"]?.steps ?? [];
-    const setupNodeStep = requireActionStep(releaseSteps, "actions/setup-node", "release workflow");
-    const releaseNodeVersion = requireMinVersion(
-      String(setupNodeStep.with?.["node-version"] ?? ""),
-      "release workflow node-version"
-    );
-    assert.equal(semver.satisfies(releaseNodeVersion, engineRange), true);
+  const releaseNodeVersion = requireMinVersion(
+    String(requireWorkflowNodeVersion(".github/workflows/release.yml", "npm-publish", "release workflow") ?? ""),
+    "release workflow node-version"
+  );
+  assert.equal(semver.satisfies(releaseNodeVersion, engineRange), true);
 
-    const unitTestsWorkflow = parse(read(".github/workflows/unit-tests.yml")) as ReleaseWorkflow;
-    const minimumBaselineSteps = unitTestsWorkflow.jobs?.["minimum-node-baseline"]?.steps ?? [];
-    const minimumSetupNodeStep = requireActionStep(
-      minimumBaselineSteps,
-      "actions/setup-node",
-      "minimum Node baseline job"
-    );
-    assert.equal(String(minimumSetupNodeStep.with?.["node-version"]), engineMinimum.version);
+  assert.equal(
+    String(requireWorkflowNodeVersion(".github/workflows/unit-tests.yml", "minimum-node-baseline", "minimum Node baseline job")),
+    engineMinimum.version
+  );
 
-    const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
-    const npmUpdates = dependabot.updates?.find(
-      (update) => update["package-ecosystem"] === "npm" && update.directory === "/"
-    );
-    assert.ok(
-      npmUpdates?.ignore?.some(
-        (entry) =>
-          entry["dependency-name"] === "@types/node" &&
-          entry["update-types"]?.includes("version-update:semver-major")
-      )
-    );
-  }
-  assertRuntimeAutomation();
+  const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
+  const npmUpdates = dependabot.updates?.find(
+    (update) => update["package-ecosystem"] === "npm" && update.directory === "/"
+  );
+  assert.ok(
+    npmUpdates?.ignore?.some(
+      (entry) =>
+        entry["dependency-name"] === "@types/node" &&
+        entry["update-types"]?.includes("version-update:semver-major")
+    )
+  );
 
-  function assertRuntimeEngineConflicts() {
-    const runtimeEngineConflicts = Object.entries(lock.packages)
-      .filter(([packagePath, meta]) => packagePath !== "" && !meta.dev && meta.engines?.node)
-      .filter(
-        ([, meta]) =>
-          !semver.intersects(
-            meta.engines?.node ?? "",
-            `>=${engineMinimum.version} <${engineMinimum.major + 1}.0.0`
-          )
-      )
-      .map(([packagePath, meta]) => [packagePath, meta.engines?.node]);
-    assert.deepEqual(runtimeEngineConflicts, []);
-  }
-  assertRuntimeEngineConflicts();
+  const runtimeEngineConflicts = Object.entries(lock.packages)
+    .filter(([packagePath, meta]) => packagePath !== "" && !meta.dev && meta.engines?.node)
+    .filter(
+      ([, meta]) =>
+        !semver.intersects(
+          meta.engines?.node ?? "",
+          `>=${engineMinimum.version} <${engineMinimum.major + 1}.0.0`
+        )
+    )
+    .map(([packagePath, meta]) => [packagePath, meta.engines?.node]);
+  assert.deepEqual(runtimeEngineConflicts, []);
 });
 
 test("reused GitHub Actions keep consistent refs across workflows", () => {
