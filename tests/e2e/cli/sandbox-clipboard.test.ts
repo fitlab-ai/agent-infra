@@ -1022,3 +1022,25 @@ test("clipboard bridge pauses stdin on exit so the host process can exit", async
   // handle stops keeping the event loop alive (otherwise the CLI hangs on exit).
   assert.deepEqual(lifecycle, ["resume", "pause"]);
 });
+
+test("clipboard bridge falls back before loading PTY when the mount is unavailable", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const stdin = Object.assign(new EventEmitter(), { isTTY: true });
+  const stdout = Object.assign(new EventEmitter(), { isTTY: true });
+  const stderr: string[] = [];
+  let loaded = false;
+  const calls: string[][] = [];
+  const exitCode = await runInteractiveWithClipboardBridge({
+    engine: "native", dockerArgs: ["exec", "-it", "demo", "bash"], container: "demo", home: "/tmp/home",
+    stdin: stdin as never, stdout: stdout as never,
+    adapter: { available: () => ({ ok: true }), readImagePng: () => null },
+    runOk: () => false,
+    loadPty: async () => { loaded = true; return null; },
+    runInteractive(_engine, cmd, args) { calls.push([cmd, ...args]); return 12; },
+    writeStderr: (chunk) => stderr.push(chunk)
+  });
+  assert.equal(exitCode, 12);
+  assert.equal(loaded, false);
+  assert.deepEqual(calls, [["docker", "exec", "-it", "demo", "bash"]]);
+  assert.match(stderr.join(""), /container \/clipboard mount is missing/);
+});
