@@ -247,21 +247,22 @@ function validateComment(value: unknown): RemoteCommentSnapshot {
   };
 }
 
-function validateChangeRequest(value: unknown, expectedKind?: ResourceIdentityKind, requireIdentity = false): ChangeRequestSnapshot {
-  const item = record(value, 'changeRequest');
-  exactKeys(item, ['id', 'identity', 'number', 'state', 'title', 'body', 'baseSha', 'headSha', 'author', 'mergedAt', 'displayUrl', 'draft', 'labels', 'assignees', 'milestone', 'mergeCommitSha', 'mergeability', 'head', 'base'], 'changeRequest');
-  const result = {
-    id: item.id === undefined ? '' : stringValue(item.id, 'changeRequest.id'),
-    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'changeRequest.identity', expectedKind) }),
-    ...(item.number === undefined ? {} : { number: Number.isSafeInteger(item.number) && (item.number as number) > 0 ? item.number as number : (() => { throw new Error('changeRequest.number is invalid'); })() }),
-    state: stringValue(item.state, 'changeRequest.state'),
-    title: stringValue(item.title, 'changeRequest.title', true),
-    body: stringValue(item.body, 'changeRequest.body', true),
+function changeRequestNumber(item: Record<string, unknown>) {
+  return item.number === undefined ? {} : { number: Number.isSafeInteger(item.number) && (item.number as number) > 0 ? item.number as number : (() => { throw new Error('changeRequest.number is invalid'); })() };
+}
+
+function changeRequestDetails(item: Record<string, unknown>) {
+  return {
     ...(item.baseSha === undefined ? {} : { baseSha: stringValue(item.baseSha, 'changeRequest.baseSha') }),
     ...(item.headSha === undefined ? {} : { headSha: stringValue(item.headSha, 'changeRequest.headSha') }),
     ...(item.author === undefined ? {} : { author: author(item.author, 'changeRequest.author') }),
     ...(item.mergedAt === undefined ? {} : { mergedAt: item.mergedAt === null ? null : utcTimestamp(item.mergedAt, 'changeRequest.mergedAt') }),
-    ...(item.displayUrl === undefined ? {} : { displayUrl: stringValue(item.displayUrl, 'changeRequest.displayUrl') }),
+    ...(item.displayUrl === undefined ? {} : { displayUrl: stringValue(item.displayUrl, 'changeRequest.displayUrl') })
+  };
+}
+
+function changeRequestMetadata(item: Record<string, unknown>) {
+  return {
     ...(item.draft === undefined ? {} : { draft: booleanValue(item.draft, 'changeRequest.draft') }),
     ...(item.labels === undefined ? {} : { labels: arrayValue(item.labels, 'changeRequest.labels').map((entry) => stringValue(entry, 'changeRequest.labels[]')) }),
     ...(item.assignees === undefined ? {} : { assignees: arrayValue(item.assignees, 'changeRequest.assignees').map((entry) => stringValue(entry, 'changeRequest.assignees[]')) }),
@@ -270,6 +271,21 @@ function validateChangeRequest(value: unknown, expectedKind?: ResourceIdentityKi
     ...(item.mergeability === undefined ? {} : { mergeability: mergeability(item.mergeability, 'changeRequest.mergeability') }),
     ...(item.head === undefined ? {} : { head: validateRef(item.head, 'changeRequest.head') }),
     ...(item.base === undefined ? {} : { base: validateRef(item.base, 'changeRequest.base') })
+  };
+}
+
+function validateChangeRequest(value: unknown, expectedKind?: ResourceIdentityKind, requireIdentity = false): ChangeRequestSnapshot {
+  const item = record(value, 'changeRequest');
+  exactKeys(item, ['id', 'identity', 'number', 'state', 'title', 'body', 'baseSha', 'headSha', 'author', 'mergedAt', 'displayUrl', 'draft', 'labels', 'assignees', 'milestone', 'mergeCommitSha', 'mergeability', 'head', 'base'], 'changeRequest');
+  const result = {
+    id: item.id === undefined ? '' : stringValue(item.id, 'changeRequest.id'),
+    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'changeRequest.identity', expectedKind) }),
+    ...changeRequestNumber(item),
+    state: stringValue(item.state, 'changeRequest.state'),
+    title: stringValue(item.title, 'changeRequest.title', true),
+    body: stringValue(item.body, 'changeRequest.body', true),
+    ...changeRequestDetails(item),
+    ...changeRequestMetadata(item)
   } as ChangeRequestSnapshot;
   if (!result.id && !result.identity) throw new Error('changeRequest must expose id or identity');
   if (requireIdentity && !result.identity) throw new Error('changeRequest identity is required');

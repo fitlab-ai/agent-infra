@@ -248,3 +248,24 @@ test('release-note provider emits typed history and keeps commit and closing-iss
   assert.equal(result.value.mergedPullRequests[0]?.author?.login, 'pr-author');
   assert.equal(result.value.mergedPullRequests[0]?.closingIssues[0]?.author?.login, 'reporter');
 });
+
+test('release inspection preserves request order, defaults, and failure short circuit', async () => {
+  const calls: string[][] = [];
+  let failRuns = false;
+  const client = {
+    json(args: string[]) {
+      calls.push(args);
+      if (args[0] === 'release') return { ok: true, value: { tagName: 'v1', isDraft: true, url: 'https://example.test/v1' } };
+      return failRuns ? { ok: false, error: { code: 'RUNS_FAILED', message: 'runs failed' } } : { ok: true, value: [{ name: 'CI' }] };
+    }
+  } as unknown as GitHubClient;
+  const provider = createGitHubProvider({ providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {} }, client);
+  const input = { context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'o/r' }, tag: 'v1' };
+  assert.deepEqual(await provider.releases!.inspect(input), { ok: true, value: {
+    id: 'v1', tag: 'v1', title: 'v1', body: '', draft: true, prerelease: false,
+    publishedAt: null, displayUrl: 'https://example.test/v1', workflows: [{ name: 'CI' }]
+  } });
+  assert.deepEqual(calls.map((args) => args.slice(0, 2)), [['release', 'view'], ['run', 'list']]);
+  failRuns = true;
+  assert.deepEqual(await provider.releases!.inspect(input), { ok: false, error: { code: 'RUNS_FAILED', message: 'runs failed' } });
+});

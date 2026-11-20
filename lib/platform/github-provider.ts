@@ -210,46 +210,7 @@ function failure(error: PlatformError | ProviderError): ProviderResult<PlatformC
   return { ok: false, error: providerError(error) };
 }
 
-function resolveContext(
-  client: GitHubClient,
-  input: Parameters<PlatformProvider['context']['resolve']>[0]
-): ProviderResult<PlatformContextSnapshot> {
-  const cwd = input.workingDirectory;
-  const version = client.version({ cwd });
-  if (!version.ok) return failure(version.error);
-  if (!semver.gte(version.value, MINIMUM_GITHUB_CLI_VERSION)) {
-    return failure({
-      code: 'GH_CLI_VERSION_UNSUPPORTED',
-      message: 'GitHub CLI ' + version.value + ' is unsupported; install gh >= ' + MINIMUM_GITHUB_CLI_VERSION,
-    });
-  }
-  const remote = input.gitRemote || defaultGitRemote(cwd);
-  if (!remote) {
-    return failure({ code: 'REMOTE_MISSING', message: 'Git origin remote is not configured' });
-  }
-  const ownerRepo = parseGitHubRemote(remote);
-  if (!ownerRepo) {
-    return failure({
-      code: /github\.com/i.test(remote) ? 'REMOTE_INVALID' : 'PLATFORM_UNSUPPORTED',
-      message: 'Unable to parse GitHub owner/repo from configured remote',
-    });
-  }
-  const repository = client.json(['api', 'repos/' + ownerRepo], { cwd });
-  if (!repository.ok) return failure(repository.error);
-  const repositoryValue = repository.value as { fork?: boolean; full_name?: string; owner?: { type?: string }; parent?: { full_name?: string } } | null;
-  const upstream = repositoryValue?.fork ? repositoryValue.parent?.full_name : repositoryValue?.full_name;
-  if (!upstream) return failure({
-    code: 'UPSTREAM_UNRESOLVED',
-    message: 'Unable to resolve the upstream repository',
-  });
-  const user = client.json(['api', 'graphql', '-f', 'query=' + CURRENT_USER_QUERY], { cwd });
-  if (!user.ok) return failure(user.error);
-  const userValue = user.value as { data?: { viewer?: { login?: string } } } | null;
-  const currentUser = userValue?.data?.viewer?.login || null;
-  const permissions = client.json(['api', 'repos/' + upstream], { cwd });
-  if (!permissions.ok) return failure(permissions.error);
-  const permissionValue = permissions.value as { permissions?: Record<string, boolean> } | null;
-  const values = permissionValue?.permissions || {};
+function contextSnapshot(upstream: string, currentUser: string | null, values: Record<string, boolean>, ownerType?: string): ProviderResult<PlatformContextSnapshot> {
   const capabilities = {
     authenticated: Boolean(currentUser),
     comment: Boolean(currentUser),
@@ -265,9 +226,70 @@ function resolveContext(
       currentUser: currentUser ? { id: currentUser, name: currentUser } : null,
       capabilities,
       authenticated: capabilities.authenticated,
-      ...(repositoryValue?.owner?.type ? { metadata: { ownerType: repositoryValue.owner.type } } : {})
+      ...(ownerType ? { metadata: { ownerType } } : {})
     }
   };
+}
+
+function resolveGitHubRemote(remoteInput: string | null | undefined, cwd: string): ProviderResult<string> {
+  const remote = remoteInput || defaultGitRemote(cwd);
+  if (!remote) {
+    return { ok: false, error: providerError({ code: 'REMOTE_MISSING', message: 'Git origin remote is not configured' }) };
+  }
+  const ownerRepo = parseGitHubRemote(remote);
+  if (!ownerRepo) {
+    return { ok: false, error: providerError({
+      code: /github\.com/i.test(remote) ? 'REMOTE_INVALID' : 'PLATFORM_UNSUPPORTED',
+      message: 'Unable to parse GitHub owner/repo from configured remote',
+    }) };
+  }
+  return { ok: true, value: ownerRepo };
+}
+
+function contextRepository(value: unknown): ProviderResult<{ upstream: string; repositoryValue: { owner?: { type?: string } } | null }> {
+  const repositoryValue = value as { fork?: boolean; full_name?: string; owner?: { type?: string }; parent?: { full_name?: string } } | null;
+  const upstream = repositoryValue?.fork ? repositoryValue.parent?.full_name : repositoryValue?.full_name;
+  if (!upstream) return { ok: false, error: providerError({
+    code: 'UPSTREAM_UNRESOLVED',
+    message: 'Unable to resolve the upstream repository',
+  }) };
+  return { ok: true, value: { upstream, repositoryValue } };
+}
+
+function contextCurrentUser(value: unknown): string | null {
+  const userValue = value as { data?: { viewer?: { login?: string } } } | null;
+  return userValue?.data?.viewer?.login || null;
+}
+
+function resolveContext(
+  client: GitHubClient,
+  input: Parameters<PlatformProvider['context']['resolve']>[0]
+): ProviderResult<PlatformContextSnapshot> {
+  const cwd = input.workingDirectory;
+  const version = client.version({ cwd });
+  if (!version.ok) return failure(version.error);
+  if (!semver.gte(version.value, MINIMUM_GITHUB_CLI_VERSION)) {
+    return failure({
+      code: 'GH_CLI_VERSION_UNSUPPORTED',
+      message: 'GitHub CLI ' + version.value + ' is unsupported; install gh >= ' + MINIMUM_GITHUB_CLI_VERSION,
+    });
+  }
+  const remote = resolveGitHubRemote(input.gitRemote, cwd);
+  if (!remote.ok) return { ok: false, error: remote.error };
+  const ownerRepo = remote.value;
+  const repository = client.json(['api', 'repos/' + ownerRepo], { cwd });
+  if (!repository.ok) return failure(repository.error);
+  const resolvedRepository = contextRepository(repository.value);
+  if (!resolvedRepository.ok) return { ok: false, error: resolvedRepository.error };
+  const { upstream, repositoryValue } = resolvedRepository.value;
+  const user = client.json(['api', 'graphql', '-f', 'query=' + CURRENT_USER_QUERY], { cwd });
+  if (!user.ok) return failure(user.error);
+  const currentUser = contextCurrentUser(user.value);
+  const permissions = client.json(['api', 'repos/' + upstream], { cwd });
+  if (!permissions.ok) return failure(permissions.error);
+  const permissionValue = permissions.value as { permissions?: Record<string, boolean> } | null;
+  const values = permissionValue?.permissions || {};
+  return contextSnapshot(upstream, currentUser, values, repositoryValue?.owner?.type);
 }
 
 function repository(context: ProviderOperationContext): string {
@@ -655,6 +677,23 @@ function reconcileGitHubLabels(
   return { ok: true, value: labelReconciliation(created, updated, removed, skipped) };
 }
 
+function releaseSnapshot(response: any, runs: any, tag: string): ReleaseSnapshot {
+  return {
+    id: String(response?.id || tag), tag: String(response?.tagName || tag),
+    title: String(response?.name || tag), body: String(response?.body || ''),
+    ...releaseSnapshotDetails(response, runs)
+  };
+}
+
+function releaseSnapshotDetails(response: any, runs: any) {
+  return {
+    draft: Boolean(response?.isDraft), prerelease: Boolean(response?.isPrerelease),
+    publishedAt: response?.publishedAt ? new Date(String(response.publishedAt)).toISOString() : null,
+    displayUrl: response?.url ? String(response.url) : undefined,
+    workflows: Array.isArray(runs) ? runs as Array<Record<string, import('./provider-contract.ts').JsonValue>> : []
+  };
+}
+
 function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'securityAlerts' | 'repositoryMetadata' | 'verification'> {
   const issues: NonNullable<PlatformProvider['issues']> = {
     async listLabels({ context }) {
@@ -1002,7 +1041,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (!response.ok) return response;
       const runs = client.json<any[]>(['run', 'list', '--repo', repository(context), '--limit', '100', '--json', 'name,workflowName,displayTitle,event,headBranch,headSha,status,conclusion,createdAt,databaseId,attempt,url'], { cwd: context.workingDirectory });
       if (!runs.ok) return runs;
-      const value: ReleaseSnapshot = { id: String(response.value?.id || tag), tag: String(response.value?.tagName || tag), title: String(response.value?.name || tag), body: String(response.value?.body || ''), draft: Boolean(response.value?.isDraft), prerelease: Boolean(response.value?.isPrerelease), publishedAt: response.value?.publishedAt ? new Date(String(response.value.publishedAt)).toISOString() : null, displayUrl: response.value?.url ? String(response.value.url) : undefined, workflows: Array.isArray(runs.value) ? runs.value as Array<Record<string, import('./provider-contract.ts').JsonValue>> : [] };
+      const value = releaseSnapshot(response.value, runs.value, tag);
       return { ok: true, value };
     },
     async create({ context, tag, title, notes }) {
