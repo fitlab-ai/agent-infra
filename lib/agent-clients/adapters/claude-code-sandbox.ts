@@ -93,6 +93,32 @@ function requireEnterContext(
   return context;
 }
 
+function mergeClaudeOnboardingFromHost(data: JsonObject & { model?: string }, hostClaudeJson: JsonObject | null): boolean {
+  let changed = false;
+  if (
+    hostClaudeJson
+    && typeof hostClaudeJson.model === 'string'
+    && hostClaudeJson.model !== ''
+    && !Object.hasOwn(data, 'model')
+  ) {
+    data.model = hostClaudeJson.model;
+    changed = true;
+  }
+  if (hostClaudeJson) {
+    for (const key of Object.keys(hostClaudeJson)) {
+      if (
+        /^unpin.*LaunchEffort$/.test(key)
+        && hostClaudeJson[key] === true
+        && !Object.hasOwn(data, key)
+      ) {
+        data[key] = true;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 export function ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void {
   const claudeJsonPath = path.join(toolDir, '.claude.json');
   let data: JsonObject & {
@@ -126,27 +152,7 @@ export function ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): v
   }
   if (hostHomeDir) {
     const hostClaudeJson = readHostJsonSafe(path.join(hostHomeDir, '.claude.json'));
-    if (
-      hostClaudeJson
-      && typeof hostClaudeJson.model === 'string'
-      && hostClaudeJson.model !== ''
-      && !Object.hasOwn(data, 'model')
-    ) {
-      data.model = hostClaudeJson.model;
-      changed = true;
-    }
-    if (hostClaudeJson) {
-      for (const key of Object.keys(hostClaudeJson)) {
-        if (
-          /^unpin.*LaunchEffort$/.test(key)
-          && hostClaudeJson[key] === true
-          && !Object.hasOwn(data, key)
-        ) {
-          data[key] = true;
-          changed = true;
-        }
-      }
-    }
+    changed = mergeClaudeOnboardingFromHost(data, hostClaudeJson) || changed;
   }
   if (changed) fs.writeFileSync(claudeJsonPath, JSON.stringify(data, null, 4), 'utf8');
 }
