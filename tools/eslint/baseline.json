@@ -450,15 +450,6 @@
       "count": 1
     },
     {
-      "file": "lib/task/secure-fs.ts",
-      "ruleId": "complexity",
-      "stableId": "6c72e750784e8abb8711a379fd3cc6a371a2c9c44bfa1ab1facb6986e0c009bc",
-      "displayName": "readStableFileSync",
-      "metric": 17,
-      "normalizedMessage": "complexity=17",
-      "count": 1
-    },
-    {
       "file": "lib/agent-clients/adapters/claude-code-credentials.ts",
       "ruleId": "complexity",
       "stableId": "f4bce05cc94bc2cf24a8645efbc6fd8c9fd3701b3bb0b1e4a88d32a55f4d3ac1",
@@ -843,15 +834,6 @@
       "displayName": "writeSandboxEngineFixture",
       "metric": 21,
       "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
-      "file": "lib/task/write.ts",
-      "ruleId": "complexity",
-      "stableId": "1dd0ce777bd472d0715c3517e6a6e7502fb8579a36a57d0bd0de69cffe9c6985",
-      "displayName": "writeTaskCore",
-      "metric": 41,
-      "normalizedMessage": "complexity=41",
       "count": 1
     },
     {

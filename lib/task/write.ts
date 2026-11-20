@@ -222,8 +222,126 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
   };
 }
 
-function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
-  const resolved = options.taskLocation
+function applyTaskMutations(original: string, request: TaskWriteRequest): { candidate: string; operations: TaskOperationSummary[] } {
+  let candidate = original;
+  const operations: TaskOperationSummary[] = [];
+  parseTypedTaskFrontmatter(original);
+  if (!Array.isArray(request.mutations)) {
+    throw Object.assign(new Error('mutations must be an array'), { code: 'MUTATION_INVALID' });
+  }
+  for (const [index, mutation] of request.mutations.entries()) {
+    if (!mutation || typeof mutation !== 'object' || !('kind' in mutation)) {
+      throw Object.assign(new Error(`mutation ${index} is invalid`), { code: 'MUTATION_INVALID' });
+    }
+    const before = candidate;
+    if (mutation.kind === 'frontmatter') {
+      let set = mutation.set;
+      if (mutation.lifecycleExecutionDomain) {
+        const proposed = updateTaskFrontmatter(candidate, mutation.set);
+        const open = mutation.lifecycleExecutionDomain === 'ordinary'
+          ? lifecycleExecutions(proposed)
+          : lifecycleExecutions(candidate);
+        const pr = prReviewExecution(mutation.lifecycleExecutionDomain === 'pr-review' ? proposed : candidate);
+        set = { ...mutation.set, lifecycle_execution: serializeLifecycleExecution(open, undefined, pr) };
+      }
+      candidate = updateTaskFrontmatter(candidate, set, mutation.remove);
+      operations.push({
+        index,
+        kind: 'frontmatter',
+        fields: [...Object.keys(mutation.set), ...(mutation.remove ?? [])],
+        wouldChange: candidate !== before
+      });
+    } else if (mutation.kind === 'section') {
+      const result = upsertSection(candidate, mutation);
+      candidate = result.content;
+      operations.push({
+        index,
+        kind: 'section',
+        heading: result.heading,
+        operation: result.operation,
+        wouldChange: candidate !== before
+      });
+    } else if (mutation.kind === 'table-row') {
+      const result = mutateTableRow(candidate, mutation);
+      candidate = result.content;
+      operations.push({
+        index,
+        kind: 'table-row',
+        section: result.section,
+        keyColumn: mutation.keyColumn,
+        key: mutation.key.trim(),
+        operation: result.operation,
+        wouldChange: candidate !== before
+      });
+    } else {
+      throw Object.assign(new Error(`mutation ${index} has an unknown kind`), {
+        code: 'MUTATION_INVALID'
+      });
+    }
+  }
+  return { candidate, operations };
+}
+
+function commitTaskFile(
+  request: TaskWriteRequest, identity: { taskId: string; taskMdPath: string; actualState: TaskWorkspaceState },
+  options: TaskWriteOptions, io: TaskFileSystem, candidate: string, mode: number,
+  operations: TaskOperationSummary[], metadata: TaskWriteMetadata, successBase: TaskWriteSuccessBase
+): TaskWriteResult {
+  const suffix = (options.randomSuffix ?? (() => Math.random().toString(36).slice(2)))();
+  const tempPath = path.join(
+    path.dirname(identity.taskMdPath),
+    `.task.md.${process.pid}.${suffix}.tmp`
+  );
+  let primary: TaskWriteError | null = null;
+  let shouldCleanupTemp: boolean;
+  try {
+    io.writeFileSync(tempPath, candidate, mode);
+    shouldCleanupTemp = true;
+  } catch (error) {
+    shouldCleanupTemp = (error as NodeJS.ErrnoException).code !== 'EEXIST';
+    primary = errorDetails(error, 'TEMP_WRITE_FAILED');
+    primary.code = 'TEMP_WRITE_FAILED';
+  }
+  if (!primary) {
+    try {
+      io.renameSync(tempPath, identity.taskMdPath);
+    } catch (error) {
+      primary = errorDetails(error, 'RENAME_FAILED');
+      primary.code = 'RENAME_FAILED';
+    }
+  }
+  if (primary && shouldCleanupTemp) {
+    try {
+      io.unlinkSync(tempPath);
+    } catch (cleanupError) {
+      const nodeError = cleanupError as NodeJS.ErrnoException;
+      if (nodeError.code !== 'ENOENT') {
+        return failure(
+          request,
+          identity,
+          'TEMP_CLEANUP_FAILED',
+          `${primary.code}: ${primary.message}; failed to clean ${tempPath}: ${nodeError.message}`,
+          operations,
+          metadata
+        );
+      }
+    }
+  }
+  if (primary) {
+    return failure(
+      request,
+      identity,
+      primary.code,
+      primary.message,
+      operations,
+      metadata
+    );
+  }
+  return { ...successBase, status: 'applied', changed: true };
+}
+
+function resolveWriteTask(request: TaskWriteRequest, options: TaskWriteOptions) {
+  return options.taskLocation
     ? {
         ok: true as const,
         repoRoot: options.taskLocation.repoRoot,
@@ -233,6 +351,29 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
         state: options.taskLocation.state
       }
     : resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+}
+
+function validatedWriteMetadata(options: TaskWriteOptions): TaskWriteMetadata {
+  let metadata: TaskWriteMetadata;
+  metadata = (options.metadataProvider ?? captureTaskWriteMetadata)();
+  if (
+    !metadata ||
+    typeof metadata.timestamp !== 'string' ||
+    !metadata.timestamp ||
+    typeof metadata.agentInfraVersion !== 'string' ||
+    !metadata.agentInfraVersion
+  ) {
+    throw new Error('metadata provider returned invalid metadata');
+  }
+  return metadata;
+}
+
+function invalidActiveMetadata(state: TaskWorkspaceState, metadata: TaskWriteMetadata): boolean {
+  return state === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion);
+}
+
+function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+  const resolved = resolveWriteTask(request, options);
   if (!resolved.ok) {
     return failure(
       request,
@@ -277,63 +418,10 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
     }
   }
 
-  let candidate = original;
-  const operations: TaskOperationSummary[] = [];
+  let candidate: string;
+  let operations: TaskOperationSummary[];
   try {
-    parseTypedTaskFrontmatter(original);
-    if (!Array.isArray(request.mutations)) {
-      throw Object.assign(new Error('mutations must be an array'), { code: 'MUTATION_INVALID' });
-    }
-    for (const [index, mutation] of request.mutations.entries()) {
-      if (!mutation || typeof mutation !== 'object' || !('kind' in mutation)) {
-        throw Object.assign(new Error(`mutation ${index} is invalid`), { code: 'MUTATION_INVALID' });
-      }
-      const before = candidate;
-      if (mutation.kind === 'frontmatter') {
-        let set = mutation.set;
-        if (mutation.lifecycleExecutionDomain) {
-          const proposed = updateTaskFrontmatter(candidate, mutation.set);
-          const open = mutation.lifecycleExecutionDomain === 'ordinary'
-            ? lifecycleExecutions(proposed)
-            : lifecycleExecutions(candidate);
-          const pr = prReviewExecution(mutation.lifecycleExecutionDomain === 'pr-review' ? proposed : candidate);
-          set = { ...mutation.set, lifecycle_execution: serializeLifecycleExecution(open, undefined, pr) };
-        }
-        candidate = updateTaskFrontmatter(candidate, set, mutation.remove);
-        operations.push({
-          index,
-          kind: 'frontmatter',
-          fields: [...Object.keys(mutation.set), ...(mutation.remove ?? [])],
-          wouldChange: candidate !== before
-        });
-      } else if (mutation.kind === 'section') {
-        const result = upsertSection(candidate, mutation);
-        candidate = result.content;
-        operations.push({
-          index,
-          kind: 'section',
-          heading: result.heading,
-          operation: result.operation,
-          wouldChange: candidate !== before
-        });
-      } else if (mutation.kind === 'table-row') {
-        const result = mutateTableRow(candidate, mutation);
-        candidate = result.content;
-        operations.push({
-          index,
-          kind: 'table-row',
-          section: result.section,
-          keyColumn: mutation.keyColumn,
-          key: mutation.key.trim(),
-          operation: result.operation,
-          wouldChange: candidate !== before
-        });
-      } else {
-        throw Object.assign(new Error(`mutation ${index} has an unknown kind`), {
-          code: 'MUTATION_INVALID'
-        });
-      }
-    }
+    ({ candidate, operations } = applyTaskMutations(original, request));
   } catch (error) {
     const details = errorDetails(error, 'MUTATION_INVALID');
     return failure(request, identity, details.code, details.message);
@@ -341,16 +429,7 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
 
   let metadata: TaskWriteMetadata;
   try {
-    metadata = (options.metadataProvider ?? captureTaskWriteMetadata)();
-    if (
-      !metadata ||
-      typeof metadata.timestamp !== 'string' ||
-      !metadata.timestamp ||
-      typeof metadata.agentInfraVersion !== 'string' ||
-      !metadata.agentInfraVersion
-    ) {
-      throw new Error('metadata provider returned invalid metadata');
-    }
+    metadata = validatedWriteMetadata(options);
   } catch (error) {
     return failure(
       request,
@@ -360,7 +439,7 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
       operations
     );
   }
-  if (resolved.state === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion)) {
+  if (invalidActiveMetadata(resolved.state, metadata)) {
     return failure(
       request,
       identity,
@@ -419,57 +498,7 @@ function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}
     return { ...successBase, status: 'planned', changed: true };
   }
 
-  const suffix = (options.randomSuffix ?? (() => Math.random().toString(36).slice(2)))();
-  const tempPath = path.join(
-    path.dirname(resolved.taskMdPath),
-    `.task.md.${process.pid}.${suffix}.tmp`
-  );
-  let primary: TaskWriteError | null = null;
-  let shouldCleanupTemp: boolean;
-  try {
-    io.writeFileSync(tempPath, candidate, mode);
-    shouldCleanupTemp = true;
-  } catch (error) {
-    shouldCleanupTemp = (error as NodeJS.ErrnoException).code !== 'EEXIST';
-    primary = errorDetails(error, 'TEMP_WRITE_FAILED');
-    primary.code = 'TEMP_WRITE_FAILED';
-  }
-  if (!primary) {
-    try {
-      io.renameSync(tempPath, resolved.taskMdPath);
-    } catch (error) {
-      primary = errorDetails(error, 'RENAME_FAILED');
-      primary.code = 'RENAME_FAILED';
-    }
-  }
-  if (primary && shouldCleanupTemp) {
-    try {
-      io.unlinkSync(tempPath);
-    } catch (cleanupError) {
-      const nodeError = cleanupError as NodeJS.ErrnoException;
-      if (nodeError.code !== 'ENOENT') {
-        return failure(
-          request,
-          identity,
-          'TEMP_CLEANUP_FAILED',
-          `${primary.code}: ${primary.message}; failed to clean ${tempPath}: ${nodeError.message}`,
-          operations,
-          metadata
-        );
-      }
-    }
-  }
-  if (primary) {
-    return failure(
-      request,
-      identity,
-      primary.code,
-      primary.message,
-      operations,
-      metadata
-    );
-  }
-  return { ...successBase, status: 'applied', changed: true };
+  return commitTaskFile(request, identity, options, io, candidate, mode, operations, metadata, successBase);
 }
 
 function archiveContentsHash(localDir: string): string {
