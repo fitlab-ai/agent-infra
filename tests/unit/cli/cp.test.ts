@@ -264,3 +264,29 @@ test("linux remote flow verifies the receiver before uploading and preserves the
   assert.deepEqual(calls[4]?.args.slice(-4), ["ai", "cp", "--remote-receive-v1", "/tmp/agent-infra-cp-fixed.png"]);
   assert.match(output.stdout.join(""), /uploaded clipboard image to cloud;.*Ctrl\+V/);
 });
+
+test("linux receiver capability failure stops before upload and cleans local files", async () => {
+  const output = outputDeps();
+  const calls: SpawnCall[] = [];
+  const removed: string[] = [];
+  const code = await cmdCp(["cloud"], {
+    ...output,
+    platform: "darwin",
+    createAdapter: () => imageAdapter(Buffer.from("PNG_BYTES")),
+    randomId: () => "fixed",
+    mkdtempFn: () => "/tmp/agent-infra-cp-local",
+    writeFileFn: () => {},
+    rmFn: (target) => { removed.push(target); },
+    spawnFn: (cmd, args, input) => {
+      calls.push({ cmd, args, input });
+      if (calls.length === 1) return { ...successResult(), stdout: "Linux\n" };
+      if (calls.length === 3) return { ...successResult(), stdout: "AGENT_INFRA_CLIPBOARD_RECEIVER:v1\n", stderr: "unexpected" };
+      return successResult();
+    }
+  });
+  assert.equal(code, 1);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[2]?.args.slice(-3), ["ai", "cp", "--remote-receive-capability"]);
+  assert.match(output.stderr.join(""), /receiver is unavailable or incompatible/);
+  assert.deepEqual(removed, ["/tmp/agent-infra-cp-local"]);
+});

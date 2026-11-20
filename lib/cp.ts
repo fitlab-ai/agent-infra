@@ -52,7 +52,7 @@ export function runCommand(cmd: string, args: string[], input?: string): SpawnRe
   };
 }
 
-export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> {
+function resolveCpDeps(deps: CpDeps) {
   const {
     platform = currentPlatform(),
     createAdapter = createClipboardAdapter,
@@ -65,7 +65,10 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     writeStdout = (chunk: string) => process.stdout.write(chunk),
     writeStderr = (chunk: string) => process.stderr.write(chunk)
   } = deps;
+  return { platform, createAdapter, spawnFn, randomId, mkdtempFn, writeFileFn, rmFn, tmpdir, writeStdout, writeStderr };
+}
 
+function receiveCpRequest(args: string[], platform: NodeJS.Platform, writeStdout: (chunk: string) => unknown, writeStderr: (chunk: string) => unknown): number | null {
   if (args.length === 1 && args[0] === '--remote-receive-capability') {
     if (platform === 'linux') writeStdout(`${RECEIVER_CAPABILITY}\n`);
     return platform === 'linux' ? 0 : 1;
@@ -80,6 +83,13 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
       return 1;
     }
   }
+
+  return null;
+}
+
+function parseCpRequest(args: string[], platform: NodeJS.Platform, writeStdout: (chunk: string) => unknown, writeStderr: (chunk: string) => unknown): string | number {
+  const received = receiveCpRequest(args, platform, writeStdout, writeStderr);
+  if (received !== null) return received;
 
   if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
     writeStdout(USAGE);
@@ -109,6 +119,48 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     return 1;
   }
 
+  return alias;
+}
+
+function detectRemotePlatform(alias: string, spawnFn: SpawnFn, writeStderr: (chunk: string) => unknown): 'Darwin' | 'Linux' | null {
+  const remoteSystem = spawnFn('ssh', [
+    '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'uname', '-s'
+  ]);
+  if (remoteSystem.status !== 0) {
+    writeStderr(`failed to detect remote platform on ${alias}:\n${commandDetail(remoteSystem)}\n`);
+    return null;
+  }
+  const remotePlatform = remoteSystem.stdout.trim();
+  if (remotePlatform !== 'Darwin' && remotePlatform !== 'Linux') {
+    writeStderr(`unsupported remote platform on ${alias}: ${remotePlatform || 'unknown'}\n`);
+    return null;
+  }
+  if (remotePlatform === 'Linux') {
+    const homeCheck = spawnFn('ssh', [
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'test', '-d', '$HOME/.agent-infra'
+    ]);
+    if (homeCheck.status !== 0) {
+      writeStderr(`remote agent-infra installation is missing on ${alias}\n`);
+      return null;
+    }
+    const capability = spawnFn('ssh', [
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'ai', 'cp', '--remote-receive-capability'
+    ]);
+    if (capability.status !== 0 || capability.stderr !== '' || capability.stdout.replace(/\n$/u, '') !== RECEIVER_CAPABILITY) {
+      writeStderr(`remote agent-infra clipboard receiver is unavailable or incompatible on ${alias}; update agent-infra\n`);
+      return null;
+    }
+  }
+  return remotePlatform;
+}
+
+export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> {
+  const { platform, createAdapter, spawnFn, randomId, mkdtempFn, writeFileFn, rmFn, tmpdir, writeStdout, writeStderr } = resolveCpDeps(deps);
+
+  const request = parseCpRequest(args, platform, writeStdout, writeStderr);
+  if (typeof request === 'number') return request;
+  const alias = request;
+
   const adapter = createAdapter({ platformName: platform });
   const png = adapter?.readImagePng() ?? null;
   if (png === null) {
@@ -126,34 +178,8 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     writeFileFn(localPng, png);
 
     remotePath = `/tmp/agent-infra-cp-${randomId()}.png`;
-    const remoteSystem = spawnFn('ssh', [
-      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'uname', '-s'
-    ]);
-    if (remoteSystem.status !== 0) {
-      writeStderr(`failed to detect remote platform on ${alias}:\n${commandDetail(remoteSystem)}\n`);
-      return 1;
-    }
-    const remotePlatform = remoteSystem.stdout.trim();
-    if (remotePlatform !== 'Darwin' && remotePlatform !== 'Linux') {
-      writeStderr(`unsupported remote platform on ${alias}: ${remotePlatform || 'unknown'}\n`);
-      return 1;
-    }
-    if (remotePlatform === 'Linux') {
-      const homeCheck = spawnFn('ssh', [
-        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'test', '-d', '$HOME/.agent-infra'
-      ]);
-      if (homeCheck.status !== 0) {
-        writeStderr(`remote agent-infra installation is missing on ${alias}\n`);
-        return 1;
-      }
-      const capability = spawnFn('ssh', [
-        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'ai', 'cp', '--remote-receive-capability'
-      ]);
-      if (capability.status !== 0 || capability.stderr !== '' || capability.stdout.replace(/\n$/u, '') !== RECEIVER_CAPABILITY) {
-        writeStderr(`remote agent-infra clipboard receiver is unavailable or incompatible on ${alias}; update agent-infra\n`);
-        return 1;
-      }
-    }
+    const remotePlatform = detectRemotePlatform(alias, spawnFn, writeStderr);
+    if (remotePlatform === null) return 1;
 
     const upload = spawnFn('scp', [
       '-o',

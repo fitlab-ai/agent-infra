@@ -59,7 +59,7 @@ function disableOutputPostProcessing(stdin: NodeJS.ReadStream): void {
   }
 }
 
-export async function runInteractiveWithClipboardBridge(options: BridgeOptions): Promise<number> {
+function resolveBridgeOptions(options: BridgeOptions) {
   const {
     engine,
     dockerArgs,
@@ -77,6 +77,11 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
     stdout = process.stdout,
     createDetector = () => new CtrlVDetector()
   } = options;
+  return { engine, dockerArgs, container, home, cwd, env, adapter, loadPty, runInteractive, runOk, writeStderr, stdin, stdout, createDetector };
+}
+
+export async function runInteractiveWithClipboardBridge(options: BridgeOptions): Promise<number> {
+  const { engine, dockerArgs, container, home, cwd, env, adapter, loadPty, runInteractive, runOk, writeStderr, stdin, stdout, createDetector } = resolveBridgeOptions(options);
 
   function fallback(reason: string): number {
     writeStderr(`${FALLBACK_PREFIX}: ${reason}\n`);

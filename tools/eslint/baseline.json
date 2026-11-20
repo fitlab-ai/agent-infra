@@ -99,15 +99,6 @@
       "count": 1
     },
     {
-      "file": "lib/cp.ts",
-      "ruleId": "complexity",
-      "stableId": "f054d7db32e1e7ac8e3ae7de0010388770644f980934d7584a96abfe972e0a37",
-      "displayName": "cmdCp",
-      "metric": 49,
-      "normalizedMessage": "complexity=49",
-      "count": 1
-    },
-    {
       "file": "lib/init.ts",
       "ruleId": "complexity",
       "stableId": "dcdf34a02236327cd33f8da889ed97c0c913ed98448fd6638f7a0c4601b087e1",
@@ -600,15 +591,6 @@
       "displayName": "runClaudeCodeRefresh",
       "metric": 31,
       "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/clipboard/bridge.ts",
-      "ruleId": "complexity",
-      "stableId": "3f61dc3238d4a12da2dcf086df374ca134dcb904710880f5aae0f154cc761312",
-      "displayName": "runInteractiveWithClipboardBridge",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
       "count": 1
     },
     {
