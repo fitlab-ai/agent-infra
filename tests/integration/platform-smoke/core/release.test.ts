@@ -133,47 +133,53 @@ test("Node runtime baseline stays aligned across metadata and automation", () =>
     true
   );
 
-  const releaseWorkflow = parse(read(".github/workflows/release.yml")) as ReleaseWorkflow;
-  const releaseSteps = releaseWorkflow.jobs?.["npm-publish"]?.steps ?? [];
-  const setupNodeStep = requireActionStep(releaseSteps, "actions/setup-node", "release workflow");
-  const releaseNodeVersion = requireMinVersion(
-    String(setupNodeStep.with?.["node-version"] ?? ""),
-    "release workflow node-version"
-  );
-  assert.equal(semver.satisfies(releaseNodeVersion, engineRange), true);
+  function assertRuntimeAutomation() {
+    const releaseWorkflow = parse(read(".github/workflows/release.yml")) as ReleaseWorkflow;
+    const releaseSteps = releaseWorkflow.jobs?.["npm-publish"]?.steps ?? [];
+    const setupNodeStep = requireActionStep(releaseSteps, "actions/setup-node", "release workflow");
+    const releaseNodeVersion = requireMinVersion(
+      String(setupNodeStep.with?.["node-version"] ?? ""),
+      "release workflow node-version"
+    );
+    assert.equal(semver.satisfies(releaseNodeVersion, engineRange), true);
 
-  const unitTestsWorkflow = parse(read(".github/workflows/unit-tests.yml")) as ReleaseWorkflow;
-  const minimumBaselineSteps = unitTestsWorkflow.jobs?.["minimum-node-baseline"]?.steps ?? [];
-  const minimumSetupNodeStep = requireActionStep(
-    minimumBaselineSteps,
-    "actions/setup-node",
-    "minimum Node baseline job"
-  );
-  assert.equal(String(minimumSetupNodeStep.with?.["node-version"]), engineMinimum.version);
+    const unitTestsWorkflow = parse(read(".github/workflows/unit-tests.yml")) as ReleaseWorkflow;
+    const minimumBaselineSteps = unitTestsWorkflow.jobs?.["minimum-node-baseline"]?.steps ?? [];
+    const minimumSetupNodeStep = requireActionStep(
+      minimumBaselineSteps,
+      "actions/setup-node",
+      "minimum Node baseline job"
+    );
+    assert.equal(String(minimumSetupNodeStep.with?.["node-version"]), engineMinimum.version);
 
-  const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
-  const npmUpdates = dependabot.updates?.find(
-    (update) => update["package-ecosystem"] === "npm" && update.directory === "/"
-  );
-  assert.ok(
-    npmUpdates?.ignore?.some(
-      (entry) =>
-        entry["dependency-name"] === "@types/node" &&
-        entry["update-types"]?.includes("version-update:semver-major")
-    )
-  );
+    const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
+    const npmUpdates = dependabot.updates?.find(
+      (update) => update["package-ecosystem"] === "npm" && update.directory === "/"
+    );
+    assert.ok(
+      npmUpdates?.ignore?.some(
+        (entry) =>
+          entry["dependency-name"] === "@types/node" &&
+          entry["update-types"]?.includes("version-update:semver-major")
+      )
+    );
+  }
+  assertRuntimeAutomation();
 
-  const runtimeEngineConflicts = Object.entries(lock.packages)
-    .filter(([packagePath, meta]) => packagePath !== "" && !meta.dev && meta.engines?.node)
-    .filter(
-      ([, meta]) =>
-        !semver.intersects(
-          meta.engines?.node ?? "",
-          `>=${engineMinimum.version} <${engineMinimum.major + 1}.0.0`
-        )
-    )
-    .map(([packagePath, meta]) => [packagePath, meta.engines?.node]);
-  assert.deepEqual(runtimeEngineConflicts, []);
+  function assertRuntimeEngineConflicts() {
+    const runtimeEngineConflicts = Object.entries(lock.packages)
+      .filter(([packagePath, meta]) => packagePath !== "" && !meta.dev && meta.engines?.node)
+      .filter(
+        ([, meta]) =>
+          !semver.intersects(
+            meta.engines?.node ?? "",
+            `>=${engineMinimum.version} <${engineMinimum.major + 1}.0.0`
+          )
+      )
+      .map(([packagePath, meta]) => [packagePath, meta.engines?.node]);
+    assert.deepEqual(runtimeEngineConflicts, []);
+  }
+  assertRuntimeEngineConflicts();
 });
 
 test("reused GitHub Actions keep consistent refs across workflows", () => {

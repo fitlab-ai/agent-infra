@@ -31,6 +31,18 @@ test('release-note context maps rewritten PR commits and keeps unrelated commits
   const directSha = git(['rev-parse', 'HEAD']);
   git(['tag', 'v1.1.0']);
   const success = (value: unknown) => ({ ok: true, value }) as never;
+  const authorResponse = (args: string[]) => {
+    const sha = args.find((arg) => arg.startsWith('oid='))?.slice(4);
+    const login = sha === firstSha ? 'first-author' : 'direct-author';
+    return success({ data: { repository: { object: {
+      authors: {
+        nodes: [{ name: login, email: `${login}@example.com`, user: { login } }], pageInfo: { hasNextPage: false }
+      },
+      associatedPullRequests: {
+        nodes: sha === firstSha ? [{ number: 7 }] : [], pageInfo: { hasNextPage: false }
+      }
+    } } } });
+  };
   const client: GitHubClient = {
     version: () => ({ ok: true, value: '2.72.0' }),
     json(args) {
@@ -44,16 +56,7 @@ test('release-note context maps rewritten PR commits and keeps unrelated commits
         const query = args.find((arg) => arg.startsWith('query=')) || '';
         if (query.includes('viewer')) return success({ data: { viewer: { login: 'maintainer' } } });
         if (query.includes('authors(first:100)')) {
-          const sha = args.find((arg) => arg.startsWith('oid='))?.slice(4);
-          const login = sha === firstSha ? 'first-author' : 'direct-author';
-          return success({ data: { repository: { object: {
-            authors: {
-              nodes: [{ name: login, email: `${login}@example.com`, user: { login } }], pageInfo: { hasNextPage: false }
-            },
-            associatedPullRequests: {
-              nodes: sha === firstSha ? [{ number: 7 }] : [], pageInfo: { hasNextPage: false }
-            }
-          } } } });
+          return authorResponse(args);
         }
         if (query.includes('commits(first:100,after:$cursor)')) return success({ data: { repository: { pullRequest: { commits: {
           nodes: [{ commit: { oid: 'rewritten-original-sha' } }], pageInfo: { hasNextPage: false, endCursor: null }
