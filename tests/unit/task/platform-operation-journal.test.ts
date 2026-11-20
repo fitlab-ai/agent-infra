@@ -106,3 +106,16 @@ test('replacement keeps the old queue position and removes an already queued dup
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
+
+test('journal rejects a mismatched task identity and preserves the file', () => {
+  const f = fixture();
+  try {
+    const file = path.join(f.taskDir, PLATFORM_OPERATION_JOURNAL_FILE);
+    const content = JSON.stringify({ version: 1, taskId: 'TASK-20260101-000002', operations: [] });
+    fs.writeFileSync(file, content);
+    assert.throws(() => readPlatformOperationJournal(f.taskId, f.repoRoot), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
+    assert.equal(fs.readFileSync(file, 'utf8'), content);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});

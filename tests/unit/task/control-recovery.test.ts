@@ -95,3 +95,11 @@ test('recovery keeps a terminal result unknown when completion audit transitions
     outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_CRITICAL_AUDIT_INCOMPLETE'
   });
 });
+
+test('conflicting evidence takes precedence over an explicit rejection before start', () => {
+  const operation = findSandboxControlRecoveryOperation('task-create', 'create')!;
+  const binding = operationRecoveryBinding('f'.repeat(32), 'generation', null, operation.family, operation.intent);
+  assert.deepEqual(classifySandboxControlRecovery({
+    operation, binding, startedCommitted: false, explicitRejection: true, evidenceConflict: true
+  }), { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_EVIDENCE_CONFLICT' });
+});
