@@ -38,6 +38,31 @@ function required(values: Map<string, string>, flag: string): string | null {
   return value && !value.startsWith('--') ? value : null;
 }
 
+function parseRequest(action: 'read' | 'dismiss', args: string[]) {
+  const parsed = parseOptions(args.slice(1));
+  if (!parsed) { fail('invalid security alert options'); return null; }
+  const kind = required(parsed.values, '--kind');
+  const numberRaw = required(parsed.values, '--number');
+  const cwd = path.resolve(required(parsed.values, '--cwd') || process.cwd());
+  if (!kind || !numberRaw) { fail(`${action} requires --kind and --number`); return null; }
+  const number = Number(numberRaw);
+  if (!Number.isSafeInteger(number) || number <= 0) { fail('--number must be a positive integer'); return null; }
+
+  return { parsed, kind, number, cwd };
+}
+
+function prepareDismiss(parsed: NonNullable<ReturnType<typeof parseOptions>>, cwd: string) {
+  const reason = required(parsed.values, '--reason');
+  const commentFile = required(parsed.values, '--comment-file');
+  if (!reason || !commentFile) { fail('dismiss requires --reason and --comment-file'); return null; }
+  const comment = readCommentFile(commentFile, cwd);
+  if (!comment.ok) {
+    finish({ status: 'failed', changed: false, error: comment.error });
+    return null;
+  }
+  return { reason, comment };
+}
+
 async function platformSecurity(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('platform-security', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
@@ -48,14 +73,9 @@ async function platformSecurity(args: string[] = []): Promise<void> {
     return;
   }
   if (action !== 'read' && action !== 'dismiss') { fail('a valid operation is required'); return; }
-  const parsed = parseOptions(args.slice(1));
-  if (!parsed) { fail('invalid security alert options'); return; }
-  const kind = required(parsed.values, '--kind');
-  const numberRaw = required(parsed.values, '--number');
-  const cwd = path.resolve(required(parsed.values, '--cwd') || process.cwd());
-  if (!kind || !numberRaw) { fail(`${action} requires --kind and --number`); return; }
-  const number = Number(numberRaw);
-  if (!Number.isSafeInteger(number) || number <= 0) { fail('--number must be a positive integer'); return; }
+  const request = parseRequest(action, args);
+  if (!request) return;
+  const { parsed, kind, number, cwd } = request;
 
   if (action === 'read') {
     if ([...parsed.values.keys()].some((flag) => !['--kind', '--number', '--cwd'].includes(flag))) {
@@ -66,16 +86,10 @@ async function platformSecurity(args: string[] = []): Promise<void> {
     return;
   }
 
-  const reason = required(parsed.values, '--reason');
-  const commentFile = required(parsed.values, '--comment-file');
-  if (!reason || !commentFile) { fail('dismiss requires --reason and --comment-file'); return; }
-  const comment = readCommentFile(commentFile, cwd);
-  if (!comment.ok) {
-    finish({ status: 'failed', changed: false, error: comment.error });
-    return;
-  }
+  const dismissal = prepareDismiss(parsed, cwd);
+  if (!dismissal) return;
   finish(await dismissSecurityAlert(
-    { kind: kind as 'dependabot' | 'code-scanning', number, reason, comment: comment.value },
+    { kind: kind as 'dependabot' | 'code-scanning', number, reason: dismissal.reason, comment: dismissal.comment.value },
     { cwd }
   ));
 }
