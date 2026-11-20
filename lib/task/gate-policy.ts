@@ -54,7 +54,14 @@ const ARTIFACT_COMMENT_SKILLS = new Set([
 ]);
 const PR_AUDIT_SKILLS = new Set(['create-pr']);
 const IN_LABEL_AUDIT_SKILLS = new Set(['code-task', 'commit', 'create-pr']);
-const PR_AUDIT_CHECKS = new Set<PlatformAuditId>(['pr-type-label', 'in-labels-match-pr', 'pr-assignee']);
+const AUDIT_GROUPS: Record<PlatformAuditId, 'marker' | 'pr' | 'other'> = {
+  'closed-status-labels': 'other', 'status-label': 'other',
+  'comment-marker': 'marker', 'pr-comment-marker': 'marker',
+  'pr-comment-last-commit': 'marker', 'pr-comment-content': 'marker',
+  'comment-content': 'other', 'task-comment-content': 'other',
+  'in-labels-computed': 'other', 'pr-type-label': 'pr', 'in-labels-match-pr': 'pr', 'pr-assignee': 'pr',
+  'requirements': 'other', 'issue-type': 'other', 'issue-fields': 'other', 'milestone': 'other'
+};
 
 function markerAuditPolicy(checkId: PlatformAuditId, skillName: string, artifactComment: boolean, prAudit: boolean): PlatformAuditPolicy | undefined {
   switch (checkId) {
@@ -91,9 +98,9 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
   const prAudit = PR_AUDIT_SKILLS.has(skillName);
   const inLabelAudit = IN_LABEL_AUDIT_SKILLS.has(skillName);
 
-  const markerPolicy = markerAuditPolicy(checkId, skillName, artifactComment, prAudit);
-  if (markerPolicy) return markerPolicy;
-  if (PR_AUDIT_CHECKS.has(checkId)) return { classification: 'soft', enabled: prAudit };
+  const group = AUDIT_GROUPS[checkId];
+  if (group === 'marker') return markerAuditPolicy(checkId, skillName, artifactComment, prAudit)!;
+  if (group === 'pr') return { classification: 'soft', enabled: prAudit };
 
   switch (checkId) {
     case 'status-label':
@@ -113,7 +120,7 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
     case 'issue-fields':
       return { classification: 'soft', enabled: true };
     default:
-      return markerPolicy!;
+      return undefined!;
   }
 }
 
