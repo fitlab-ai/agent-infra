@@ -133,6 +133,95 @@ function resolveSandboxToolIds(
   });
 }
 
+function resolveSandboxInput(airc: AircConfig): SandboxConfigInput {
+  return airc.sandbox ?? {};
+}
+
+function resolveInitCommand(sandbox: SandboxConfigInput): string | null {
+  return typeof sandbox.initCommand === 'string' ? sandbox.initCommand : null;
+}
+
+function resolveRuntimes(sandbox: SandboxConfigInput, defaults: ReturnType<typeof cloneDefaults>): string[] {
+  return Array.isArray(sandbox.runtimes) && sandbox.runtimes.length > 0
+    ? [...sandbox.runtimes]
+    : defaults.runtimes;
+}
+
+function resolveDockerfile(sandbox: SandboxConfigInput, defaults: ReturnType<typeof cloneDefaults>): string | null {
+  return typeof sandbox.dockerfile === 'string' ? sandbox.dockerfile : defaults.dockerfile ?? null;
+}
+
+function sandboxToolsConfig(sandbox: SandboxConfigInput): Record<string, unknown> | undefined {
+  return sandbox.tools && typeof sandbox.tools === 'object' && !Array.isArray(sandbox.tools)
+    ? sandbox.tools as Record<string, unknown>
+    : undefined;
+}
+
+function warnRuntimeMismatches(repoRoot: string, runtimes: string[], dockerfile: string | null, writeStderr: WriteStderr): void {
+  if (!dockerfile) {
+    let enginesNode: string | undefined;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+        engines?: { node?: unknown };
+      };
+      enginesNode = typeof pkg.engines?.node === 'string' ? pkg.engines.node : undefined;
+    } catch {
+      enginesNode = undefined;
+    }
+
+    for (const { runtimes: invalidRuntimes, enginesNode: range } of findRuntimeEngineMismatches(runtimes, enginesNode)) {
+      writeStderr(pc.yellow(
+        `Warning: sandbox runtimes ${invalidRuntimes.map((runtime) => `"${runtime}"`).join(', ')} do not satisfy this project's package.json "engines.node" ("${range}").\n` +
+        '  Update "sandbox.runtimes" in .agents/.airc.json (e.g. "node22"), or relax "engines.node".\n'
+      ));
+    }
+  }
+}
+
+function buildSandboxConfig(
+  repoRoot: string, configPath: string, project: string, home: string,
+  airc: AircConfig, delivery: NonNullable<AircConfig['delivery']>,
+  sandbox: SandboxConfigInput, defaults: ReturnType<typeof cloneDefaults>,
+  engine: string | null, runtimes: string[], dockerfile: string | null, initCommand: string | null,
+  customTools: SandboxTool[], tools: string[], agentClientState: AgentClientState
+): SandboxConfig {
+  return {
+    repoRoot,
+    configPath,
+    project,
+    org: typeof airc.org === 'string' ? airc.org : '',
+    home,
+    containerPrefix: `${project}-dev`,
+    imageName: `${project}-sandbox:latest`,
+    worktreeBase: hostJoin(home, '.agent-infra', 'worktrees', project),
+    shareBase: hostJoin(home, '.agent-infra', 'share', project),
+    shellConfigBase: hostJoin(home, '.agent-infra', 'config', project),
+    workspaceViewBase: hostJoin(home, '.agent-infra', 'workspace-views'),
+    controlBase: hostJoin(home, '.agent-infra', 'sandbox-control'),
+    dotfilesDir: hostJoin(home, '.agent-infra', 'dotfiles'),
+    engine,
+    runtimes,
+    tools,
+    customTools,
+    agentClientState,
+    delivery: {
+      remote: typeof delivery.remote === 'string' ? delivery.remote : 'origin',
+      baseRef: typeof delivery.baseRef === 'string' ? delivery.baseRef : 'main'
+    },
+    refreshIntervalDays: asNonNegativeIntegerOrDefault(
+      sandbox.refreshIntervalDays,
+      defaults.refreshIntervalDays
+    ),
+    dockerfile,
+    initCommand,
+    vm: {
+      cpu: asPositiveNumberOrNull(sandbox.vm?.cpu) ?? defaults.vm.cpu,
+      memory: asPositiveNumberOrNull(sandbox.vm?.memory) ?? defaults.vm.memory,
+      disk: asPositiveNumberOrNull(sandbox.vm?.disk) ?? defaults.vm.disk
+    }
+  };
+}
+
 export function loadConfig({
   platformFn = platform,
   writeStderr = (chunk) => process.stderr.write(chunk)
@@ -152,7 +241,7 @@ export function loadConfig({
   const airc = JSON.parse(fs.readFileSync(configPath, 'utf8')) as AircConfig;
   const agentClients = normalizeAgentClients(airc);
   const defaults = cloneDefaults();
-  const sandbox = airc.sandbox ?? {};
+  const sandbox = resolveSandboxInput(airc);
   const delivery = airc.delivery ?? {};
   const engine = validateSandboxEngine(sandbox.engine ?? defaults.engine, { platformFn });
   const project = airc.project;
@@ -161,81 +250,27 @@ export function loadConfig({
     throw new Error('sandbox: .agents/.airc.json is missing a valid "project" field');
   }
 
-  const runtimes = Array.isArray(sandbox.runtimes) && sandbox.runtimes.length > 0
-    ? [...sandbox.runtimes]
-    : defaults.runtimes;
-  const dockerfile = typeof sandbox.dockerfile === 'string' ? sandbox.dockerfile : defaults.dockerfile ?? null;
+  const runtimes = resolveRuntimes(sandbox, defaults);
+  const dockerfile = resolveDockerfile(sandbox, defaults);
   if (sandbox.initCommand !== undefined &&
       (typeof sandbox.initCommand !== 'string' || sandbox.initCommand.trim().length === 0)) {
     throw new Error('sandbox.initCommand must be a non-empty string when configured');
   }
-  const initCommand = typeof sandbox.initCommand === 'string'
-    ? sandbox.initCommand
-    : null;
+  const initCommand = resolveInitCommand(sandbox);
 
-  if (!dockerfile) {
-    let enginesNode: string | undefined;
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
-        engines?: { node?: unknown };
-      };
-      enginesNode = typeof pkg.engines?.node === 'string' ? pkg.engines.node : undefined;
-    } catch {
-      enginesNode = undefined;
-    }
+  warnRuntimeMismatches(repoRoot, runtimes, dockerfile, writeStderr);
 
-    for (const { runtimes: invalidRuntimes, enginesNode: range } of findRuntimeEngineMismatches(runtimes, enginesNode)) {
-      writeStderr(pc.yellow(
-        `Warning: sandbox runtimes ${invalidRuntimes.map((runtime) => `"${runtime}"`).join(', ')} do not satisfy this project's package.json "engines.node" ("${range}").\n` +
-        '  Update "sandbox.runtimes" in .agents/.airc.json (e.g. "node22"), or relax "engines.node".\n'
-      ));
-    }
-  }
-
-  const toolsConfig = sandbox.tools && typeof sandbox.tools === 'object' && !Array.isArray(sandbox.tools)
-    ? sandbox.tools as Record<string, unknown>
-    : undefined;
+  const toolsConfig = sandboxToolsConfig(sandbox);
   if (sandbox.customTools !== undefined) {
     throw new Error('sandbox.customTools is no longer supported; use sandbox.tools.definitions');
   }
   const customTools = parseCustomTools(toolsConfig?.definitions, { home });
   const tools = resolveSandboxToolIds(sandbox, defaults.tools);
 
-  return {
-    repoRoot,
-    configPath,
-    project,
-    org: typeof airc.org === 'string' ? airc.org : '',
-    home,
-    containerPrefix: `${project}-dev`,
-    imageName: `${project}-sandbox:latest`,
-    worktreeBase: hostJoin(home, '.agent-infra', 'worktrees', project),
-    shareBase: hostJoin(home, '.agent-infra', 'share', project),
-    shellConfigBase: hostJoin(home, '.agent-infra', 'config', project),
-    workspaceViewBase: hostJoin(home, '.agent-infra', 'workspace-views'),
-    controlBase: hostJoin(home, '.agent-infra', 'sandbox-control'),
-    dotfilesDir: hostJoin(home, '.agent-infra', 'dotfiles'),
-    engine,
-    runtimes,
-    tools,
-    customTools,
-    agentClientState: agentClients.state,
-    delivery: {
-      remote: typeof delivery.remote === 'string' ? delivery.remote : 'origin',
-      baseRef: typeof delivery.baseRef === 'string' ? delivery.baseRef : 'main'
-    },
-    refreshIntervalDays: asNonNegativeIntegerOrDefault(
-      sandbox.refreshIntervalDays,
-      defaults.refreshIntervalDays
-    ),
-    dockerfile,
-    initCommand,
-    vm: {
-      cpu: asPositiveNumberOrNull(sandbox.vm?.cpu) ?? defaults.vm.cpu,
-      memory: asPositiveNumberOrNull(sandbox.vm?.memory) ?? defaults.vm.memory,
-      disk: asPositiveNumberOrNull(sandbox.vm?.disk) ?? defaults.vm.disk
-    }
-  };
+  return buildSandboxConfig(
+    repoRoot, configPath, project, home, airc, delivery, sandbox, defaults,
+    engine, runtimes, dockerfile, initCommand, customTools, tools, agentClients.state
+  );
 }
 
 export function loadSandboxControlLocation(repoRoot = detectRepoRoot()): Readonly<{

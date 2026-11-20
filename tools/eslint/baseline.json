@@ -171,15 +171,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/commands/enter.ts",
-      "ruleId": "complexity",
-      "stableId": "84c60e66b2e633a525088de9ee5eaf591fc92b89513f50443c2e438eb2e0267d",
-      "displayName": "enter",
-      "metric": 31,
-      "normalizedMessage": "complexity=31",
-      "count": 1
-    },
-    {
       "file": "lib/task/commit-operation.ts",
       "ruleId": "complexity",
       "stableId": "a08f68a1f1e47cf643864c99eb6b121a5f7f9ed29b8bd37ada90abce355173e0",
@@ -213,15 +204,6 @@
       "displayName": "listSandboxRemovalJournals",
       "metric": 19,
       "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/config.ts",
-      "ruleId": "complexity",
-      "stableId": "96d3efc4311fb00faeaa37d9bbfa37995bdf33a45a049a95e1d030d475a72d88",
-      "displayName": "loadConfig",
-      "metric": 38,
-      "normalizedMessage": "complexity=38",
       "count": 1
     },
     {
@@ -636,15 +618,6 @@
       "displayName": "create.anonymous-object-3.value:task",
       "metric": 5,
       "normalizedMessage": "depth=5",
-      "count": 4
-    },
-    {
-      "file": "lib/sandbox/task-resolver.ts",
-      "ruleId": "max-depth",
-      "stableId": "1bd89dff7b3e41551910209c71f07c84f53c82caec087cc5164db0f8cb5a4a40",
-      "displayName": "listTaskWorkspaces",
-      "metric": 6,
-      "normalizedMessage": "depth=6",
       "count": 4
     },
     {
