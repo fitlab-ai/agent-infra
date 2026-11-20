@@ -80,29 +80,29 @@ function optionValue(args: readonly string[], name: string): string | undefined 
   return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
-export function internalRouteSelector(command: string, args: readonly string[]): string {
-  if (command === 'sandbox-control') return first(args);
-  if (command === 'task-create') return 'input';
-  if (command === 'task-qualification') return args[1] ?? '';
-  if (command === 'task-lifecycle') return args[1] ? 'intent' : '';
-  if (command === 'task-finalization') return args[1] === 'complete' ? 'complete' : '';
-  if (command === 'task-platform-recovery') return args[1] ?? '';
-  if (command === 'task-event') return args[1] ? 'event' : '';
-  if (command === 'task-verify') return args[0] && args[1] ? 'event' : '';
-  if (command === 'task-snapshot') return 'snapshot';
-  if (command === 'task-validate') return optionValue(args, '--scope') ?? 'snapshot';
-  if (command === 'task-short-id') return first(args) === 'list' && args.includes('--verify') ? 'list-verify' : first(args);
-  if (command === 'task-review') return args[1] ?? '';
-  if (command === 'task-artifact') return args[1] ?? '';
-  if (command === 'platform-pr-review' && first(args) === 'publish') {
+type RouteSelector = (args: readonly string[]) => string;
+
+const second: RouteSelector = (args) => args[1] ?? '';
+const internalSelectors = new Map<string, RouteSelector>([
+  ['task-create', () => 'input'],
+  ['task-snapshot', () => 'snapshot'],
+  ...['task-qualification', 'task-platform-recovery', 'task-review', 'task-artifact',
+    'task-ledger', 'task-warning', 'task-activity', 'task-delivery'].map((command): [string, RouteSelector] => [command, second]),
+  ['task-lifecycle', (args) => args[1] ? 'intent' : ''],
+  ['task-event', (args) => args[1] ? 'event' : ''],
+  ['task-finalization', (args) => args[1] === 'complete' ? 'complete' : ''],
+  ['task-verify', (args) => args[0] && args[1] ? 'event' : ''],
+  ['task-validate', (args) => optionValue(args, '--scope') ?? 'snapshot'],
+  ['task-short-id', (args) => first(args) === 'list' && args.includes('--verify') ? 'list-verify' : first(args)],
+  ['platform-pr-review', (args) => {
+    if (first(args) !== 'publish') return first(args);
     const scope = optionValue(args, '--scope') ?? '';
     return /^TASK-\d{8}-\d{6}$/u.test(scope) ? 'publish-task' : /^pr\d+$/u.test(scope) ? 'publish-pr' : '';
-  }
-  if (['task-ledger', 'task-warning', 'task-activity'].includes(command)) return args[1] ?? '';
-  if (command === 'task-delivery') return args[1] ?? '';
-  if (command === 'task-context') return first(args);
-  if (command === 'task-workspace') return first(args);
-  return first(args);
+  }]
+]);
+
+export function internalRouteSelector(command: string, args: readonly string[]): string {
+  return (internalSelectors.get(command) ?? first)(args);
 }
 
 export function isInternalHandlerRoute(command: string, args: readonly string[]): boolean {
