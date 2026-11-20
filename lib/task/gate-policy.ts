@@ -54,16 +54,10 @@ const ARTIFACT_COMMENT_SKILLS = new Set([
 ]);
 const PR_AUDIT_SKILLS = new Set(['create-pr']);
 const IN_LABEL_AUDIT_SKILLS = new Set(['code-task', 'commit', 'create-pr']);
-const AUDIT_GROUPS: Record<PlatformAuditId, 'marker' | 'pr' | 'other'> = {
-  'closed-status-labels': 'other', 'status-label': 'other',
-  'comment-marker': 'marker', 'pr-comment-marker': 'marker',
-  'pr-comment-last-commit': 'marker', 'pr-comment-content': 'marker',
-  'comment-content': 'other', 'task-comment-content': 'other',
-  'in-labels-computed': 'other', 'pr-type-label': 'pr', 'in-labels-match-pr': 'pr', 'pr-assignee': 'pr',
-  'requirements': 'other', 'issue-type': 'other', 'issue-fields': 'other', 'milestone': 'other'
-};
 
-function markerAuditPolicy(checkId: PlatformAuditId, skillName: string, artifactComment: boolean, prAudit: boolean): PlatformAuditPolicy | undefined {
+type MarkerAuditId = 'comment-marker' | 'pr-comment-marker' | 'pr-comment-last-commit' | 'pr-comment-content';
+
+function markerAuditPolicy(checkId: MarkerAuditId, skillName: string, artifactComment: boolean, prAudit: boolean): PlatformAuditPolicy {
   switch (checkId) {
     case 'comment-marker':
       return {
@@ -98,10 +92,6 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
   const prAudit = PR_AUDIT_SKILLS.has(skillName);
   const inLabelAudit = IN_LABEL_AUDIT_SKILLS.has(skillName);
 
-  const group = AUDIT_GROUPS[checkId];
-  if (group === 'marker') return markerAuditPolicy(checkId, skillName, artifactComment, prAudit)!;
-  if (group === 'pr') return { classification: 'soft', enabled: prAudit };
-
   switch (checkId) {
     case 'status-label':
       return { classification: 'soft', enabled: Boolean(STATUS_LABELS[skillName]), expectedStatusLabel: STATUS_LABELS[skillName] };
@@ -111,6 +101,10 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
       return { classification: 'soft', enabled: true };
     case 'in-labels-computed':
       return { classification: 'soft', enabled: inLabelAudit };
+    case 'pr-type-label':
+    case 'in-labels-match-pr':
+    case 'pr-assignee':
+      return { classification: 'soft', enabled: prAudit };
     case 'requirements':
       return { classification: 'soft', enabled: skillName === 'complete-task' };
     case 'milestone':
@@ -119,9 +113,8 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
     case 'issue-type':
     case 'issue-fields':
       return { classification: 'soft', enabled: true };
-    default:
-      return undefined!;
   }
+  return markerAuditPolicy(checkId, skillName, artifactComment, prAudit);
 }
 
 export function classificationForCheck(checkId: string): GateClassification {
