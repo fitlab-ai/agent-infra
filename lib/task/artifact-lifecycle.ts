@@ -724,10 +724,6 @@ function resolveCodeContext(
     }
     const review = reviewCode.latest;
     if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
-    return resolveReviewedCode(review);
-  }
-
-  function resolveReviewedCode(review: ArtifactIdentity): ArtifactContextResult {
     const verdict = parseVerdict(review.path);
     if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, review.name);
     const decision = resolveDecisionImplementationInput(reviewCode, review);
