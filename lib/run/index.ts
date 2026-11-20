@@ -242,6 +242,47 @@ function writeRunRecord(params: {
   );
 }
 
+function processExitCode(result: RunProcessResult): number {
+  return result.exitCode ?? (result.signal ? 1 : 0);
+}
+
+async function runTaskSkill(
+  taskRef: string,
+  recreate: boolean | undefined,
+  config: ReturnType<typeof loadServerConfig> | null,
+  options: RunSkillOptions,
+  command: string[]
+): Promise<number> {
+  const repoRoot = options.repoRoot ?? config?.repoRoot ?? process.cwd();
+  const target = resolveSandboxTarget(taskRef, repoRoot);
+  const branch = target.branch;
+  const identity = resolveActiveTaskIdentity(taskRef, repoRoot);
+  const runId = identity ? createRunId() : undefined;
+  const writeStdout = options.writeStdout ?? ((chunk: string) => process.stdout.write(chunk));
+  const writeStderr = options.writeStderr ?? ((chunk: string) => process.stderr.write(chunk));
+  const runSandbox =
+    options.runSandbox ??
+    ((request: SandboxRunRequest) => runInSandbox(request));
+  const result = await runSandbox({
+    taskRef,
+    branch,
+    workspace: target.workspace,
+    command,
+    runId,
+    recreate
+  });
+  if (result.stdout) {
+    writeStdout(result.stdout);
+  }
+  if (result.stderr) {
+    writeStderr(result.stderr);
+  }
+  if (processExitCode(result) === 0 && identity && result.run) {
+    writeRunRecord({ identity, run: result.run, branch, command });
+  }
+  return processExitCode(result);
+}
+
 export async function runSkill(args: string[], options: RunSkillOptions = {}): Promise<number> {
   const parsed = parseRunArgs(args);
   const config = options.command ? null : loadServerConfig({ rootDir: options.repoRoot });
@@ -257,34 +298,7 @@ export async function runSkill(args: string[], options: RunSkillOptions = {}): P
     return result.exitCode ?? (result.signal ? 1 : 0);
   }
 
-  const repoRoot = options.repoRoot ?? config?.repoRoot ?? process.cwd();
-  const target = resolveSandboxTarget(parsed.taskRef, repoRoot);
-  const branch = target.branch;
-  const identity = resolveActiveTaskIdentity(parsed.taskRef, repoRoot);
-  const runId = identity ? createRunId() : undefined;
-  const writeStdout = options.writeStdout ?? ((chunk: string) => process.stdout.write(chunk));
-  const writeStderr = options.writeStderr ?? ((chunk: string) => process.stderr.write(chunk));
-  const runSandbox =
-    options.runSandbox ??
-    ((request: SandboxRunRequest) => runInSandbox(request));
-  const result = await runSandbox({
-    taskRef: parsed.taskRef,
-    branch,
-    workspace: target.workspace,
-    command,
-    runId,
-    recreate: parsed.recreate
-  });
-  if (result.stdout) {
-    writeStdout(result.stdout);
-  }
-  if (result.stderr) {
-    writeStderr(result.stderr);
-  }
-  if ((result.exitCode ?? (result.signal ? 1 : 0)) === 0 && identity && result.run) {
-    writeRunRecord({ identity, run: result.run, branch, command });
-  }
-  return result.exitCode ?? (result.signal ? 1 : 0);
+  return runTaskSkill(parsed.taskRef, parsed.recreate, config, options, command);
 }
 
 export async function cmdRun(args: string[]): Promise<void> {

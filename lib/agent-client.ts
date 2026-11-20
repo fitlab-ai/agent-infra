@@ -104,6 +104,81 @@ function printState(state: AgentClientState): void {
   }
 }
 
+function showAgentClientStatus(args: string[], projectRoot: string, config: Record<string, unknown>): number {
+  if (args.length !== 1) {
+    throw new AgentClientCommandError('AGENT_CLIENT_ARGUMENT_INVALID', 'status accepts no arguments');
+  }
+  const plan = workflowPlan(projectRoot, config, { type: 'none' });
+  printState(plan.desired);
+  for (const seed of plan.seedOperations) {
+    process.stdout.write(`  seed ${seed.target}: ${seed.kind}\n`);
+  }
+  for (const diagnostic of plan.diagnostics) {
+    process.stdout.write(`  diagnostic ${diagnostic.code} at ${diagnostic.path}\n`);
+  }
+  return 0;
+}
+
+function setAgentClientEnabled(args: string[], operation: 'enable' | 'disable', projectRoot: string, config: Record<string, unknown>): number {
+  if (args.length !== 2) {
+    throw new AgentClientCommandError(
+      'AGENT_CLIENT_ARGUMENT_INVALID',
+      `${operation} requires exactly one client id`
+    );
+  }
+  const id = args[1];
+  if (!isAgentClientId(id)) {
+    throw new AgentClientCommandError('UNKNOWN_AGENT_CLIENT', `Unknown Agent Client '${String(id)}'`);
+  }
+  const plan = workflowPlan(projectRoot, config, {
+    type: 'set-enabled',
+    id,
+    value: operation === 'enable'
+  });
+  process.stdout.write('Before:\n');
+  printState(plan.before);
+  const result = applyAgentClientReconciliation(plan);
+  process.stdout.write('After:\n');
+  printState(plan.desired);
+  process.stdout.write(
+    `Result: ${result.status}; applied=${result.applied.length}; protected=${result.protected.length}\n`
+  );
+  return 0;
+}
+
+async function configureAgentClients(args: string[], projectRoot: string, config: Record<string, unknown>): Promise<number> {
+  if (args.length !== 1) {
+    throw new AgentClientCommandError('AGENT_CLIENT_ARGUMENT_INVALID', 'configure accepts no arguments');
+  }
+  const normalized = normalizeAgentClients(config);
+  let enabled: string[];
+  let installed: string[];
+  try {
+    enabled = await multiSelect(
+      'Agent Client project integrations',
+      choices(),
+      selected(normalized.state, 'enabled')
+    );
+    installed = await multiSelect(
+      'Agent Clients installed in sandbox',
+      choices(),
+      selected(normalized.state, 'installInSandbox')
+    );
+  } finally {
+    closePrompt();
+  }
+  const state = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
+    enabled: enabled.includes(id),
+    installInSandbox: installed.includes(id)
+  }])) as AgentClientState;
+  const plan = workflowPlan(projectRoot, config, { type: 'replace-state', state });
+  const result = applyAgentClientReconciliation(plan);
+  process.stdout.write(
+    `Result: ${result.status}; applied=${result.applied.length}; protected=${result.protected.length}\n`
+  );
+  return 0;
+}
+
 async function cmdAgentClient(args: string[]): Promise<number> {
   const operation = args[0];
   if (!operation || operation === '--help' || operation === '-h' || operation === 'help') {
@@ -132,80 +207,9 @@ async function cmdAgentClient(args: string[]): Promise<number> {
   const projectRoot = process.cwd();
   const config = readConfig(projectRoot);
   try {
-    if (operation === 'status') {
-      if (args.length !== 1) {
-        throw new AgentClientCommandError('AGENT_CLIENT_ARGUMENT_INVALID', 'status accepts no arguments');
-      }
-      const plan = workflowPlan(projectRoot, config, { type: 'none' });
-      printState(plan.desired);
-      for (const seed of plan.seedOperations) {
-        process.stdout.write(`  seed ${seed.target}: ${seed.kind}\n`);
-      }
-      for (const diagnostic of plan.diagnostics) {
-        process.stdout.write(`  diagnostic ${diagnostic.code} at ${diagnostic.path}\n`);
-      }
-      return 0;
-    }
-
-    if (operation === 'enable' || operation === 'disable') {
-      if (args.length !== 2) {
-        throw new AgentClientCommandError(
-          'AGENT_CLIENT_ARGUMENT_INVALID',
-          `${operation} requires exactly one client id`
-        );
-      }
-      const id = args[1];
-      if (!isAgentClientId(id)) {
-        throw new AgentClientCommandError('UNKNOWN_AGENT_CLIENT', `Unknown Agent Client '${String(id)}'`);
-      }
-      const plan = workflowPlan(projectRoot, config, {
-        type: 'set-enabled',
-        id,
-        value: operation === 'enable'
-      });
-      process.stdout.write('Before:\n');
-      printState(plan.before);
-      const result = applyAgentClientReconciliation(plan);
-      process.stdout.write('After:\n');
-      printState(plan.desired);
-      process.stdout.write(
-        `Result: ${result.status}; applied=${result.applied.length}; protected=${result.protected.length}\n`
-      );
-      return 0;
-    }
-
-    if (operation === 'configure') {
-      if (args.length !== 1) {
-        throw new AgentClientCommandError('AGENT_CLIENT_ARGUMENT_INVALID', 'configure accepts no arguments');
-      }
-      const normalized = normalizeAgentClients(config);
-      let enabled: string[];
-      let installed: string[];
-      try {
-        enabled = await multiSelect(
-          'Agent Client project integrations',
-          choices(),
-          selected(normalized.state, 'enabled')
-        );
-        installed = await multiSelect(
-          'Agent Clients installed in sandbox',
-          choices(),
-          selected(normalized.state, 'installInSandbox')
-        );
-      } finally {
-        closePrompt();
-      }
-      const state = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
-        enabled: enabled.includes(id),
-        installInSandbox: installed.includes(id)
-      }])) as AgentClientState;
-      const plan = workflowPlan(projectRoot, config, { type: 'replace-state', state });
-      const result = applyAgentClientReconciliation(plan);
-      process.stdout.write(
-        `Result: ${result.status}; applied=${result.applied.length}; protected=${result.protected.length}\n`
-      );
-      return 0;
-    }
+    if (operation === 'status') return showAgentClientStatus(args, projectRoot, config);
+    if (operation === 'enable' || operation === 'disable') return setAgentClientEnabled(args, operation, projectRoot, config);
+    if (operation === 'configure') return await configureAgentClients(args, projectRoot, config);
 
     throw new AgentClientCommandError(
       'AGENT_CLIENT_OPERATION_INVALID',
