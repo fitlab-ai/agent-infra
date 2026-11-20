@@ -207,6 +207,48 @@ function resolvedContextClient(
   let repositoryCalls = 0;
   let pullRequestCalls = 0;
   const remoteComments = [...(options.comments || [])];
+  const pullRequestResponse = () => {
+    const pullRequestCall = pullRequestCalls++;
+    if (options.pullRequestFailureAt === pullRequestCall + 1) {
+      return { ok: false, error: { code: 'PR_INSPECTION_FAILED', message: 'pull-request inspect failed', retryable: true } };
+    }
+    const currentHead = options.headSequence?.[Math.min(pullRequestCall, (options.headSequence?.length || 1) - 1)] || headSha;
+    return { ok: true, value: {
+      number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/widgets/pull/42',
+      state: 'open', title: 'Canonical report', body: '', draft: false,
+      head: { ref: 'feature', sha: currentHead, repo: { full_name: 'acme/widgets' } },
+      base: { ref: 'main', sha: baseSha, repo: { full_name: 'acme/widgets' } },
+      merged_at: null, merge_commit_sha: null
+    } };
+  };
+
+  const writeComment = (args: string[], request?: { input?: string }) => {
+    if (options.commentWrites) options.commentWrites.value += 1;
+    options.onCommentWrite?.();
+    const body = request?.input ? JSON.parse(request.input).body as string : '';
+    if (options.writtenBodies && request?.input) options.writtenBodies.push(body);
+    const id = /\/comments\/(\d+)$/u.exec(args[1] ?? '')?.[1];
+    const current = id
+      ? remoteComments.find((comment) => String(comment.id) === id)
+      : remoteComments.find((comment) => comment.body.includes(`<!-- sync-pr:TASK-20260101-000042:summary -->`));
+    if (current) current.body = body;
+    else remoteComments.push({ id: 9, body });
+    return { ok: true, value: { id: 9 } };
+  };
+
+  const commentResponse = (args: string[], request?: { input?: string }) => {
+    if (args.includes('POST') || args.includes('PATCH')) {
+      return writeComment(args, request);
+    }
+    if (failure === 'duplicate') {
+      const marker = '<!-- sync-pr:TASK-20260101-000042:summary -->';
+      return { ok: true, value: [[{ id: 1, body: `${marker}\nfirst` }, { id: 2, body: `${marker}\nsecond` }]] };
+    }
+    return failure === 'comments'
+      ? { ok: false, error: { code: 'COMMENT_LIST_FAILED', message: 'comment API failed', retryable: true } }
+      : { ok: true, value: [remoteComments] };
+  };
+
   return {
     version: () => ({ ok: true, value: '2.72.0' }),
     json: (args: string[], request?: { input?: string }) => {
@@ -218,40 +260,10 @@ function resolvedContextClient(
         return { ok: true, value: { full_name: 'acme/widgets', fork: false, permissions: { triage: true, push: true, admin: true } } };
       }
       if (args.some((value: string) => value.includes('/pulls/42'))) {
-        const pullRequestCall = pullRequestCalls++;
-        if (options.pullRequestFailureAt === pullRequestCall + 1) {
-          return { ok: false, error: { code: 'PR_INSPECTION_FAILED', message: 'pull-request inspect failed', retryable: true } };
-        }
-        const currentHead = options.headSequence?.[Math.min(pullRequestCall, (options.headSequence?.length || 1) - 1)] || headSha;
-        return { ok: true, value: {
-          number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/widgets/pull/42',
-          state: 'open', title: 'Canonical report', body: '', draft: false,
-          head: { ref: 'feature', sha: currentHead, repo: { full_name: 'acme/widgets' } },
-          base: { ref: 'main', sha: baseSha, repo: { full_name: 'acme/widgets' } },
-          merged_at: null, merge_commit_sha: null
-        } };
+        return pullRequestResponse();
       }
       if (args.some((value: string) => value.includes('/issues/42/comments') || value.includes('/issues/comments/'))) {
-        if (args.includes('POST') || args.includes('PATCH')) {
-          if (options.commentWrites) options.commentWrites.value += 1;
-          options.onCommentWrite?.();
-          const body = request?.input ? JSON.parse(request.input).body as string : '';
-          if (options.writtenBodies && request?.input) options.writtenBodies.push(body);
-          const id = /\/comments\/(\d+)$/u.exec(args[1] ?? '')?.[1];
-          const current = id
-            ? remoteComments.find((comment) => String(comment.id) === id)
-            : remoteComments.find((comment) => comment.body.includes(`<!-- sync-pr:TASK-20260101-000042:summary -->`));
-          if (current) current.body = body;
-          else remoteComments.push({ id: 9, body });
-          return { ok: true, value: { id: 9 } };
-        }
-        if (failure === 'duplicate') {
-          const marker = '<!-- sync-pr:TASK-20260101-000042:summary -->';
-          return { ok: true, value: [[{ id: 1, body: `${marker}\nfirst` }, { id: 2, body: `${marker}\nsecond` }]] };
-        }
-        return failure === 'comments'
-          ? { ok: false, error: { code: 'COMMENT_LIST_FAILED', message: 'comment API failed', retryable: true } }
-          : { ok: true, value: [remoteComments] };
+        return commentResponse(args, request);
       }
       throw new Error(`unexpected GitHub call: ${args.join(' ')}`);
     },

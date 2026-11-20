@@ -40,6 +40,21 @@ function mockClient(options: {
   let nextId = 100;
   let transientFailures = options.failPostTimes ?? 0;
 
+  const postReview = (request: { method?: string; input?: string }) => {
+    const input = JSON.parse(request.input || '{}') as { commit_id?: string; body?: string; event?: string };
+    postedBodies.push(input.body || '');
+    if (transientFailures > 0) {
+      transientFailures -= 1;
+      reviews.push({ id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: `https://github.com/${repository}/pull/42#r1` });
+      nextId += 1;
+      return { ok: false as const, error: { code: 'NETWORK_TRANSIENT', message: 'timeout', retryable: true } };
+    }
+    const created: MockReview = { id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: `https://github.com/${repository}/pull/42#r1` };
+    nextId += 1;
+    reviews.push(created);
+    return { ok: true as const, value: created };
+  };
+
   const json = (args: string[], request: { method?: string; input?: string } = {}) => {
     const joined = args.join(' ');
     requests.push(`${request.method ?? 'GET'} ${joined}`);
@@ -47,18 +62,7 @@ function mockClient(options: {
       return { ok: true as const, value: [reviews] };
     }
     if (args.includes('-X') && args.includes('POST') && joined.includes(`repos/${repository}/pulls/42/reviews`)) {
-      const input = JSON.parse(request.input || '{}') as { commit_id?: string; body?: string; event?: string };
-      postedBodies.push(input.body || '');
-      if (transientFailures > 0) {
-        transientFailures -= 1;
-        reviews.push({ id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: `https://github.com/${repository}/pull/42#r1` });
-        nextId += 1;
-        return { ok: false as const, error: { code: 'NETWORK_TRANSIENT', message: 'timeout', retryable: true } };
-      }
-      const created: MockReview = { id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: `https://github.com/${repository}/pull/42#r1` };
-      nextId += 1;
-      reviews.push(created);
-      return { ok: true as const, value: created };
+      return postReview(request);
     }
     if (args[1] === 'graphql') {
       return { ok: true as const, value: { data: { viewer: { login: 'codex' } } } };

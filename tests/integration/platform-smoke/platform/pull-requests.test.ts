@@ -123,18 +123,37 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   let issueLabels = ['in: stale', 'keep'];
   let prLabels = ['in: stale', 'type: feature'];
   const calls: string[] = [];
+  const deleteLabels = (endpoint: string) => {
+    const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
+    if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
+    else prLabels = prLabels.filter((label) => label !== name);
+    return { ok: true, value: {} };
+  };
+
+  const postLabels = (endpoint: string, options: RequestOptions) => {
+    const labels = JSON.parse(options.input || '{}').labels as string[];
+    if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
+    else prLabels.push(...labels);
+    return { ok: true, value: {} };
+  };
+
+  const readIdentity = (args: string[]) => {
+    if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+      return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+    }
+    if (args[0] === 'api' && args[1] === 'repos/o/r') {
+      return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
+    }
+    if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(42), labels: prLabels.map((name) => ({ name })) } };
+  };
+
   const client: GitHubClient = {
     version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], options: RequestOptions = {}) {
       const joined = args.join(' ');
       calls.push(joined);
-      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
-        return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
-      }
-      if (args[0] === 'api' && args[1] === 'repos/o/r') {
-        return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
-      }
-      if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(42), labels: prLabels.map((name) => ({ name })) } };
+      const identity = readIdentity(args);
+      if (identity !== undefined) return identity;
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (/pulls\/42\/files\?/.test(endpoint)) return { ok: true, value: [[{ filename: 'lib/core.ts' }]] };
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
@@ -148,16 +167,10 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
         labels: issueLabels.map((name) => ({ name })), assignees: [], milestone: null
       } };
       if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
-        const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
-        if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
-        else prLabels = prLabels.filter((label) => label !== name);
-        return { ok: true, value: {} };
+        return deleteLabels(endpoint);
       }
       if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
-        const labels = JSON.parse(options.input || '{}').labels as string[];
-        if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
-        else prLabels.push(...labels);
-        return { ok: true, value: {} };
+        return postLabels(endpoint, options);
       }
       return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: joined, retryable: false } };
     },
@@ -184,18 +197,45 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
   let issueLabels = ['in: stale', 'keep'];
   let prLabels = fixtureOptions.prLabels || ['in: stale', 'type: feature'];
   const calls: string[] = [];
+  const deleteLabels = (endpoint: string) => {
+    if (fixtureOptions.injectConcurrentUnrelatedLabel && endpoint.includes('/issues/42/') && !prLabels.includes('unrelated: concurrent')) {
+      prLabels.push('unrelated: concurrent');
+    }
+    const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
+    if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
+    else prLabels = prLabels.filter((label) => label !== name);
+    return { ok: true, value: {} };
+  };
+
+  const postLabels = (endpoint: string, request: RequestOptions) => {
+    if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) {
+      return fixtureOptions.failPullRequestDeterministic
+        ? { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } }
+        : { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
+    }
+    const labels = JSON.parse(request.input || '{}').labels as string[];
+    if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
+    else prLabels.push(...labels);
+    return { ok: true, value: {} };
+  };
+
+  const readIdentity = (args: string[]) => {
+    if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+      return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+    }
+    if (args[0] === 'api' && args[1] === 'repos/o/r') {
+      return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
+    }
+    if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(fixtureOptions.identityMismatch ? 43 : 42), labels: prLabels.map((name) => ({ name })) } };
+  };
+
   const client: GitHubClient = {
     version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], request: RequestOptions = {}) {
       const joined = args.join(' ');
       calls.push(joined);
-      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
-        return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
-      }
-      if (args[0] === 'api' && args[1] === 'repos/o/r') {
-        return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
-      }
-      if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(fixtureOptions.identityMismatch ? 43 : 42), labels: prLabels.map((name) => ({ name })) } };
+      const identity = readIdentity(args);
+      if (identity !== undefined) return identity;
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (/pulls\/42\/files\?/.test(endpoint)) return { ok: true, value: [[{ filename: 'lib/core.ts' }]] };
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
@@ -209,24 +249,10 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
         labels: issueLabels.map((name) => ({ name })), assignees: [], milestone: null
       } };
       if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
-        if (fixtureOptions.injectConcurrentUnrelatedLabel && endpoint.includes('/issues/42/') && !prLabels.includes('unrelated: concurrent')) {
-          prLabels.push('unrelated: concurrent');
-        }
-        const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
-        if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
-        else prLabels = prLabels.filter((label) => label !== name);
-        return { ok: true, value: {} };
+        return deleteLabels(endpoint);
       }
       if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
-        if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) {
-          return fixtureOptions.failPullRequestDeterministic
-            ? { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } }
-            : { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
-        }
-        const labels = JSON.parse(request.input || '{}').labels as string[];
-        if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
-        else prLabels.push(...labels);
-        return { ok: true, value: {} };
+        return postLabels(endpoint, request);
       }
       return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: joined, retryable: false } };
     },
@@ -277,21 +303,60 @@ function boundPullRequestFixture(options: {
   const writes: string[] = [];
   const issuePatchPayloads: Array<Record<string, unknown>> = [];
   let pullRequestReads = 0;
+  const deleteLabels = (endpoint: string) => {
+    const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
+    if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
+    else prLabels = prLabels.filter((label) => label !== name);
+    writes.push(`DELETE ${endpoint}`);
+    return { ok: true, value: {} };
+  };
+
+  const postLabels = (endpoint: string, request: RequestOptions) => {
+    if (options.failPullRequestLabel && endpoint.includes('/issues/42/')) {
+      writes.push(`POST ${endpoint}`);
+      return { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } };
+    }
+    const labels = JSON.parse(request.input || '{}').labels as string[];
+    if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
+    else {
+      prLabels.push(...labels);
+      if (options.injectConcurrentUnrelatedLabel && !prLabels.includes('unrelated: concurrent')) {
+        prLabels.push('unrelated: concurrent');
+      }
+    }
+    writes.push(`POST ${endpoint}`);
+    return { ok: true, value: {} };
+  };
+
+  const readIdentity = (args: string[]) => {
+    if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+      return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+    }
+    if (args[0] === 'api' && args[1] === 'repos/o/r') {
+      return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: false, admin: false } } };
+    }
+    if (/pulls\/42$/.test(args[1] || '')) {
+      pullRequestReads += 1;
+      const identityMismatch = options.identityMismatch || (options.identityMismatchOnReread && pullRequestReads > 1);
+      return { ok: true, value: { ...remote(identityMismatch ? 43 : 42), body: prBody, labels: prLabels.map((name) => ({ name })) } };
+    }
+  };
+
+  const patchPullRequest = (endpoint: string, request: RequestOptions) => {
+    writes.push(`PATCH ${endpoint}`);
+    const payload = JSON.parse(request.input || '{}') as Record<string, unknown>;
+    issuePatchPayloads.push(payload);
+    if (typeof payload.body === 'string') prBody = payload.body;
+    if (Array.isArray(payload.labels)) prLabels = [...payload.labels.filter((label): label is string => typeof label === 'string')];
+    return { ok: true, value: {} };
+  };
+
   const client: GitHubClient = {
     version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], request: RequestOptions = {}) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
-      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
-        return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
-      }
-      if (args[0] === 'api' && args[1] === 'repos/o/r') {
-        return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: false, admin: false } } };
-      }
-      if (/pulls\/42$/.test(args[1] || '')) {
-        pullRequestReads += 1;
-        const identityMismatch = options.identityMismatch || (options.identityMismatchOnReread && pullRequestReads > 1);
-        return { ok: true, value: { ...remote(identityMismatch ? 43 : 42), body: prBody, labels: prLabels.map((name) => ({ name })) } };
-      }
+      const identity = readIdentity(args);
+      if (identity !== undefined) return identity;
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
       if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
         number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/o/r/issues/7', state: 'open', title: 'Issue', body: '',
@@ -302,35 +367,13 @@ function boundPullRequestFixture(options: {
         return { ok: true, value: [[{ title: '1.0.0', number: 100 }, { title: '1.0.1', number: 101 }]] };
       }
       if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
-        const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
-        if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
-        else prLabels = prLabels.filter((label) => label !== name);
-        writes.push(`DELETE ${endpoint}`);
-        return { ok: true, value: {} };
+        return deleteLabels(endpoint);
       }
       if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
-        if (options.failPullRequestLabel && endpoint.includes('/issues/42/')) {
-          writes.push(`POST ${endpoint}`);
-          return { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } };
-        }
-        const labels = JSON.parse(request.input || '{}').labels as string[];
-        if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
-        else {
-          prLabels.push(...labels);
-          if (options.injectConcurrentUnrelatedLabel && !prLabels.includes('unrelated: concurrent')) {
-            prLabels.push('unrelated: concurrent');
-          }
-        }
-        writes.push(`POST ${endpoint}`);
-        return { ok: true, value: {} };
+        return postLabels(endpoint, request);
       }
       if (args.includes('PATCH') && /issues\/42$/.test(endpoint)) {
-        writes.push(`PATCH ${endpoint}`);
-        const payload = JSON.parse(request.input || '{}') as Record<string, unknown>;
-        issuePatchPayloads.push(payload);
-        if (typeof payload.body === 'string') prBody = payload.body;
-        if (Array.isArray(payload.labels)) prLabels = [...payload.labels.filter((label): label is string => typeof label === 'string')];
-        return { ok: true, value: {} };
+        return patchPullRequest(endpoint, request);
       }
       return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: args.join(' '), retryable: false } };
     },

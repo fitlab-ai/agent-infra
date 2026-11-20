@@ -36,15 +36,6 @@
       "count": 1
     },
     {
-      "file": "tests/integration/platform-smoke/platform/pull-requests.test.ts",
-      "ruleId": "complexity",
-      "stableId": "608b7ab9684a84ec2cc8ec95044d5f27a3272f43756df6a92d257f9b0147b106",
-      "displayName": "boundPullRequestFixture.anonymous-object-1.method:json",
-      "metric": 33,
-      "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/index.ts",
       "ruleId": "complexity",
       "stableId": "0b058968fd8a5212b9f3ca46b76dbfc7881868d0d8a5c853e18ea45a18fb9e63",
@@ -153,15 +144,6 @@
       "count": 1
     },
     {
-      "file": "tests/integration/platform-smoke/platform/pr-review.test.ts",
-      "ruleId": "complexity",
-      "stableId": "56ab0cb108240d632053f73ad53dbe8132c769d137a52457238b2264f14beb62",
-      "displayName": "mockClient.json",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "7a1dc21733e9da8a40d612f6888bedf86ddcda8cc094bc9a3697cda62c8104ca",
@@ -177,15 +159,6 @@
       "displayName": "platformSecurity",
       "metric": 22,
       "normalizedMessage": "complexity=22",
-      "count": 1
-    },
-    {
-      "file": "tests/integration/platform-smoke/platform/pull-requests.test.ts",
-      "ruleId": "complexity",
-      "stableId": "91ec75ce35973d1f62d0d456e292f985f28ebd81d5d8f9216825d3c298578ff0",
-      "displayName": "prOnlyInLabelFixture.anonymous-object-1.method:json",
-      "metric": 29,
-      "normalizedMessage": "complexity=29",
       "count": 1
     },
     {
@@ -270,15 +243,6 @@
       "count": 1
     },
     {
-      "file": "tests/integration/platform-smoke/platform/pr-summary.test.ts",
-      "ruleId": "complexity",
-      "stableId": "fbc43b64ff5e76b6145f9929ebc77d3b30a9eea6dc41904cffa0423a40c24d35",
-      "displayName": "resolvedContextClient.anonymous-object-1.value:json",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/removal.ts",
       "ruleId": "complexity",
       "stableId": "449251fb597b02115c885e2d886a773e9b15779960256f350ac87af2a75c181c",
@@ -351,39 +315,12 @@
       "count": 1
     },
     {
-      "file": "tests/integration/platform-smoke/platform/release-note-context.test.ts",
-      "ruleId": "complexity",
-      "stableId": "4a9df851e561c5a7886c7010639173f0cda15ee426df5644b4e81ba3cf3c7410",
-      "displayName": "test callback[1]#1.client.method:json",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
-      "file": "tests/integration/platform-smoke/core/release.test.ts",
-      "ruleId": "complexity",
-      "stableId": "f1c6057946d5c2743fe40ff52613efea358e6fc6c70d73a61589f7c256b813a7",
-      "displayName": "test callback[1]#2",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "tests/integration/cli/platform-issue.test.ts",
       "ruleId": "complexity",
       "stableId": "9ee9ce075c7d635cd2987a5bf93b2e68d55133c936237baa443d0ba95baf40d6",
       "displayName": "test callback[1]#5",
       "metric": 28,
       "normalizedMessage": "complexity=28",
-      "count": 1
-    },
-    {
-      "file": "tests/integration/platform-smoke/platform/pull-requests.test.ts",
-      "ruleId": "complexity",
-      "stableId": "517bd621bf3fc76eb5469019c16fe8d706e56749939ea4ef2c92e45ab8c401db",
-      "displayName": "test callback[1]#6.anonymous-object-1.method:json",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
       "count": 1
     },
     {

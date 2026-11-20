@@ -70,6 +70,12 @@ function requireActionStep(steps: WorkflowStep[], action: string, label: string)
   return step;
 }
 
+function requireWorkflowNodeVersion(workflowPath: string, jobName: string, label: string) {
+  const workflow = parse(read(workflowPath)) as ReleaseWorkflow;
+  const steps = workflow.jobs?.[jobName]?.steps ?? [];
+  return requireActionStep(steps, "actions/setup-node", label).with?.["node-version"];
+}
+
 test("package metadata supports scoped npm publishing", () => {
   const pkg = JSON.parse(read("package.json"));
 
@@ -133,23 +139,16 @@ test("Node runtime baseline stays aligned across metadata and automation", () =>
     true
   );
 
-  const releaseWorkflow = parse(read(".github/workflows/release.yml")) as ReleaseWorkflow;
-  const releaseSteps = releaseWorkflow.jobs?.["npm-publish"]?.steps ?? [];
-  const setupNodeStep = requireActionStep(releaseSteps, "actions/setup-node", "release workflow");
   const releaseNodeVersion = requireMinVersion(
-    String(setupNodeStep.with?.["node-version"] ?? ""),
+    String(requireWorkflowNodeVersion(".github/workflows/release.yml", "npm-publish", "release workflow") ?? ""),
     "release workflow node-version"
   );
   assert.equal(semver.satisfies(releaseNodeVersion, engineRange), true);
 
-  const unitTestsWorkflow = parse(read(".github/workflows/unit-tests.yml")) as ReleaseWorkflow;
-  const minimumBaselineSteps = unitTestsWorkflow.jobs?.["minimum-node-baseline"]?.steps ?? [];
-  const minimumSetupNodeStep = requireActionStep(
-    minimumBaselineSteps,
-    "actions/setup-node",
-    "minimum Node baseline job"
+  assert.equal(
+    String(requireWorkflowNodeVersion(".github/workflows/unit-tests.yml", "minimum-node-baseline", "minimum Node baseline job")),
+    engineMinimum.version
   );
-  assert.equal(String(minimumSetupNodeStep.with?.["node-version"]), engineMinimum.version);
 
   const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
   const npmUpdates = dependabot.updates?.find(
