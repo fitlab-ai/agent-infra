@@ -43,6 +43,60 @@ function parseFailure(error: unknown): string {
   return message.replace(/^TASK_CONTROL_OPERATION_INVALID: /u, '');
 }
 
+type FinalizationOperation = Extract<ReturnType<typeof parseTaskControlOperation>, { family: 'task-finalization' }>;
+
+async function finalizeSandboxLocal(boundOperation: FinalizationOperation, repoRoot: string): Promise<void> {
+  const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
+  const taskId = process.env.AGENT_INFRA_TASK_ID;
+  const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
+  const controlRootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
+  const controlRoot = process.env.AGENT_INFRA_CONTROL_ROOT_DIR;
+  if (!statusDir || !taskId || !generation || !controlRootId || !controlRoot || taskId !== boundOperation.request.taskRef) {
+    const detail = { code: 'TASK_CONTROL_TRANSPORT_INVALID', message: 'sandbox task control identity is incomplete', retryable: false };
+    process.stdout.write(envelope('failed', false, true, null, detail));
+    process.exitCode = 1;
+    return;
+  }
+  const result = await applyTaskFinalization(boundOperation.request, {
+    repoRoot,
+    beforeLifecycle: async (currentTaskId) => {
+      if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
+      validateSandboxControlTaskIdentity(
+        controlRoot,
+        { taskId, generation, controlRootId, statusDir }
+      );
+    },
+    preflight: (request, options) => verifyTaskEvent(
+      { ...request, event: 'complete-task.hard-preflight' }, options
+    )
+  });
+  const status = result.status === 'prepared' ? 'failed' : result.status;
+  process.stdout.write(envelope(status, result.changed, true, result, result.error
+    ?? (result.status === 'prepared' ? { code: 'TASK_FINALIZATION_PREPARATION_INCOMPLETE', message: 'finalization did not commit', retryable: true } : null)));
+  process.exitCode = exitCode(status);
+  return;
+}
+
+async function finalizeDirect(boundOperation: FinalizationOperation, repoRoot: string): Promise<void> {
+  const controlLocation = loadSandboxControlLocation(repoRoot);
+  const result = await dispatchTaskControlOperation(
+    createDirectHostExecutionContext({ repoRoot, ...(controlLocation ?? {}) }),
+    boundOperation
+  );
+  if (result.status === 'prepared') {
+    const detail = {
+      code: 'TASK_FINALIZATION_DIRECT_COMMIT_REQUIRED',
+      message: 'direct finalization prepared external work without committing the lifecycle transition',
+      retryable: false
+    };
+    process.stdout.write(envelope('failed', result.changed, true, result, detail));
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(envelope(result.status, result.changed, true, result, result.error));
+  process.exitCode = exitCode(result.status);
+}
+
 async function taskFinalization(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (!ensureInternalHandlerRoute('task-finalization', args)) return;
@@ -81,53 +135,10 @@ async function taskFinalization(args: string[] = []): Promise<void> {
   };
   const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
   if (transport.kind === 'sandbox-local') {
-    const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
-    const taskId = process.env.AGENT_INFRA_TASK_ID;
-    const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
-    const controlRootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
-    const controlRoot = process.env.AGENT_INFRA_CONTROL_ROOT_DIR;
-    if (!statusDir || !taskId || !generation || !controlRootId || !controlRoot || taskId !== resolved.taskId) {
-      const detail = { code: 'TASK_CONTROL_TRANSPORT_INVALID', message: 'sandbox task control identity is incomplete', retryable: false };
-      process.stdout.write(envelope('failed', false, true, null, detail));
-      process.exitCode = 1;
-      return;
-    }
-    const result = await applyTaskFinalization(boundOperation.request, {
-      repoRoot,
-      beforeLifecycle: async (currentTaskId) => {
-        if (currentTaskId !== taskId) throw new Error('SANDBOX_CONTROL_IDENTITY_MISMATCH');
-        validateSandboxControlTaskIdentity(
-          controlRoot,
-          { taskId, generation, controlRootId, statusDir }
-        );
-      },
-      preflight: (request, options) => verifyTaskEvent(
-        { ...request, event: 'complete-task.hard-preflight' }, options
-      )
-    });
-    const status = result.status === 'prepared' ? 'failed' : result.status;
-    process.stdout.write(envelope(status, result.changed, true, result, result.error
-      ?? (result.status === 'prepared' ? { code: 'TASK_FINALIZATION_PREPARATION_INCOMPLETE', message: 'finalization did not commit', retryable: true } : null)));
-    process.exitCode = exitCode(status);
+    await finalizeSandboxLocal(boundOperation, repoRoot);
     return;
   }
-  const controlLocation = loadSandboxControlLocation(repoRoot);
-  const result = await dispatchTaskControlOperation(
-    createDirectHostExecutionContext({ repoRoot, ...(controlLocation ?? {}) }),
-    boundOperation
-  );
-  if (result.status === 'prepared') {
-    const detail = {
-      code: 'TASK_FINALIZATION_DIRECT_COMMIT_REQUIRED',
-      message: 'direct finalization prepared external work without committing the lifecycle transition',
-      retryable: false
-    };
-    process.stdout.write(envelope('failed', result.changed, true, result, detail));
-    process.exitCode = 1;
-    return;
-  }
-  process.stdout.write(envelope(result.status, result.changed, true, result, result.error));
-  process.exitCode = exitCode(result.status);
+  await finalizeDirect(boundOperation, repoRoot);
 }
 
 export { taskFinalization };

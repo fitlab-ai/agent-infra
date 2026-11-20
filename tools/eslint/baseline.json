@@ -279,15 +279,6 @@
       "count": 1
     },
     {
-      "file": "lib/internal/cli-route-inventory.ts",
-      "ruleId": "complexity",
-      "stableId": "c5e2051a9c901d3c54bcdbb38c1b760f3c39b92d22b98d9f9d179993e9a873b4",
-      "displayName": "internalRouteSelector",
-      "metric": 39,
-      "normalizedMessage": "complexity=39",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/lifecycle.ts",
       "ruleId": "complexity",
       "stableId": "2bfc5edda456388c9ef4d424858ff7b43a7be1cdb6657b372826f5a60c872ba1",
@@ -675,30 +666,12 @@
       "count": 1
     },
     {
-      "file": "lib/internal/task-create.ts",
-      "ruleId": "complexity",
-      "stableId": "7c0948a3f02313b1beddcb5988061fdb9fefe34a7c329fe5e1185b6076025871",
-      "displayName": "taskCreate",
-      "metric": 34,
-      "normalizedMessage": "complexity=34",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "aeef80ac7adb9ebe55abff1624fad776cba350154907f78a965d0cf034fa738e",
       "displayName": "taskCreateDomainEvidence",
       "metric": 21,
       "normalizedMessage": "complexity=21",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/task-finalization.ts",
-      "ruleId": "complexity",
-      "stableId": "484386b7341cbd3bc4a6fc0672b7fa8466ceffa454dba148ddb4c6ba2f8cb52f",
-      "displayName": "taskFinalization",
-      "metric": 26,
-      "normalizedMessage": "complexity=26",
       "count": 1
     },
     {

@@ -18,6 +18,7 @@ import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../../lib/sandbox/environmen
 import {
   INTERNAL_HANDLER_ROUTE_SELECTORS,
   isInternalHandlerRoute,
+  internalRouteSelector,
   PUBLIC_CLI_ROUTE_SELECTORS
 } from '../../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../../lib/sandbox/control/task-view.ts';
@@ -159,6 +160,16 @@ test('actual handler branches and registry descriptors have bidirectional covera
   const [command, selector] = removed.split(':');
   const simulatedRename = new Set([...actual].map((key) => key === removed ? routeKey(command!, `${selector}-renamed`) : key));
   assert.deepEqual([...descriptors].filter((key) => !simulatedRename.has(key)), [removed]);
+});
+
+test('internal selectors preserve empty, unknown and option precedence behavior', () => {
+  assert.equal(internalRouteSelector('unknown', []), '');
+  assert.equal(internalRouteSelector('toString', ['value']), 'value');
+  assert.equal(internalRouteSelector('task-verify', ['task']), '');
+  assert.equal(internalRouteSelector('task-validate', ['--scope=inplace', '--scope', 'snapshot']), 'snapshot');
+  assert.equal(internalRouteSelector('platform-pr-review', ['publish', '--scope', 'invalid']), '');
+  assert.equal(internalRouteSelector('platform-pr-review', ['inspect']), 'inspect');
+  assert.equal(internalRouteSelector('task-short-id', ['list', '--verify']), 'list-verify');
 });
 
 test('non-prefix task mutation routes resolve to task-bound descriptors', () => {

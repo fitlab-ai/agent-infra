@@ -67,56 +67,64 @@ function parseControlledResult(response: ReturnType<typeof requestSandboxTaskCre
   return result;
 }
 
-async function taskCreate(args: string[]): Promise<void> {
-  if (!ensureInternalHandlerRoute('task-create', args)) return;
+function readCandidateInput(input: string): string {
+  const inputPath = path.resolve(input);
+  const stat = fs.lstatSync(inputPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_INPUT_INVALID: input must be a regular file');
+  if (stat.size > SANDBOX_CONTROL_MAX_BYTES) throw new Error('TASK_CREATE_INPUT_TOO_LARGE: input exceeds the control limit');
+  return fs.readFileSync(inputPath, 'utf8');
+}
+
+function parseCandidate(inputContent: string): TaskCreateCandidateV1 | null {
+  try {
+    return validateTaskCreateCandidate(JSON.parse(inputContent));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_INPUT_INVALID';
+    output(failed(code, message, false, { requestId: null, accepted: false, recovery: 'new-request-id' }));
+    return null;
+  }
+}
+
+function controlledCreate(candidate: TaskCreateCandidateV1): TaskCreateResult {
+  const response = requestSandboxTaskCreate({ candidate });
+  if (response.phase === 'rejected') {
+    const accepted = response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN';
+    return failed(response.error?.code ?? 'SANDBOX_CONTROL_REJECTED', response.error?.message ?? response.stderr,
+      response.error?.retryable ?? false, {
+        requestId: response.id,
+        accepted,
+        recovery: accepted ? 'same-request-id' : response.error?.retryable ? 'new-request-id' : 'none'
+      });
+  }
+  return parseControlledResult(response);
+}
+
+function parseInputArgument(args: string[]): string | undefined {
   const inputSelector = args.includes('--input') ? 'input' : '';
   const inputIndex = internalHandlerRoute('task-create', 'input', inputSelector) ? args.indexOf('--input') : -1;
   const input = inputIndex >= 0 ? args[inputIndex + 1] : undefined;
   if (!input || args.length !== 2 || inputIndex !== 0) {
     output(failed('TASK_CREATE_PAYLOAD_INVALID', 'Usage: agent-infra-internal task-create --input <candidate.json>'));
-    return;
+    return undefined;
   }
+  return input;
+}
+
+async function taskCreate(args: string[]): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-create', args)) return;
+  const input = parseInputArgument(args);
+  if (!input) return;
   try {
-    const inputPath = path.resolve(input);
-    const stat = fs.lstatSync(inputPath);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_INPUT_INVALID: input must be a regular file');
-    if (stat.size > SANDBOX_CONTROL_MAX_BYTES) throw new Error('TASK_CREATE_INPUT_TOO_LARGE: input exceeds the control limit');
-    const inputContent = fs.readFileSync(inputPath, 'utf8');
-    let candidate: TaskCreateCandidateV1;
-    try {
-      candidate = validateTaskCreateCandidate(JSON.parse(inputContent));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_INPUT_INVALID';
-      output(failed(code, message, false, {
-        requestId: null,
-        accepted: false,
-        recovery: 'new-request-id'
-      }));
-      return;
-    }
+    const candidate = parseCandidate(readCandidateInput(input));
+    if (!candidate) return;
     const environment = resolveSandboxControlTransport();
     if (environment.kind === 'fail-closed') {
       output(failed(environment.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID', 'sandbox client control configuration is invalid'));
       return;
     }
     if (environment.kind === 'broker-client') {
-      const response = requestSandboxTaskCreate({ candidate });
-      if (response.phase === 'rejected') {
-        const accepted = response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN';
-        output(failed(
-          response.error?.code ?? 'SANDBOX_CONTROL_REJECTED',
-          response.error?.message ?? response.stderr,
-          response.error?.retryable ?? false,
-          {
-            requestId: response.id,
-            accepted,
-            recovery: accepted ? 'same-request-id' : response.error?.retryable ? 'new-request-id' : 'none'
-          }
-        ));
-        return;
-      }
-      output(parseControlledResult(response));
+      output(controlledCreate(candidate));
       return;
     }
     output(await createTask(candidate, { repoRoot: process.cwd() }));
