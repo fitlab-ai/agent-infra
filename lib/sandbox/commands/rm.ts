@@ -37,6 +37,33 @@ function resolveMissingTaskSandboxBranch(taskId: string, config: ReturnType<type
   return branches.values().next().value ?? null;
 }
 
+async function dispatchRemoval(
+  values: { purge?: boolean; unbound?: boolean; 'dry-run'?: boolean; yes?: boolean },
+  positionals: string[]
+): Promise<void> {
+  const config = loadConfig();
+  const tools = [...createSandboxCapabilityPlan(config).cleanupInventory];
+
+  if (values.purge) {
+    await rmPurge(config, tools);
+    return;
+  }
+
+  if (values.unbound) {
+    await rmUnbound(config, tools, {
+      dryRun: Boolean(values['dry-run']),
+      assumeYes: Boolean(values.yes)
+    });
+    return;
+  }
+
+  const cleanupTarget = resolveSandboxCleanupTarget(positionals[0] ?? '', config.repoRoot, {
+    allowProtected: true,
+    resolveMissingTask: (taskId) => resolveMissingTaskSandboxBranch(taskId, config)
+  });
+  await rmOne(config, tools, cleanupTarget.branch, { cleanupTarget });
+}
+
 export async function rm(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
@@ -77,25 +104,5 @@ export async function rm(args: string[]): Promise<void> {
     throw new Error(USAGE);
   }
 
-  const config = loadConfig();
-  const tools = [...createSandboxCapabilityPlan(config).cleanupInventory];
-
-  if (values.purge) {
-    await rmPurge(config, tools);
-    return;
-  }
-
-  if (values.unbound) {
-    await rmUnbound(config, tools, {
-      dryRun: Boolean(values['dry-run']),
-      assumeYes: Boolean(values.yes)
-    });
-    return;
-  }
-
-  const cleanupTarget = resolveSandboxCleanupTarget(positionals[0] ?? '', config.repoRoot, {
-    allowProtected: true,
-    resolveMissingTask: (taskId) => resolveMissingTaskSandboxBranch(taskId, config)
-  });
-  await rmOne(config, tools, cleanupTarget.branch, { cleanupTarget });
+  await dispatchRemoval(values, positionals);
 }

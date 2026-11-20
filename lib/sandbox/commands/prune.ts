@@ -160,6 +160,21 @@ function writeGroups(groups: OrphanGroup[]): void {
   }
 }
 
+function resolvePruneContext(dependencies: PruneDependencies) {
+  const config = dependencies.config ?? loadConfig();
+  const tools = dependencies.tools ?? [...createSandboxCapabilityPlan(config).cleanupInventory];
+  const engine = dependencies.engine ?? detectEngine(config);
+  return { config, tools, engine };
+}
+
+function writeBlockers(blockers: Exclude<ReturnType<typeof inspectWorktrees>[number], { status: 'clean' }>[]): void {
+  for (const blocker of blockers) {
+    p.log.error(blocker.status === 'failed'
+      ? `${JSON.stringify(blocker.worktree)}: ${blocker.message}`
+      : formatWorktreeSnapshot(blocker.snapshot));
+  }
+}
+
 export async function prune(args: string[], dependencies: PruneDependencies = {}): Promise<void> {
   const { values } = parseArgs({
     args,
@@ -175,9 +190,7 @@ export async function prune(args: string[], dependencies: PruneDependencies = {}
     return;
   }
 
-  const config = dependencies.config ?? loadConfig();
-  const tools = dependencies.tools ?? [...createSandboxCapabilityPlan(config).cleanupInventory];
-  const engine = dependencies.engine ?? detectEngine(config);
+  const { config, tools, engine } = resolvePruneContext(dependencies);
   const psArgs = [
     'ps',
     '-a',
@@ -215,11 +228,7 @@ export async function prune(args: string[], dependencies: PruneDependencies = {}
   }
 
   writeGroups(groups);
-  for (const blocker of blockers) {
-    p.log.error(blocker.status === 'failed'
-      ? `${JSON.stringify(blocker.worktree)}: ${blocker.message}`
-      : formatWorktreeSnapshot(blocker.snapshot));
-  }
+  writeBlockers(blockers);
 
   if (values['dry-run']) {
     p.outro(pc.green('Dry run complete'));
