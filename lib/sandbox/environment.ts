@@ -81,10 +81,26 @@ export function hasSandboxControlMarker(env: NodeJS.ProcessEnv = process.env): b
   return TASK_CONTROL_MARKER_KEYS.some((key) => Boolean(env[key]));
 }
 
-export function resolveSandboxControlTransport(
-  env: NodeJS.ProcessEnv = process.env,
-  options: Readonly<{ statusMountPath?: string; localWorkflow?: boolean }> = {}
-): SandboxControlTransportDecision {
+function validateControlSentinel(
+  sentinel: ReturnType<typeof readSandboxControlIdentitySentinel>, env: NodeJS.ProcessEnv,
+  taskBound: boolean, runtime: boolean
+): SandboxControlTransportDecision | null {
+  if (sentinel.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH' };
+  }
+  if (sentinel.mode === 'task-bound'
+    && (sentinel.taskId !== env.AGENT_INFRA_TASK_ID || !runtime)) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
+  }
+  if (sentinel.mode === 'branch-only' && (taskBound || runtime || Boolean(env.AGENT_INFRA_CONTROL_ROOT_DIR))) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
+  }
+  return null;
+}
+
+function initialTransportCheck(
+  env: NodeJS.ProcessEnv, options: Readonly<{ statusMountPath?: string; localWorkflow?: boolean }>
+): SandboxControlTransportDecision | { fixedStatusDir: string; fixedStatusMounted: boolean } {
   const markerState = sandboxTaskMarkerState(env);
   const hasAnyMarker = markerState !== 'none'
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
@@ -111,6 +127,12 @@ export function resolveSandboxControlTransport(
     && (!env.AGENT_INFRA_CONTROL_ROOT_DIR || !path.isAbsolute(env.AGENT_INFRA_CONTROL_ROOT_DIR))) {
     return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
   }
+  return { fixedStatusDir, fixedStatusMounted };
+}
+
+function configuredStatusDirectory(
+  env: NodeJS.ProcessEnv, fixedStatusDir: string, fixedStatusMounted: boolean
+): string | null | SandboxControlTransportDecision {
   const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const configuredStatusProbe = configuredStatusDir && path.isAbsolute(configuredStatusDir)
     ? nativeDirectoryProbe(configuredStatusDir) : 'absent';
@@ -120,6 +142,19 @@ export function resolveSandboxControlTransport(
   const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir)
     ? configuredStatusProbe === 'present' ? configuredStatusDir : null
     : fixedStatusMounted ? fixedStatusDir : null;
+  return statusDir;
+}
+
+export function resolveSandboxControlTransport(
+  env: NodeJS.ProcessEnv = process.env,
+  options: Readonly<{ statusMountPath?: string; localWorkflow?: boolean }> = {}
+): SandboxControlTransportDecision {
+  const initial = initialTransportCheck(env, options);
+  if ('kind' in initial) return initial;
+  const { fixedStatusDir, fixedStatusMounted } = initial;
+  const status = configuredStatusDirectory(env, fixedStatusDir, fixedStatusMounted);
+  if (typeof status === 'object' && status !== null) return status;
+  const statusDir = status;
   const statusMounted = statusDir !== null;
   if (env.AGENT_INFRA_EXECUTOR_MANIFEST) {
     return { kind: 'fail-closed', reasonCode: 'TASK_CONTROL_TRANSPORT_INVALID' };
@@ -136,16 +171,8 @@ export function resolveSandboxControlTransport(
         ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
         : 'SANDBOX_CONTROL_IDENTITY_MALFORMED' };
     }
-    if (sentinel.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
-      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH' };
-    }
-    if (sentinel.mode === 'task-bound'
-      && (sentinel.taskId !== env.AGENT_INFRA_TASK_ID || !runtime)) {
-      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
-    }
-    if (sentinel.mode === 'branch-only' && (taskBound || runtime || Boolean(env.AGENT_INFRA_CONTROL_ROOT_DIR))) {
-      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
-    }
+    const failure = validateControlSentinel(sentinel, env, taskBound, runtime);
+    if (failure) return failure;
     return { kind: options.localWorkflow ? 'sandbox-local' : 'broker-client', reasonCode: null };
   }
   return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_MISSING' };
