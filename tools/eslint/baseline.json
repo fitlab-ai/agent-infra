@@ -63,15 +63,6 @@
       "count": 1
     },
     {
-      "file": "lib/platform/security-alerts.ts",
-      "ruleId": "complexity",
-      "stableId": "82dd2ee577b3b979fcae18ca1236533db7bfaa831ccc67c466a9add74607f256",
-      "displayName": "dismissSecurityAlert",
-      "metric": 20,
-      "normalizedMessage": "complexity=20",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/recovery.ts",
       "ruleId": "complexity",
       "stableId": "e3cece6031bc179ce78bf221637bb4afadd9cb33b56d6e6eec2317a4de229ab9",
@@ -132,15 +123,6 @@
       "displayName": "parseRemovalJournal",
       "metric": 69,
       "normalizedMessage": "complexity=69",
-      "count": 1
-    },
-    {
-      "file": "lib/internal/platform-security.ts",
-      "ruleId": "complexity",
-      "stableId": "518fa0ddff9da6e50c405466104e0165a4023ff053c8a87acc1be9cc969d719c",
-      "displayName": "platformSecurity",
-      "metric": 22,
-      "normalizedMessage": "complexity=22",
       "count": 1
     },
     {
