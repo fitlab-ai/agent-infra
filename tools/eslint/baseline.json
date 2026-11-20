@@ -45,15 +45,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "6301a6a45db8df3f054facee6bd93169e9a74a17a85293c86e88bc0173775ea7",
-      "displayName": "classifySandboxRecovery",
-      "metric": 39,
-      "normalizedMessage": "complexity=39",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/sources.ts",
       "ruleId": "complexity",
       "stableId": "07926a05acba21a8cf55ff06a681a12c53938f2104e5457275a837b710972149",
@@ -69,15 +60,6 @@
       "displayName": "collectGitHubBoundary",
       "metric": 47,
       "normalizedMessage": "complexity=47",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/recovery.ts",
-      "ruleId": "complexity",
-      "stableId": "b4d6a4ded5dac43c782f4431e6c15023d82b6c8a1ab2f6b1c16ff75e934795eb",
-      "displayName": "collectSandboxRecoverySnapshot",
-      "metric": 25,
-      "normalizedMessage": "complexity=25",
       "count": 1
     },
     {

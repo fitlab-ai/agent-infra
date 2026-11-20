@@ -428,109 +428,119 @@ function findingKey(finding: SandboxRecoveryFinding): string {
 
 export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): SandboxRecoveryFinding[] {
   const findings: SandboxRecoveryFinding[] = [];
-  if (!snapshot.identityOk) {
-    const branchOnly = snapshot.containerIdValid
-      && snapshot.actualBranch === snapshot.expectedBranch
-      && snapshot.expectedWorkspace.mode === 'task-bound'
-      && snapshot.actualWorkspace.mode === 'branch-only';
-    const expectedIdentity = snapshot.expectedWorkspace.mode === 'task-bound'
-      ? `task-bound:${snapshot.expectedWorkspace.taskId}`
-      : snapshot.expectedWorkspace.mode;
-    const actualIdentity = snapshot.actualWorkspace.mode === 'task-bound'
-      ? `task-bound:${snapshot.actualWorkspace.taskId}`
-      : snapshot.actualWorkspace.mode;
-    findings.push({
-      repairKind: 'hard-failure',
-      code: branchOnly ? 'SANDBOX_CONTROL_BRANCH_ONLY' : 'SANDBOX_WORKSPACE_IDENTITY_CONFLICT',
-      message: branchOnly
-        ? `Container is branch-only but the requested sandbox is ${expectedIdentity}.`
-        : `Container identity ${actualIdentity} on branch ${snapshot.actualBranch ?? 'unknown'} does not match requested ${expectedIdentity} on branch ${snapshot.expectedBranch}.`
-    });
-  }
-  if (snapshot.workspaceTopology === 'legacy-parent') {
-    const legacyRoot = snapshot.mounts.some((mount) => mount.path === '/task-workspace')
-      ? '/task-workspace' : '/workspace/.agents/workspace';
-    findings.push({
-      repairKind: 'hard-failure',
-      code: 'SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH',
-      message: 'Sandbox uses the legacy workspace parent-mount topology; recreate the container explicitly to migrate it.',
-      path: legacyRoot
-    });
-  }
-  if (snapshot.taskView && !snapshot.taskView.readable) {
-    findings.push({
-      repairKind: 'hard-failure',
-      code: 'SANDBOX_TASK_VIEW_UNREADABLE',
-      message: `Bound task view is not readable at ${snapshot.taskView.path}.`,
-      path: snapshot.taskView.path
-    });
-  }
-  if (snapshot.runtimeStoreOk === false) {
-    findings.push({
-      repairKind: 'hard-failure',
-      code: 'SANDBOX_RUNTIME_STORE_UNAVAILABLE',
-      message: 'Task-bound runtime store is not writable and readable by devuser.',
-      path: '/run/agent-infra/runtime'
-    });
-  }
-  for (const mount of snapshot.mounts) {
-    if (
-      snapshot.workspaceTopology === 'legacy-parent'
-      && (mount.path.startsWith('/workspace/.agents/workspace')
-        || mount.path.startsWith('/task-workspace'))
-    ) continue;
-    if (
-      mount.actualType !== mount.expectedType
-      || !mount.sourceMatches
-      || mount.actualRW !== mount.expectedRW
-      || !mount.sourceAccessible
-    ) {
+  function classifyIdentity(): void {
+    if (!snapshot.identityOk) {
+      const branchOnly = snapshot.containerIdValid
+        && snapshot.actualBranch === snapshot.expectedBranch
+        && snapshot.expectedWorkspace.mode === 'task-bound'
+        && snapshot.actualWorkspace.mode === 'branch-only';
+      const expectedIdentity = snapshot.expectedWorkspace.mode === 'task-bound'
+        ? `task-bound:${snapshot.expectedWorkspace.taskId}`
+        : snapshot.expectedWorkspace.mode;
+      const actualIdentity = snapshot.actualWorkspace.mode === 'task-bound'
+        ? `task-bound:${snapshot.actualWorkspace.taskId}`
+        : snapshot.actualWorkspace.mode;
       findings.push({
         repairKind: 'hard-failure',
-        message: `Expected ${mount.expectedType} mount at ${mount.path}`
-          + `${mount.expectedSource === null ? '' : ` from ${mount.expectedSource}`}`
-          + ` with RW=${mount.expectedRW}, found ${mount.actualType ?? 'none'}`
-          + `${mount.actualSource === null ? '' : ` from ${mount.actualSource}`}`
-          + ` with RW=${mount.actualRW ?? 'unknown'}.`,
-        path: mount.path
+        code: branchOnly ? 'SANDBOX_CONTROL_BRANCH_ONLY' : 'SANDBOX_WORKSPACE_IDENTITY_CONFLICT',
+        message: branchOnly
+          ? `Container is branch-only but the requested sandbox is ${expectedIdentity}.`
+          : `Container identity ${actualIdentity} on branch ${snapshot.actualBranch ?? 'unknown'} does not match requested ${expectedIdentity} on branch ${snapshot.expectedBranch}.`
       });
     }
-  }
-
-  for (const mount of snapshot.tmpfs) {
-    if (!mount.permissionsOk || !mount.writable) {
-      findings.push({
-        repairKind: 'permissions',
-        message: `Tmpfs ${mount.path} is not owned and writable by devuser with mode 0700.`,
-        path: mount.path
-      });
-    }
-  }
-
-  for (const seed of snapshot.seeds) {
-    if (!seed.mounted) {
-      continue;
-    }
-    if (seed.targetState === 'missing' || seed.targetState === 'wrong-type') {
-      findings.push({
-        repairKind: 'missing-seed',
-        message: `Runtime seed target ${seed.targetPath} must be restored from staging.`,
-        path: seed.targetPath,
-        seed: {
-          toolId: seed.toolId,
-          containerMount: seed.containerMount ?? seed.targetPath.slice(0, seed.targetPath.lastIndexOf('/')),
-          stagingPath: seed.stagingPath,
-          targetPath: seed.targetPath
-        }
-      });
-    } else if (seed.targetState === 'inaccessible') {
+    if (snapshot.workspaceTopology === 'legacy-parent') {
+      const legacyRoot = snapshot.mounts.some((mount) => mount.path === '/task-workspace')
+        ? '/task-workspace' : '/workspace/.agents/workspace';
       findings.push({
         repairKind: 'hard-failure',
-        message: `Runtime seed target ${seed.targetPath} exists but is not accessible to devuser.`,
-        path: seed.targetPath
+        code: 'SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH',
+        message: 'Sandbox uses the legacy workspace parent-mount topology; recreate the container explicitly to migrate it.',
+        path: legacyRoot
+      });
+    }
+    if (snapshot.taskView && !snapshot.taskView.readable) {
+      findings.push({
+        repairKind: 'hard-failure',
+        code: 'SANDBOX_TASK_VIEW_UNREADABLE',
+        message: `Bound task view is not readable at ${snapshot.taskView.path}.`,
+        path: snapshot.taskView.path
+      });
+    }
+    if (snapshot.runtimeStoreOk === false) {
+      findings.push({
+        repairKind: 'hard-failure',
+        code: 'SANDBOX_RUNTIME_STORE_UNAVAILABLE',
+        message: 'Task-bound runtime store is not writable and readable by devuser.',
+        path: '/run/agent-infra/runtime'
       });
     }
   }
+  classifyIdentity();
+
+  function classifyMounts(): void {
+    for (const mount of snapshot.mounts) {
+      if (
+        snapshot.workspaceTopology === 'legacy-parent'
+        && (mount.path.startsWith('/workspace/.agents/workspace')
+          || mount.path.startsWith('/task-workspace'))
+      ) continue;
+      if (
+        mount.actualType !== mount.expectedType
+        || !mount.sourceMatches
+        || mount.actualRW !== mount.expectedRW
+        || !mount.sourceAccessible
+      ) {
+        findings.push({
+          repairKind: 'hard-failure',
+          message: `Expected ${mount.expectedType} mount at ${mount.path}`
+            + `${mount.expectedSource === null ? '' : ` from ${mount.expectedSource}`}`
+            + ` with RW=${mount.expectedRW}, found ${mount.actualType ?? 'none'}`
+            + `${mount.actualSource === null ? '' : ` from ${mount.actualSource}`}`
+            + ` with RW=${mount.actualRW ?? 'unknown'}.`,
+          path: mount.path
+        });
+      }
+    }
+  }
+  classifyMounts();
+
+  function classifyRuntime(): void {
+    for (const mount of snapshot.tmpfs) {
+      if (!mount.permissionsOk || !mount.writable) {
+        findings.push({
+          repairKind: 'permissions',
+          message: `Tmpfs ${mount.path} is not owned and writable by devuser with mode 0700.`,
+          path: mount.path
+        });
+      }
+    }
+
+    for (const seed of snapshot.seeds) {
+      if (!seed.mounted) {
+        continue;
+      }
+      if (seed.targetState === 'missing' || seed.targetState === 'wrong-type') {
+        findings.push({
+          repairKind: 'missing-seed',
+          message: `Runtime seed target ${seed.targetPath} must be restored from staging.`,
+          path: seed.targetPath,
+          seed: {
+            toolId: seed.toolId,
+            containerMount: seed.containerMount ?? seed.targetPath.slice(0, seed.targetPath.lastIndexOf('/')),
+            stagingPath: seed.stagingPath,
+            targetPath: seed.targetPath
+          }
+        });
+      } else if (seed.targetState === 'inaccessible') {
+        findings.push({
+          repairKind: 'hard-failure',
+          message: `Runtime seed target ${seed.targetPath} exists but is not accessible to devuser.`,
+          path: seed.targetPath
+        });
+      }
+    }
+  }
+  classifyRuntime();
 
   if (!snapshot.aliasesReadable) {
     findings.push({
@@ -912,19 +922,22 @@ export function collectSandboxRecoverySnapshot(params: {
         : []
     )
   );
-  const declaredTmpfs = inspection.HostConfig?.Tmpfs;
-  if (declaredTmpfs && typeof declaredTmpfs === 'object' && !Array.isArray(declaredTmpfs)) {
-    for (const [destination, rawOptions] of Object.entries(declaredTmpfs)) {
-      if (mountsByDestination.has(destination) || typeof rawOptions !== 'string') continue;
-      const options = rawOptions.split(',').map((option) => option.trim());
-      mountsByDestination.set(destination, {
-        Type: 'tmpfs',
-        Source: '',
-        Destination: destination,
-        RW: !options.includes('ro')
-      });
+  function addDeclaredTmpfs(): void {
+    const declaredTmpfs = inspection.HostConfig?.Tmpfs;
+    if (declaredTmpfs && typeof declaredTmpfs === 'object' && !Array.isArray(declaredTmpfs)) {
+      for (const [destination, rawOptions] of Object.entries(declaredTmpfs)) {
+        if (mountsByDestination.has(destination) || typeof rawOptions !== 'string') continue;
+        const options = rawOptions.split(',').map((option) => option.trim());
+        mountsByDestination.set(destination, {
+          Type: 'tmpfs',
+          Source: '',
+          Destination: destination,
+          RW: !options.includes('ro')
+        });
+      }
     }
   }
+  addDeclaredTmpfs();
   const capabilityPlan = createSandboxCapabilityPlan(params.config);
   const workspace = params.workspace ?? { mode: 'branch-only' as const };
   const tools = [...capabilityPlan.tools];
@@ -1020,6 +1033,12 @@ export function collectSandboxRecoverySnapshot(params: {
     };
   });
 
+  function matchesIdentity(): boolean {
+    return typeof inspection.Id === 'string' && inspection.Id.length > 0
+      && branchLabel === params.branch
+      && sameSandboxWorkspaceIdentity(containerWorkspace, workspace);
+  }
+
   return {
     containerIdValid: typeof inspection.Id === 'string' && inspection.Id.length > 0,
     expectedBranch: params.branch,
@@ -1040,9 +1059,7 @@ export function collectSandboxRecoverySnapshot(params: {
       }
     }),
     ...(runtimeStoreOk === undefined ? {} : { runtimeStoreOk }),
-    identityOk: typeof inspection.Id === 'string' && inspection.Id.length > 0
-      && branchLabel === params.branch
-      && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
+    identityOk: matchesIdentity(),
     mounts: mountSnapshots,
     tmpfs,
     seeds,
