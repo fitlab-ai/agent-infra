@@ -90,24 +90,6 @@
       "count": 1
     },
     {
-      "file": "lib/init.ts",
-      "ruleId": "complexity",
-      "stableId": "dcdf34a02236327cd33f8da889ed97c0c913ed98448fd6638f7a0c4601b087e1",
-      "displayName": "cmdInit",
-      "metric": 24,
-      "normalizedMessage": "complexity=24",
-      "count": 1
-    },
-    {
-      "file": "lib/update.ts",
-      "ruleId": "complexity",
-      "stableId": "95a67b160fcf91c5db88177db79f30b7d900415168bdb8532df3ceada0dc8616",
-      "displayName": "cmdSync",
-      "metric": 43,
-      "normalizedMessage": "complexity=43",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/sources.ts",
       "ruleId": "complexity",
       "stableId": "07926a05acba21a8cf55ff06a681a12c53938f2104e5457275a837b710972149",

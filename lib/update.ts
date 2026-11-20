@@ -45,6 +45,91 @@ const defaults = JSON.parse(
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
 
+type AddedDefaults = {
+  platformAdded: boolean;
+  sandboxAdded: boolean;
+  taskAdded: boolean;
+  labelsAdded: boolean;
+  deliveryAdded: boolean;
+};
+
+function applyDefaults(config: UpdateConfig): AddedDefaults {
+  const platformAdded = !config.platform;
+  const sandboxAdded = !config.sandbox;
+  const taskAdded = !config.task;
+  const labelsAdded = !config.labels;
+  const deliveryAdded = !config.delivery;
+  if (platformAdded) config.platform = structuredClone(defaults.platform);
+  if (sandboxAdded) config.sandbox = structuredClone(defaults.sandbox);
+  if (taskAdded) config.task = structuredClone(defaults.task);
+  if (labelsAdded) config.labels = structuredClone(defaults.labels);
+  if (deliveryAdded) config.delivery = structuredClone(defaults.delivery);
+
+  return { platformAdded, sandboxAdded, taskAdded, labelsAdded, deliveryAdded };
+}
+
+function reportAddedDefaults({ platformAdded, sandboxAdded, taskAdded, labelsAdded, deliveryAdded }: AddedDefaults): void {
+  if (platformAdded) {
+    info(`Default platform config added to ${CONFIG_PATH}.`);
+  }
+  if (sandboxAdded) {
+    info(`Default sandbox config added to ${CONFIG_PATH}.`);
+  }
+  if (taskAdded) {
+    info(`Default task.shortIdLength=${defaults.task.shortIdLength} added to ${CONFIG_PATH}.`);
+  }
+  if (labelsAdded) {
+    info(`Default labels.in config added to ${CONFIG_PATH}.`);
+  }
+  if (deliveryAdded) {
+    info(`Default delivery target added to ${CONFIG_PATH}.`);
+  }
+}
+
+function reportAddedDefaultsAfterEntries({ platformAdded, sandboxAdded, taskAdded, labelsAdded, deliveryAdded }: AddedDefaults): void {
+  if (sandboxAdded) {
+    info(`Default sandbox config added to ${CONFIG_PATH}.`);
+  }
+  if (taskAdded) {
+    info(`Default task.shortIdLength=${defaults.task.shortIdLength} added to ${CONFIG_PATH}.`);
+  }
+  if (labelsAdded) {
+    info(`Default labels.in config added to ${CONFIG_PATH}.`);
+  }
+  if (platformAdded) {
+    info(`Default platform config added to ${CONFIG_PATH}.`);
+  }
+  if (deliveryAdded) {
+    info(`Default delivery target added to ${CONFIG_PATH}.`);
+  }
+}
+
+function reportConfigUpdate(
+  configUpdated: boolean,
+  added: { managed: string[]; merged: string[] },
+  hasNewEntries: boolean,
+  { platformAdded, sandboxAdded, taskAdded, labelsAdded, deliveryAdded }: AddedDefaults
+): void {
+  if (configUpdated) {
+    console.log('');
+    if (hasNewEntries) {
+      info(`New file entries synced to ${CONFIG_PATH}:`);
+      for (const entry of added.managed) {
+        ok(`  managed: ${entry}`);
+      }
+      for (const entry of added.merged) {
+        ok(`  merged: ${entry}`);
+      }
+    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded) {
+      reportAddedDefaults({ platformAdded, sandboxAdded, taskAdded, labelsAdded, deliveryAdded });
+    } else {
+      info(`File registry changed in ${CONFIG_PATH}.`);
+    }
+    if (hasNewEntries) reportAddedDefaultsAfterEntries({ platformAdded, sandboxAdded, taskAdded, labelsAdded, deliveryAdded });
+    ok(`Updated ${CONFIG_PATH}`);
+  }
+}
+
 async function cmdSync(): Promise<void> {
   console.log('');
   console.log('  ai sync');
@@ -80,16 +165,7 @@ async function cmdSync(): Promise<void> {
     merged: config.files?.merged || [],
     ejected: config.files?.ejected || []
   };
-  const platformAdded = !config.platform;
-  const sandboxAdded = !config.sandbox;
-  const taskAdded = !config.task;
-  const labelsAdded = !config.labels;
-  const deliveryAdded = !config.delivery;
-  if (platformAdded) config.platform = structuredClone(defaults.platform);
-  if (sandboxAdded) config.sandbox = structuredClone(defaults.sandbox);
-  if (taskAdded) config.task = structuredClone(defaults.task);
-  if (labelsAdded) config.labels = structuredClone(defaults.labels);
-  if (deliveryAdded) config.delivery = structuredClone(defaults.delivery);
+  const addedDefaults = applyDefaults(config);
 
   const workflowPlan = planAgentClientReconciliation({
     config: config as unknown as Record<string, unknown>,
@@ -136,52 +212,7 @@ async function cmdSync(): Promise<void> {
   const reconcileResult = applyAgentClientReconciliation(workflowPlan);
   for (const target of reconcileResult.applied) ok(`Updated ${target}`);
 
-  if (reconcileResult.configUpdated) {
-    console.log('');
-    if (hasNewEntries) {
-      info(`New file entries synced to ${CONFIG_PATH}:`);
-      for (const entry of added.managed) {
-        ok(`  managed: ${entry}`);
-      }
-      for (const entry of added.merged) {
-        ok(`  merged: ${entry}`);
-      }
-    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded) {
-      if (platformAdded) {
-        info(`Default platform config added to ${CONFIG_PATH}.`);
-      }
-      if (sandboxAdded) {
-        info(`Default sandbox config added to ${CONFIG_PATH}.`);
-      }
-      if (taskAdded) {
-        info(`Default task.shortIdLength=${defaults.task.shortIdLength} added to ${CONFIG_PATH}.`);
-      }
-      if (labelsAdded) {
-        info(`Default labels.in config added to ${CONFIG_PATH}.`);
-      }
-      if (deliveryAdded) {
-        info(`Default delivery target added to ${CONFIG_PATH}.`);
-      }
-    } else {
-      info(`File registry changed in ${CONFIG_PATH}.`);
-    }
-    if (hasNewEntries && sandboxAdded) {
-      info(`Default sandbox config added to ${CONFIG_PATH}.`);
-    }
-    if (hasNewEntries && taskAdded) {
-      info(`Default task.shortIdLength=${defaults.task.shortIdLength} added to ${CONFIG_PATH}.`);
-    }
-    if (hasNewEntries && labelsAdded) {
-      info(`Default labels.in config added to ${CONFIG_PATH}.`);
-    }
-    if (hasNewEntries && platformAdded) {
-      info(`Default platform config added to ${CONFIG_PATH}.`);
-    }
-    if (hasNewEntries && deliveryAdded) {
-      info(`Default delivery target added to ${CONFIG_PATH}.`);
-    }
-    ok(`Updated ${CONFIG_PATH}`);
-  }
+  reportConfigUpdate(reconcileResult.configUpdated, added, hasNewEntries, addedDefaults);
 
   // done
   console.log('');

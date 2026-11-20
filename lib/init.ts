@@ -107,6 +107,77 @@ function parseLocalSources(input: string): SourceEntry[] {
     .map((entry) => ({ type: 'local', path: entry }));
 }
 
+async function collectProjectInfo(): Promise<{ projectName: string; orgName: string; language: string } | null> {
+  // collect project info
+  const defaultProject = detectProjectName();
+  const projectName = await prompt('Project name', defaultProject);
+  if (!projectName) {
+    err('Project name is required.');
+    closePrompt();
+    process.exitCode = 1;
+    return null;
+  }
+  if (!VALID_NAME_RE.test(projectName)) {
+    err('Project name may only contain letters, digits, hyphens, underscores, dots, and @.');
+    err(`Got: ${projectName}`);
+    closePrompt();
+    process.exitCode = 1;
+    return null;
+  }
+
+  const defaultOrg = detectOrgName();
+  const orgName = await prompt('Organization / owner (optional)', defaultOrg);
+  if (orgName && !VALID_NAME_RE.test(orgName)) {
+    err('Organization name may only contain letters, digits, hyphens, underscores, dots, and @.');
+    err(`Got: ${orgName}`);
+    closePrompt();
+    process.exitCode = 1;
+    return null;
+  }
+
+  let language = await prompt('Language (en / zh)', 'zh');
+  if (language === 'zh') language = 'zh-CN';
+  if (language !== 'en' && language !== 'zh-CN') {
+    closePrompt();
+    err(`Language must be 'en' or 'zh'. Got: ${language}`);
+    process.exitCode = 1;
+    return null;
+  }
+
+  return { projectName, orgName, language };
+}
+
+async function selectPlatform(): Promise<string | null> {
+  const platformChoices = [...KNOWN_PLATFORMS, 'other'];
+  let platformType = await select('Platform', platformChoices, 'github');
+
+  if (platformType === 'other') {
+    platformType = (await prompt('Custom platform type', '')).trim();
+    if (!platformType) {
+      closePrompt();
+      err('Custom platform type is required.');
+      process.exitCode = 1;
+      return null;
+    }
+  }
+
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(platformType)) {
+    closePrompt();
+    err(`Platform type must match /^[a-z0-9][a-z0-9-]*$/. Got: ${platformType}`);
+    process.exitCode = 1;
+    return null;
+  }
+
+  if (!KNOWN_PLATFORMS.has(platformType)) {
+    info(
+      `Custom platform '${platformType}' selected. Built-in templates are only complete for github;`
+      + ` provide matching '.${platformType}.' or generic templates before running update-agent-infra.`
+    );
+  }
+
+  return platformType;
+}
+
 async function cmdInit(): Promise<void> {
   console.log('');
   console.log('  ai init');
@@ -133,41 +204,9 @@ async function cmdInit(): Promise<void> {
     return;
   }
 
-  // collect project info
-  const defaultProject = detectProjectName();
-  const projectName = await prompt('Project name', defaultProject);
-  if (!projectName) {
-    err('Project name is required.');
-    closePrompt();
-    process.exitCode = 1;
-    return;
-  }
-  if (!VALID_NAME_RE.test(projectName)) {
-    err('Project name may only contain letters, digits, hyphens, underscores, dots, and @.');
-    err(`Got: ${projectName}`);
-    closePrompt();
-    process.exitCode = 1;
-    return;
-  }
-
-  const defaultOrg = detectOrgName();
-  const orgName = await prompt('Organization / owner (optional)', defaultOrg);
-  if (orgName && !VALID_NAME_RE.test(orgName)) {
-    err('Organization name may only contain letters, digits, hyphens, underscores, dots, and @.');
-    err(`Got: ${orgName}`);
-    closePrompt();
-    process.exitCode = 1;
-    return;
-  }
-
-  let language = await prompt('Language (en / zh)', 'zh');
-  if (language === 'zh') language = 'zh-CN';
-  if (language !== 'en' && language !== 'zh-CN') {
-    closePrompt();
-    err(`Language must be 'en' or 'zh'. Got: ${language}`);
-    process.exitCode = 1;
-    return;
-  }
+  const projectInfo = await collectProjectInfo();
+  if (!projectInfo) return;
+  const { projectName, orgName, language } = projectInfo;
 
   const currentPlatform = resolveInitPlatform();
   const defaultEngine = PLATFORM_DEFAULT_ENGINES[currentPlatform as keyof typeof PLATFORM_DEFAULT_ENGINES];
@@ -185,32 +224,8 @@ async function cmdInit(): Promise<void> {
     );
   }
 
-  const platformChoices = [...KNOWN_PLATFORMS, 'other'];
-  let platformType = await select('Platform', platformChoices, 'github');
-
-  if (platformType === 'other') {
-    platformType = (await prompt('Custom platform type', '')).trim();
-    if (!platformType) {
-      closePrompt();
-      err('Custom platform type is required.');
-      process.exitCode = 1;
-      return;
-    }
-  }
-
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(platformType)) {
-    closePrompt();
-    err(`Platform type must match /^[a-z0-9][a-z0-9-]*$/. Got: ${platformType}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  if (!KNOWN_PLATFORMS.has(platformType)) {
-    info(
-      `Custom platform '${platformType}' selected. Built-in templates are only complete for github;`
-      + ` provide matching '.${platformType}.' or generic templates before running update-agent-infra.`
-    );
-  }
+  const platformType = await selectPlatform();
+  if (platformType === null) return;
 
   const adapters = listAgentClientAdapters();
   let enabledClientIds: string[];
