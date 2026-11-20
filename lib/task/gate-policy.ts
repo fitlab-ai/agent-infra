@@ -55,15 +55,10 @@ const ARTIFACT_COMMENT_SKILLS = new Set([
 const PR_AUDIT_SKILLS = new Set(['create-pr']);
 const IN_LABEL_AUDIT_SKILLS = new Set(['code-task', 'commit', 'create-pr']);
 
-export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillName?: string; artifactFile?: string | null }): PlatformAuditPolicy {
-  const skillName = context.skillName || '';
-  const artifactComment = Boolean(context.artifactFile) && ARTIFACT_COMMENT_SKILLS.has(skillName);
-  const prAudit = PR_AUDIT_SKILLS.has(skillName);
-  const inLabelAudit = IN_LABEL_AUDIT_SKILLS.has(skillName);
+type MarkerAuditId = 'comment-marker' | 'pr-comment-marker' | 'pr-comment-last-commit' | 'pr-comment-content';
 
+function markerAuditPolicy(checkId: MarkerAuditId, skillName: string, artifactComment: boolean, prAudit: boolean): PlatformAuditPolicy {
   switch (checkId) {
-    case 'status-label':
-      return { classification: 'soft', enabled: Boolean(STATUS_LABELS[skillName]), expectedStatusLabel: STATUS_LABELS[skillName] };
     case 'comment-marker':
       return {
         classification: 'soft',
@@ -88,6 +83,18 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
         enabled: skillName === 'complete-manual-validation',
         ...(skillName === 'complete-manual-validation' ? { expectedPrCommentMarkerKey: 'prSummary' } : {})
       };
+  }
+}
+
+export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillName?: string; artifactFile?: string | null }): PlatformAuditPolicy {
+  const skillName = context.skillName || '';
+  const artifactComment = Boolean(context.artifactFile) && ARTIFACT_COMMENT_SKILLS.has(skillName);
+  const prAudit = PR_AUDIT_SKILLS.has(skillName);
+  const inLabelAudit = IN_LABEL_AUDIT_SKILLS.has(skillName);
+
+  switch (checkId) {
+    case 'status-label':
+      return { classification: 'soft', enabled: Boolean(STATUS_LABELS[skillName]), expectedStatusLabel: STATUS_LABELS[skillName] };
     case 'comment-content':
       return { classification: 'soft', enabled: artifactComment, expectedCommentMarkerKey: 'artifact' };
     case 'task-comment-content':
@@ -107,6 +114,7 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
     case 'issue-fields':
       return { classification: 'soft', enabled: true };
   }
+  return markerAuditPolicy(checkId, skillName, artifactComment, prAudit);
 }
 
 export function classificationForCheck(checkId: string): GateClassification {
