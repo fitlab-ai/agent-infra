@@ -177,58 +177,47 @@ function publishedEvidence(records: AuditRecord[], manifest: SandboxControlManif
   return selected;
 }
 
-function verifiedResponse(manifest: SandboxControlManifest, requestId: string, records: AuditRecord[]): SandboxControlResponse | null {
-  assertDirectory(manifest.channelDir);
-  const responsesDir = path.join(manifest.channelDir, 'responses');
-  assertDirectory(responsesDir);
-  const responsePath = path.join(responsesDir, `${requestId}.json`);
-  if (!fs.existsSync(responsePath)) return null;
-  const responseStat = fs.lstatSync(responsePath);
-  if (!responseStat.isFile() || responseStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
-  const raw = fs.readFileSync(responsePath, 'utf8');
-  let response: SandboxControlResponse;
-  try { response = JSON.parse(raw) as SandboxControlResponse; } catch { throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID'); }
-  if (!response || response.version !== 2 || response.id !== requestId) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
-  if (response.phase === 'accepted') return null;
-  if (!['completed', 'rejected'].includes(response.phase)) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
-  if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') return unknown(requestId);
-  const evidencePath = path.join(manifest.processingDir, requestId, 'result.json');
-  const published = publishedEvidence(records, manifest);
-  if (!published) return unknown(requestId);
-  if (fs.existsSync(evidencePath)) {
-    const evidence = readSandboxControlResultEvidence(evidencePath);
-    if (evidence.id !== requestId || evidence.generation !== manifest.generation
-      || evidence.exitCode !== published.exitCode || evidence.stdoutBytes !== published.outputBytes
-      || evidence.stderrBytes !== published.errorBytes || evidence.stdoutSha256 !== published.outputDigest
-      || evidence.stderrSha256 !== published.errorDigest) throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
-  }
-  if (response.phase !== 'completed' || response.exitCode !== published.exitCode || response.error !== null) {
+function verifiedInlineOutput(response: SandboxControlResponse, published: NonNullable<ReturnType<typeof publishedEvidence>>): SandboxControlResponse {
+  const stdout = response.stdout;
+  const stderr = response.stderr;
+  if (response.payload !== undefined
+    || Buffer.byteLength(stdout, 'utf8') !== published.outputBytes
+    || Buffer.byteLength(stderr, 'utf8') !== published.errorBytes
+    || createHash('sha256').update(stdout, 'utf8').digest('hex') !== published.outputDigest
+    || createHash('sha256').update(stderr, 'utf8').digest('hex') !== published.errorDigest) {
     throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   }
-  if (response.outputState === undefined) {
-    const stdout = response.stdout;
-    const stderr = response.stderr;
-    if (response.payload !== undefined
-      || Buffer.byteLength(stdout, 'utf8') !== published.outputBytes
-      || Buffer.byteLength(stderr, 'utf8') !== published.errorBytes
-      || createHash('sha256').update(stdout, 'utf8').digest('hex') !== published.outputDigest
-      || createHash('sha256').update(stderr, 'utf8').digest('hex') !== published.errorDigest) {
-      throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
-    }
-    return response;
+  return response;
+}
+
+function responsePayloadMismatch(
+  response: SandboxControlResponse, payload: ReturnType<typeof readSandboxControlPayload>
+): boolean {
+  return response.payload?.id !== payload.id || response.payload?.generation !== payload.generation
+    || response.payload?.stdoutBytes !== payload.stdoutBytes || response.payload?.stderrBytes !== payload.stderrBytes
+    || response.payload?.stdoutSha256 !== payload.stdoutSha256 || response.payload?.stderrSha256 !== payload.stderrSha256;
+}
+
+function verifiedAvailableOutput(
+  response: SandboxControlResponse, published: NonNullable<ReturnType<typeof publishedEvidence>>,
+  manifest: SandboxControlManifest, requestId: string
+): SandboxControlResponse {
+  const payload = readSandboxControlPayload(path.join(manifest.channelDir, 'responses', `${requestId}.payload.json`));
+  if (payload.id !== requestId || payload.generation !== manifest.generation
+    || payload.stdoutBytes !== published.outputBytes || payload.stderrBytes !== published.errorBytes
+    || payload.stdoutSha256 !== published.outputDigest || payload.stderrSha256 !== published.errorDigest
+    || responsePayloadMismatch(response, payload)) {
+    throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   }
-  if (response.outputState === 'available') {
-    const payload = readSandboxControlPayload(path.join(manifest.channelDir, 'responses', `${requestId}.payload.json`));
-    if (payload.id !== requestId || payload.generation !== manifest.generation
-      || payload.stdoutBytes !== published.outputBytes || payload.stderrBytes !== published.errorBytes
-      || payload.stdoutSha256 !== published.outputDigest || payload.stderrSha256 !== published.errorDigest
-      || response.payload?.id !== payload.id || response.payload?.generation !== payload.generation
-      || response.payload?.stdoutBytes !== payload.stdoutBytes || response.payload?.stderrBytes !== payload.stderrBytes
-      || response.payload?.stdoutSha256 !== payload.stdoutSha256 || response.payload?.stderrSha256 !== payload.stderrSha256) {
-      throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
-    }
-    return { ...response, stdout: payload.stdout, stderr: payload.stderr };
-  }
+  return { ...response, stdout: payload.stdout, stderr: payload.stderr };
+}
+
+function verifiedResponseOutput(
+  response: SandboxControlResponse, manifest: SandboxControlManifest, requestId: string,
+  published: NonNullable<ReturnType<typeof publishedEvidence>>
+): SandboxControlResponse {
+  if (response.outputState === undefined) return verifiedInlineOutput(response, published);
+  if (response.outputState === 'available') return verifiedAvailableOutput(response, published, manifest, requestId);
   const expectedStdout = published.requestFamily === 'task-create'
     ? `${JSON.stringify(taskCreateOutputUnavailableResult(requestId))}\n`
     : '';
@@ -238,6 +227,50 @@ function verifiedResponse(manifest: SandboxControlManifest, requestId: string, r
     throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
   }
   return response;
+}
+
+function verifyResultEvidence(
+  evidencePath: string, requestId: string, manifest: SandboxControlManifest,
+  published: NonNullable<ReturnType<typeof publishedEvidence>>
+): void {
+  if (fs.existsSync(evidencePath)) {
+    const evidence = readSandboxControlResultEvidence(evidencePath);
+    if (evidence.id !== requestId || evidence.generation !== manifest.generation
+      || evidence.exitCode !== published.exitCode || evidence.stdoutBytes !== published.outputBytes
+      || evidence.stderrBytes !== published.errorBytes || evidence.stdoutSha256 !== published.outputDigest
+      || evidence.stderrSha256 !== published.errorDigest) throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  }
+}
+
+function readVerifiedResponse(responsesDir: string, requestId: string): SandboxControlResponse | null {
+  const responsePath = path.join(responsesDir, `${requestId}.json`);
+  if (!fs.existsSync(responsePath)) return null;
+  const responseStat = fs.lstatSync(responsePath);
+  if (!responseStat.isFile() || responseStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
+  const raw = fs.readFileSync(responsePath, 'utf8');
+  let response: SandboxControlResponse;
+  try { response = JSON.parse(raw) as SandboxControlResponse; } catch { throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID'); }
+  if (!response || response.version !== 2 || response.id !== requestId) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
+  return response;
+}
+
+function verifiedResponse(manifest: SandboxControlManifest, requestId: string, records: AuditRecord[]): SandboxControlResponse | null {
+  assertDirectory(manifest.channelDir);
+  const responsesDir = path.join(manifest.channelDir, 'responses');
+  assertDirectory(responsesDir);
+  const response = readVerifiedResponse(responsesDir, requestId);
+  if (!response) return null;
+  if (response.phase === 'accepted') return null;
+  if (!['completed', 'rejected'].includes(response.phase)) throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
+  if (response.phase === 'rejected' && response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN') return unknown(requestId);
+  const evidencePath = path.join(manifest.processingDir, requestId, 'result.json');
+  const published = publishedEvidence(records, manifest);
+  if (!published) return unknown(requestId);
+  verifyResultEvidence(evidencePath, requestId, manifest, published);
+  if (response.phase !== 'completed' || response.exitCode !== published.exitCode || response.error !== null) {
+    throw new Error('SANDBOX_CONTROL_RESPONSE_INVALID');
+  }
+  return verifiedResponseOutput(response, manifest, requestId, published);
 }
 
 export function recoverSandboxControlFromHost(requestId: string, params: Readonly<{

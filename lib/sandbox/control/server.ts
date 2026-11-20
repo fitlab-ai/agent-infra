@@ -254,20 +254,9 @@ type RecoveryDomainEvidence = Readonly<{
   journal?: ReturnType<typeof readLifecycleJournalEvidence>;
 }>;
 
-function taskCreateDomainEvidence(
-  manifest: SandboxControlManifest,
-  output: Record<string, unknown> | null
+function resolvedTaskCreateEvidence(
+  manifest: SandboxControlManifest, taskId: string, shortId: string | null, state: unknown
 ): Readonly<Record<string, unknown>> {
-  if (!output || !['applied', 'no-op', 'degraded'].includes(String(output.status))) {
-    return { consistent: false };
-  }
-  const task = output.task && typeof output.task === 'object' && !Array.isArray(output.task)
-    ? output.task as Record<string, unknown> : null;
-  const taskId = typeof task?.id === 'string' ? task.id : null;
-  const shortId = typeof task?.shortId === 'string' ? task.shortId : null;
-  const state = task?.state;
-  if (!taskId || !['active', 'blocked', 'completed', 'archive'].includes(String(state))) return { consistent: false };
-  if (state === 'active' ? !shortId : output.status !== 'no-op' || shortId !== null) return { consistent: false };
   try {
     const resolved = resolveTaskRef(taskId, { repoRoot: manifest.repoRoot });
     const shortIds = loadShortIdByTaskId(manifest.repoRoot);
@@ -279,6 +268,49 @@ function taskCreateDomainEvidence(
     };
   } catch {
     return { consistent: false };
+  }
+}
+
+function taskCreateOutputIdentity(output: Record<string, unknown>): { taskId: string | null; shortId: string | null; state: unknown } {
+  const task = output.task && typeof output.task === 'object' && !Array.isArray(output.task)
+    ? output.task as Record<string, unknown> : null;
+  const taskId = typeof task?.id === 'string' ? task.id : null;
+  const shortId = typeof task?.shortId === 'string' ? task.shortId : null;
+  const state = task?.state;
+  return { taskId, shortId, state };
+}
+
+function taskCreateDomainEvidence(
+  manifest: SandboxControlManifest,
+  output: Record<string, unknown> | null
+): Readonly<Record<string, unknown>> {
+  if (!output || !['applied', 'no-op', 'degraded'].includes(String(output.status))) {
+    return { consistent: false };
+  }
+  const { taskId, shortId, state } = taskCreateOutputIdentity(output);
+  if (!taskId || !['active', 'blocked', 'completed', 'archive'].includes(String(state))) return { consistent: false };
+  if (state === 'active' ? !shortId : output.status !== 'no-op' || shortId !== null) return { consistent: false };
+  return resolvedTaskCreateEvidence(manifest, taskId, shortId, state);
+}
+
+function lifecycleDomainEvidence(
+  manifest: SandboxControlManifest, taskRef: string | null,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
+): RecoveryDomainEvidence {
+  if (!taskRef || !terminalResult.targetState) return { domain: null };
+  const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
+  try {
+    const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
+    const shortIds = loadShortIdByTaskId(manifest.repoRoot);
+    const shortIdMatches = terminalResult.targetState === 'active'
+      ? shortIds.has(resolved.ok ? resolved.taskId : taskRef)
+      : !shortIds.has(resolved.ok ? resolved.taskId : taskRef);
+    return {
+      domain: { consistent: resolved.ok && resolved.state === terminalResult.targetState && shortIdMatches },
+      journal
+    };
+  } catch {
+    return { domain: { consistent: false }, journal };
   }
 }
 
@@ -297,21 +329,7 @@ async function readRecoveryDomain(
   }
 
   if (operation.family === 'task-lifecycle') {
-    if (!taskRef || !terminalResult.targetState) return { domain: null };
-    const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
-    try {
-      const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
-      const shortIds = loadShortIdByTaskId(manifest.repoRoot);
-      const shortIdMatches = terminalResult.targetState === 'active'
-        ? shortIds.has(resolved.ok ? resolved.taskId : taskRef)
-        : !shortIds.has(resolved.ok ? resolved.taskId : taskRef);
-      return {
-        domain: { consistent: resolved.ok && resolved.state === terminalResult.targetState && shortIdMatches },
-        journal
-      };
-    } catch {
-      return { domain: { consistent: false }, journal };
-    }
+    return lifecycleDomainEvidence(manifest, taskRef, terminalResult);
   }
 
   if (operation.family === 'task-create') {
@@ -364,6 +382,26 @@ export async function recoveryResponse(
   return genericRecoveryResponse(request, evidence.exitCode, payload);
 }
 
+function availableTerminalMatchesEvidence(
+  response: SandboxControlResponse, evidence: ReturnType<typeof readSandboxControlResultEvidence>,
+  payload: ReturnType<typeof readSandboxControlPayload> | null, payloadInvalid: boolean
+): { valid: boolean; payloadReferenced: boolean } {
+  const reference = response.payload;
+  return {
+    valid: !payloadInvalid && payload !== null && response.stdout === '' && response.stderr === ''
+      && reference !== undefined && reference !== null
+      && reference.version === payload.version
+      && reference.id === payload.id
+      && reference.generation === payload.generation
+      && reference.stdoutBytes === payload.stdoutBytes
+      && reference.stderrBytes === payload.stderrBytes
+      && reference.stdoutSha256 === payload.stdoutSha256
+      && reference.stderrSha256 === payload.stderrSha256
+      && payloadMatchesEvidence(payload, evidence),
+    payloadReferenced: true
+  };
+}
+
 async function terminalMatchesEvidence(
   request: SandboxControlRequest,
   response: SandboxControlResponse,
@@ -376,20 +414,7 @@ async function terminalMatchesEvidence(
     return { valid: false, payloadReferenced: false };
   }
   if (response.outputState === 'available') {
-    const reference = response.payload;
-    return {
-      valid: !payloadInvalid && payload !== null && response.stdout === '' && response.stderr === ''
-        && reference !== undefined && reference !== null
-        && reference.version === payload.version
-        && reference.id === payload.id
-        && reference.generation === payload.generation
-        && reference.stdoutBytes === payload.stdoutBytes
-        && reference.stderrBytes === payload.stderrBytes
-        && reference.stdoutSha256 === payload.stdoutSha256
-        && reference.stderrSha256 === payload.stderrSha256
-        && payloadMatchesEvidence(payload, evidence),
-      payloadReferenced: true
-    };
+    return availableTerminalMatchesEvidence(response, evidence, payload, payloadInvalid);
   }
   if (response.outputState === 'unavailable') {
     const causes = ['recovery', 'publish'] as const;
