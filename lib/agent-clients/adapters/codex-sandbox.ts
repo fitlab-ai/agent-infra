@@ -77,6 +77,27 @@ function inheritDisabledCodexFeatureFlags(
   return changed;
 }
 
+function projectCodexHookTrust(nextState: JsonObject, hostParsed: JsonObject, hostProjectDir: string, sandboxPrefix: string): void {
+  const hostState = isJsonObjectRecord(hostParsed.hooks)
+    && isJsonObjectRecord(hostParsed.hooks.state)
+    ? hostParsed.hooks.state
+    : {};
+  const hostPrefix = `${path.join(hostProjectDir, '.codex', 'hooks.json')}:`;
+  for (const [key, value] of Object.entries(hostState)) {
+    if (!key.startsWith(hostPrefix) || !isJsonObjectRecord(value)) {
+      continue;
+    }
+    const trustedHash = value.trusted_hash;
+    if (typeof trustedHash !== 'string' || !CODEX_HOOK_TRUST_HASH.test(trustedHash)) {
+      continue;
+    }
+    nextState[`${sandboxPrefix}${key.slice(hostPrefix.length)}`] = {
+      trusted_hash: trustedHash,
+      ...(typeof value.enabled === 'boolean' ? { enabled: value.enabled } : {})
+    };
+  }
+}
+
 function inheritCodexHookTrustState(
   sandboxParsed: JsonObject,
   hostParsed: JsonObject,
@@ -100,24 +121,7 @@ function inheritCodexHookTrustState(
     Object.entries(sandboxState).filter(([key]) => !key.startsWith(sandboxPrefix))
   );
 
-  const hostState = isJsonObjectRecord(hostParsed.hooks)
-    && isJsonObjectRecord(hostParsed.hooks.state)
-    ? hostParsed.hooks.state
-    : {};
-  const hostPrefix = `${path.join(hostProjectDir, '.codex', 'hooks.json')}:`;
-  for (const [key, value] of Object.entries(hostState)) {
-    if (!key.startsWith(hostPrefix) || !isJsonObjectRecord(value)) {
-      continue;
-    }
-    const trustedHash = value.trusted_hash;
-    if (typeof trustedHash !== 'string' || !CODEX_HOOK_TRUST_HASH.test(trustedHash)) {
-      continue;
-    }
-    nextState[`${sandboxPrefix}${key.slice(hostPrefix.length)}`] = {
-      trusted_hash: trustedHash,
-      ...(typeof value.enabled === 'boolean' ? { enabled: value.enabled } : {})
-    };
-  }
+  projectCodexHookTrust(nextState, hostParsed, hostProjectDir, sandboxPrefix);
 
   if (JSON.stringify(sandboxState) === JSON.stringify(nextState)) {
     return false;
@@ -134,6 +138,57 @@ function inheritCodexHookTrustState(
     }
   }
   return true;
+}
+
+function inheritCodexModelScalars(sandboxParsed: JsonObject, hostParsed: JsonObject): boolean {
+  let changed = false;
+  const inheritSpecs: Array<readonly [string, 'string' | 'number']> = [
+    ['model', 'string'],
+    ['model_reasoning_effort', 'string'],
+    ['model_auto_compact_token_limit', 'number']
+  ];
+
+  for (const [key, type] of inheritSpecs) {
+    if (Object.hasOwn(sandboxParsed, key)) {
+      continue;
+    }
+    const value = hostParsed[key];
+    if (type === 'string' && (typeof value !== 'string' || value === '')) {
+      continue;
+    }
+    if (type === 'number' && (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)) {
+      continue;
+    }
+    sandboxParsed[key] = value;
+    changed = true;
+  }
+
+  return changed;
+}
+
+function inheritCodexModelCatalog(sandboxParsed: JsonObject, hostParsed: JsonObject, hostHomeDir: string, toolDir: string, containerCodexDir: string): boolean {
+  let changed = false;
+  if (!Object.hasOwn(sandboxParsed, 'model_catalog_json')) {
+    const hostCatalogPath = resolveHostCatalogPath(hostParsed['model_catalog_json'], hostHomeDir);
+    if (hostCatalogPath) {
+      try {
+        const basename = path.basename(hostCatalogPath);
+        const destDir = path.join(toolDir, 'model-catalogs');
+        fs.mkdirSync(destDir, { recursive: true });
+        fs.copyFileSync(hostCatalogPath, path.join(destDir, basename));
+        sandboxParsed['model_catalog_json'] = path.posix.join(
+          containerCodexDir,
+          'model-catalogs',
+          basename
+        );
+        changed = true;
+      } catch {
+        // Copy failed (e.g. permissions): skip catalog, keep scalar inheritance intact.
+      }
+    }
+  }
+
+  return changed;
 }
 
 function ensureCodexModelInheritance(
@@ -177,46 +232,8 @@ function ensureCodexModelInheritance(
   changed = inheritDisabledCodexFeatureFlags(sandboxParsed, hostParsed) || changed;
   changed = inheritCodexHookTrustState(sandboxParsed, hostParsed, hostProjectDir) || changed;
 
-  const inheritSpecs: Array<readonly [string, 'string' | 'number']> = [
-    ['model', 'string'],
-    ['model_reasoning_effort', 'string'],
-    ['model_auto_compact_token_limit', 'number']
-  ];
-
-  for (const [key, type] of inheritSpecs) {
-    if (Object.hasOwn(sandboxParsed, key)) {
-      continue;
-    }
-    const value = hostParsed[key];
-    if (type === 'string' && (typeof value !== 'string' || value === '')) {
-      continue;
-    }
-    if (type === 'number' && (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)) {
-      continue;
-    }
-    sandboxParsed[key] = value;
-    changed = true;
-  }
-
-  if (!Object.hasOwn(sandboxParsed, 'model_catalog_json')) {
-    const hostCatalogPath = resolveHostCatalogPath(hostParsed['model_catalog_json'], hostHomeDir);
-    if (hostCatalogPath) {
-      try {
-        const basename = path.basename(hostCatalogPath);
-        const destDir = path.join(toolDir, 'model-catalogs');
-        fs.mkdirSync(destDir, { recursive: true });
-        fs.copyFileSync(hostCatalogPath, path.join(destDir, basename));
-        sandboxParsed['model_catalog_json'] = path.posix.join(
-          containerCodexDir,
-          'model-catalogs',
-          basename
-        );
-        changed = true;
-      } catch {
-        // Copy failed (e.g. permissions): skip catalog, keep scalar inheritance intact.
-      }
-    }
-  }
+  changed = inheritCodexModelScalars(sandboxParsed, hostParsed) || changed;
+  changed = inheritCodexModelCatalog(sandboxParsed, hostParsed, hostHomeDir, toolDir, containerCodexDir) || changed;
 
   if (changed) {
     fs.writeFileSync(sandboxConfigPath, `${toml.stringify(sandboxParsed)}\n`, 'utf8');
