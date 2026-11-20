@@ -27,15 +27,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "8a38a911f826c787c6f4d03c0d1fd7bcba7380cba6cc21970b8494808822c3c3",
-      "displayName": "appendSafeDirectories",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/native-file-lock.ts",
       "ruleId": "complexity",
       "stableId": "9422a81d6ab7114b964b5b411b10140efb67a173b2b6077c04857a7d43ed93b2",
@@ -51,15 +42,6 @@
       "displayName": "boundPullRequestFixture.anonymous-object-1.method:json",
       "metric": 33,
       "normalizedMessage": "complexity=33",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "2680f8dc139a3d1770171f4f1b8f67e56b67f38f6993a38abdc7493728510e38",
-      "displayName": "buildContainerEnvFile",
-      "metric": 16,
-      "normalizedMessage": "complexity=16",
       "count": 1
     },
     {
@@ -105,33 +87,6 @@
       "displayName": "collectSandboxRecoverySnapshot",
       "metric": 25,
       "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "f65233ddbaf231878df1118176e4b661674222b4c18f6ec5a976ff63bbfaf059",
-      "displayName": "create",
-      "metric": 55,
-      "normalizedMessage": "complexity=55",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "9bad002b75aa0bb32bdb14ccda17ad34b85cbcd1067f36ef8d5e955af634e1f2",
-      "displayName": "create.anonymous-object-2.value:task",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "9259a91e3d3c8920b9265841962541d5f13401afa7e8558b3c7aaf6c596a0dbe",
-      "displayName": "create.anonymous-object-3.value:task",
-      "metric": 81,
-      "normalizedMessage": "complexity=81",
       "count": 1
     },
     {
@@ -351,15 +306,6 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "72cc88930c0a360180f41221a664efd90c4ba0a70036b39a15896295942353f5",
-      "displayName": "sanitizeGitConfig",
-      "metric": 27,
-      "normalizedMessage": "complexity=27",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "4db70cefc7f1fcd3c885d55612f9dff6eebd9da6b000c980a70f6ad2f1073d14",
@@ -384,15 +330,6 @@
       "displayName": "startSandboxControlBroker",
       "metric": 38,
       "normalizedMessage": "complexity=38",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/commands/create.ts",
-      "ruleId": "complexity",
-      "stableId": "9ccb34cb0c4d6859a0d5732084ec5ee0b8da553a6a71f58d6f71a8e685fea776",
-      "displayName": "syncGpgKeys",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
       "count": 1
     },
     {

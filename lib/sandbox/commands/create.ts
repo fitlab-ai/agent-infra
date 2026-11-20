@@ -192,6 +192,22 @@ export function buildClipboardVolumeArgs(engine: string, home: string): string[]
   ];
 }
 
+function reportRuntimeChecks(
+  checks: Array<{ name: string; ok: boolean }>,
+  toolChecks: Array<{ name: string; ok: boolean; hint: string }>
+): void {
+  for (const check of checks) {
+    p.log.info(`  ${check.ok ? pc.green('✓') : pc.yellow('?')} ${check.name}`);
+  }
+  for (const check of toolChecks) {
+    p.log.info(`  ${check.ok ? pc.green('✓') : pc.yellow('?')} ${check.name}`);
+    if (!check.ok) {
+      p.log.warn(`    ${check.hint}`);
+    }
+  }
+
+}
+
 function runtimeChecks(runtimes: string[]): RuntimeCheck[] {
   const checks: RuntimeCheck[] = [];
   if (runtimes.some((runtime) => runtime.startsWith('node'))) {
@@ -211,12 +227,7 @@ export function detectGpgConfig(gitconfig: string): boolean {
   return /\bgpgsign\s*=\s*true\b/i.test(gitconfig) || /^\s*\[gpg(?:\s|"|\])/im.test(gitconfig);
 }
 
-function appendSafeDirectories(lines: string[], repoRoot: string): string[] {
-  if (!repoRoot) {
-    return lines;
-  }
-
-  const requiredDirectories = ['/workspace', repoRoot];
+function scanSafeDirectories(lines: string[]): { existingDirectories: Set<string>; firstSafeSectionIndex: number } {
   const existingDirectories = new Set<string>();
   let firstSafeSectionIndex = -1;
   let inSafeSection = false;
@@ -241,6 +252,17 @@ function appendSafeDirectories(lines: string[], repoRoot: string): string[] {
       existingDirectories.add((directoryMatch[1] ?? '').trim());
     }
   }
+
+  return { existingDirectories, firstSafeSectionIndex };
+}
+
+function appendSafeDirectories(lines: string[], repoRoot: string): string[] {
+  if (!repoRoot) {
+    return lines;
+  }
+
+  const requiredDirectories = ['/workspace', repoRoot];
+  const { existingDirectories, firstSafeSectionIndex } = scanSafeDirectories(lines);
 
   const missingDirectories = requiredDirectories
     .filter((directory) => !existingDirectories.has(directory));
@@ -288,6 +310,29 @@ function isGitHubCliCredentialHelper(line: string): boolean {
   return /^!\s*(?:"[^"]*[\\/]+gh"|(?:\S*[\\/]+)?gh)\s+auth\s+git-credential(?:\s|$)/i.test(helper);
 }
 
+function shouldStripGitConfigLine(line: string, stripGpg: boolean, currentSection: string, currentSectionName: string): boolean {
+  if (stripGpg && currentSection === 'commit' && /^\s*gpgsign\s*=.*$/i.test(line)) {
+    return true;
+  }
+  if (stripGpg && currentSection === 'tag' && /^\s*gpgsign\s*=.*$/i.test(line)) {
+    return true;
+  }
+  if (stripGpg && currentSection === 'user' && /^\s*signingKey\s*=.*$/i.test(line)) {
+    return true;
+  }
+  if (currentSection === 'credential' && isGitHubCliCredentialHelper(line)) {
+    return true;
+  }
+  if (
+    /^url\s+"https:\/\/github\.com\/"$/i.test(currentSectionName)
+    && /^\s*insteadOf\s*=\s*git@github\.com:\s*$/i.test(line)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function sanitizeGitConfig(
   gitconfig: string,
   home: string,
@@ -330,22 +375,7 @@ export function sanitizeGitConfig(
       }
     }
 
-    if (stripGpg && currentSection === 'commit' && /^\s*gpgsign\s*=.*$/i.test(line)) {
-      continue;
-    }
-    if (stripGpg && currentSection === 'tag' && /^\s*gpgsign\s*=.*$/i.test(line)) {
-      continue;
-    }
-    if (stripGpg && currentSection === 'user' && /^\s*signingKey\s*=.*$/i.test(line)) {
-      continue;
-    }
-    if (currentSection === 'credential' && isGitHubCliCredentialHelper(line)) {
-      continue;
-    }
-    if (
-      /^url\s+"https:\/\/github\.com\/"$/i.test(currentSectionName)
-      && /^\s*insteadOf\s*=\s*git@github\.com:\s*$/i.test(line)
-    ) {
+    if (shouldStripGitConfigLine(line, stripGpg, currentSection, currentSectionName)) {
       continue;
     }
 
@@ -629,23 +659,27 @@ export function syncGpgKeys(
     dockerRunSafeFn = runSafeFn
   } = options;
   const hostEnv = { ...process.env, HOME: home };
-  let signingKey = normalizeSigningKey(signingKeyOverride);
-  let resolvedSigningKey = Object.hasOwn(options, 'signingKey');
-  // Allow callers to supply a pre-computed cache read so we don't re-invoke
-  // `gpg --list-secret-keys` just to decide the progress message.
-  if (cachedOverride === null && !resolvedSigningKey) {
-    signingKey = getGitSigningKey({ repoPath, home, execFn });
-    resolvedSigningKey = true;
-  }
-  const cached = cachedOverride ?? readGpgCache(home, project, execFn, signingKey);
+  const resolveKeyCache = (): { cached: GpgCache | null; signingKey: string | null } => {
+    let signingKey = normalizeSigningKey(signingKeyOverride);
+    let resolvedSigningKey = Object.hasOwn(options, 'signingKey');
+    // Allow callers to supply a pre-computed cache read so we don't re-invoke
+    // `gpg --list-secret-keys` just to decide the progress message.
+    if (cachedOverride === null && !resolvedSigningKey) {
+      signingKey = getGitSigningKey({ repoPath, home, execFn });
+      resolvedSigningKey = true;
+    }
+    const cached = cachedOverride ?? readGpgCache(home, project, execFn, signingKey);
+
+    if (!cached && !resolvedSigningKey) {
+      signingKey = getGitSigningKey({ repoPath, home, execFn });
+    }
+    return { cached, signingKey };
+  };
+  const { cached, signingKey } = resolveKeyCache();
   let pubKeys = cached?.pub ?? null;
   let secKeys = cached?.sec ?? null;
 
-  if (!cached && !resolvedSigningKey) {
-    signingKey = getGitSigningKey({ repoPath, home, execFn });
-  }
-
-  if (!cached) {
+  const exportAndCacheKeys = (): boolean => {
     const exportArgs = signingKey ? ['--export', signingKey] : ['--export'];
     const exportSecretArgs = signingKey
       ? ['--export-secret-keys', signingKey]
@@ -676,16 +710,24 @@ export function syncGpgKeys(
         );
       }
     }
+
+    return true;
+  };
+  if (!cached && !exportAndCacheKeys()) {
+    return false;
   }
 
-  dockerExecFn('docker', ['exec', '-i', container, 'gpg', '--import'], {
-    input: pubKeys ?? undefined,
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
-  dockerExecFn('docker', ['exec', '-i', container, 'gpg', '--batch', '--import'], {
-    input: secKeys ?? undefined,
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
+  const importKeys = (): void => {
+    dockerExecFn('docker', ['exec', '-i', container, 'gpg', '--import'], {
+      input: pubKeys ?? undefined,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    dockerExecFn('docker', ['exec', '-i', container, 'gpg', '--batch', '--import'], {
+      input: secKeys ?? undefined,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+  };
+  importKeys();
 
   dockerRunSafeFn('docker', ['exec', container, 'gpgconf', '--launch', 'gpg-agent']);
   return true;
@@ -735,13 +777,16 @@ export function buildContainerEnvFile(
 
   const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
   entries.push(...additionalEntries);
-  let ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
-  if (!ghToken && engine === 'wsl2') {
-    ghToken = runSafeFn('gh', ['auth', 'token']);
-  }
-  if (ghToken) {
-    entries.push(['GH_TOKEN', ghToken]);
-  }
+  const appendGitHubToken = (): void => {
+    let ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
+    if (!ghToken && engine === 'wsl2') {
+      ghToken = runSafeFn('gh', ['auth', 'token']);
+    }
+    if (ghToken) {
+      entries.push(['GH_TOKEN', ghToken]);
+    }
+  };
+  appendGitHubToken();
 
   if (entries.length === 0) {
     return { dockerArgs: [], cleanup: () => {} };
@@ -1032,22 +1077,28 @@ export async function create(
   const config = loadConfig();
   const [branchOrTaskId = '', base] = positionals;
   const resolvedTarget = resolveSandboxTarget(branchOrTaskId, config.repoRoot);
-  const workspace = workspaceOverride?.mode === 'task-bound'
-    && resolvedTarget.workspace.mode === 'task-bound'
-    && workspaceOverride.taskId === resolvedTarget.workspace.taskId
-    ? resolvedTarget.workspace
-    : workspaceOverride ?? resolvedTarget.workspace;
+  const selectWorkspace = (): SandboxWorkspaceKey => {
+    return workspaceOverride?.mode === 'task-bound'
+      && resolvedTarget.workspace.mode === 'task-bound'
+      && workspaceOverride.taskId === resolvedTarget.workspace.taskId
+      ? resolvedTarget.workspace
+      : workspaceOverride ?? resolvedTarget.workspace;
+  };
+  const workspace = selectWorkspace();
   const target = { ...resolvedTarget, workspace };
   const branch = target.branch;
   assertValidBranchName(branch);
-  const effectiveConfig = {
-    ...config,
-    vm: {
-      ...config.vm,
-      cpu: parsePositiveIntegerOption(values.cpu, '--cpu') ?? config.vm.cpu,
-      memory: parsePositiveIntegerOption(values.memory, '--memory') ?? config.vm.memory
-    }
+  const createEffectiveConfig = () => {
+    return {
+      ...config,
+      vm: {
+        ...config.vm,
+        cpu: parsePositiveIntegerOption(values.cpu, '--cpu') ?? config.vm.cpu,
+        memory: parsePositiveIntegerOption(values.memory, '--memory') ?? config.vm.memory
+      }
+    };
   };
+  const effectiveConfig = createEffectiveConfig();
   const worktreeCandidates = worktreeDirCandidates(effectiveConfig, branch);
   assertBranchAvailable(config.repoRoot, branch, { allowedWorktrees: worktreeCandidates });
   const capabilityPlan = createSandboxCapabilityPlan(effectiveConfig);
@@ -1080,7 +1131,10 @@ export async function create(
     container,
     identity: target.workspace
   });
-  const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
+  const selectWorktree = (): string => {
+    return worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
+  };
+  const worktree = selectWorktree();
   let worktreeCreated = false;
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
@@ -1105,76 +1159,86 @@ export async function create(
     });
     p.log.success('Docker is ready');
 
-    const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName]);
-    const imageLabels = imageExists ? readImageLabels(effectiveConfig, engine) : {};
-    const currentImageSignature = imageLabels[sandboxImageConfigLabel(effectiveConfig)] ?? '';
-    const currentLastRefresh = parseRefreshTimestamp(imageLabels[sandboxImageRefreshLabel(effectiveConfig)] ?? '');
-    const signatureStale = !imageExists || currentImageSignature !== expectedImageSignature;
-    const now = Date.now();
-    const refreshDue = imageExists
-      && !signatureStale
-      && !isRefreshDisabled(process.env, values['no-refresh'] ?? false)
-      && isRefreshDue(currentLastRefresh, now, effectiveConfig.refreshIntervalDays);
-    const needsImageBuild = signatureStale || refreshDue;
+    const ensureImage = (): void => {
+      const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName]);
+      const imageLabels = imageExists ? readImageLabels(effectiveConfig, engine) : {};
+      const currentImageSignature = imageLabels[sandboxImageConfigLabel(effectiveConfig)] ?? '';
+      const currentLastRefresh = parseRefreshTimestamp(imageLabels[sandboxImageRefreshLabel(effectiveConfig)] ?? '');
+      const signatureStale = !imageExists || currentImageSignature !== expectedImageSignature;
+      const now = Date.now();
+      const refreshDue = imageExists
+        && !signatureStale
+        && !isRefreshDisabled(process.env, values['no-refresh'] ?? false)
+        && isRefreshDue(currentLastRefresh, now, effectiveConfig.refreshIntervalDays);
+      const needsImageBuild = signatureStale || refreshDue;
 
-    if (needsImageBuild) {
-      if (values['inherit-build-proxy'] && effectiveConfig.dockerfile) {
-        throw new Error('Build proxy inheritance is unavailable with a custom sandbox Dockerfile.');
-      }
-      const buildProxy = prepareBuildProxy(
-        values['inherit-build-proxy'] ?? false,
-        process.env,
-        engine
-      );
-      if (values['inherit-build-proxy']) assertBuildProxyCompatibility(engine);
-      const buildRefresh = !imageExists || refreshDue;
-      const buildLastRefresh = buildRefresh ? now : currentLastRefresh || 0;
-
-      p.log.step(
-        refreshDue
-          ? 'Refreshing stale image...'
-          : imageExists
-            ? 'Rebuilding stale image...'
-            : 'Building image for first use...'
-      );
-      try {
-        buildImage(
-          effectiveConfig,
-          tools,
-          preparedDockerfile.path,
-          expectedImageSignature,
-          {
-            engine,
-            refresh: buildRefresh,
-            lastRefresh: buildLastRefresh,
-            buildProxyArgs: buildProxy.args,
-            buildEnv: buildProxy.env
+      const buildOrReuseImage = (): void => {
+        if (needsImageBuild) {
+          if (values['inherit-build-proxy'] && effectiveConfig.dockerfile) {
+            throw new Error('Build proxy inheritance is unavailable with a custom sandbox Dockerfile.');
           }
-        );
-        p.log.success(
-          refreshDue
-            ? 'Image refreshed'
-            : imageExists
-              ? 'Image rebuilt'
-              : 'Image built'
-        );
-      } catch (error) {
-        if (refreshDue && !signatureStale && imageExists) {
-          p.log.warn(
-            'Scheduled sandbox image refresh failed; continuing with the existing image. ' +
-            redactBuildProxyValues(commandErrorMessage(error), buildProxy.redactionValues)
-            + (values['inherit-build-proxy'] ? ` ${buildProxyFailureHint(engine)}` : '')
+          const buildProxy = prepareBuildProxy(
+            values['inherit-build-proxy'] ?? false,
+            process.env,
+            engine
           );
+          if (values['inherit-build-proxy']) assertBuildProxyCompatibility(engine);
+          const buildRefresh = !imageExists || refreshDue;
+          const buildLastRefresh = buildRefresh ? now : currentLastRefresh || 0;
+
+          p.log.step(
+            refreshDue
+              ? 'Refreshing stale image...'
+              : imageExists
+                ? 'Rebuilding stale image...'
+                : 'Building image for first use...'
+          );
+          try {
+            buildImage(
+              effectiveConfig,
+              tools,
+              preparedDockerfile.path,
+              expectedImageSignature,
+              {
+                engine,
+                refresh: buildRefresh,
+                lastRefresh: buildLastRefresh,
+                buildProxyArgs: buildProxy.args,
+                buildEnv: buildProxy.env
+              }
+            );
+            p.log.success(
+              refreshDue
+                ? 'Image refreshed'
+                : imageExists
+                  ? 'Image rebuilt'
+                  : 'Image built'
+            );
+          } catch (error) {
+            const reportBuildFailure = (): void => {
+              if (refreshDue && !signatureStale && imageExists) {
+                p.log.warn(
+                  'Scheduled sandbox image refresh failed; continuing with the existing image. ' +
+                  redactBuildProxyValues(commandErrorMessage(error), buildProxy.redactionValues)
+                  + (values['inherit-build-proxy'] ? ` ${buildProxyFailureHint(engine)}` : '')
+                );
+              } else {
+                const hint = values['inherit-build-proxy'] ? `\n${buildProxyFailureHint(engine)}` : '';
+                throw new Error(
+                  `${redactBuildProxyValues(commandErrorMessage(error), buildProxy.redactionValues)}${hint}`
+                );
+              }
+            };
+            reportBuildFailure();
+
+          }
         } else {
-          const hint = values['inherit-build-proxy'] ? `\n${buildProxyFailureHint(engine)}` : '';
-          throw new Error(
-            `${redactBuildProxyValues(commandErrorMessage(error), buildProxy.redactionValues)}${hint}`
-          );
+          p.log.step(`Using existing image ${effectiveConfig.imageName}`);
         }
-      }
-    } else {
-      p.log.step(`Using existing image ${effectiveConfig.imageName}`);
-    }
+      };
+      buildOrReuseImage();
+    };
+    ensureImage();
 
     await p.tasks([
       {
@@ -1249,23 +1313,26 @@ export async function create(
               }
             }
 
-            for (const relativePath of tool.pathRewriteFiles ?? []) {
-              const filePath = path.join(dir, relativePath);
-              if (!fs.existsSync(filePath)) {
-                continue;
-              }
-              let content = fs.readFileSync(filePath, 'utf8');
-              const containerHome = path.posix.dirname(tool.containerMount);
-              for (const hostPath of [effectiveConfig.repoRoot, effectiveConfig.home]) {
-                const replacement = hostPath === effectiveConfig.repoRoot ? '/workspace' : containerHome;
-                content = content.replaceAll(hostPath, replacement);
-                const posixHostPath = hostPath.replaceAll('\\', '/');
-                if (posixHostPath !== hostPath) {
-                  content = content.replaceAll(posixHostPath, replacement);
+            const rewriteToolPaths = (): void => {
+              for (const relativePath of tool.pathRewriteFiles ?? []) {
+                const filePath = path.join(dir, relativePath);
+                if (!fs.existsSync(filePath)) {
+                  continue;
                 }
+                let content = fs.readFileSync(filePath, 'utf8');
+                const containerHome = path.posix.dirname(tool.containerMount);
+                for (const hostPath of [effectiveConfig.repoRoot, effectiveConfig.home]) {
+                  const replacement = hostPath === effectiveConfig.repoRoot ? '/workspace' : containerHome;
+                  content = content.replaceAll(hostPath, replacement);
+                  const posixHostPath = hostPath.replaceAll('\\', '/');
+                  if (posixHostPath !== hostPath) {
+                    content = content.replaceAll(posixHostPath, replacement);
+                  }
+                }
+                fs.writeFileSync(filePath, content, 'utf8');
               }
-              fs.writeFileSync(filePath, content, 'utf8');
-            }
+            };
+            rewriteToolPaths();
           }
 
           return `${effectiveResolvedTools.length} tool config directories ready`;
@@ -1290,90 +1357,109 @@ export async function create(
             .filter((name) => existing.includes(name));
 
           const oldContainer = previousManifest ? await inspectSandboxControlContainer(previousManifest) : null;
-          if (oldContainer?.state === 'unknown') {
-            throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${oldContainer.reason}`);
-          }
-          if (previousManifest && (previousManifest.branch !== branch
-            || previousManifest.mode !== target.workspace.mode
-            || previousManifest.taskId !== (target.workspace.mode === 'task-bound' ? target.workspace.taskId : null)
-            || fs.realpathSync.native(previousManifest.worktreeRoot) !== fs.realpathSync.native(worktree))) {
-            throw new Error('SANDBOX_WORKSPACE_IDENTITY_CONFLICT: recorded sandbox binding does not match the requested worktree');
-          }
+          const validatePreviousBinding = (): void => {
+            if (oldContainer?.state === 'unknown') {
+              throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${oldContainer.reason}`);
+            }
+            if (previousManifest && (previousManifest.branch !== branch
+              || previousManifest.mode !== target.workspace.mode
+              || previousManifest.taskId !== (target.workspace.mode === 'task-bound' ? target.workspace.taskId : null)
+              || fs.realpathSync.native(previousManifest.worktreeRoot) !== fs.realpathSync.native(worktree))) {
+              throw new Error('SANDBOX_WORKSPACE_IDENTITY_CONFLICT: recorded sandbox binding does not match the requested worktree');
+            }
+          };
+          validatePreviousBinding();
+
           const removalIds: string[] = [];
-          if (matchedContainers.length > 0) {
-            for (const name of matchedContainers) {
-              const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name]).trim();
-              if (!/^[a-f0-9]{64}$/u.test(id)
-                || (previousManifest && id !== previousManifest.containerIdentity.id)) {
-                throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
-              }
-              removalIds.push(id);
-              const rawLabels = runSafeEngine(engine, 'docker', [
-                'inspect', '--format', '{{json .Config.Labels}}', name
-              ]).trim();
-              let labels: Record<string, string> = {};
-              try {
-                labels = JSON.parse(rawLabels) as Record<string, string>;
-              } catch {
-                labels = {};
-              }
-              const existingIdentity = parseSandboxWorkspaceIdentity(labels, {
-                mode: sandboxWorkspaceModeLabel(effectiveConfig),
-                taskId: sandboxTaskIdLabel(effectiveConfig)
-              });
-              if (!sameSandboxWorkspaceIdentity(existingIdentity, target.workspace)) {
-                const existingDescription = existingIdentity.mode === 'task-bound'
-                  ? `task-bound:${existingIdentity.taskId}`
-                  : existingIdentity.mode;
-                const requestedDescription = target.workspace.mode === 'task-bound'
-                  ? `task-bound:${target.workspace.taskId}`
-                  : target.workspace.mode;
-                const recoveryTarget = target.workspace.mode === 'task-bound'
-                  ? target.workspace.taskId
-                  : branch;
-                throw new Error(
-                  `SANDBOX_WORKSPACE_IDENTITY_CONFLICT: container '${name}' is ${existingDescription}, `
-                  + `but this request is ${requestedDescription}. `
-                  + `Run 'ai sandbox start --recreate ${recoveryTarget}' on the host, then retry.`
-                );
+          const validateMatchedContainers = (): void => {
+            if (matchedContainers.length > 0) {
+              for (const name of matchedContainers) {
+                const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name]).trim();
+                if (!/^[a-f0-9]{64}$/u.test(id)
+                  || (previousManifest && id !== previousManifest.containerIdentity.id)) {
+                  throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
+                }
+                removalIds.push(id);
+                const rawLabels = runSafeEngine(engine, 'docker', [
+                  'inspect', '--format', '{{json .Config.Labels}}', name
+                ]).trim();
+                let labels: Record<string, string>;
+                try {
+                  labels = JSON.parse(rawLabels) as Record<string, string>;
+                } catch {
+                  labels = {};
+                }
+                const existingIdentity = parseSandboxWorkspaceIdentity(labels, {
+                  mode: sandboxWorkspaceModeLabel(effectiveConfig),
+                  taskId: sandboxTaskIdLabel(effectiveConfig)
+                });
+                if (!sameSandboxWorkspaceIdentity(existingIdentity, target.workspace)) {
+                  const existingDescription = existingIdentity.mode === 'task-bound'
+                    ? `task-bound:${existingIdentity.taskId}`
+                    : existingIdentity.mode;
+                  const requestedDescription = target.workspace.mode === 'task-bound'
+                    ? `task-bound:${target.workspace.taskId}`
+                    : target.workspace.mode;
+                  const recoveryTarget = target.workspace.mode === 'task-bound'
+                    ? target.workspace.taskId
+                    : branch;
+                  throw new Error(
+                    `SANDBOX_WORKSPACE_IDENTITY_CONFLICT: container '${name}' is ${existingDescription}, `
+                    + `but this request is ${requestedDescription}. `
+                    + `Run 'ai sandbox start --recreate ${recoveryTarget}' on the host, then retry.`
+                  );
+                }
               }
             }
-          }
-          if (oldContainer?.state === 'found' && !removalIds.includes(oldContainer.id)) {
-            throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
-          }
-          const aliasesFile = ensureSandboxAliasesFile(
-            effectiveConfig.home,
-            capabilityPlan.aliases
-          );
-          if (aliasesFile.created) {
-            message(`Created default sandbox aliases at ${aliasesFile.path}`);
-          }
+          };
+          validateMatchedContainers();
 
-          const readmeResults = ensureSandboxDiscoveryReadmes(effectiveConfig, branch);
-          for (const { created, path: readmePath } of readmeResults) {
-            if (created) {
-              message(`Created discovery README at ${readmePath}`);
+          const validateRemovalSet = (): void => {
+            if (oldContainer?.state === 'found' && !removalIds.includes(oldContainer.id)) {
+              throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
             }
-          }
+          };
+          validateRemovalSet();
 
-          const gitconfigPath = path.join(effectiveConfig.home, '.gitconfig');
-          const gitconfigContent = fs.existsSync(gitconfigPath)
-            ? fs.readFileSync(gitconfigPath, 'utf8')
-            : '';
-          const needsGpg = detectGpgConfig(gitconfigContent);
-          const hasHostGpgKeys = needsGpg && hostHasGpgKeys(effectiveConfig.home);
-          const signingKey = needsGpg
-            ? getGitSigningKey({ repoPath: worktree, home: effectiveConfig.home })
-            : null;
-          const cachedGpg = needsGpg
-            ? readGpgCache(
+          const prepareDiscovery = (): void => {
+            const aliasesFile = ensureSandboxAliasesFile(
               effectiveConfig.home,
-              effectiveConfig.project,
-              undefined,
-              signingKey
-            )
-            : null;
+              capabilityPlan.aliases
+            );
+            if (aliasesFile.created) {
+              message(`Created default sandbox aliases at ${aliasesFile.path}`);
+            }
+
+            const readmeResults = ensureSandboxDiscoveryReadmes(effectiveConfig, branch);
+            for (const { created, path: readmePath } of readmeResults) {
+              if (created) {
+                message(`Created discovery README at ${readmePath}`);
+              }
+            }
+          };
+          prepareDiscovery();
+
+          const readSigningState = () => {
+            const gitconfigPath = path.join(effectiveConfig.home, '.gitconfig');
+            const gitconfigContent = fs.existsSync(gitconfigPath)
+              ? fs.readFileSync(gitconfigPath, 'utf8')
+              : '';
+            const needsGpg = detectGpgConfig(gitconfigContent);
+            const hasHostGpgKeys = needsGpg && hostHasGpgKeys(effectiveConfig.home);
+            const signingKey = needsGpg
+              ? getGitSigningKey({ repoPath: worktree, home: effectiveConfig.home })
+              : null;
+            const cachedGpg = needsGpg
+              ? readGpgCache(
+                effectiveConfig.home,
+                effectiveConfig.project,
+                undefined,
+                signingKey
+              )
+              : null;
+            return { needsGpg, hasHostGpgKeys, signingKey, cachedGpg };
+          };
+          const { needsGpg, hasHostGpgKeys, signingKey, cachedGpg } = readSigningState();
           const proxyEntries = values['inherit-proxy'] ? collectHostProxyEntries(process.env) : [];
           const envFile = buildContainerEnvFile(effectiveResolvedTools, engine, undefined, {
             additionalEntries: proxyEntries
@@ -1396,15 +1482,19 @@ export async function create(
               },
               runCommand: runBoundedSandboxHookCommand
             });
-            const beforeCreateFailure = beforeCreateResults.find(
-              (result) => result.status === 'fatal'
-            );
-            if (beforeCreateFailure) {
-              throw new Error(
-                beforeCreateFailure.message
-                ?? `Sandbox hook '${beforeCreateFailure.hookId}' failed.`
+            const assertBeforeCreateHook = (): void => {
+              const beforeCreateFailure = beforeCreateResults.find(
+                (result) => result.status === 'fatal'
               );
-            }
+              if (beforeCreateFailure) {
+                throw new Error(
+                  beforeCreateFailure.message
+                  ?? `Sandbox hook '${beforeCreateFailure.hookId}' failed.`
+                );
+              }
+            };
+            assertBeforeCreateHook();
+
             const toolVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
               tool.tmpfs ? [] : ['-v', volumeArg(engine, dir, tool.containerMount)]
             );
@@ -1417,34 +1507,50 @@ export async function create(
               container,
               identity: target.workspace
             });
-            const taskSource = target.workspace.mode === 'task-bound'
-              ? assertSandboxTaskSource(effectiveConfig.repoRoot, target.workspace.taskId)
-              : null;
-            const completedTaskSource = target.workspace.mode === 'task-bound'
-              ? prepareSandboxCompletedTaskMountSource(effectiveConfig.repoRoot, target.workspace.taskId)
-              : null;
+            const prepareTaskSources = () => {
+              const taskSource = target.workspace.mode === 'task-bound'
+                ? assertSandboxTaskSource(effectiveConfig.repoRoot, target.workspace.taskId)
+                : null;
+              const completedTaskSource = target.workspace.mode === 'task-bound'
+                ? prepareSandboxCompletedTaskMountSource(effectiveConfig.repoRoot, target.workspace.taskId)
+                : null;
+              return { taskSource, completedTaskSource };
+            };
+            const { taskSource, completedTaskSource } = prepareTaskSources();
             prepareSandboxWorkspaceMountTargets(effectiveConfig.repoRoot);
             if (hadExistingControlRoot) await quiesceSandboxControlRoot(controlPaths.root);
-            const previousCutoverSnapshot = hadExistingControlRoot
-              ? captureSandboxControlCutoverSnapshot(controlPaths.root)
-              : null;
-            if (previousCutoverSnapshot) assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
-            if (removalIds.length > 0) message('Removing old container instance...');
-            for (const id of removalIds) {
-              runEngineTaskCommand(engine, 'docker', ['stop', id]);
-              runEngineTaskCommand(engine, 'docker', ['rm', id]);
-            }
+            const snapshotCutover = () => {
+              const previousCutoverSnapshot = hadExistingControlRoot
+                ? captureSandboxControlCutoverSnapshot(controlPaths.root)
+                : null;
+              if (previousCutoverSnapshot) assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
+              return previousCutoverSnapshot;
+            };
+            const previousCutoverSnapshot = snapshotCutover();
+            const removePreviousContainers = (): void => {
+              if (removalIds.length > 0) message('Removing old container instance...');
+              for (const id of removalIds) {
+                runEngineTaskCommand(engine, 'docker', ['stop', id]);
+                runEngineTaskCommand(engine, 'docker', ['rm', id]);
+              }
+            };
+            removePreviousContainers();
+
             if (previousCutoverSnapshot) {
               if (previousManifest) {
                 const finalOldContainer = await inspectSandboxControlContainer(previousManifest);
-                if (finalOldContainer.state !== 'absent') {
-                  throw new Error(finalOldContainer.state === 'unknown'
-                    ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${finalOldContainer.reason}`
-                    : 'SANDBOX_CONTROL_CONTAINER_REAPPEARED');
-                }
+                const validateOldContainerAbsent = (): void => {
+                  if (finalOldContainer.state !== 'absent') {
+                    throw new Error(finalOldContainer.state === 'unknown'
+                      ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${finalOldContainer.reason}`
+                      : 'SANDBOX_CONTROL_CONTAINER_REAPPEARED');
+                  }
+                };
+                validateOldContainerAbsent();
               }
               replacementCutover = beginSandboxControlReplacement(controlPaths.root, replacementLease);
             }
+
             const control = materializeSandboxControl({
               base: effectiveConfig.controlBase,
               repoRoot: effectiveConfig.repoRoot,
@@ -1463,27 +1569,30 @@ export async function create(
               branch,
               repoRoot: effectiveConfig.repoRoot
             });
-            const coreVolumes = sandboxCoreBindMounts(effectiveConfig, branch, {
-              gitCommonDir: gitMetadata.commonDir,
-              worktreeGitFile: gitMetadata.worktreeGitFile,
-              worktree,
-              shellConfigHostDir: hostShellConfig.hostDir,
-              workspaceViewRoot: workspaceView.root,
-              controlDir: control.channelDir,
-              ...(target.workspace.mode === 'task-bound' ? { controlRootDir: control.root } : {}),
-              controlStatusDir: control.statusDir,
-              ...(target.workspace.mode === 'task-bound' ? { runtimeDir: control.runtimeDir } : {}),
-              ...(target.workspace.mode === 'task-bound'
-                ? {
-                  taskSources: [taskSource!],
-                  completedTaskSource: completedTaskSource!,
-                  taskId: target.workspace.taskId
-                }
-                : {})
-            }).flatMap(({ hostPaths, containerPath, readOnly }) => [
-              '-v',
-              volumeArg(engine, hostPaths[0]!, containerPath, readOnly ? ':ro' : '')
-            ]);
+            const buildCoreVolumes = (): string[] => {
+              return sandboxCoreBindMounts(effectiveConfig, branch, {
+                gitCommonDir: gitMetadata.commonDir,
+                worktreeGitFile: gitMetadata.worktreeGitFile,
+                worktree,
+                shellConfigHostDir: hostShellConfig.hostDir,
+                workspaceViewRoot: workspaceView.root,
+                controlDir: control.channelDir,
+                ...(target.workspace.mode === 'task-bound' ? { controlRootDir: control.root } : {}),
+                controlStatusDir: control.statusDir,
+                ...(target.workspace.mode === 'task-bound' ? { runtimeDir: control.runtimeDir } : {}),
+                ...(target.workspace.mode === 'task-bound'
+                  ? {
+                    taskSources: [taskSource!],
+                    completedTaskSource: completedTaskSource!,
+                    taskId: target.workspace.taskId
+                  }
+                  : {})
+              }).flatMap(({ hostPaths, containerPath, readOnly }) => [
+                '-v',
+                volumeArg(engine, hostPaths[0]!, containerPath, readOnly ? ':ro' : '')
+              ]);
+            };
+            const coreVolumes = buildCoreVolumes();
             // Mount each declared seed read-only at an isolated staging path.
             // After docker run mounts the empty tmpfs, the container's default
             // user copies these entries into it so the runtime targets are normal,
@@ -1526,124 +1635,139 @@ export async function create(
             fs.mkdirSync(shareBranch, { recursive: true });
             fs.mkdirSync(clipboardHostDir(effectiveConfig.home), { recursive: true, mode: 0o700 });
 
-            const dotfilesSnapshot = materializeDotfiles(
-              effectiveConfig.dotfilesDir,
-              dotfilesCacheDir(effectiveConfig.home, effectiveConfig.project)
-            );
-            const dotfilesMount = dotfilesSnapshot
-              ? buildDotfilesVolumeArgs(engine, dotfilesSnapshot.cacheDir)
-              : [];
-            const hostTz = detectHostTimezone();
-            const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
+            const prepareOptionalMounts = () => {
+              const dotfilesSnapshot = materializeDotfiles(
+                effectiveConfig.dotfilesDir,
+                dotfilesCacheDir(effectiveConfig.home, effectiveConfig.project)
+              );
+              const dotfilesMount = dotfilesSnapshot
+                ? buildDotfilesVolumeArgs(engine, dotfilesSnapshot.cacheDir)
+                : [];
+              const hostTz = detectHostTimezone();
+              const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
 
+              return { dotfilesMount, tzFlags };
+            };
+            const { dotfilesMount, tzFlags } = prepareOptionalMounts();
             let createdContainerRef: string | null = null;
             try {
-              const dockerRunId = runEngineTaskCommand(engine, 'docker', [
-              'run',
-              '-d',
-              '--init',
-              '--name',
-              container,
-              '--hostname',
-              `${effectiveConfig.project}-sandbox`,
-              '--label',
-              sandboxLabel(effectiveConfig),
-              '--label',
-              `${sandboxBranchLabel(effectiveConfig)}=${branch}`,
-              '--label',
-              `${sandboxWorkspaceModeLabel(effectiveConfig)}=${target.workspace.mode}`,
-              '-e',
-              'AGENT_INFRA_SANDBOX=1',
-              ...(target.workspace.mode === 'task-bound'
-                ? [
+              const runContainer = (): string => {
+                return runEngineTaskCommand(engine, 'docker', [
+                  'run',
+                  '-d',
+                  '--init',
+                  '--name',
+                  container,
+                  '--hostname',
+                  `${effectiveConfig.project}-sandbox`,
                   '--label',
-                  `${sandboxTaskIdLabel(effectiveConfig)}=${target.workspace.taskId}`,
+                  sandboxLabel(effectiveConfig),
+                  '--label',
+                  `${sandboxBranchLabel(effectiveConfig)}=${branch}`,
+                  '--label',
+                  `${sandboxWorkspaceModeLabel(effectiveConfig)}=${target.workspace.mode}`,
                   '-e',
-                  `AGENT_INFRA_TASK_ID=${target.workspace.taskId}`
-                ]
-                : []),
-              '-e',
-              `AGENT_INFRA_CONTROL_GENERATION=${control.generation}`,
-              '-e',
-              'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',
-              '-e',
-              'AGENT_INFRA_CONTROL_STATUS_DIR=/run/agent-infra/control-status',
-              '-e',
-              `AGENT_INFRA_CONTROL_ROOT_ID=${control.controlRootId}`,
-              ...(target.workspace.mode === 'task-bound'
-                ? [
-                  '-e', 'AGENT_INFRA_CONTROL_ROOT_DIR=/run/agent-infra/control-root',
-                  '-e', 'AGENT_INFRA_RUNTIME_DIR=/run/agent-infra/runtime'
-                ]
-                : []),
-              '--label',
-              `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
-              // Every task sandbox runs without seccomp and AppArmor filtering;
-              // capabilities and namespace isolation remain unchanged.
-              '--security-opt', 'seccomp=unconfined',
-              '--security-opt', 'apparmor=unconfined',
-              ...coreVolumes,
-              ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
-              ...dotfilesMount,
-              ...toolVolumes,
-              ...tmpfsArgs,
-              ...tmpfsSeedPlan.flatMap(({ volumeArgs }) => volumeArgs),
-              ...liveMountVolumes,
-              ...hostStateMountVolumes,
-              ...envFile.dockerArgs,
-              ...tzFlags,
-              '-w',
-              '/workspace',
-              effectiveConfig.imageName
-              ]);
-              createdContainerRef = dockerRunId.trim();
-              const containerId = runEngineTaskCommand(engine, 'docker', [
-                'inspect', '--format', '{{.Id}}', dockerRunId.trim()
-              ]).trim();
-              if (!/^[a-f0-9]{64}$/u.test(containerId)) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
-              const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
-                'inspect', '--format', '{{json .Config.Labels}}', containerId
-              ]).trim();
-              let inspectedLabels: unknown;
-              try {
-                inspectedLabels = JSON.parse(rawContainerLabels);
-              } catch {
-                throw new Error('SANDBOX_CONTROL_CONTAINER_LABELS_INVALID');
-              }
-              if (!inspectedLabels || typeof inspectedLabels !== 'object' || Array.isArray(inspectedLabels)) {
-                throw new Error('SANDBOX_CONTROL_CONTAINER_LABELS_INVALID');
-              }
-              const expectedLabels: Record<string, string> = {
-                [sandboxLabel(effectiveConfig)]: '',
-                [sandboxBranchLabel(effectiveConfig)]: branch,
-                [sandboxWorkspaceModeLabel(effectiveConfig)]: target.workspace.mode,
-                [sandboxRuntimeCapabilityLabel(effectiveConfig)]: capabilityPlan.runtimeSignature,
-                ...(target.workspace.mode === 'task-bound'
-                  ? { [sandboxTaskIdLabel(effectiveConfig)]: target.workspace.taskId }
-                  : {})
+                  'AGENT_INFRA_SANDBOX=1',
+                  ...(target.workspace.mode === 'task-bound'
+                    ? [
+                      '--label',
+                      `${sandboxTaskIdLabel(effectiveConfig)}=${target.workspace.taskId}`,
+                      '-e',
+                      `AGENT_INFRA_TASK_ID=${target.workspace.taskId}`
+                    ]
+                    : []),
+                  '-e',
+                  `AGENT_INFRA_CONTROL_GENERATION=${control.generation}`,
+                  '-e',
+                  'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',
+                  '-e',
+                  'AGENT_INFRA_CONTROL_STATUS_DIR=/run/agent-infra/control-status',
+                  '-e',
+                  `AGENT_INFRA_CONTROL_ROOT_ID=${control.controlRootId}`,
+                  ...(target.workspace.mode === 'task-bound'
+                    ? [
+                      '-e', 'AGENT_INFRA_CONTROL_ROOT_DIR=/run/agent-infra/control-root',
+                      '-e', 'AGENT_INFRA_RUNTIME_DIR=/run/agent-infra/runtime'
+                    ]
+                    : []),
+                  '--label',
+                  `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
+                  // Every task sandbox runs without seccomp and AppArmor filtering;
+                  // capabilities and namespace isolation remain unchanged.
+                  '--security-opt', 'seccomp=unconfined',
+                  '--security-opt', 'apparmor=unconfined',
+                  ...coreVolumes,
+                  ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
+                  ...dotfilesMount,
+                  ...toolVolumes,
+                  ...tmpfsArgs,
+                  ...tmpfsSeedPlan.flatMap(({ volumeArgs }) => volumeArgs),
+                  ...liveMountVolumes,
+                  ...hostStateMountVolumes,
+                  ...envFile.dockerArgs,
+                  ...tzFlags,
+                  '-w',
+                  '/workspace',
+                  effectiveConfig.imageName
+                  ]);
               };
-              const labels = inspectedLabels as Record<string, unknown>;
-              for (const [key, expected] of Object.entries(expectedLabels)) {
-                if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
-              }
-              finalizeSandboxControlManifest(control, {
-                engine,
-                id: containerId,
-                labels: expectedLabels
-              });
+              const dockerRunId = runContainer();
+              createdContainerRef = dockerRunId.trim();
+              const validateAndFinalizeContainer = (): void => {
+                const containerId = runEngineTaskCommand(engine, 'docker', [
+                  'inspect', '--format', '{{.Id}}', dockerRunId.trim()
+                ]).trim();
+                if (!/^[a-f0-9]{64}$/u.test(containerId)) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
+                const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
+                  'inspect', '--format', '{{json .Config.Labels}}', containerId
+                ]).trim();
+                let inspectedLabels: unknown;
+                try {
+                  inspectedLabels = JSON.parse(rawContainerLabels);
+                } catch {
+                  throw new Error('SANDBOX_CONTROL_CONTAINER_LABELS_INVALID');
+                }
+                if (!inspectedLabels || typeof inspectedLabels !== 'object' || Array.isArray(inspectedLabels)) {
+                  throw new Error('SANDBOX_CONTROL_CONTAINER_LABELS_INVALID');
+                }
+                const expectedLabels: Record<string, string> = {
+                  [sandboxLabel(effectiveConfig)]: '',
+                  [sandboxBranchLabel(effectiveConfig)]: branch,
+                  [sandboxWorkspaceModeLabel(effectiveConfig)]: target.workspace.mode,
+                  [sandboxRuntimeCapabilityLabel(effectiveConfig)]: capabilityPlan.runtimeSignature,
+                  ...(target.workspace.mode === 'task-bound'
+                    ? { [sandboxTaskIdLabel(effectiveConfig)]: target.workspace.taskId }
+                    : {})
+                };
+                const labels = inspectedLabels as Record<string, unknown>;
+                for (const [key, expected] of Object.entries(expectedLabels)) {
+                  if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
+                }
+                finalizeSandboxControlManifest(control, {
+                  engine,
+                  id: containerId,
+                  labels: expectedLabels
+                });
+              };
+              validateAndFinalizeContainer();
               replacementLease.clearQuiescing();
               await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
               if (replacementCutover) {
                 commitSandboxControlReplacement(control.root, replacementLease);
                 replacementCutover = null;
               }
+
               createdTmpfsSeedPlan = tmpfsSeedPlan;
             } catch (error) {
-              if (createdContainerRef) {
-                runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
-                runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
-              }
-              if (!hadExistingControlRoot) removeDirRecursive(control.root);
+              const removeFailedContainer = (): void => {
+                if (createdContainerRef) {
+                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
+                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
+                }
+                if (!hadExistingControlRoot) removeDirRecursive(control.root);
+              };
+              removeFailedContainer();
+
               if (replacementCutover) {
                 try {
                   await recoverSandboxControlReplacement(control.root, replacementLease);
@@ -1653,6 +1777,7 @@ export async function create(
                 }
               }
               removeDirRecursive(workspaceView.root);
+
               throw error;
             }
           } finally {
@@ -1680,56 +1805,62 @@ export async function create(
           // `ln -sf` is idempotent for the default image.
           ensureShellConfigSymlinks(engine, container);
 
-          if (needsGpg) {
-            message(
-              cachedGpg
-                ? 'Syncing GPG keys from cache...'
-                : hasHostGpgKeys
-                  ? 'Syncing GPG keys (you may be prompted for your passphrase)...'
-                  : 'Checking GPG cache before falling back to stripped git config...'
-            );
-            try {
-              if (syncGpgKeys(
-                container,
-                effectiveConfig.home,
-                effectiveConfig.project,
-                undefined,
-                undefined,
-                {
-                  cachedOverride: cachedGpg,
-                  repoPath: worktree,
-                  signingKey,
-                  dockerExecFn: (cmd: string, args: string[], opts?: ExecSyncOptions) => execEngine(engine, cmd, args, opts),
-                  dockerRunSafeFn: (cmd: string, args: string[], opts?: { cwd?: string }) => runSafeEngine(engine, cmd, args, opts)
+          const prepareSigning = (): void => {
+            if (needsGpg) {
+              message(
+                cachedGpg
+                  ? 'Syncing GPG keys from cache...'
+                  : hasHostGpgKeys
+                    ? 'Syncing GPG keys (you may be prompted for your passphrase)...'
+                    : 'Checking GPG cache before falling back to stripped git config...'
+              );
+              try {
+                if (syncGpgKeys(
+                  container,
+                  effectiveConfig.home,
+                  effectiveConfig.project,
+                  undefined,
+                  undefined,
+                  {
+                    cachedOverride: cachedGpg,
+                    repoPath: worktree,
+                    signingKey,
+                    dockerExecFn: (cmd: string, args: string[], opts?: ExecSyncOptions) => execEngine(engine, cmd, args, opts),
+                    dockerRunSafeFn: (cmd: string, args: string[], opts?: { cwd?: string }) => runSafeEngine(engine, cmd, args, opts)
+                  }
+                )) {
+                  writeSanitizedGitconfig({
+                    home: effectiveConfig.home,
+                    hostConfigDir: hostShellConfig.hostDir,
+                    stripGpg: false,
+                    repoRoot: effectiveConfig.repoRoot
+                  });
+                } else {
+                  message(
+                    hasHostGpgKeys
+                      ? 'GPG key sync failed; using stripped git config fallback...'
+                      : 'Host GPG keys unavailable; using stripped git config fallback...'
+                  );
                 }
-              )) {
-                writeSanitizedGitconfig({
-                  home: effectiveConfig.home,
-                  hostConfigDir: hostShellConfig.hostDir,
-                  stripGpg: false,
-                  repoRoot: effectiveConfig.repoRoot
-                });
-              } else {
+              } catch {
                 message(
                   hasHostGpgKeys
                     ? 'GPG key sync failed; using stripped git config fallback...'
                     : 'Host GPG keys unavailable; using stripped git config fallback...'
                 );
               }
-            } catch {
-              message(
-                hasHostGpgKeys
-                  ? 'GPG key sync failed; using stripped git config fallback...'
-                  : 'Host GPG keys unavailable; using stripped git config fallback...'
-              );
             }
-          }
+          };
+          prepareSigning();
 
-          for (const { tool } of effectiveResolvedTools) {
-            for (const command of tool.postSetupCmds ?? []) {
-              runSafeEngine(engine, 'docker', ['exec', container, 'bash', '-lc', command]);
+          const runPostSetupCommands = (): void => {
+            for (const { tool } of effectiveResolvedTools) {
+              for (const command of tool.postSetupCmds ?? []) {
+                runSafeEngine(engine, 'docker', ['exec', container, 'bash', '-lc', command]);
+              }
             }
-          }
+          };
+          runPostSetupCommands();
 
           const afterStartResults = await runSandboxHooks({
             hooks: capabilityPlan.hooksByPhase['after-container-start'],
@@ -1737,41 +1868,47 @@ export async function create(
             context: { config: effectiveConfig, plan: capabilityPlan },
             runCommand: runBoundedSandboxHookCommand
           });
-          const afterStartFailure = afterStartResults.find(
-            (result) => result.status === 'fatal'
-          );
-          if (afterStartFailure) {
-            throw new Error(
-              afterStartFailure.message
-              ?? `Sandbox hook '${afterStartFailure.hookId}' failed.`
+          const assertAfterStartHook = (): void => {
+            const afterStartFailure = afterStartResults.find(
+              (result) => result.status === 'fatal'
             );
-          }
-
-          const initCommand = effectiveConfig.initCommand;
-          const initCommandDigest = initCommand === null ? null : createHash('sha256').update(initCommand).digest('hex');
-          const shouldRunProjectInitCommand = runProjectInitCommand
-            && initCommand !== null
-            && initCommandDigest !== null
-            && (worktreeCreated || previousProjectInitCommandDigest !== initCommandDigest);
-          let projectInitCompleted = !worktreeCreated
-            && initCommandDigest !== null
-            && previousProjectInitCommandDigest === initCommandDigest;
-
-          if (shouldRunProjectInitCommand && initCommand !== null) {
-            try {
-              runVerboseEngine(engine, 'docker', [
-                'exec', '--workdir', '/workspace', container, 'bash', '-lc', initCommand
-              ]);
-              projectInitCompleted = true;
-            } catch (error) {
+            if (afterStartFailure) {
               throw new Error(
-                `Project initialization failed for '${branch}': ${error instanceof Error ? error.message : String(error)}`
+                afterStartFailure.message
+                ?? `Sandbox hook '${afterStartFailure.hookId}' failed.`
               );
             }
-          }
-          if (projectInitCompleted && initCommandDigest !== null) {
-            writeProjectInitCommandDigest(controlPaths.root, initCommandDigest);
-          }
+          };
+          assertAfterStartHook();
+
+          const initializeProject = (): void => {
+            const initCommand = effectiveConfig.initCommand;
+            const initCommandDigest = initCommand === null ? null : createHash('sha256').update(initCommand).digest('hex');
+            const shouldRunProjectInitCommand = runProjectInitCommand
+              && initCommand !== null
+              && initCommandDigest !== null
+              && (worktreeCreated || previousProjectInitCommandDigest !== initCommandDigest);
+            let projectInitCompleted = !worktreeCreated
+              && initCommandDigest !== null
+              && previousProjectInitCommandDigest === initCommandDigest;
+
+            if (shouldRunProjectInitCommand && initCommand !== null) {
+              try {
+                runVerboseEngine(engine, 'docker', [
+                  'exec', '--workdir', '/workspace', container, 'bash', '-lc', initCommand
+                ]);
+                projectInitCompleted = true;
+              } catch (error) {
+                throw new Error(
+                  `Project initialization failed for '${branch}': ${error instanceof Error ? error.message : String(error)}`
+                );
+              }
+            }
+            if (projectInitCompleted && initCommandDigest !== null) {
+              writeProjectInitCommandDigest(controlPaths.root, initCommandDigest);
+            }
+          };
+          initializeProject();
 
           replacementLease.release();
           replacementLeaseHeld = false;
@@ -1817,15 +1954,7 @@ export async function create(
     hint: tool.setupHint
   }));
 
-  for (const check of checks) {
-    p.log.info(`  ${check.ok ? pc.green('✓') : pc.yellow('?')} ${check.name}`);
-  }
-  for (const check of toolChecks) {
-    p.log.info(`  ${check.ok ? pc.green('✓') : pc.yellow('?')} ${check.name}`);
-    if (!check.ok) {
-      p.log.warn(`    ${check.hint}`);
-    }
-  }
+  reportRuntimeChecks(checks, toolChecks);
 
   p.outro(pc.green('Sandbox ready'));
 
