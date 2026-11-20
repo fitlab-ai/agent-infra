@@ -83,6 +83,23 @@ export function resolveTaskWorkspace(taskId: string, repoRoot: string): TaskWork
   return matches[0]!;
 }
 
+function appendArchivedDay(rows: TaskWorkspace[], stateRoot: string, year: string, month: string, day: string): void {
+  for (const taskId of fs.readdirSync(path.join(stateRoot, year, month, day)).sort()) {
+    if (!TASK_ID_RE.test(taskId)) continue;
+    const taskMd = path.join(stateRoot, year, month, day, taskId, 'local', 'task.md');
+    if (!fs.existsSync(taskMd)) continue;
+    const content = fs.readFileSync(taskMd, 'utf8');
+    rows.push({ taskId, branch: resolveBranchFromTaskContent(content, taskId), state: 'archive', taskMd });
+  }
+}
+
+function appendArchivedMonth(rows: TaskWorkspace[], stateRoot: string, year: string, month: string): void {
+  for (const day of fs.readdirSync(path.join(stateRoot, year, month)).sort()) {
+    if (!/^\d{2}$/.test(day)) continue;
+    appendArchivedDay(rows, stateRoot, year, month, day);
+  }
+}
+
 export function listTaskWorkspaces(repoRoot: string, state: TaskWorkspaceState): TaskWorkspace[] {
   const stateRoot = path.join(resolveProjectTaskWorkspaceRoot(repoRoot), state);
   if (state === 'archive') {
@@ -92,16 +109,7 @@ export function listTaskWorkspaces(repoRoot: string, state: TaskWorkspaceState):
       if (!/^\d{4}$/.test(year)) continue;
       for (const month of fs.readdirSync(path.join(stateRoot, year)).sort()) {
         if (!/^\d{2}$/.test(month)) continue;
-        for (const day of fs.readdirSync(path.join(stateRoot, year, month)).sort()) {
-          if (!/^\d{2}$/.test(day)) continue;
-          for (const taskId of fs.readdirSync(path.join(stateRoot, year, month, day)).sort()) {
-            if (!TASK_ID_RE.test(taskId)) continue;
-            const taskMd = path.join(stateRoot, year, month, day, taskId, 'local', 'task.md');
-            if (!fs.existsSync(taskMd)) continue;
-            const content = fs.readFileSync(taskMd, 'utf8');
-            rows.push({ taskId, branch: resolveBranchFromTaskContent(content, taskId), state, taskMd });
-          }
-        }
+        appendArchivedMonth(rows, stateRoot, year, month);
       }
     }
     return rows;

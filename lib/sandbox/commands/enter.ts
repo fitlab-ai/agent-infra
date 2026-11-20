@@ -115,6 +115,66 @@ export function parseEnterArgs(args: string[]): {
   return { target, command: args.slice(index + 1), recreate };
 }
 
+function reportEnterHookResults(results: Awaited<ReturnType<typeof runSandboxHooks>>): void {
+  for (const result of results) {
+    if (result.status === 'fatal') {
+      throw new Error(result.message ?? `Sandbox hook '${result.hookId}' failed.`);
+    }
+    if (result.status === 'warning') {
+      process.stderr.write(
+        `Warning: ${result.message ?? `Sandbox hook '${result.hookId}' did not complete.`}\n`
+      );
+    }
+    if (result.message && result.status !== 'warning') process.stderr.write(result.message);
+  }
+}
+
+function runEnterCommand(
+  config: ReturnType<typeof loadConfig>, engine: string, container: string, cmd: string[]
+): number | Promise<number> {
+  const envFlags = [...terminalEnvFlags(), ...hostTimezoneEnvFlags()];
+  if (cmd.length === 0) {
+    try {
+      materializeDotfiles(config.dotfilesDir, dotfilesCacheDir(config.home, config.project));
+    } catch (error) {
+      process.stderr.write(`Warning: dotfiles snapshot rebuild failed: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
+    }
+
+    const dockerArgs = ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH];
+    return runSandboxInteractive({
+      engine,
+      dockerArgs,
+      container,
+      home: config.home
+    });
+  }
+
+  return runInteractiveEngine(engine, 'docker', ['exec', '-it', ...envFlags, container, ...cmd]);
+}
+
+function resolveEnterTarget(targetName: string, config: ReturnType<typeof loadConfig>) {
+  const fullTaskId = /^TASK-\d{8}-\d{6}$/.test(targetName);
+  const target = fullTaskId ? null : resolveSandboxTarget(targetName, config.repoRoot);
+  const branch = target?.branch ?? '';
+  return { fullTaskId, target, branch };
+}
+
+function selectEnterContainer(
+  rows: ReturnType<typeof fetchSandboxRows>['running'], fullTaskId: boolean,
+  targetName: string, branch: string, config: ReturnType<typeof loadConfig>
+) {
+  return fullTaskId
+    ? rows.find((row) => row.taskId === targetName)
+    : rows.find((row) => row.branch === branch)
+      ?? selectSandboxContainer(rows, containerNameCandidates(config, branch));
+}
+
+function enterWorkspace(found: NonNullable<ReturnType<typeof selectEnterContainer>>) {
+  return found.workspaceMode === 'task-bound' && found.taskId
+    ? { mode: 'task-bound' as const, taskId: found.taskId }
+    : { mode: 'branch-only' as const };
+}
+
 export async function enter(args: string[]): Promise<number> {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(`${USAGE}\n`);
@@ -127,9 +187,7 @@ export async function enter(args: string[]): Promise<number> {
   const config = loadConfig();
   const engine = detectEngine(config);
   const parsed = parseEnterArgs(args);
-  const fullTaskId = /^TASK-\d{8}-\d{6}$/.test(parsed.target);
-  const target = fullTaskId ? null : resolveSandboxTarget(parsed.target, config.repoRoot);
-  const branch = target?.branch ?? '';
+  const { fullTaskId, target, branch } = resolveEnterTarget(parsed.target, config);
   if (branch) assertValidBranchName(branch);
   const { running, nonRunning } = fetchSandboxRows(
     engine,
@@ -141,19 +199,14 @@ export async function enter(args: string[]): Promise<number> {
     }
   );
   const rows = [...running, ...nonRunning];
-  const found = fullTaskId
-    ? rows.find((row) => row.taskId === parsed.target)
-    : rows.find((row) => row.branch === branch)
-      ?? selectSandboxContainer(rows, containerNameCandidates(config, branch));
+  const found = selectEnterContainer(rows, fullTaskId, parsed.target, branch, config);
   if (!found) throw new Error(`No sandbox found for '${parsed.target}'.`);
   const sandboxBranch = found.branch || branch;
   if (sandboxBranch) assertValidBranchName(sandboxBranch);
   if (target?.workspace.mode === 'task-bound' && found.taskId !== target.workspace.taskId) {
     throw new Error(`Sandbox task mismatch for short id '${parsed.target}'.`);
   }
-  const workspace = found.workspaceMode === 'task-bound' && found.taskId
-    ? { mode: 'task-bound' as const, taskId: found.taskId }
-    : { mode: 'branch-only' as const };
+  const workspace = enterWorkspace(found);
   let container = found.name;
   if (parsed.recreate) {
     const ready = await ensureSandboxReady({
@@ -188,34 +241,7 @@ export async function enter(args: string[]): Promise<number> {
     },
     runCommand: runBoundedSandboxHookCommand
   });
-  for (const result of enterHookResults) {
-    if (result.status === 'fatal') {
-      throw new Error(result.message ?? `Sandbox hook '${result.hookId}' failed.`);
-    }
-    if (result.status === 'warning') {
-      process.stderr.write(
-        `Warning: ${result.message ?? `Sandbox hook '${result.hookId}' did not complete.`}\n`
-      );
-    }
-    if (result.message && result.status !== 'warning') process.stderr.write(result.message);
-  }
+  reportEnterHookResults(enterHookResults);
 
-  const envFlags = [...terminalEnvFlags(), ...hostTimezoneEnvFlags()];
-  if (cmd.length === 0) {
-    try {
-      materializeDotfiles(config.dotfilesDir, dotfilesCacheDir(config.home, config.project));
-    } catch (error) {
-      process.stderr.write(`Warning: dotfiles snapshot rebuild failed: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
-    }
-
-    const dockerArgs = ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH];
-    return runSandboxInteractive({
-      engine,
-      dockerArgs,
-      container,
-      home: config.home
-    });
-  }
-
-  return runInteractiveEngine(engine, 'docker', ['exec', '-it', ...envFlags, container, ...cmd]);
+  return runEnterCommand(config, engine, container, cmd);
 }
