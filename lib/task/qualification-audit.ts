@@ -402,6 +402,62 @@ function parseQualificationConfirmations(content: string): { ok: true; confirmat
   }
 }
 
+type QualificationError = Extract<QualificationValidationResult, { ok: false }>;
+
+function validateConfirmations(confirmations: readonly QualificationConfirmation[], qualification: TaskQualification, constraintMap: Map<string, Constraint>): QualificationError | null {
+  const confirmationIds = new Set<string>();
+  for (const confirmation of confirmations) {
+    if (confirmationIds.has(confirmation.qcrId)) return { ok: false, code: 'QUALIFICATION_CONFIRMATION_DUPLICATE', message: `qualification confirmation '${confirmation.qcrId}' is duplicated` };
+    confirmationIds.add(confirmation.qcrId);
+    if (!constraintMap.has(confirmation.constraintId)) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_UNKNOWN', message: `qualification confirmation references unknown constraint '${confirmation.constraintId}'` };
+  }
+  const confirmationMap = new Map(confirmations.map((row) => [row.qcrId, row]));
+  for (const constraint of qualification.constraints) {
+    if (constraint.status !== 'confirmed') continue;
+    const confirmation = confirmationMap.get(constraint.approvalEvidence);
+    if (!confirmation || confirmation.constraintId !== constraint.constraintId) return { ok: false, code: 'QUALIFICATION_CONFIRMATION_MISSING', message: `confirmed constraint '${constraint.constraintId}' has no matching QCR` };
+    if (confirmation.approvedDigest !== constraint.digest) return { ok: false, code: 'QUALIFICATION_CONFIRMATION_DIGEST_MISMATCH', message: `qualification confirmation for '${constraint.constraintId}' is stale` };
+  }
+  return null;
+}
+
+function validateDependencies(audit: QualificationAudit, constraintMap: Map<string, Constraint>): QualificationError | null {
+  for (const row of audit.constraintDependencies) {
+    const constraint = constraintMap.get(row.constraintId);
+    if (!constraint) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_UNKNOWN', message: `qualification audit references unknown constraint '${row.constraintId}'` };
+    if (constraint.digest !== row.constraintDigest) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_DIGEST_MISMATCH', message: `qualification audit digest does not match '${row.constraintId}'` };
+  }
+  return null;
+}
+
+function validateCandidates(qualification: TaskQualification, audit: QualificationAudit, constraintMap: Map<string, Constraint>): QualificationError | null {
+  const candidateMap = new Map(qualification.candidates.map((row) => [row.candidateId, row]));
+  const candidateIds = new Set<string>();
+  for (const row of audit.candidateQualifications) {
+    if (candidateIds.has(row.candidateId)) return { ok: false, code: 'QUALIFICATION_CANDIDATE_MISMATCH', message: `qualification candidate '${row.candidateId}' is duplicated` };
+    candidateIds.add(row.candidateId);
+    const current = candidateMap.get(row.candidateId);
+    if (!current) return { ok: false, code: 'QUALIFICATION_CANDIDATE_UNKNOWN', message: `qualification audit references unknown candidate '${row.candidateId}'` };
+    if (row.constraintIds.some((id) => !constraintMap.has(id))) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_UNKNOWN', message: `candidate '${row.candidateId}' references unknown qualification constraint` };
+    if (row.status !== current.status || row.impact !== current.impact || row.evidence !== current.evidence || row.constraintIds.join(',') !== current.constraintIds.join(',')) {
+      return { ok: false, code: 'QUALIFICATION_CANDIDATE_MISMATCH', message: `qualification candidate '${row.candidateId}' does not match task input` };
+    }
+  }
+  if (candidateIds.size !== candidateMap.size) return { ok: false, code: 'QUALIFICATION_CANDIDATE_MISMATCH', message: 'qualification audit does not contain the complete task candidate set' };
+  return null;
+}
+
+function validateSnapshotAndIdentity(qualification: TaskQualification, audit: QualificationAudit, options: { family?: ArtifactFamily; artifact?: string }): QualificationError | null {
+  const snapshot = audit.snapshot!;
+  if (snapshot.taskInputDigest !== qualification.taskInputDigest) return { ok: false, code: 'QUALIFICATION_TASK_DIGEST_MISMATCH', message: 'qualification audit task input digest is stale' };
+  if (snapshot.nonConstraintInputDigest !== qualification.nonConstraintInputDigest) return { ok: false, code: 'QUALIFICATION_NON_CONSTRAINT_DIGEST_MISMATCH', message: 'qualification audit non-constraint input digest is stale' };
+  if (options.family && options.artifact) {
+    const identity = parseArtifactName(options.artifact);
+    if (!identity || identity.family !== options.family) return { ok: false, code: 'QUALIFICATION_ARTIFACT_IDENTITY_INVALID', message: `artifact '${options.artifact}' is not canonical for '${options.family}'` };
+  }
+  return null;
+}
+
 function validateQualificationAudit(
   taskContent: string,
   artifactContent: string,
@@ -421,44 +477,14 @@ function validateQualificationAudit(
   const constraintMap = new Map(task.qualification.constraints.map((row) => [row.constraintId, row]));
   const confirmations = parseQualificationConfirmations(taskContent);
   if (!confirmations.ok) return confirmations;
-  const confirmationIds = new Set<string>();
-  for (const confirmation of confirmations.confirmations) {
-    if (confirmationIds.has(confirmation.qcrId)) return { ok: false, code: 'QUALIFICATION_CONFIRMATION_DUPLICATE', message: `qualification confirmation '${confirmation.qcrId}' is duplicated` };
-    confirmationIds.add(confirmation.qcrId);
-    if (!constraintMap.has(confirmation.constraintId)) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_UNKNOWN', message: `qualification confirmation references unknown constraint '${confirmation.constraintId}'` };
-  }
-  const confirmationMap = new Map(confirmations.confirmations.map((row) => [row.qcrId, row]));
-  for (const constraint of task.qualification.constraints) {
-    if (constraint.status !== 'confirmed') continue;
-    const confirmation = confirmationMap.get(constraint.approvalEvidence);
-    if (!confirmation || confirmation.constraintId !== constraint.constraintId) return { ok: false, code: 'QUALIFICATION_CONFIRMATION_MISSING', message: `confirmed constraint '${constraint.constraintId}' has no matching QCR` };
-    if (confirmation.approvedDigest !== constraint.digest) return { ok: false, code: 'QUALIFICATION_CONFIRMATION_DIGEST_MISMATCH', message: `qualification confirmation for '${constraint.constraintId}' is stale` };
-  }
-  for (const row of audit.audit.constraintDependencies) {
-    const constraint = constraintMap.get(row.constraintId);
-    if (!constraint) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_UNKNOWN', message: `qualification audit references unknown constraint '${row.constraintId}'` };
-    if (constraint.digest !== row.constraintDigest) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_DIGEST_MISMATCH', message: `qualification audit digest does not match '${row.constraintId}'` };
-  }
-  const candidateMap = new Map(task.qualification.candidates.map((row) => [row.candidateId, row]));
-  const candidateIds = new Set<string>();
-  for (const row of audit.audit.candidateQualifications) {
-    if (candidateIds.has(row.candidateId)) return { ok: false, code: 'QUALIFICATION_CANDIDATE_MISMATCH', message: `qualification candidate '${row.candidateId}' is duplicated` };
-    candidateIds.add(row.candidateId);
-    const current = candidateMap.get(row.candidateId);
-    if (!current) return { ok: false, code: 'QUALIFICATION_CANDIDATE_UNKNOWN', message: `qualification audit references unknown candidate '${row.candidateId}'` };
-    if (row.constraintIds.some((id) => !constraintMap.has(id))) return { ok: false, code: 'QUALIFICATION_CONSTRAINT_UNKNOWN', message: `candidate '${row.candidateId}' references unknown qualification constraint` };
-    if (row.status !== current.status || row.impact !== current.impact || row.evidence !== current.evidence || row.constraintIds.join(',') !== current.constraintIds.join(',')) {
-      return { ok: false, code: 'QUALIFICATION_CANDIDATE_MISMATCH', message: `qualification candidate '${row.candidateId}' does not match task input` };
-    }
-  }
-  if (candidateIds.size !== candidateMap.size) return { ok: false, code: 'QUALIFICATION_CANDIDATE_MISMATCH', message: 'qualification audit does not contain the complete task candidate set' };
-  const snapshot = audit.audit.snapshot!;
-  if (snapshot.taskInputDigest !== task.qualification.taskInputDigest) return { ok: false, code: 'QUALIFICATION_TASK_DIGEST_MISMATCH', message: 'qualification audit task input digest is stale' };
-  if (snapshot.nonConstraintInputDigest !== task.qualification.nonConstraintInputDigest) return { ok: false, code: 'QUALIFICATION_NON_CONSTRAINT_DIGEST_MISMATCH', message: 'qualification audit non-constraint input digest is stale' };
-  if (options.family && options.artifact) {
-    const identity = parseArtifactName(options.artifact);
-    if (!identity || identity.family !== options.family) return { ok: false, code: 'QUALIFICATION_ARTIFACT_IDENTITY_INVALID', message: `artifact '${options.artifact}' is not canonical for '${options.family}'` };
-  }
+  const confirmationError = validateConfirmations(confirmations.confirmations, task.qualification, constraintMap);
+  if (confirmationError) return confirmationError;
+  const dependencyError = validateDependencies(audit.audit, constraintMap);
+  if (dependencyError) return dependencyError;
+  const candidateError = validateCandidates(task.qualification, audit.audit, constraintMap);
+  if (candidateError) return candidateError;
+  const snapshotError = validateSnapshotAndIdentity(task.qualification, audit.audit, options);
+  if (snapshotError) return snapshotError;
   return { ok: true, qualification: task.qualification, audit: audit.audit };
 }
 

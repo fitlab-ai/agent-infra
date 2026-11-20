@@ -85,15 +85,7 @@ function failure(request: { taskRef: string; event: string; artifact?: string },
   };
 }
 
-async function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: string }, options: VerificationOptions = {}): Promise<TaskVerificationResult> {
-  const spec = VERIFICATION_CATALOG[request.event as VerificationEvent];
-  if (!spec) return failure(request, 'VERIFY_EVENT_UNKNOWN', `unknown verification event '${request.event}'`);
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failure(request, resolved.code, resolved.message, { taskId: resolved.taskId, skill: spec.skill, mode: spec.mode });
-  const identity = { taskId: resolved.taskId, taskDir: resolved.taskDir, taskState: resolved.state, skill: spec.skill, mode: spec.mode } as const;
-  if (resolved.state !== spec.expectedState) {
-    return failure(request, 'VERIFY_TASK_STATE_MISMATCH', `event '${request.event}' requires workspace '${spec.expectedState}', received '${resolved.state}'`, identity);
-  }
+function validateVerificationArtifact(request: { taskRef: string; event: string; artifact?: string }, spec: VerificationSpec, identity: Partial<TaskVerificationResult>): TaskVerificationResult | null {
   if (spec.artifactFamily) {
     if (!request.artifact) return failure(request, 'VERIFY_ARTIFACT_REQUIRED', `event '${request.event}' requires an artifact`, identity);
     const parsed = parseArtifactName(request.artifact);
@@ -103,6 +95,21 @@ async function verifyTaskEvent(request: { taskRef: string; event: string; artifa
   } else if (request.artifact) {
     return failure(request, 'VERIFY_ARTIFACT_UNEXPECTED', `event '${request.event}' does not accept an artifact`, identity);
   }
+
+  return null;
+}
+
+async function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: string }, options: VerificationOptions = {}): Promise<TaskVerificationResult> {
+  const spec = VERIFICATION_CATALOG[request.event as VerificationEvent];
+  if (!spec) return failure(request, 'VERIFY_EVENT_UNKNOWN', `unknown verification event '${request.event}'`);
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failure(request, resolved.code, resolved.message, { taskId: resolved.taskId, skill: spec.skill, mode: spec.mode });
+  const identity = { taskId: resolved.taskId, taskDir: resolved.taskDir, taskState: resolved.state, skill: spec.skill, mode: spec.mode } as const;
+  if (resolved.state !== spec.expectedState) {
+    return failure(request, 'VERIFY_TASK_STATE_MISMATCH', `event '${request.event}' requires workspace '${spec.expectedState}', received '${resolved.state}'`, identity);
+  }
+  const artifactError = validateVerificationArtifact(request, spec, identity);
+  if (artifactError) return artifactError;
 
   const invocations: VerificationInvocation[] = [];
   const engine = options.engine ?? verifyInProcess;
