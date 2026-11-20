@@ -57,53 +57,68 @@ function scanArtifact(
   return count;
 }
 
-function grep(args: string[] = []): void {
-  const positional: string[] = [];
-  let ignoreCase = false;
-  let current = false;
-  let taskRef: string | undefined;
-  let optsEnded = false;
-  for (let index = 0; index < args.length; index += 1) {
-    const a = args[index]!;
-    if (!optsEnded && a === '--') { optsEnded = true; continue; }
-    if (!optsEnded && (a === '-h' || a === '--help')) {
-      process.stdout.write(USAGE);
-      return;
-    }
-    if (!optsEnded && (a === '-i' || a === '--ignore-case')) { ignoreCase = true; continue; }
-    if (!optsEnded && a === '--current') { current = true; continue; }
-    if (!optsEnded && (a === '--task' || a === '-t')) {
-      if (taskRef !== undefined) { process.stderr.write("ai task grep: duplicate option '--task'\n"); process.exitCode = 1; return; }
-      const value = args[++index];
-      if (!value || value.startsWith('-')) { process.stderr.write(`ai task grep: ${a} requires a value\n`); process.exitCode = 1; return; }
-      taskRef = value;
-      continue;
-    }
-    if (!optsEnded && a.startsWith('--task=')) {
-      process.stderr.write('ai task grep: --task=... is not supported; use --task <ref> or -t <ref>\n'); process.exitCode = 1; return;
-    }
-    if (!optsEnded && a.startsWith('-') && a !== '-') {
-      process.stderr.write(`ai task grep: unknown flag: ${a}\n`);
-      process.exitCode = 1;
-      return;
-    }
-    positional.push(a);
-  }
+type GrepOptions = {
+  positional: string[];
+  ignoreCase: boolean;
+  current: boolean;
+  taskRef?: string;
+  optsEnded: boolean;
+  index: number;
+};
 
-  if (positional.length === 0) {
+function argumentError(message: string): false {
+  process.stderr.write(`ai task grep: ${message}\n`);
+  process.exitCode = 1;
+  return false;
+}
+
+function parseTaskOption(args: string[], state: GrepOptions, option: string): boolean {
+  if (state.taskRef !== undefined) return argumentError("duplicate option '--task'");
+  const value = args[++state.index];
+  if (!value || value.startsWith('-')) return argumentError(`${option} requires a value`);
+  state.taskRef = value;
+  return true;
+}
+
+function parseOption(args: string[], state: GrepOptions): boolean {
+  const arg = args[state.index]!;
+  if (state.optsEnded) { state.positional.push(arg); return true; }
+  if (arg === '--') { state.optsEnded = true; return true; }
+  if (arg === '-h' || arg === '--help') { process.stdout.write(USAGE); return false; }
+  if (arg === '-i' || arg === '--ignore-case') { state.ignoreCase = true; return true; }
+  if (arg === '--current') { state.current = true; return true; }
+  if (arg === '--task' || arg === '-t') return parseTaskOption(args, state, arg);
+  if (arg.startsWith('--task=')) return argumentError('--task=... is not supported; use --task <ref> or -t <ref>');
+  if (arg.startsWith('-') && arg !== '-') return argumentError(`unknown flag: ${arg}`);
+  state.positional.push(arg);
+  return true;
+}
+
+function parseArgs(args: string[]): GrepOptions | undefined {
+  const state: GrepOptions = { positional: [], ignoreCase: false, current: false, optsEnded: false, index: 0 };
+  for (; state.index < args.length; state.index += 1) {
+    if (!parseOption(args, state)) return undefined;
+  }
+  if (state.positional.length === 0) {
     process.stdout.write(USAGE);
     process.exitCode = 1;
-    return;
+    return undefined;
   }
-  if (current && taskRef !== undefined) {
-    process.stderr.write('ai task grep: --current and --task are mutually exclusive\n'); process.exitCode = 1; return;
+  if (state.current && state.taskRef !== undefined) {
+    argumentError('--current and --task are mutually exclusive');
+    return undefined;
   }
-  if (positional.length > 2) {
-    process.stderr.write('ai task grep: too many arguments\n');
-    process.exitCode = 1;
-    return;
+  if (state.positional.length > 2) {
+    argumentError('too many arguments');
+    return undefined;
   }
+  return state;
+}
 
+function grep(args: string[] = []): void {
+  const options = parseArgs(args);
+  if (!options) return;
+  const { positional, ignoreCase, current, taskRef } = options;
   const [pattern, artifactOrN] = positional;
   const matcher = makeMatcher(pattern!, ignoreCase);
   const chunks: string[] = [];

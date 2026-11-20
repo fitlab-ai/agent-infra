@@ -231,3 +231,25 @@ test('grep with no pattern prints usage and exits non-zero', () => {
   assert.equal(out.status, 1);
   assert.match(out.stdout, /Usage: ai task grep/);
 });
+
+test('argument errors retain their precedence and diagnostics', () => {
+  const { repoRoot } = mkFixture();
+  const cases: Array<[string[], string]> = [
+    [['--task', 'one', '-t', 'two', '--help'], "ai task grep: duplicate option '--task'\n"],
+    [['--task', '--help'], 'ai task grep: --task requires a value\n'],
+    [['--unknown', '--help'], 'ai task grep: unknown flag: --unknown\n'],
+    [['--task=one'], 'ai task grep: --task=... is not supported; use --task <ref> or -t <ref>\n'],
+    [['--current', '--task', 'one', 'needle', 'extra', 'more'], 'ai task grep: --current and --task are mutually exclusive\n'],
+    [['needle', 'extra', 'more'], 'ai task grep: too many arguments\n']
+  ];
+  for (const [args, stderr] of cases) {
+    const out = runCli(['task', 'grep', ...args], repoRoot);
+    assert.equal(out.status, 1);
+    assert.equal(out.stdout, '');
+    assert.equal(out.stderr, stderr);
+  }
+  const help = runCli(['task', 'grep', '--help', '--unknown'], repoRoot);
+  assert.equal(help.status, 0);
+  assert.equal(help.stderr, '');
+  assert.match(help.stdout, /^Usage: ai task grep/);
+});
