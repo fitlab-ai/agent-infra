@@ -177,63 +177,79 @@ test('platform-issue in-label sync stays deferred until completion and dry-run i
       GH_FAKE_LABELS_PATH: labelsPath
     };
 
-    const dry = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main', '--dry-run'], { cwd: root, env });
-    assert.equal(dry.status, 0, dry.stderr || dry.stdout);
-    assert.equal(fs.existsSync(path.join(taskDir, '.platform-operations.json')), false);
+    function syncDeferred() {
+      const dry = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main', '--dry-run'], { cwd: root, env });
+      assert.equal(dry.status, 0, dry.stderr || dry.stdout);
+      assert.equal(fs.existsSync(path.join(taskDir, '.platform-operations.json')), false);
 
-    const synced = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main'], { cwd: root, env });
-    assert.equal(synced.status, 0, synced.stderr || synced.stdout);
-    const operation = readPlatformOperationJournal(taskId, root).operations[0];
-    assert.equal(operation?.kind, 'issue-metadata');
-    assert.equal(operation?.dependency, 'deferred');
-    assert.equal(operation?.issueMetadata?.inLabels, 'from-diff');
-    assert.equal(operation?.issueMetadata?.base, 'main');
-    assert.equal(operation?.state, 'succeeded');
+      const synced = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main'], { cwd: root, env });
+      assert.equal(synced.status, 0, synced.stderr || synced.stdout);
+      const operation = readPlatformOperationJournal(taskId, root).operations[0];
+      assert.equal(operation?.kind, 'issue-metadata');
+      assert.equal(operation?.dependency, 'deferred');
+      assert.equal(operation?.issueMetadata?.inLabels, 'from-diff');
+      assert.equal(operation?.issueMetadata?.base, 'main');
+      assert.equal(operation?.state, 'succeeded');
 
-    assert.ok(operation);
-    recordPlatformOperation({ taskRef: taskId, cwd: root, ...operation, state: 'unknown' });
-    fs.writeFileSync(path.join(root, 'lib', 'second.ts'), 'export const second = true;\n');
-    execFileSync('git', ['add', 'lib/second.ts'], { cwd: root });
-    const nextTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
-    const nextCommit = execFileSync('git', ['commit-tree', nextTree, '-p', featureCommit, '-m', 'second fixture'], { cwd: root, encoding: 'utf8' }).trim();
-    execFileSync('git', ['update-ref', 'refs/heads/feature', nextCommit], { cwd: root });
-    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/feature'], { cwd: root });
-    assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), ['lib/sample.ts', 'lib/second.ts']);
-    const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });
-    assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
-    const recoveredJournal = readPlatformOperationJournal(taskId, root).operations;
-    const superseded = recoveredJournal.find((item) => item.id === operation.id);
-    const retargeted = recoveredJournal.find((item) => item.id !== operation.id && item.issueMetadata?.inLabels === 'from-diff');
-    assert.equal(superseded, undefined);
-    assert.ok(retargeted);
-    assert.notDeepEqual(retargeted?.issueMetadata?.fromDiffFiles, operation.issueMetadata?.fromDiffFiles, JSON.stringify(recoveredJournal));
-    assert.equal(recoveredJournal[0]?.id, retargeted.id);
-    assert.equal(retargeted?.state, 'succeeded');
+      assert.ok(operation);
+      return operation;
+    }
 
-    assert.ok(retargeted);
-    recordPlatformOperation({ taskRef: taskId, cwd: root, ...retargeted, state: 'unknown' });
-    assert.equal(readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === retargeted.id)?.state, 'unknown');
-    const mappingFilesBefore = execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort();
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
-      project: taskWorkspaceProject(root), platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
-    }));
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).labels.in, { cli: ['lib/'] });
-    const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });
-    assert.equal(mappingRecovery.status, 0, mappingRecovery.stderr || mappingRecovery.stdout);
-    const mappingJournal = readPlatformOperationJournal(taskId, root).operations;
-    const staleMapping = mappingJournal.find((item) => item.id === retargeted.id);
-    const currentMapping = mappingJournal.find((item) => item.id !== retargeted.id
-      && item.issueMetadata?.inLabels === 'from-diff'
-      && JSON.stringify(item.issueMetadata.fromDiffFiles) === JSON.stringify(retargeted.issueMetadata?.fromDiffFiles));
-    assert.equal(staleMapping, undefined);
-    assert.ok(currentMapping);
-    assert.notEqual(currentMapping.id, retargeted.id);
-    assert.equal(mappingJournal[0]?.id, currentMapping.id);
-    assert.notEqual(currentMapping.issueMetadata?.inLabelMappingDigest, retargeted.issueMetadata?.inLabelMappingDigest, JSON.stringify({ retargeted, currentMapping }));
-    assert.deepEqual(currentMapping.issueMetadata?.fromDiffFiles, retargeted.issueMetadata?.fromDiffFiles);
-    assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), mappingFilesBefore);
-    assert.equal(currentMapping.state, 'succeeded');
-    assert.deepEqual(JSON.parse(fs.readFileSync(issuePath, 'utf8')).labels, ['in: cli']);
+    const operation = syncDeferred();
+
+    function recoverAfterDiff() {
+      recordPlatformOperation({ taskRef: taskId, cwd: root, ...operation, state: 'unknown' });
+      fs.writeFileSync(path.join(root, 'lib', 'second.ts'), 'export const second = true;\n');
+      execFileSync('git', ['add', 'lib/second.ts'], { cwd: root });
+      const nextTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
+      const nextCommit = execFileSync('git', ['commit-tree', nextTree, '-p', featureCommit, '-m', 'second fixture'], { cwd: root, encoding: 'utf8' }).trim();
+      execFileSync('git', ['update-ref', 'refs/heads/feature', nextCommit], { cwd: root });
+      execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/feature'], { cwd: root });
+      assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), ['lib/sample.ts', 'lib/second.ts']);
+      const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });
+      assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
+      const recoveredJournal = readPlatformOperationJournal(taskId, root).operations;
+      const superseded = recoveredJournal.find((item) => item.id === operation.id);
+      const retargeted = recoveredJournal.find((item) => item.id !== operation.id && item.issueMetadata?.inLabels === 'from-diff');
+      assert.equal(superseded, undefined);
+      assert.ok(retargeted);
+      assert.notDeepEqual(retargeted?.issueMetadata?.fromDiffFiles, operation.issueMetadata?.fromDiffFiles, JSON.stringify(recoveredJournal));
+      assert.equal(recoveredJournal[0]?.id, retargeted.id);
+      assert.equal(retargeted?.state, 'succeeded');
+
+      return retargeted;
+    }
+
+    const retargeted = recoverAfterDiff();
+
+    function recoverAfterMappingChange() {
+      assert.ok(retargeted);
+      recordPlatformOperation({ taskRef: taskId, cwd: root, ...retargeted, state: 'unknown' });
+      assert.equal(readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === retargeted.id)?.state, 'unknown');
+      const mappingFilesBefore = execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort();
+      fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+        project: taskWorkspaceProject(root), platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
+      }));
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).labels.in, { cli: ['lib/'] });
+      const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });
+      assert.equal(mappingRecovery.status, 0, mappingRecovery.stderr || mappingRecovery.stdout);
+      const mappingJournal = readPlatformOperationJournal(taskId, root).operations;
+      const staleMapping = mappingJournal.find((item) => item.id === retargeted.id);
+      const currentMapping = mappingJournal.find((item) => item.id !== retargeted.id
+        && item.issueMetadata?.inLabels === 'from-diff'
+        && JSON.stringify(item.issueMetadata.fromDiffFiles) === JSON.stringify(retargeted.issueMetadata?.fromDiffFiles));
+      assert.equal(staleMapping, undefined);
+      assert.ok(currentMapping);
+      assert.notEqual(currentMapping.id, retargeted.id);
+      assert.equal(mappingJournal[0]?.id, currentMapping.id);
+      assert.notEqual(currentMapping.issueMetadata?.inLabelMappingDigest, retargeted.issueMetadata?.inLabelMappingDigest, JSON.stringify({ retargeted, currentMapping }));
+      assert.deepEqual(currentMapping.issueMetadata?.fromDiffFiles, retargeted.issueMetadata?.fromDiffFiles);
+      assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), mappingFilesBefore);
+      assert.equal(currentMapping.state, 'succeeded');
+      assert.deepEqual(JSON.parse(fs.readFileSync(issuePath, 'utf8')).labels, ['in: cli']);
+    }
+
+    recoverAfterMappingChange();
 
     const statusSync = run(['sync', taskId, '--agent', 'codex', '--status', 'none'], { cwd: root, env });
     assert.equal(statusSync.status, 0, statusSync.stderr || statusSync.stdout);

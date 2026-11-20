@@ -261,15 +261,6 @@
       "count": 1
     },
     {
-      "file": "tests/e2e/core/validate-artifact-helpers.ts",
-      "ruleId": "complexity",
-      "stableId": "9af71f6b11199d52bdf8dbb532b5d12266282c78211bb70c09a9418b8761383d",
-      "displayName": "runValidator",
-      "metric": 18,
-      "normalizedMessage": "complexity=18",
-      "count": 1
-    },
-    {
       "file": "lib/sandbox/control/server.ts",
       "ruleId": "complexity",
       "stableId": "4db70cefc7f1fcd3c885d55612f9dff6eebd9da6b000c980a70f6ad2f1073d14",
@@ -312,15 +303,6 @@
       "displayName": "terminateSandboxControlExecution",
       "metric": 23,
       "normalizedMessage": "complexity=23",
-      "count": 1
-    },
-    {
-      "file": "tests/integration/cli/platform-issue.test.ts",
-      "ruleId": "complexity",
-      "stableId": "9ee9ce075c7d635cd2987a5bf93b2e68d55133c936237baa443d0ba95baf40d6",
-      "displayName": "test callback[1]#5",
-      "metric": 28,
-      "normalizedMessage": "complexity=28",
       "count": 1
     },
     {

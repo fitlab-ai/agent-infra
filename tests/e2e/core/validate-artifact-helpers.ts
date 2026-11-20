@@ -303,6 +303,16 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
   ].join("\n");
 }
 
+function normalizeValidatorPath(env: NodeJS.ProcessEnv): void {
+  if (env.PATH) {
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === "path") {
+        env[key] = env.PATH;
+      }
+    }
+  }
+}
+
 async function runValidator(args: string[], options: ValidatorOptions = {}): Promise<SpawnSyncReturns<string>> {
   const env = gitSafeEnv({
     ...(options.fakeGhPath ? {
@@ -311,21 +321,15 @@ async function runValidator(args: string[], options: ValidatorOptions = {}): Pro
     } : {}),
     ...options.env
   });
-  if (env.PATH) {
-    for (const key of Object.keys(env)) {
-      if (key.toLowerCase() === "path") {
-        env[key] = env.PATH;
-      }
-    }
-  }
+  normalizeValidatorPath(env);
 
   const previous = process.env;
   try {
     process.env = env;
     const mode = args[0] === "gate" ? "gate" : "checks";
     const skillName = mode === "gate" ? args[1]! : args[args.indexOf("--skill") + 1]!;
-    const taskDir = mode === "gate" ? args[2]! : args[2]!;
-    const artifactFile = mode === "gate" ? args[3] && !args[3]!.startsWith("--") ? args[3] : undefined : args[3] && !args[3]!.startsWith("--") ? args[3] : undefined;
+    const taskDir = args[2]!;
+    const artifactFile = args[3] && !args[3]!.startsWith("--") ? args[3] : undefined;
     const repositoryRoot = options.repositoryRoot ?? taskWorkspaceRepoRoot(taskDir);
     if (!repositoryRoot) throw new Error(`validator fixture must resolve an owning repository for ${taskDir}`);
     const verifyConfig = path.join(repositoryRoot, ".agents", "skills", skillName, "config", "verify.json");
