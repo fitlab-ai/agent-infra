@@ -281,26 +281,17 @@ function value(values: Record<string, string | boolean>, flag: string): string |
   return typeof current === 'string' ? current : undefined;
 }
 
-export function parseTaskControlOperation(
-  family: 'task-lifecycle' | 'task-finalization',
-  args: readonly string[]
-): TaskControlOperation {
-  if (family === 'task-finalization') {
-    if (args.length !== 4 || args[1] !== 'complete' || args[2] !== '--agent' || !args[0] || !args[3]) {
-      operationInvalid('task ref, complete intent, and --agent are required');
-    }
-    const values = parseValues(args, 2, FINALIZATION_FLAGS);
-    const agent = normalizeAgentToken(value(values, '--agent') ?? '');
-    if (!agent) operationInvalid('finalization agent is invalid');
-    return { family, request: { taskRef: args[0]!, intent: 'complete', agent } };
+function parseFinalizationOperation(args: readonly string[]): TaskControlOperation {
+  if (args.length !== 4 || args[1] !== 'complete' || args[2] !== '--agent' || !args[0] || !args[3]) {
+    operationInvalid('task ref, complete intent, and --agent are required');
   }
-  if (args.length < 2) operationInvalid('task ref and intent are required');
-  const taskRef = args[0]!;
-  const intent = args[1]!;
-  if (intent === 'complete') operationInvalid('complete must use task-finalization');
-  const values = parseValues(args, 2, LIFECYCLE_FLAGS);
+  const values = parseValues(args, 2, FINALIZATION_FLAGS);
   const agent = normalizeAgentToken(value(values, '--agent') ?? '');
-  if (!agent) operationInvalid('lifecycle agent is invalid');
+  if (!agent) operationInvalid('finalization agent is invalid');
+  return { family: 'task-finalization', request: { taskRef: args[0]!, intent: 'complete', agent } };
+}
+
+function buildLifecycleRequest(taskRef: string, intent: string, agent: string, values: Record<string, string | boolean>): TaskLifecycleControlRequest {
   const request: Record<string, unknown> = {
     taskRef,
     intent,
@@ -313,5 +304,20 @@ export function parseTaskControlOperation(
     ...(value(values, '--issue-number') ? { issueNumber: Number(value(values, '--issue-number')) } : {}),
     ...(values['--dry-run'] === true ? { dryRun: true } : {})
   };
-  return { family, request: request as unknown as TaskLifecycleControlRequest };
+  return request as unknown as TaskLifecycleControlRequest;
+}
+
+export function parseTaskControlOperation(
+  family: 'task-lifecycle' | 'task-finalization',
+  args: readonly string[]
+): TaskControlOperation {
+  if (family === 'task-finalization') return parseFinalizationOperation(args);
+  if (args.length < 2) operationInvalid('task ref and intent are required');
+  const taskRef = args[0]!;
+  const intent = args[1]!;
+  if (intent === 'complete') operationInvalid('complete must use task-finalization');
+  const values = parseValues(args, 2, LIFECYCLE_FLAGS);
+  const agent = normalizeAgentToken(value(values, '--agent') ?? '');
+  if (!agent) operationInvalid('lifecycle agent is invalid');
+  return { family, request: buildLifecycleRequest(taskRef, intent, agent, values) };
 }

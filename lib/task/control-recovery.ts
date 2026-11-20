@@ -80,33 +80,7 @@ function domainEvidenceMatches(
   return true;
 }
 
-export function classifySandboxControlRecovery(input: ControlRecoveryInput): ControlRecoveryDecision {
-  const result = input.terminalResult ?? null;
-  if (input.evidenceConflict) return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_EVIDENCE_CONFLICT' };
-  if (input.explicitRejection && !input.startedCommitted) {
-    return { outcome: 'not-executed', responseReconstructable: true, reasonCode: 'RECOVERY_EXPLICIT_REJECTION' };
-  }
-  if (!input.startedCommitted) {
-    return { outcome: 'not-executed', responseReconstructable: false, reasonCode: 'RECOVERY_NOT_STARTED' };
-  }
-  if (!result) return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING' };
-  if (!bindingMatchesResult(input.binding, result)) {
-    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_BINDING_MISMATCH' };
-  }
-  if (!SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES.every((phase) => input.criticalPhases?.includes(phase))) {
-    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_CRITICAL_AUDIT_INCOMPLETE' };
-  }
-  const status = result.status;
-  const failed = status === 'failed' || result.error !== null && result.error !== undefined;
-  if (failed) {
-    if (input.domain && input.domain.consistent === false) {
-      return { outcome: 'failure', responseReconstructable: true, reasonCode: 'RECOVERY_TERMINAL_FAILURE' };
-    }
-    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_FAILURE_EVIDENCE_INCOMPLETE' };
-  }
-  if (result.changed === null) {
-    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_CHANGE_FLAG_MISSING' };
-  }
+function classifyDomainRecovery(input: ControlRecoveryInput): ControlRecoveryDecision {
   if (!domainEvidenceMatches(input.domain)) {
     if (input.journal?.exists && (input.journal.completedSteps?.length ?? 0) > 0) {
       return { outcome: 'in-progress', responseReconstructable: false, reasonCode: 'RECOVERY_DOMAIN_EVIDENCE_INCOMPLETE' };
@@ -128,6 +102,40 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
     responseReconstructable: true,
     reasonCode: 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH'
   };
+}
+
+export function classifySandboxControlRecovery(input: ControlRecoveryInput): ControlRecoveryDecision {
+  const result = input.terminalResult ?? null;
+  if (input.evidenceConflict) return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_EVIDENCE_CONFLICT' };
+  if (input.explicitRejection && !input.startedCommitted) {
+    return { outcome: 'not-executed', responseReconstructable: true, reasonCode: 'RECOVERY_EXPLICIT_REJECTION' };
+  }
+  if (!input.startedCommitted) {
+    return { outcome: 'not-executed', responseReconstructable: false, reasonCode: 'RECOVERY_NOT_STARTED' };
+  }
+  if (!result) return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING' };
+  if (!bindingMatchesResult(input.binding, result)) {
+    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_BINDING_MISMATCH' };
+  }
+  if (!SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES.every((phase) => input.criticalPhases?.includes(phase))) {
+    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_CRITICAL_AUDIT_INCOMPLETE' };
+  }
+  return classifyTerminalRecovery(input, result);
+}
+
+function classifyTerminalRecovery(input: ControlRecoveryInput, result: Readonly<Record<string, unknown>>): ControlRecoveryDecision {
+  const status = result.status;
+  const failed = status === 'failed' || result.error !== null && result.error !== undefined;
+  if (failed) {
+    if (input.domain && input.domain.consistent === false) {
+      return { outcome: 'failure', responseReconstructable: true, reasonCode: 'RECOVERY_TERMINAL_FAILURE' };
+    }
+    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_FAILURE_EVIDENCE_INCOMPLETE' };
+  }
+  if (result.changed === null) {
+    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_CHANGE_FLAG_MISSING' };
+  }
+  return classifyDomainRecovery(input);
 }
 
 export function operationRecoveryBinding(

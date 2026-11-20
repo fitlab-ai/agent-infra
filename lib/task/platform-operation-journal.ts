@@ -108,6 +108,120 @@ function journalPath(taskDir: string): string {
   return path.join(taskDir, JOURNAL_FILE);
 }
 
+function emptyIssueMetadata(item: PlatformOperation): boolean {
+  return (!item.issueMetadata!.requirements && !item.issueMetadata!.issueType && !item.issueMetadata!.fields
+      && item.issueMetadata!.status === undefined && item.issueMetadata!.assignees === undefined
+      && item.issueMetadata!.milestone === undefined && item.issueMetadata!.inLabels === undefined && item.issueMetadata!.state === undefined);
+}
+
+function invalidIssueMetadataOptions(item: PlatformOperation): boolean {
+  return (item.issueMetadata!.inLabels !== undefined && !['from-diff', 'none'].includes(item.issueMetadata!.inLabels))
+    || (item.issueMetadata!.base !== undefined && (typeof item.issueMetadata!.base !== 'string' || !item.issueMetadata!.base.trim()))
+    || (item.issueMetadata!.fromDiffFiles !== undefined && (!Array.isArray(item.issueMetadata!.fromDiffFiles)
+      || item.issueMetadata!.fromDiffFiles.some((file: unknown) => typeof file !== 'string')))
+    || (item.issueMetadata!.inLabelMappingDigest !== undefined && !/^[a-f0-9]{64}$/u.test(item.issueMetadata!.inLabelMappingDigest))
+    || (item.issueMetadata!.state !== undefined && !['open', 'closed'].includes(item.issueMetadata!.state))
+    || (item.issueMetadata!.closeReason !== undefined && !['completed', 'not_planned'].includes(item.issueMetadata!.closeReason))
+    || emptyIssueMetadata(item);
+}
+
+function invalidIssueMetadata(item: PlatformOperation): boolean {
+  return (item.kind === 'issue-metadata'
+        ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
+    || typeof item.issueMetadata.issueType !== 'boolean' || typeof item.issueMetadata.fields !== 'boolean'
+    || (item.issueMetadata.status !== undefined && typeof item.issueMetadata.status !== 'string')
+    || (item.issueMetadata.assignees !== undefined && !['current', 'none'].includes(item.issueMetadata.assignees))
+    || (item.issueMetadata.milestone !== undefined && !['initial', 'specific', 'none'].includes(item.issueMetadata.milestone))
+    || invalidIssueMetadataOptions(item)
+        : item.issueMetadata !== undefined);
+}
+
+function invalidPullRequest(item: PlatformOperation): boolean {
+  return (item.kind === 'pull-request'
+        ? !item.pullRequest || !['create', 'bind', 'sync'].includes(item.pullRequest.action)
+    || Object.entries(item.pullRequest).some(([key, field]) => key !== 'action'
+      && key !== 'metadata' && key !== 'closingIssue' && (typeof field !== 'string' || !field.trim()))
+    || (item.pullRequest.metadata !== undefined && typeof item.pullRequest.metadata !== 'boolean')
+    || (item.pullRequest.closingIssue !== undefined && typeof item.pullRequest.closingIssue !== 'boolean')
+        : item.pullRequest !== undefined);
+}
+
+function invalidIssueCreate(item: PlatformOperation): boolean {
+  return (item.kind === 'issue-create'
+        ? !item.issueCreate || typeof item.issueCreate.title !== 'string' || !item.issueCreate.title.trim()
+    || !/^[a-f0-9]{64}$/u.test(item.issueCreate.bodyDigest)
+        : item.issueCreate !== undefined);
+}
+
+function invalidManualValidationEvidence(item: PlatformOperation): boolean {
+  return (item.pullRequestSummary!.manualValidation!.receiptDigest !== undefined && !/^[a-f0-9]{64}$/u.test(item.pullRequestSummary!.manualValidation!.receiptDigest))
+      || (item.pullRequestSummary!.manualValidation!.prHeadSha !== undefined && !/^[a-f0-9]{40}$/u.test(item.pullRequestSummary!.manualValidation!.prHeadSha))
+      || (item.pullRequestSummary!.manualValidation!.authority !== undefined && item.pullRequestSummary!.manualValidation!.authority !== 'coordinator')
+      || (item.pullRequestSummary!.manualValidation!.phase === 'final' && (
+        !/^[a-f0-9]{64}$/u.test(item.pullRequestSummary!.manualValidation!.receiptDigest ?? '')
+        || !/^[a-f0-9]{40}$/u.test(item.pullRequestSummary!.manualValidation!.prHeadSha ?? '')
+        || item.pullRequestSummary!.manualValidation!.authority !== 'coordinator'
+      ));
+}
+
+function invalidManualValidation(item: PlatformOperation): boolean {
+  return (item.pullRequestSummary!.manualValidation !== undefined && (
+      !item.pullRequestSummary!.manualValidation
+      || typeof item.pullRequestSummary!.manualValidation !== 'object'
+      || Array.isArray(item.pullRequestSummary!.manualValidation)
+      || !['pending', 'final'].includes(item.pullRequestSummary!.manualValidation.phase)
+      || typeof item.pullRequestSummary!.manualValidation.transactionId !== 'string'
+      || !item.pullRequestSummary!.manualValidation.transactionId.trim()
+      || invalidManualValidationEvidence(item)
+    ));
+}
+
+function invalidPullRequestSummary(item: PlatformOperation): boolean {
+  return (item.kind === 'pull-request-summary'
+        ? !item.pullRequestSummary || typeof item.pullRequestSummary.body !== 'string'
+    || !item.pullRequestSummary.body.trim() || typeof item.pullRequestSummary.changeReportFile !== 'string'
+    || !item.pullRequestSummary.changeReportFile.trim()
+    || invalidManualValidation(item)
+        : item.pullRequestSummary !== undefined);
+}
+
+function invalidReviewDetails(item: PlatformOperation): boolean {
+  return !/^[0-9a-f]{7,40}$/iu.test(item.pullRequestReview!.commitSha)
+    || !['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(item.pullRequestReview!.event)
+    || typeof item.pullRequestReview!.artifactFile !== 'string'
+    || !/^pr-review(?:-r\d+)?\.md$/u.test(item.pullRequestReview!.artifactFile)
+    || (item.pullRequestReview!.artifactFile === 'pr-review.md'
+      ? item.pullRequestReview!.round !== 1
+      : item.pullRequestReview!.artifactFile !== `pr-review-r${item.pullRequestReview!.round}.md`)
+    || !/^[a-f0-9]{64}$/u.test(item.pullRequestReview!.bodyDigest);
+}
+
+function invalidPullRequestReview(item: PlatformOperation): boolean {
+  return (item.kind === 'pull-request-review'
+        ? !item.pullRequestReview || typeof item.pullRequestReview.prNumber !== 'string'
+    || !isResourceIdentity(item.pullRequestReview.resource)
+    || typeof item.pullRequestReview.providerScopeId !== 'string' || !item.pullRequestReview.providerScopeId.trim()
+    || !item.pullRequestReview.prNumber.trim() || !/^TASK-\d{8}-\d{6}$|^pr\d+$/u.test(item.pullRequestReview.scope)
+    || !Number.isSafeInteger(item.pullRequestReview.round) || item.pullRequestReview.round <= 0
+    || invalidReviewDetails(item)
+        : item.pullRequestReview !== undefined);
+}
+
+function invalidOperationBase(item: PlatformOperation): boolean {
+  return !item || typeof item !== 'object' || !/^[a-f0-9]{64}$/u.test(item.id)
+      || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-create', 'issue-metadata', 'pull-request', 'pull-request-summary', 'pull-request-review'].includes(item.kind)
+      || typeof item.target !== 'string' || !item.target
+      || !/^[a-f0-9]{64}$/u.test(item.expectedDigest)
+      || !['deferred', 'required'].includes(item.dependency)
+      || !['queued', 'pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
+      || !Number.isSafeInteger(item.attempts) || item.attempts < 0
+      || !(item.lastCode === null || typeof item.lastCode === 'string');
+}
+
+function invalidJournalIdentity(journal: Partial<PlatformOperationJournal>, taskId: string): boolean {
+  return journal.version !== 1 || journal.taskId !== taskId || !Array.isArray(journal.operations);
+}
+
 function parseJournal(file: string, taskId: string): PlatformOperationJournal {
   let value: unknown;
   try { value = JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -117,82 +231,16 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
   }
   if (!value || typeof value !== 'object') throw Object.assign(new Error('Platform operation journal is invalid'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
   const journal = value as Partial<PlatformOperationJournal>;
-  if (journal.version !== 1 || journal.taskId !== taskId || !Array.isArray(journal.operations)) {
+  if (invalidJournalIdentity(journal, taskId)) {
     throw Object.assign(new Error('Platform operation journal identity or version is invalid'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
   }
-  for (const item of journal.operations) {
-    if (!item || typeof item !== 'object' || !/^[a-f0-9]{64}$/u.test(item.id)
-      || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-create', 'issue-metadata', 'pull-request', 'pull-request-summary', 'pull-request-review'].includes(item.kind)
-      || typeof item.target !== 'string' || !item.target
-      || !/^[a-f0-9]{64}$/u.test(item.expectedDigest)
-      || !['deferred', 'required'].includes(item.dependency)
-      || !['queued', 'pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
-      || !Number.isSafeInteger(item.attempts) || item.attempts < 0
-      || !(item.lastCode === null || typeof item.lastCode === 'string')
-      || (item.kind === 'issue-metadata'
-        ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
-          || typeof item.issueMetadata.issueType !== 'boolean' || typeof item.issueMetadata.fields !== 'boolean'
-          || (item.issueMetadata.status !== undefined && typeof item.issueMetadata.status !== 'string')
-          || (item.issueMetadata.assignees !== undefined && !['current', 'none'].includes(item.issueMetadata.assignees))
-          || (item.issueMetadata.milestone !== undefined && !['initial', 'specific', 'none'].includes(item.issueMetadata.milestone))
-          || (item.issueMetadata.inLabels !== undefined && !['from-diff', 'none'].includes(item.issueMetadata.inLabels))
-          || (item.issueMetadata.base !== undefined && (typeof item.issueMetadata.base !== 'string' || !item.issueMetadata.base.trim()))
-          || (item.issueMetadata.fromDiffFiles !== undefined && (!Array.isArray(item.issueMetadata.fromDiffFiles)
-            || item.issueMetadata.fromDiffFiles.some((file: unknown) => typeof file !== 'string')))
-          || (item.issueMetadata.inLabelMappingDigest !== undefined && !/^[a-f0-9]{64}$/u.test(item.issueMetadata.inLabelMappingDigest))
-          || (item.issueMetadata.state !== undefined && !['open', 'closed'].includes(item.issueMetadata.state))
-          || (item.issueMetadata.closeReason !== undefined && !['completed', 'not_planned'].includes(item.issueMetadata.closeReason))
-          || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields
-            && item.issueMetadata.status === undefined && item.issueMetadata.assignees === undefined
-            && item.issueMetadata.milestone === undefined && item.issueMetadata.inLabels === undefined && item.issueMetadata.state === undefined)
-        : item.issueMetadata !== undefined)
-      || (item.kind === 'pull-request'
-        ? !item.pullRequest || !['create', 'bind', 'sync'].includes(item.pullRequest.action)
-          || Object.entries(item.pullRequest).some(([key, field]) => key !== 'action'
-            && key !== 'metadata' && key !== 'closingIssue' && (typeof field !== 'string' || !field.trim()))
-          || (item.pullRequest.metadata !== undefined && typeof item.pullRequest.metadata !== 'boolean')
-          || (item.pullRequest.closingIssue !== undefined && typeof item.pullRequest.closingIssue !== 'boolean')
-        : item.pullRequest !== undefined)
-      || (item.kind === 'issue-create'
-        ? !item.issueCreate || typeof item.issueCreate.title !== 'string' || !item.issueCreate.title.trim()
-          || !/^[a-f0-9]{64}$/u.test(item.issueCreate.bodyDigest)
-        : item.issueCreate !== undefined)
-      || (item.kind === 'pull-request-summary'
-        ? !item.pullRequestSummary || typeof item.pullRequestSummary.body !== 'string'
-          || !item.pullRequestSummary.body.trim() || typeof item.pullRequestSummary.changeReportFile !== 'string'
-          || !item.pullRequestSummary.changeReportFile.trim()
-          || (item.pullRequestSummary.manualValidation !== undefined && (
-            !item.pullRequestSummary.manualValidation
-            || typeof item.pullRequestSummary.manualValidation !== 'object'
-            || Array.isArray(item.pullRequestSummary.manualValidation)
-            || !['pending', 'final'].includes(item.pullRequestSummary.manualValidation.phase)
-            || typeof item.pullRequestSummary.manualValidation.transactionId !== 'string'
-            || !item.pullRequestSummary.manualValidation.transactionId.trim()
-            || (item.pullRequestSummary.manualValidation.receiptDigest !== undefined && !/^[a-f0-9]{64}$/u.test(item.pullRequestSummary.manualValidation.receiptDigest))
-            || (item.pullRequestSummary.manualValidation.prHeadSha !== undefined && !/^[a-f0-9]{40}$/u.test(item.pullRequestSummary.manualValidation.prHeadSha))
-            || (item.pullRequestSummary.manualValidation.authority !== undefined && item.pullRequestSummary.manualValidation.authority !== 'coordinator')
-            || (item.pullRequestSummary.manualValidation.phase === 'final' && (
-              !/^[a-f0-9]{64}$/u.test(item.pullRequestSummary.manualValidation.receiptDigest ?? '')
-              || !/^[a-f0-9]{40}$/u.test(item.pullRequestSummary.manualValidation.prHeadSha ?? '')
-              || item.pullRequestSummary.manualValidation.authority !== 'coordinator'
-            ))
-          ))
-        : item.pullRequestSummary !== undefined)
-      || (item.kind === 'pull-request-review'
-        ? !item.pullRequestReview || typeof item.pullRequestReview.prNumber !== 'string'
-          || !isResourceIdentity(item.pullRequestReview.resource)
-          || typeof item.pullRequestReview.providerScopeId !== 'string' || !item.pullRequestReview.providerScopeId.trim()
-          || !item.pullRequestReview.prNumber.trim() || !/^TASK-\d{8}-\d{6}$|^pr\d+$/u.test(item.pullRequestReview.scope)
-          || !Number.isSafeInteger(item.pullRequestReview.round) || item.pullRequestReview.round <= 0
-          || !/^[0-9a-f]{7,40}$/iu.test(item.pullRequestReview.commitSha)
-          || !['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(item.pullRequestReview.event)
-          || typeof item.pullRequestReview.artifactFile !== 'string'
-          || !/^pr-review(?:-r\d+)?\.md$/u.test(item.pullRequestReview.artifactFile)
-          || (item.pullRequestReview.artifactFile === 'pr-review.md'
-            ? item.pullRequestReview.round !== 1
-            : item.pullRequestReview.artifactFile !== `pr-review-r${item.pullRequestReview.round}.md`)
-          || !/^[a-f0-9]{64}$/u.test(item.pullRequestReview.bodyDigest)
-        : item.pullRequestReview !== undefined)
+  for (const item of journal.operations!) {
+    if (invalidOperationBase(item)
+      || invalidIssueMetadata(item)
+      || invalidPullRequest(item)
+      || invalidIssueCreate(item)
+      || invalidPullRequestSummary(item)
+      || invalidPullRequestReview(item)
       || typeof item.updatedAt !== 'string') {
       throw Object.assign(new Error('Platform operation journal contains an invalid operation'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
     }
