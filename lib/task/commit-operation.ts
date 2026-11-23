@@ -449,18 +449,67 @@ function selectCommitDeliveryStrategy(delivery: CommitDelivery): CommitDeliveryS
   return { execute: (context) => executePushDelivery(context, delivery) };
 }
 
+function validateCommitContext(
+  input: CommitOperationInput,
+  task: BoundTask | null,
+  mode: CommitExecutionMode,
+  snapshot: CommitDeliveryContext['snapshot']
+): { delivery: CommitDelivery; error: null } | { delivery: null; error: CommitOperationResult } {
+  const branch = snapshot.branch;
+  const commonError = validateCommon(input, branch);
+  if (commonError) return { delivery: null, error: failure(input, mode, task?.taskId ?? null, commonError.code, commonError.message, 'blocked', snapshot) };
+  if (task && task.state !== 'active') return { delivery: null, error: failure(input, mode, task.taskId, 'TASK_STATE_INVALID', 'task-bound commit requires an active task', 'blocked', snapshot) };
+  if (task && task.branch !== branch) return { delivery: null, error: failure(input, mode, task.taskId, 'GIT_BRANCH_MISMATCH', `Task branch '${task.branch}' does not match current branch '${branch}'`, 'blocked', snapshot) };
+  if (task && !input.agent) return { delivery: null, error: failure(input, mode, task.taskId, 'COMMIT_AGENT_REQUIRED', 'task-bound commit requires an agent', 'blocked', snapshot) };
+  const delivery = effectiveDelivery(input)!;
+  if (delivery.mode === 'local' && !task) return { delivery: null, error: failure(input, mode, null, 'CHECKPOINT_TASK_REQUIRED', 'local checkpoint delivery requires a task context', 'blocked', snapshot) };
+  return { delivery, error: null };
+}
+
+function syncCommitOutcome(
+  input: CommitOperationInput,
+  task: BoundTask | null,
+  strategy: CommitDeliveryStrategy,
+  outcome: CommitDeliveryOutcome,
+  writeOptions: TaskWriteOptions
+): OperationWarning | null {
+  const committed = outcome.committed;
+  if (!task || (committed.status !== 'applied' && committed.status !== 'no-op')) return null;
+  const committedHead = outcome.checkpoint?.committedHead ?? committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']);
+  const taskWarning = syncTaskCommit(input, task, committedHead, writeOptions);
+  strategy.afterTaskSync?.(outcome, taskWarning);
+  return taskWarning;
+}
+
+function commitOperationResult(
+  outcome: CommitDeliveryOutcome,
+  task: BoundTask | null,
+  mode: CommitExecutionMode,
+  taskWarning: OperationWarning | null
+): CommitOperationResult {
+  const committed = outcome.committed;
+  const warnings = [...outcome.warnings];
+  if (taskWarning) warnings.push(taskWarning);
+  const hasWarnings = warnings.length > 0;
+  return {
+    status: hasWarnings ? 'applied' : committed.status,
+    changed: committed.changed,
+    result: hasWarnings ? 'committed_with_warnings' : committed.status === 'applied' ? 'committed' : 'no_op',
+    taskId: task?.taskId ?? null,
+    mode,
+    warnings: mergeOperationWarnings(warnings),
+    snapshot: committed.snapshot,
+    operations: committed.operations,
+    error: null
+  };
+}
+
 function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode, writeOptions: TaskWriteOptions): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
-  const branch = inspected.snapshot.branch;
-  const commonError = validateCommon(input, branch);
-  if (commonError) return failure(input, mode, task?.taskId ?? null, commonError.code, commonError.message, 'blocked', inspected.snapshot);
-  if (task && task.state !== 'active') return failure(input, mode, task.taskId, 'TASK_STATE_INVALID', 'task-bound commit requires an active task', 'blocked', inspected.snapshot);
-  if (task && task.branch !== branch) return failure(input, mode, task.taskId, 'GIT_BRANCH_MISMATCH', `Task branch '${task.branch}' does not match current branch '${branch}'`, 'blocked', inspected.snapshot);
-  if (task && !input.agent) return failure(input, mode, task.taskId, 'COMMIT_AGENT_REQUIRED', 'task-bound commit requires an agent', 'blocked', inspected.snapshot);
-  const delivery = effectiveDelivery(input)!;
-  if (delivery.mode === 'local' && !task) return failure(input, mode, null, 'CHECKPOINT_TASK_REQUIRED', 'local checkpoint delivery requires a task context', 'blocked', inspected.snapshot);
-  const strategy = selectCommitDeliveryStrategy(delivery);
+  const validated = validateCommitContext(input, task, mode, inspected.snapshot);
+  if (validated.error) return validated.error;
+  const strategy = selectCommitDeliveryStrategy(validated.delivery);
   const outcome = strategy.execute({ input, task, snapshot: inspected.snapshot });
   const committed = outcome.committed;
   if (committed.status === 'failed') return {
@@ -471,35 +520,8 @@ function executeCommitOperationCore(input: CommitOperationInput, task: BoundTask
     warnings: [],
     snapshot: committed.snapshot
   };
-
-  const warnings = [...outcome.warnings];
-  let status: CommitOperationResult['status'] = committed.status;
-  let result: CommitOperationResult['result'] = committed.status === 'applied' ? 'committed' : 'no_op';
-  if (warnings.length > 0) {
-    status = 'applied';
-    result = 'committed_with_warnings';
-  }
-  if (task && (committed.status === 'applied' || committed.status === 'no-op')) {
-    const committedHead = outcome.checkpoint?.committedHead ?? committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']);
-    const taskWarning = syncTaskCommit(input, task, committedHead, writeOptions);
-    if (taskWarning) {
-      warnings.push(taskWarning);
-      status = 'applied';
-      result = 'committed_with_warnings';
-    }
-    strategy.afterTaskSync?.(outcome, taskWarning);
-  }
-  return {
-    status,
-    changed: committed.changed,
-    result,
-    taskId: task?.taskId ?? null,
-    mode,
-    warnings: mergeOperationWarnings(warnings),
-    snapshot: committed.snapshot,
-    operations: committed.operations,
-    error: null
-  };
+  const taskWarning = syncCommitOutcome(input, task, strategy, outcome, writeOptions);
+  return commitOperationResult(outcome, task, mode, taskWarning);
 }
 
 function executeCommitOperation(input: CommitOperationInput, writeOptions: TaskWriteOptions = {}): CommitOperationResult {
