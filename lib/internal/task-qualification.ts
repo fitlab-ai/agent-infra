@@ -39,20 +39,40 @@ function readQualificationInput(inputPath: string): { payload: unknown } | { err
   catch (error) { return { error: `cannot read qualification input: ${error instanceof Error ? error.message : String(error)}` }; }
 }
 
+type QualificationContext = {
+  payload: Record<string, unknown>;
+  taskRef: string;
+  repoRoot: string;
+  dryRun: boolean;
+};
+
+type QualificationHandler = (context: QualificationContext) =>
+  ReturnType<typeof applyQualificationProposal> | ReturnType<typeof applyQualificationConfirmation>;
+
+function confirmationHandler(operation: 'confirm' | 'supersede' | 'revoke'): QualificationHandler {
+  return ({ payload, taskRef, repoRoot, dryRun }) => applyQualificationConfirmation(
+    { ...payload, taskRef, operation, dryRun } as QualificationConfirmationRequest, { repoRoot }
+  );
+}
+
+const proposalHandler: QualificationHandler = ({ payload, taskRef, repoRoot, dryRun }) => applyQualificationProposal(
+  { ...payload, taskRef, dryRun } as QualificationProposalRequest, { repoRoot }
+);
+
 async function taskQualification(args: string[] = []): Promise<void> {
-  const [taskRef, operation] = args;
-  const registered = [
-    internalHandlerRoute('task-qualification', 'proposal', operation ?? ''),
-    internalHandlerRoute('task-qualification', 'confirm', operation ?? ''),
-    internalHandlerRoute('task-qualification', 'supersede', operation ?? ''),
-    internalHandlerRoute('task-qualification', 'revoke', operation ?? '')
-  ].some(Boolean);
-  if (!registered) {
+  const [taskRef, operation = ''] = args;
+  const route = [
+    { matches: internalHandlerRoute('task-qualification', 'proposal', operation), handler: proposalHandler },
+    { matches: internalHandlerRoute('task-qualification', 'confirm', operation), handler: confirmationHandler('confirm') },
+    { matches: internalHandlerRoute('task-qualification', 'supersede', operation), handler: confirmationHandler('supersede') },
+    { matches: internalHandlerRoute('task-qualification', 'revoke', operation), handler: confirmationHandler('revoke') }
+  ].find((candidate) => candidate.matches);
+  if (!route) {
     fail('task ref and a valid qualification operation are required');
     return;
   }
   if (!ensureInternalHandlerRoute('task-qualification', args)) return;
-  if (!taskRef || !['proposal', 'confirm', 'supersede', 'revoke'].includes(operation ?? '')) { fail('task ref and a valid qualification operation are required'); return; }
+  if (!taskRef) { fail('task ref and a valid qualification operation are required'); return; }
   const parsed = parseQualificationOptions(args);
   if ('error' in parsed) { fail(parsed.error); return; }
   const input = readQualificationInput(parsed.inputPath);
@@ -61,9 +81,7 @@ async function taskQualification(args: string[] = []): Promise<void> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) { fail('qualification input must be an object'); return; }
   const resolved = resolveTaskRef(taskRef);
   if (!resolved.ok) { fail(resolved.message, resolved.code); return; }
-  const result = await (operation === 'proposal'
-    ? applyQualificationProposal({ ...(payload as Record<string, unknown>), taskRef: resolved.taskId, dryRun: parsed.dryRun } as QualificationProposalRequest, { repoRoot: resolved.repoRoot })
-    : applyQualificationConfirmation({ ...(payload as Record<string, unknown>), taskRef: resolved.taskId, operation, dryRun: parsed.dryRun } as QualificationConfirmationRequest, { repoRoot: resolved.repoRoot }));
+  const result = await route.handler({ payload: payload as Record<string, unknown>, taskRef: resolved.taskId, repoRoot: resolved.repoRoot, dryRun: parsed.dryRun });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

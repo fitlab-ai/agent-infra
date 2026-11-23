@@ -113,3 +113,63 @@ test('internal task-qualification rejects duplicate or missing options', () => {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test('CLI controls task identity, operation and dry-run for both qualification handlers', () => {
+  for (const operation of ['proposal', 'confirm'] as const) {
+    for (const dryRun of [true, false]) {
+      const f = fixture();
+      try {
+        const before = fs.readFileSync(f.taskPath, 'utf8');
+        const parsed = parseTaskQualification(before);
+        assert.equal(parsed.ok, true);
+        const payload = operation === 'proposal' ? {
+          taskRef: 'invalid', dryRun: !dryRun, expectedTaskInputDigest: parsed.qualification.taskInputDigest,
+          constraints: [{ constraintId: 'C-2', statement: 'Use atomic writes', status: 'assumption', authority: 'model', source: 'analysis.md', evidence: 'analysis.md#risk', derivedFrom: [], approvalEvidence: '' }]
+        } : {
+          taskRef: 'invalid', dryRun: !dryRun, operation: 'revoke', constraintId: 'C-1',
+          expectedDigest: parsed.qualification.constraintDigest, rationale: 'Confirm constraint.'
+        };
+        const input = path.join(f.root, 'input.json');
+        fs.writeFileSync(input, JSON.stringify(payload));
+        const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', TASK_ID, operation, '--input', input, ...(dryRun ? ['--dry-run'] : [])], { cwd: f.root, encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        const response = JSON.parse(result.stdout);
+        assert.equal(response.taskId, TASK_ID);
+        assert.equal(response.status, dryRun ? 'planned' : 'applied');
+        const after = fs.readFileSync(f.taskPath, 'utf8');
+        if (dryRun) assert.equal(after, before);
+        else {
+          const updated = parseTaskQualification(after);
+          assert.equal(updated.ok, true);
+          assert.equal(updated.qualification.constraints.find((row) => row.constraintId === (operation === 'proposal' ? 'C-2' : 'C-1'))?.status, operation === 'proposal' ? 'assumption' : 'confirmed');
+        }
+      } finally {
+        fs.rmSync(f.root, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test('CLI preserves error precedence across operation, options and input', () => {
+  const f = fixture();
+  try {
+    const malformed = path.join(f.root, 'malformed.json');
+    fs.writeFileSync(malformed, '{');
+    const cases = [
+      { args: ['missing', 'unknown', '--input', malformed], message: 'task ref and a valid qualification operation are required' },
+      { args: ['missing', 'confirm', '--input', malformed, '--input', malformed], message: "unknown or duplicate option '--input'" },
+      { args: ['missing', 'confirm', '--input', malformed], prefix: 'cannot read qualification input:' }
+    ];
+    for (const item of cases) {
+      const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', ...item.args], { cwd: f.root, encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      const error = JSON.parse(result.stdout).error;
+      assert.equal(error.code, 'QUALIFICATION_PROPOSAL_INVALID');
+      if (item.message) assert.equal(error.message, item.message);
+      else assert.ok(error.message.startsWith(item.prefix));
+      assert.ok(result.stderr.startsWith('Usage:'));
+    }
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
