@@ -332,6 +332,7 @@ function writeSandboxEngineFixture(
       "}",
       "log();",
       "captureEnvFile();",
+      "if (process.env.TASK04_REQUIRE_CONTAINER_QUERY_STDIN === '1' && ((args[0] === 'ps' && args.includes('-a') && args.includes('--format') && args.includes('{{.Names}}')) || (args[0] === 'inspect' && args.includes('--format') && ['{{.Id}}', '{{json .Config.Labels}}'].some((v) => args.includes(v)))) && !fs.fstatSync(0).isCharacterDevice()) process.exit(91);",
       "if (args[0] === 'ps') {",
       "  const rows = dockerRows();",
       "  const formatIndex = args.indexOf('--format');",

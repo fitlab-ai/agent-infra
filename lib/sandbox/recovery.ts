@@ -573,7 +573,7 @@ function inspectContainer(
   container: string,
   runFn: typeof runEngine
 ): DockerInspection {
-  const raw = runFn(engine, 'docker', ['inspect', container]);
+  const raw = runFn(engine, 'docker', ['inspect', container], { noInput: true });
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== 'object') {
     throw new Error(`Unable to inspect sandbox container '${container}'.`);
@@ -602,11 +602,12 @@ function probe(
   script: string,
   args: string[],
   runOkFn: typeof runOkEngine,
-  user = 'devuser'
+  user = 'devuser',
+  noInput = false
 ): boolean {
   return runOkFn(engine, 'docker', [
     'exec', '--user', user, container, 'sh', '-c', script, 'agent-infra-recovery', ...args
-  ]);
+  ], noInput ? { stdio: ['ignore', 'pipe', 'pipe'] } : undefined);
 }
 
 function normalizeMountSource(engine: string, source: string): string {
@@ -881,7 +882,7 @@ function targetState(
     container,
     'test -e "$1" || test -L "$1"',
     [seed.targetPath],
-    runOkFn
+    runOkFn, 'devuser', true
   );
   if (!exists) return 'missing';
 
@@ -890,16 +891,16 @@ function targetState(
     container,
     'if test -d "$1"; then test -d "$2"; else test -f "$2"; fi',
     [seed.stagingPath, seed.targetPath],
-    runOkFn
+    runOkFn, 'devuser', true
   );
   if (!compatible) return 'wrong-type';
 
   const readable = runOkFn(engine, 'docker', [
     'exec', '--user', 'devuser', container, 'test', '-r', seed.targetPath
-  ]);
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const writable = runOkFn(engine, 'docker', [
     'exec', '--user', 'devuser', container, 'test', '-w', seed.targetPath
-  ]);
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
   return readable && writable ? 'ok' : 'inaccessible';
 }
 
@@ -965,7 +966,7 @@ export function collectSandboxRecoverySnapshot(params: {
       params.container,
       'test "$(stat -c %u:%g:%a -- "$1")" = "$(id -u devuser):$(id -g devuser):700"',
       [tool.containerMount],
-      runOkFn
+      runOkFn, 'devuser', true
     ),
     writable: probe(
       params.engine,
@@ -1054,7 +1055,7 @@ export function collectSandboxRecoverySnapshot(params: {
           params.container,
           'test -r "$1"',
           [taskViewPath],
-          runOkFn
+          runOkFn, 'devuser', true
         )
       }
     }),
@@ -1068,7 +1069,7 @@ export function collectSandboxRecoverySnapshot(params: {
       params.container,
       'test -r "$1"',
       ['/home/devuser/.bash_aliases'],
-      runOkFn
+      runOkFn, 'devuser', true
     ),
     agentClientChecks: capabilityPlan.recoveryChecks.map(({ adapterId, check }) => {
       const applicable = check.when === undefined || probe(
@@ -1156,10 +1157,10 @@ export function validateTmpfsSeedEntries(params: {
     ]);
     const readable = runOkFn(params.engine, 'docker', [
       'exec', '--user', 'devuser', params.container, 'test', '-r', entry.targetPath
-    ]);
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
     const writable = runOkFn(params.engine, 'docker', [
       'exec', '--user', 'devuser', params.container, 'test', '-w', entry.targetPath
-    ]);
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
     if (!readable || !writable) {
       throw new Error(`Hydrated seed target ${entry.targetPath} is not writable by devuser.`);
     }

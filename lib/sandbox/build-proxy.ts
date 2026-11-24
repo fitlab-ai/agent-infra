@@ -1,4 +1,5 @@
 import semver from 'semver';
+import type { StdioOptions } from 'node:child_process';
 import { engineDisplayName } from './engine.ts';
 import { runSafeEngine } from './shell.ts';
 
@@ -12,7 +13,7 @@ export type BuildProxyPlan = {
   redactionValues: string[];
 };
 
-type EngineRunSafeFn = (engine: string, cmd: string, args: string[]) => string;
+type EngineRunSafeFn = (engine: string, cmd: string, args: string[], opts?: { stdio?: StdioOptions }) => string;
 
 export function prepareBuildProxy(
   enabled: boolean,
@@ -55,7 +56,7 @@ export function assertBuildProxyCompatibility(
   engine: string,
   runSafeEngineFn: EngineRunSafeFn = runSafeEngine
 ): void {
-  const dockerRaw = runSafeEngineFn(engine, 'docker', ['version', '--format', '{{.Server.Version}}']);
+  const dockerRaw = runSafeEngineFn(engine, 'docker', ['version', '--format', '{{.Server.Version}}'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const dockerVersion = parsedVersion(dockerRaw);
   if (!dockerVersion || !semver.gte(dockerVersion, MIN_BUILD_PROXY_DOCKER_VERSION)) {
     throw new Error(
@@ -64,7 +65,7 @@ export function assertBuildProxyCompatibility(
     );
   }
 
-  const buildxRaw = runSafeEngineFn(engine, 'docker', ['buildx', 'inspect', '--bootstrap']);
+  const buildxRaw = runSafeEngineFn(engine, 'docker', ['buildx', 'inspect', '--bootstrap'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const versions = [...buildxRaw.matchAll(/BuildKit(?:\s+version)?:\s*v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/gi)]
     .map((match) => parsedVersion(match[1] ?? ''))
     .filter((version): version is string => version !== null);

@@ -161,8 +161,7 @@ type EngineExecFn = (engine: string, cmd: string, args: string[], opts?: ExecFil
 type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => string;
 type EngineRunSafeFn = EngineRunFn;
 type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
-type DirectRunFn = (cmd: string, args: string[], opts?: { cwd?: string }) => string;
-type DirectRunSafeFn = DirectRunFn;
+type DirectRunSafeFn = (cmd: string, args: string[], opts?: { cwd?: string; stdio?: StdioOptions }) => string;
 type HostShellConfig = {
   hostDir: string;
   mounts: Array<{ hostPath: string; containerPath: string }>;
@@ -837,7 +836,7 @@ export function assertBranchAvailable(
   { allowedWorktrees = [], runFn = runSafe }: { allowedWorktrees?: string[]; runFn?: DirectRunSafeFn } = {}
 ): void {
   const normalizedAllowedWorktrees = new Set(allowedWorktrees.map((worktree) => normalizeWorktreePath(worktree)));
-  const output = runFn('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain']);
+  const output = runFn('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain'], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!output) {
     return;
   }
@@ -951,7 +950,7 @@ export function commandErrorMessage(error: unknown): string {
   return redactCommandError(stderr || message);
 }
 
-function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): string {
+function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string; noInput?: boolean } = {}): string {
   try {
     return run(cmd, args, opts);
   } catch (error) {
@@ -959,7 +958,7 @@ function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string } = {}
   }
 }
 
-function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts: { cwd?: string } = {}): string {
+function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts: { cwd?: string; noInput?: boolean } = {}): string {
   const command = commandForEngine(engine, cmd, args);
   return runTaskCommand(command.cmd, command.args, opts);
 }
@@ -1139,7 +1138,7 @@ export async function create(
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
   const preparedDockerfile = prepareDockerfile(effectiveConfig, capabilityPlan.image);
-  const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current']);
+  const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const expectedImageSignature = buildImageSignature(preparedDockerfile, tools);
   const engine = detectEngine(effectiveConfig);
   let createdTmpfsSeedPlan: TmpfsSeedPlanEntry[] = [];
@@ -1258,7 +1257,7 @@ export async function create(
             '--verify',
             '--quiet',
             `refs/heads/${branch}`
-          ]);
+          ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
           if (branchExists) {
             message(`Using existing branch '${branch}'...`);
@@ -1352,7 +1351,7 @@ export async function create(
             const previousManifest = fs.existsSync(controlPaths.manifestPath)
               ? readSandboxControlManifest(controlPaths.manifestPath)
               : null;
-          const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
+          const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'], { stdio: ['ignore', 'pipe', 'pipe'] }).split('\n').filter(Boolean);
           const matchedContainers = containerNameCandidates(effectiveConfig, branch)
             .filter((name) => existing.includes(name));
 
@@ -1374,7 +1373,7 @@ export async function create(
           const validateMatchedContainers = (): void => {
             if (matchedContainers.length > 0) {
               for (const name of matchedContainers) {
-                const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name]).trim();
+                const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name], { stdio: ['ignore', 'pipe', 'pipe'] }).trim();
                 if (!/^[a-f0-9]{64}$/u.test(id)
                   || (previousManifest && id !== previousManifest.containerIdentity.id)) {
                   throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
@@ -1382,7 +1381,7 @@ export async function create(
                 removalIds.push(id);
                 const rawLabels = runSafeEngine(engine, 'docker', [
                   'inspect', '--format', '{{json .Config.Labels}}', name
-                ]).trim();
+                ], { stdio: ['ignore', 'pipe', 'pipe'] }).trim();
                 let labels: Record<string, string>;
                 try {
                   labels = JSON.parse(rawLabels) as Record<string, string>;
@@ -1716,11 +1715,11 @@ export async function create(
               const validateAndFinalizeContainer = (): void => {
                 const containerId = runEngineTaskCommand(engine, 'docker', [
                   'inspect', '--format', '{{.Id}}', dockerRunId.trim()
-                ]).trim();
+                ], { noInput: true }).trim();
                 if (!/^[a-f0-9]{64}$/u.test(containerId)) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
                 const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
                   'inspect', '--format', '{{json .Config.Labels}}', containerId
-                ]).trim();
+                ], { noInput: true }).trim();
                 let inspectedLabels: unknown;
                 try {
                   inspectedLabels = JSON.parse(rawContainerLabels);
@@ -1939,14 +1938,14 @@ export async function create(
     container,
     copiedEntries: createdTmpfsSeedPlan
   });
-  const runningContainers = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
+  const runningContainers = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}'], { stdio: ['ignore', 'pipe', 'pipe'] }).split('\n');
   const checks = [
     { name: 'Container running', ok: runningContainers.includes(container) },
     ...runtimeChecks(effectiveConfig.runtimes).map((check) => ({
       name: check.name,
       ok: runOkEngine(engine, 'docker', ['exec', container, ...check.cmd])
     })),
-    { name: 'GitHub CLI', ok: runOkEngine(engine, 'docker', ['exec', container, 'gh', '--version']) }
+    { name: 'GitHub CLI', ok: runOkEngine(engine, 'docker', ['exec', container, 'gh', '--version'], { stdio: ['ignore', 'pipe', 'pipe'] }) }
   ];
   const toolChecks = tools.map((tool) => ({
     name: tool.name,

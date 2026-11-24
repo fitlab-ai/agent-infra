@@ -154,7 +154,7 @@ function resolveRmTarget(
     candidates: toolConfigDirCandidates(tool, config.project, branch)
   }));
   const shellCandidates = shellConfigDirCandidates(config, branch);
-  const existing = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
+  const existing = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'], { noInput: true }).split('\n').filter(Boolean);
   const matchedContainers = options.discoveredContainers
     ? [...options.discoveredContainers]
     : containerNameCandidates(config, branch).filter((name) => existing.includes(name));
@@ -199,7 +199,7 @@ function assertRemoved(target: string, label: string): void {
 
 function sandboxContainersRemoved(engine: string, containers: readonly string[]): boolean {
   if (containers.length === 0) return true;
-  const remaining = new Set(runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'])
+  const remaining = new Set(runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'], { noInput: true })
     .split('\n')
     .filter(Boolean));
   return containers.every((container) => !remaining.has(container));
@@ -428,7 +428,7 @@ async function rmPurge(
   const rows = [...listed.running, ...listed.nonRunning];
   const containers = runEngine(engine, 'docker', [
     'ps', '-a', '--filter', `label=${sandboxLabel(config)}`, '--format', '{{.Names}}'
-  ]).split('\n').filter(Boolean);
+  ], { noInput: true }).split('\n').filter(Boolean);
   const controlRoots = rows.flatMap((row) => {
     if (!row.branch) return [];
     const identity = row.workspaceMode === 'task-bound' && row.taskId

@@ -40,3 +40,12 @@ test('full engine preparation and image build queries close stdin, preserve erro
     }
   }
 });
+
+test('build proxy compatibility probes close stdin and read versions', onPlatforms('linux', 'darwin'), async () => {
+  const { assertBuildProxyCompatibility } = await import('../../../../lib/sandbox/build-proxy.ts');
+  const bin = createTempDir('build-proxy-probes-');
+  fs.writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\n[ -c /dev/stdin ] || exit 91\ncase "$1" in version) echo 24.0.0;; buildx) echo "BuildKit: v0.12.0";; esac\n', { mode: 0o755 });
+  const previous = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${previous}`;
+  try { assertBuildProxyCompatibility('native'); } finally { process.env.PATH = previous; }
+});

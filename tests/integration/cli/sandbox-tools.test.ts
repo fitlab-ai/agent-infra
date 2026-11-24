@@ -1239,3 +1239,24 @@ test("image inspect with closed stdin reuses a matching image on create", onPlat
     assert.equal(calls.some((call) => call[0] === "build"), false);
   } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
 });
+
+
+test("matching container identity probes use no stdin and matching image is reused", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = createTempDir("sandbox-container-query-stdin-");
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: "demo-dev-feature-x\tUp 1 minute\tdemo.sandbox.branch=feature-x", sandbox: { tools: { ids: ["codex"], definitions: {} } } });
+    const git = spawnSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], { cwd: fixture.repoDir, env: gitSafeEnv(), encoding: "utf8" });
+    assert.equal(git.status, 0, git.stderr);
+    const signature = await sandboxImageSignature(fixture.repoDir);
+    const result = spawnSandboxCli(fixture, tmpDir, ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"], {
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CONTAINER_QUERY_STDIN: "1", AGENT_INFRA_SANDBOX: undefined, AGENT_INFRA_TASK_ID: undefined, AGENT_INFRA_CONTROL_STATUS_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_ID: undefined, AGENT_INFRA_RUNTIME_DIR: undefined, AGENT_INFRA_CONTROL_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_DIR: undefined, AGENT_INFRA_CONTROL_GENERATION: undefined,
+      DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({ "demo.sandbox.image-config": signature, "demo.sandbox.last-refresh": "1234" })
+    });
+    const calls = fixture.readDockerCalls();
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(calls.some((call) => call[0] === "build"), false);
+    assert.ok(calls.some((call) => call[0] === "ps" && call.includes("{{.Names}}")));
+    assert.ok(calls.some((call) => call[0] === "inspect" && call.includes("{{.Id}}") && call.includes("demo-dev-feature-x")));
+    assert.ok(calls.some((call) => call[0] === "inspect" && call.includes("{{json .Config.Labels}}") && call.includes("demo-dev-feature-x")));
+  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+});

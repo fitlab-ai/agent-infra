@@ -202,7 +202,7 @@ export async function prune(args: string[], dependencies: PruneDependencies = {}
   let labelsOutput = dependencies.labelsOutput;
   if (labelsOutput === undefined) {
     try {
-      labelsOutput = runEngine(engine, 'docker', psArgs);
+      labelsOutput = runEngine(engine, 'docker', psArgs, { noInput: true });
     } catch {
       throw new Error('Unable to determine active sandbox branches: docker ps failed');
     }
