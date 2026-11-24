@@ -21,7 +21,7 @@ type BuildImageConfig = {
   repoRoot: string;
   engine?: string | null;
 };
-type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
+type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; stdio?: StdioOptions }) => string;
 type EngineRunSafeFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; stdio?: StdioOptions }) => string;
 
 export function buildImageSignature(preparedDockerfile: PreparedDockerfileSignature, tools: SandboxTool[]): string {

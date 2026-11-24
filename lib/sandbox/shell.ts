@@ -65,7 +65,7 @@ function commandOptions<T extends object>(cmd: string, opts: T): T | (T & { shel
 export function run(cmd: string, args: string[], opts: CommandOptions = {}): string {
   const resolved = resolveCommand(cmd);
   return execFileSync(resolved, args, commandOptions(resolved, {
-    ...normalizeOptions(opts, ['pipe', 'pipe', 'pipe']),
+    ...normalizeOptions(opts, opts.stdio ?? ['pipe', 'pipe', 'pipe']),
     encoding: 'utf8'
   })).trim();
 }
