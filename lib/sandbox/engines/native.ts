@@ -1,8 +1,9 @@
+import type { StdioOptions } from 'node:child_process';
 import type { OnMessage, SandboxAdapter } from './index.ts';
 
-type NativeRunSafe = (cmd: string, args: string[]) => string;
+type NativeRunSafe = (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
 type EngineRun = (engine: string, cmd: string, args: string[]) => string;
-type EngineRunSafe = (engine: string, cmd: string, args: string[]) => string;
+type EngineRunSafe = (engine: string, cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
 
 export function isRootlessDocker({
   env = process.env,
@@ -18,7 +19,7 @@ export function isRootlessDocker({
   }
 
   try {
-    const securityOptions = runSafe('docker', ['info', '--format', '{{.SecurityOptions}}']);
+    const securityOptions = runSafe('docker', ['info', '--format', '{{.SecurityOptions}}'], { stdio: ['ignore', 'pipe', 'pipe'] });
     return securityOptions.includes('rootless');
   } catch {
     return false;
@@ -37,7 +38,7 @@ export function resolveBuildUid({
   env?: NodeJS.ProcessEnv;
 }) {
   const runSafe = runSafeFn
-    ? (cmd: string, args: string[]) => runSafeFn(engine, cmd, args)
+    ? (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => runSafeFn(engine, cmd, args, options)
     : undefined;
 
   if (engine === 'native' && isRootlessDocker({ env, runSafe })) {
@@ -76,7 +77,7 @@ export const nativeAdapter: SandboxAdapter = {
       return false;
     }
 
-    const serverVersion = runSafe('docker', ['version', '--format', '{{.Server.Version}}']);
+    const serverVersion = runSafe('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: ['ignore', 'pipe', 'pipe'] });
     const rootless = isRootlessDocker({ runSafe });
     if (!serverVersion) {
       if (rootless) {

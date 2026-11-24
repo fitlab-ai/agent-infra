@@ -1,7 +1,7 @@
 import type { OnMessage, RunFns, SandboxAdapter } from './index.ts';
 
 function ensureWslAvailable(runOk: RunFns['runOk']): void {
-  if (runOk('wsl.exe', ['--status']) || runOk('wsl.exe', ['--', 'true'])) {
+  if (runOk('wsl.exe', ['--status'], { stdio: ['ignore', 'pipe', 'pipe'] }) || runOk('wsl.exe', ['--', 'true'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     return;
   }
 
@@ -12,7 +12,7 @@ function ensureWslAvailable(runOk: RunFns['runOk']): void {
 }
 
 function ensureDockerAvailable(runOk: RunFns['runOk']): void {
-  if (runOk('wsl.exe', ['--', 'docker', 'info'])) {
+  if (runOk('wsl.exe', ['--', 'docker', 'info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     return;
   }
 

@@ -1,10 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import type { ExecFileSyncOptions, ExecFileSyncOptionsWithBufferEncoding, ExecFileSyncOptionsWithStringEncoding, SpawnSyncOptions } from 'node:child_process';
 
-export function execNoInput(file: string, args: readonly string[], options: ExecFileSyncOptionsWithStringEncoding): string;
-export function execNoInput(file: string, args: readonly string[], options?: ExecFileSyncOptionsWithBufferEncoding): Buffer;
-export function execNoInput(file: string, args: readonly string[], options?: ExecFileSyncOptions): string | Buffer;
-export function execNoInput(file: string, args: readonly string[], options: ExecFileSyncOptions = {}): string | Buffer {
+type NoInput<T> = Omit<T, 'input' | 'stdio'> & { input?: never; stdio?: never };
+
+export function execNoInput(file: string, args: readonly string[], options: NoInput<ExecFileSyncOptionsWithStringEncoding>): string;
+export function execNoInput(file: string, args: readonly string[], options?: NoInput<ExecFileSyncOptionsWithBufferEncoding>): Buffer;
+export function execNoInput(file: string, args: readonly string[], options?: NoInput<ExecFileSyncOptions>): string | Buffer;
+export function execNoInput(file: string, args: readonly string[], options: NoInput<ExecFileSyncOptions> = {}): string | Buffer {
+  if ('input' in options || 'stdio' in options) throw new TypeError('execNoInput does not accept input or stdio');
   const result = spawnSync(file, [...args], {
     ...options,
     encoding: options.encoding === 'buffer' ? null : options.encoding,

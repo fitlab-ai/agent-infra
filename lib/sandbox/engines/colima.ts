@@ -1,7 +1,7 @@
 import type { EffectiveSandboxConfig, HostResources, OnMessage, RunFns, SandboxAdapter } from './index.ts';
 
 function colimaArgs(config: EffectiveSandboxConfig, runSafeFn: RunFns['runSafe']): string[] {
-  const arch = runSafeFn('uname', ['-m']);
+  const arch = runSafeFn('uname', ['-m'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const vm = config.vm ?? {};
   const args = ['start', '--cpu', String(vm.cpu), '--memory', String(vm.memory), '--disk', String(vm.disk)];
 
@@ -34,18 +34,18 @@ export const colimaAdapter: SandboxAdapter = {
   async ensure(config, onMessage: OnMessage, { runOk, runSafe, runVerbose }) {
     let started = false;
 
-    if (!runOk('which', ['colima'])) {
+    if (!runOk('which', ['colima'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       onMessage?.('Installing colima + docker + docker-buildx via Homebrew...');
       runVerbose('brew', ['install', 'colima', 'docker', 'docker-buildx']);
     }
 
-    if (!runOk('colima', ['status'])) {
+    if (!runOk('colima', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       onMessage?.('Starting Colima VM...');
       runVerbose('colima', colimaArgs(config, runSafe));
       started = true;
     }
 
-    if (!runOk('docker', ['info'])) {
+    if (!runOk('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       throw new Error('Docker daemon is not available after starting Colima');
     }
 
@@ -53,7 +53,7 @@ export const colimaAdapter: SandboxAdapter = {
   },
 
   startVm(config, _onMessage: OnMessage, { runOk, runSafe, runVerbose }) {
-    if (runOk('colima', ['status'])) {
+    if (runOk('colima', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       return 'already-running';
     }
 

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-type CommandResult = { status: number | null; stdout: string; stderr: string };
+type CommandResult = { status: number | null; stdout: string; stderr: string; error?: Error };
 type GitRunner = (args: readonly string[], cwd: string, noInput?: boolean) => CommandResult;
 type GitOperation = { name: string; status: 'applied' | 'no-op' | 'failed'; ref?: string; message?: string };
 
@@ -13,7 +13,8 @@ const defaultRunner: GitRunner = (args, cwd, noInput = false) => {
 };
 
 function run(runner: GitRunner, cwd: string, args: readonly string[], noInput = false): CommandResult {
-  return runner(args, cwd, noInput);
+  const result = runner(args, cwd, noInput);
+  return result.error ? { ...result, status: null, stderr: result.stderr || result.error.message } : result;
 }
 
 function value(runner: GitRunner, cwd: string, args: readonly string[], trim = true, noInput = false): string | null {

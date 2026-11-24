@@ -15,18 +15,18 @@ export const orbstackAdapter: SandboxAdapter = {
   async ensure(_config, onMessage: OnMessage, { runOk, runVerbose }) {
     let started = false;
 
-    if (!runOk('which', ['orb'])) {
+    if (!runOk('which', ['orb'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       onMessage?.('Installing OrbStack via Homebrew...');
       runVerbose('brew', ['install', '--cask', 'orbstack']);
     }
 
-    if (!runOk('docker', ['info'])) {
+    if (!runOk('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       onMessage?.('Starting OrbStack...');
       runVerbose('orb', ['start']);
       started = true;
     }
 
-    if (!runOk('docker', ['info'])) {
+    if (!runOk('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       throw new Error('Docker daemon is not available after starting OrbStack');
     }
 
@@ -34,7 +34,7 @@ export const orbstackAdapter: SandboxAdapter = {
   },
 
   startVm(_config, _onMessage: OnMessage, { runOk, runVerbose }) {
-    if (runOk('orb', ['status'])) {
+    if (runOk('orb', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       return 'already-running';
     }
 

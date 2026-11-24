@@ -10,7 +10,7 @@ const PROBE_TIMEOUT_MS = 2_000;
 const READ_IMAGE_TIMEOUT_MS = 5_000;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-type ExecFn = (cmd: string, args: string[], options?: ExecFileSyncOptions) => Buffer | string;
+type ExecFn = (cmd: string, args: string[], options?: Omit<ExecFileSyncOptions, 'input' | 'stdio'> & { input?: never; stdio?: never }) => Buffer | string;
 type ExecToFileFn = (cmd: string, args: string[], outputPath: string, timeout: number) => void;
 
 type LinuxBackend =
