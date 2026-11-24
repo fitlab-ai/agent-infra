@@ -125,7 +125,8 @@ export async function rebuild(args: string[]): Promise<void> {
         buildProxyArgs: buildProxy.args
       }), {
         cwd: config.repoRoot,
-        env: buildProxy.env
+        env: buildProxy.env,
+        noInput: true
       });
       spinner.stop(pc.green('Sandbox image rebuilt'));
     } else {

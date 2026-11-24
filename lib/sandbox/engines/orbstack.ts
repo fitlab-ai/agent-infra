@@ -43,7 +43,7 @@ export const orbstackAdapter: SandboxAdapter = {
   },
 
   stopVm(_config, _onMessage: OnMessage, { run }) {
-    run('orb', ['stop']);
+    run('orb', ['stop'], { noInput: true });
     return 'stopped';
   },
 

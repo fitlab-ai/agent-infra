@@ -973,7 +973,7 @@ export function collectSandboxRecoverySnapshot(params: {
       params.container,
       'probe="$1/.agent-infra-ready-$$"; trap \'rm -f -- "$probe"\' EXIT; : > "$probe"',
       [tool.containerMount],
-      runOkFn
+      runOkFn, 'devuser', true
     )
   }));
   const runtimeStoreOk = workspace.mode === 'task-bound'
@@ -982,7 +982,7 @@ export function collectSandboxRecoverySnapshot(params: {
       params.container,
       'probe="$1/.agent-infra-runtime-$$"; trap \'rm -f -- "$probe"\' EXIT; printf runtime-probe > "$probe" && test "$(cat -- "$probe")" = runtime-probe',
       ['/run/agent-infra/runtime'],
-      runOkFn
+      runOkFn, 'devuser', true
     )
     : undefined;
   const labels = inspection.Config?.Labels ?? {};

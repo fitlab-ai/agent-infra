@@ -334,7 +334,7 @@ async function removeUncheckedSandbox(
     { ...options.prompt, interactive: options.interactive }
   );
 
-  for (const container of matchedContainers) runSafeEngine(engine, 'docker', ['rm', '-f', container]);
+  for (const container of matchedContainers) runSafeEngine(engine, 'docker', ['rm', '-f', container], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!sandboxContainersRemoved(engine, matchedContainers)) {
     throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${matchedContainers.join(', ')}`);
   }
@@ -378,7 +378,7 @@ async function removeUncheckedSandbox(
   }
   if (shouldDeleteBranch) {
     assertBranchRemovalIdentity(config, effectiveBranch, worktreePermits);
-    runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
+    runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch], { stdio: ['ignore', 'pipe', 'pipe'] });
   }
   if (toolRemovalFailures.length > 0) {
     throw new Error(`SANDBOX_TOOL_CLEANUP_INCOMPLETE:\n${toolRemovalFailures.map((failure) => `  - ${failure}`).join('\n')}`);
@@ -445,7 +445,7 @@ async function rmPurge(
   const completedTaskIds = [...new Set(rows
     .filter((row) => row.workspaceMode === 'task-bound' && row.taskId)
     .map((row) => row.taskId!))];
-  for (const name of containers) runSafeEngine(engine, 'docker', ['rm', '-f', name]);
+  for (const name of containers) runSafeEngine(engine, 'docker', ['rm', '-f', name], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!sandboxContainersRemoved(engine, containers)) {
     throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${containers.join(', ')}`);
   }
@@ -459,7 +459,7 @@ async function rmPurge(
     const selected = await confirm({ message: `Remove all worktrees in ${config.worktreeBase}?`, initialValue: true });
     if (!isCancel(selected) && selected) {
       for (const worktree of worktrees) fs.rmSync(worktree, { recursive: true, force: true });
-      runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+      runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune'], { stdio: ['ignore', 'pipe', 'pipe'] });
     } else cleanupCompleted = false;
   }
 
@@ -480,7 +480,7 @@ async function rmPurge(
     for (const taskId of completedTaskIds) releaseStaleShortIdRegistry(config.repoRoot, taskId);
   }
   const removeImage = await confirm({ message: `Remove image ${config.imageName}?`, initialValue: false });
-  if (!isCancel(removeImage) && removeImage) runSafeEngine(engine, 'docker', ['rmi', config.imageName]);
+  if (!isCancel(removeImage) && removeImage) runSafeEngine(engine, 'docker', ['rmi', config.imageName], { stdio: ['ignore', 'pipe', 'pipe'] });
   p.outro(pc.green('All project sandboxes removed'));
 }
 

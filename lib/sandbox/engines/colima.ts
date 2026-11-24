@@ -62,7 +62,7 @@ export const colimaAdapter: SandboxAdapter = {
   },
 
   stopVm(_config, _onMessage: OnMessage, { run }) {
-    run('colima', ['stop']);
+    run('colima', ['stop'], { noInput: true });
     return 'stopped';
   },
 

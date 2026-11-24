@@ -64,9 +64,10 @@ if (!forwarded.includes("--short-id-length")) {
 const sourceCli = findSourceCli();
 const installedCli = resolveCommand("agent-infra-internal");
 const child = sourceCli
-  ? spawnSync(process.execPath, ["--experimental-strip-types", sourceCli, "task-short-id", ...forwarded], { cwd: repoRoot || process.cwd(), encoding: "utf8" })
+  ? spawnSync(process.execPath, ["--experimental-strip-types", sourceCli, "task-short-id", ...forwarded], { cwd: repoRoot || process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
   : spawnSync(installedCli, ["task-short-id", ...forwarded], {
       encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
       cwd: repoRoot || process.cwd(),
       shell: process.platform === "win32" && /\.(?:bat|cmd)$/i.test(installedCli)
     });

@@ -86,11 +86,14 @@ function defaultRunner(args: string[], options: RunOptions): RunResult {
   } catch {
     prefix = [];
   }
+  const stockVersion = !process.env.AGENT_INFRA_GH_BIN && !process.env.AGENT_INFRA_GH_ARGS_JSON
+    && args.length === 1 && args[0] === '--version' && options.input === undefined;
   const result = spawn.sync(command, [...prefix, ...args], {
     cwd: options.cwd,
     encoding: 'utf8',
     env: process.env,
     input: options.input,
+    ...(stockVersion ? { stdio: ['ignore', 'pipe', 'pipe'] as const } : {}),
     maxBuffer: GITHUB_CLI_MAX_BUFFER,
     shell: false
   });

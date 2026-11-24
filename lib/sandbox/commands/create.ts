@@ -728,7 +728,7 @@ export function syncGpgKeys(
   };
   importKeys();
 
-  dockerRunSafeFn('docker', ['exec', container, 'gpgconf', '--launch', 'gpg-agent']);
+  dockerRunSafeFn('docker', ['exec', container, 'gpgconf', '--launch', 'gpg-agent'], { stdio: ['ignore', 'pipe', 'pipe'] });
   return true;
 }
 
@@ -1529,8 +1529,8 @@ export async function create(
             const removePreviousContainers = (): void => {
               if (removalIds.length > 0) message('Removing old container instance...');
               for (const id of removalIds) {
-                runEngineTaskCommand(engine, 'docker', ['stop', id]);
-                runEngineTaskCommand(engine, 'docker', ['rm', id]);
+                runEngineTaskCommand(engine, 'docker', ['stop', id], { noInput: true });
+                runEngineTaskCommand(engine, 'docker', ['rm', id], { noInput: true });
               }
             };
             removePreviousContainers();
@@ -1708,7 +1708,7 @@ export async function create(
                   '-w',
                   '/workspace',
                   effectiveConfig.imageName
-                  ]);
+                  ], { noInput: true });
               };
               const dockerRunId = runContainer();
               createdContainerRef = dockerRunId.trim();
@@ -1760,8 +1760,8 @@ export async function create(
             } catch (error) {
               const removeFailedContainer = (): void => {
                 if (createdContainerRef) {
-                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
-                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
+                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef], { stdio: ['ignore', 'pipe', 'pipe'] });
+                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef], { stdio: ['ignore', 'pipe', 'pipe'] });
                 }
                 if (!hadExistingControlRoot) removeDirRecursive(control.root);
               };
@@ -1943,7 +1943,7 @@ export async function create(
     { name: 'Container running', ok: runningContainers.includes(container) },
     ...runtimeChecks(effectiveConfig.runtimes).map((check) => ({
       name: check.name,
-      ok: runOkEngine(engine, 'docker', ['exec', container, ...check.cmd])
+      ok: runOkEngine(engine, 'docker', ['exec', container, ...check.cmd], { stdio: ['ignore', 'pipe', 'pipe'] })
     })),
     { name: 'GitHub CLI', ok: runOkEngine(engine, 'docker', ['exec', container, 'gh', '--version'], { stdio: ['ignore', 'pipe', 'pipe'] }) }
   ];

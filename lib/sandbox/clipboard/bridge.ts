@@ -94,7 +94,7 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
   const available = adapter?.available() ?? { ok: false as const, reason: 'no clipboard adapter available on this platform' };
   const inboxReady = isClipboardInboxReadable(home);
   if (!available.ok && !inboxReady) return fallback(available.reason);
-  if (!runOk(engine, 'docker', ['exec', container, 'sh', '-c', '[ -d /clipboard ] && [ -r /clipboard ]'])) {
+  if (!runOk(engine, 'docker', ['exec', container, 'sh', '-c', '[ -d /clipboard ] && [ -r /clipboard ]'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     return fallback('container /clipboard mount is missing; rebuild the sandbox to enable image paste');
   }
 

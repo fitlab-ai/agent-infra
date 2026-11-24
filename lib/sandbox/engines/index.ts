@@ -23,7 +23,7 @@ export type HostResources = {
 };
 
 export type RunFns = {
-  run: (cmd: string, args: string[]) => string;
+  run: (cmd: string, args: string[], options?: { noInput?: boolean }) => string;
   runOk: (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => boolean;
   runSafe: (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
   runVerbose: (cmd: string, args: string[]) => void;

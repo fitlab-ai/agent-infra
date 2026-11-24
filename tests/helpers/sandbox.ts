@@ -332,6 +332,8 @@ function writeSandboxEngineFixture(
       "}",
       "log();",
       "captureEnvFile();",
+      "if (process.env.TASK04_REQUIRE_R8_BUILD_STDIN === '1' && args[0] === 'build' && !fs.fstatSync(0).isCharacterDevice()) process.exit(91);",
+      "if (process.env.TASK04_REQUIRE_R8_FIXED_STDIN === '1' && ((args[0] === 'run' && args.includes('-d')) || (args[0] === 'exec' && ['node', 'java', 'mvn', 'python3', 'gh'].some((v) => args.includes(v)) && (args.includes('--version') || args.includes('-version')))) && !fs.fstatSync(0).isCharacterDevice()) process.exit(91);",
       "if (process.env.TASK04_REQUIRE_CONTAINER_QUERY_STDIN === '1' && ((args[0] === 'ps' && args.includes('-a') && args.includes('--format') && args.includes('{{.Names}}')) || (args[0] === 'inspect' && args.includes('--format') && ['{{.Id}}', '{{json .Config.Labels}}'].some((v) => args.includes(v)))) && !fs.fstatSync(0).isCharacterDevice()) process.exit(91);",
       "if (args[0] === 'ps') {",
       "  const rows = dockerRows();",

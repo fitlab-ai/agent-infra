@@ -14,7 +14,7 @@ export function pruneSandboxDanglingImages(
       '-f',
       '--filter',
       `label=${sandboxLabel(config)}`
-    ]);
+    ], { noInput: true });
   } catch {
     p.log.warn(
       `Failed to prune dangling sandbox images (label=${sandboxLabel(config)}); leaving them in place.`

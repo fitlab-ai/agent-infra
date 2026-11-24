@@ -709,7 +709,7 @@ test("sandbox rebuild preserves last refresh label without refresh", onPlatforms
     });
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], {
-      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0"
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_R8_BUILD_STDIN: "1"
     });
     const buildCall = fixture.readDockerCalls().find((call) => call[0] === "build");
 
@@ -1249,12 +1249,13 @@ test("matching container identity probes use no stdin and matching image is reus
     assert.equal(git.status, 0, git.stderr);
     const signature = await sandboxImageSignature(fixture.repoDir);
     const result = spawnSandboxCli(fixture, tmpDir, ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"], {
-      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CONTAINER_QUERY_STDIN: "1", AGENT_INFRA_SANDBOX: undefined, AGENT_INFRA_TASK_ID: undefined, AGENT_INFRA_CONTROL_STATUS_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_ID: undefined, AGENT_INFRA_RUNTIME_DIR: undefined, AGENT_INFRA_CONTROL_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_DIR: undefined, AGENT_INFRA_CONTROL_GENERATION: undefined,
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CONTAINER_QUERY_STDIN: "1", TASK04_REQUIRE_R8_FIXED_STDIN: "1", AGENT_INFRA_SANDBOX: undefined, AGENT_INFRA_TASK_ID: undefined, AGENT_INFRA_CONTROL_STATUS_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_ID: undefined, AGENT_INFRA_RUNTIME_DIR: undefined, AGENT_INFRA_CONTROL_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_DIR: undefined, AGENT_INFRA_CONTROL_GENERATION: undefined,
       DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({ "demo.sandbox.image-config": signature, "demo.sandbox.last-refresh": "1234" })
     });
     const calls = fixture.readDockerCalls();
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.equal(calls.some((call) => call[0] === "build"), false);
+    for (const operation of ["stop", "rm", "run"]) assert.equal(calls.filter((call) => call[0] === operation).length, 1);
     assert.ok(calls.some((call) => call[0] === "ps" && call.includes("{{.Names}}")));
     assert.ok(calls.some((call) => call[0] === "inspect" && call.includes("{{.Id}}") && call.includes("demo-dev-feature-x")));
     assert.ok(calls.some((call) => call[0] === "inspect" && call.includes("{{json .Config.Labels}}") && call.includes("demo-dev-feature-x")));

@@ -11,7 +11,8 @@ function runGit(args, options = {}) {
   const result = spawnSync("git", args, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
-    ...options
+    ...options,
+    stdio: ["ignore", "pipe", "pipe"]
   });
 
   if (result.status !== 0) {
