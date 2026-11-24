@@ -94,7 +94,7 @@ function assertBranchRemovalIdentity(
   branch: string,
   permits: ReadonlyMap<string, WorktreeRemovalPermit>
 ): void {
-  if (!runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${branch}`])) return;
+  if (!runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${branch}`], { stdio: ['ignore', 'pipe', 'pipe'] })) return;
   const expectedHeads = new Set(
     [...permits.values()]
       .filter((permit) => permit.snapshot.branch === branch)
@@ -103,7 +103,7 @@ function assertBranchRemovalIdentity(
   if (expectedHeads.size === 0) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
   }
-  const actualHead = runSafe('git', ['-C', config.repoRoot, 'rev-parse', `refs/heads/${branch}`]);
+  const actualHead = runSafe('git', ['-C', config.repoRoot, 'rev-parse', `refs/heads/${branch}`], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!expectedHeads.has(actualHead)) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
   }

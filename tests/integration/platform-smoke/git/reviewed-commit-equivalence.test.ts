@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { resolveLocalReviewedCommitRelation } from "../../../../lib/git/reviewed-commit-equivalence.ts";
-import { createTempDir, gitSafeEnv } from "../../../helpers.ts";
+import { createTempDir, gitSafeEnv, onPlatforms, withGitSafeProcessEnv } from "../../../helpers.ts";
 
 function git(root: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8", env: gitSafeEnv() });
@@ -145,4 +145,15 @@ test("blocks when a required commit object is missing", () => {
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+
+test("reviewed commit queries run without unused stdin pipes", onPlatforms("linux", "darwin"), () => {
+  const f = fixture();
+  const rewritten = writeCommit(f.root, { "protected.txt": "base\nreviewed\n" }, "rewritten");
+  const bin = createTempDir("equivalence-git-shim-");
+  const realGit = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
+  fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\n[ -c /dev/stdin ] || exit 91\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  const result = withGitSafeProcessEnv(() => resolve(f.root, f.reviewed, rewritten), { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.equal(result.status, "local-equivalent");
 });

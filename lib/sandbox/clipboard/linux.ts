@@ -1,3 +1,4 @@
+import { execNoInput } from '../../exec-no-input.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,7 +24,7 @@ export type LinuxClipboardAdapter = {
 
 export function createLinuxClipboardAdapter({
   env = process.env,
-  execFn = execFileSync,
+  execFn = execNoInput,
   execToFileFn = execToFile,
   mkdtempFn = fs.mkdtempSync,
   readFileFn = fs.readFileSync,

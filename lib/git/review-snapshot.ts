@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { execNoInput } from '../exec-no-input.ts';
 
 function git(repoRoot: string, args: string[], options: { env?: NodeJS.ProcessEnv; encoding?: BufferEncoding | 'buffer' } = {}) {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: options.encoding ?? 'utf8', env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  return execNoInput('git', args, { cwd: repoRoot, encoding: options.encoding ?? 'utf8', env: options.env ?? process.env });
 }
 
 function splitNull(output: string): string[] { return output.split('\0').filter(Boolean); }
@@ -15,7 +16,7 @@ function withTemporaryIndex<T>(repoRoot: string, baseline: string, callback: (en
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-review-index-'));
   const env = { ...process.env, GIT_INDEX_FILE: path.join(tempDir, 'index') };
   try {
-    execFileSync('git', ['read-tree', baseline], { cwd: repoRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    git(repoRoot, ['read-tree', baseline], { env, encoding: 'buffer' });
     return callback(env);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -27,13 +28,13 @@ function projectWorktree(repoRoot: string, baseline: string, globs: string[], en
   const untracked = splitNull(String(git(repoRoot, ['ls-files', '-o', '--exclude-standard', '-z', '--', ...globs])));
   for (const filePath of new Set([...tracked, ...untracked])) {
     const args = exists(path.join(repoRoot, filePath)) ? ['update-index', '--add', '--', filePath] : ['update-index', '--remove', '--', filePath];
-    execFileSync('git', args, { cwd: repoRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    git(repoRoot, args, { env, encoding: 'buffer' });
   }
 }
 
 function projectStaged(repoRoot: string, baseline: string, globs: string[], env: NodeJS.ProcessEnv) {
   for (const filePath of splitNull(String(git(repoRoot, ['diff', '--cached', '--name-only', '-z', baseline, '--', ...globs])))) {
-    const entry = execFileSync('git', ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', filePath], { cwd: repoRoot, encoding: 'buffer', stdio: ['ignore', 'pipe', 'pipe'] });
+    const entry = git(repoRoot, ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', filePath], { encoding: 'buffer' });
     execFileSync('git', ['update-index', '-z', '--index-info'], {
       cwd: repoRoot, env, input: entry.length > 0 ? entry : Buffer.from(`0 ${'0'.repeat(40)}\t${filePath}\0`)
     });
@@ -50,12 +51,7 @@ function projectSnapshot(
     if (mode === 'worktree') projectWorktree(repoRoot, baseline, globs, env);
     else projectStaged(repoRoot, baseline, globs, env);
     return {
-      diff: execFileSync('git', ['diff', '--cached', '--binary', baseline, '--', ...globs], {
-        cwd: repoRoot,
-        encoding: 'buffer',
-        env,
-        stdio: ['ignore', 'pipe', 'pipe']
-      }),
+      diff: git(repoRoot, ['diff', '--cached', '--binary', baseline, '--', ...globs], { encoding: 'buffer', env }),
       tree: String(git(repoRoot, ['write-tree'], { env })).trim()
     };
   });

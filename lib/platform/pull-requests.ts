@@ -1,7 +1,8 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
@@ -611,7 +612,7 @@ function taskInLabelTarget(
   };
   let changedFiles: string[];
   try {
-    changedFiles = execFileSync('git', ['diff', `${baseRef}...HEAD`, '--name-only'], {
+    changedFiles = execNoInput('git', ['diff', `${baseRef}...HEAD`, '--name-only'], {
       cwd: repoRoot, encoding: 'utf8'
     }).trim().split(/\r?\n/).filter(Boolean);
   } catch (error) {

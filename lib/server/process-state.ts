@@ -1,3 +1,4 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -128,7 +129,7 @@ export function getProcessStartTime(
   const query = buildProcessStartTimeQuery(pid, platform);
   if (query === null) return null;
   try {
-    const output = execFileSync(query.command, query.args, {
+    const output = execNoInput(query.command, query.args, {
       encoding: 'utf8',
       env: platform === 'darwin' ? { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } : process.env
     }).trim();
@@ -175,7 +176,7 @@ export function getProcessIdentityState(
   const query = buildProcessStartTimeQuery(identity.pid, platform);
   if (query === null) return 'unknown';
   try {
-    const output = (runtime.execFileSync ?? execFileSync)(query.command, query.args, {
+    const output = (runtime.execFileSync ?? execNoInput)(query.command, query.args, {
       encoding: 'utf8',
       env: platform === 'darwin' ? { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } : process.env
     }).trim();

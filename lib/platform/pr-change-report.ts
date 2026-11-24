@@ -1,7 +1,8 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+
 import { escapeHtmlText } from './comment-safety.ts';
 import { isResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
@@ -705,7 +706,7 @@ function runMechanicalChangeReport(repoRoot: string, baseSha: string, headSha: s
   const script = path.join(repoRoot, '.agents', 'skills', 'create-pr', 'scripts', 'change-report.mjs');
   const invoke = (): ScopedDiff => {
     const args = [script, '--base', baseSha, '--head', headSha, '--cwd', repoRoot];
-    const output = execFileSync(process.execPath, args, {
+    const output = execNoInput(process.execPath, args, {
       cwd: repoRoot,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024

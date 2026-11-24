@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { execNoInput } from "../exec-no-input.ts";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
@@ -15,7 +16,7 @@ type LocalReviewedCommitRelation =
     };
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  return execNoInput("git", args, { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
 }
 
 function commitExists(gitRoot: string, sha: string): boolean {
@@ -30,8 +31,10 @@ function commitExists(gitRoot: string, sha: string): boolean {
 function isAncestor(gitRoot: string, ancestor: string, descendant: string): boolean | null {
   const result = spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
     cwd: gitRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
   });
+  if (result.error) return null;
   if (result.status === 0) return true;
   if (result.status === 1) return false;
   return null;

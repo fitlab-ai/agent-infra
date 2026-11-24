@@ -2,12 +2,17 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { inspectGitWorkflow, pushGitRefs } from '../../../../lib/git/workflow.ts';
+import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs } from '../../../../lib/git/workflow.ts';
 
 test('process errors override a zero status and a failed push is not replayed', () => {
   let pushes = 0;
+  let commits = 0;
+  let failDiff = false;
   let failHead = true;
   mock.method(childProcess, 'spawnSync', ((_file: unknown, args: string[]) => {
+    if (args[0] === 'commit') commits += 1;
+    if (failDiff && args[0] === 'diff') return { status: 0, stdout: '', stderr: '', error: new Error('diff failed') };
+    if (args[0] === 'ls-files' || args[0] === 'ls-tree') return { status: 0, stdout: 'tracked.txt\0', stderr: '' };
     if (args[0] === 'push') {
       pushes += 1;
       return { status: 0, stdout: '', stderr: '', error: new Error('unknown push result') };
@@ -26,6 +31,12 @@ test('process errors override a zero status and a failed push is not replayed', 
     assert.equal(pushed.status, 'failed');
     assert.equal(pushed.error?.code, 'GIT_PUSH_PARTIAL');
     assert.equal(pushes, 1);
+    failDiff = true;
+    const commit = commitExplicitPaths({ cwd: '/unused', paths: ['tracked.txt'], message: 'fix: test' });
+    assert.equal(commit.status, 'failed');
+    assert.equal(commit.error?.code, 'GIT_STAGE_FAILED');
+    assert.match(commit.error?.message ?? '', /diff failed/);
+    assert.equal(commits, 0);
   } finally {
     mock.restoreAll();
     syncBuiltinESMExports();

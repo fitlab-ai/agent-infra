@@ -63,7 +63,7 @@ export const nativeAdapter: SandboxAdapter = {
   },
 
   async ensure(_config, _onMessage: OnMessage, { runOk, runSafe }) {
-    if (!runOk('which', ['docker'])) {
+    if (!runOk('which', ['docker'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       throw new Error([
         'Docker is not installed.',
         'Install Docker Engine for your distribution: https://docs.docker.com/engine/install/',
@@ -72,7 +72,7 @@ export const nativeAdapter: SandboxAdapter = {
       ].join('\n'));
     }
 
-    if (runOk('docker', ['info'])) {
+    if (runOk('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       return false;
     }
 

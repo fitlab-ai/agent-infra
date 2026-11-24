@@ -346,3 +346,21 @@ test('default inspection and preview use no stdin pipe for their noninteractive 
     process.env.PATH = oldPath;
   }
 });
+
+test('staging probe failures never proceed to commit', () => {
+  for (const status of [null, 128]) {
+    let commits = 0;
+    const result = commitExplicitPaths({ cwd: '/unused', paths: ['tracked.txt'], message: 'fix: test' }, (args) => {
+      if (args[0] === 'commit') commits += 1;
+      if (args[0] === 'diff') return { status, stdout: '', stderr: 'probe failed' };
+      if (args[0] === 'rev-parse') return { status: 0, stdout: 'head\n', stderr: '' };
+      if (args[0] === 'branch') return { status: 0, stdout: 'feature\n', stderr: '' };
+      if (args[0] === 'ls-files' || args[0] === 'ls-tree') return { status: 0, stdout: 'tracked.txt\0', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'GIT_STAGE_FAILED');
+    assert.match(result.error?.message ?? '', /probe failed/);
+    assert.equal(commits, 0);
+  }
+});

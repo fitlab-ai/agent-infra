@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execNoInput } from '../../exec-no-input.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +23,7 @@ export type Win32ClipboardAdapter = {
 };
 
 export function createWin32ClipboardAdapter({
-  execFn = execFileSync,
+  execFn = execNoInput,
   mkdtempFn = fs.mkdtempSync,
   readFileFn = fs.readFileSync,
   rmFn = fs.rmSync,

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execNoInput } from '../../exec-no-input.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +29,7 @@ export type DarwinClipboardAdapter = {
 };
 
 export function createDarwinClipboardAdapter({
-  execFn = execFileSync,
+  execFn = execNoInput,
   mkdtempFn = fs.mkdtempSync,
   readFileFn = fs.readFileSync,
   rmFn = fs.rmSync

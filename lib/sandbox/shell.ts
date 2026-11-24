@@ -72,7 +72,7 @@ export function run(cmd: string, args: string[], opts: CommandOptions = {}): str
 
 export function runOk(cmd: string, args: string[], opts: CommandOptions = {}): boolean {
   const resolved = resolveCommand(cmd);
-  const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, 'pipe')));
+  const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, opts.stdio ?? 'pipe')));
   return result.status === 0;
 }
 
@@ -131,7 +131,7 @@ export function runVerbose(cmd: string, args: string[], opts: CommandOptions = {
 export function runSafe(cmd: string, args: string[], opts: CommandOptions = {}): string {
   const resolved = resolveCommand(cmd);
   const result = spawnSync(resolved, args, commandOptions(resolved, {
-    ...normalizeOptions(opts, ['pipe', 'pipe', 'pipe']),
+    ...normalizeOptions(opts, opts.stdio ?? ['pipe', 'pipe', 'pipe']),
     encoding: 'utf8',
   }));
   if (result.status !== 0 && result.stderr) {
