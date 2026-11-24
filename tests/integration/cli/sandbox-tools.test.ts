@@ -1211,3 +1211,31 @@ test("buildTmpfsRunArgs emits a sized --tmpfs flag for the container mount", asy
     ["--tmpfs", "/home/devuser/.codex:rw,size=512m"]
   );
 });
+
+
+test("image inspect with closed stdin preserves rebuild refresh label", onPlatforms("linux", "darwin"), () => {
+  const tmpDir = createTempDir("sandbox-image-stdin-rebuild-");
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerLabelsForInspect: { "demo.sandbox.last-refresh": "1234" } });
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], { DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CLOSED_STDIN: "1" });
+    assert.equal(result.status, 0, result.stderr);
+    const calls = fixture.readDockerCalls();
+    assert.equal(calls.filter((call) => call[0] === "image" && call[1] === "inspect").length, 2);
+    assert.ok(calls.find((call) => call[0] === "build")?.includes("demo.sandbox.last-refresh=1234"));
+  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+});
+
+test("image inspect with closed stdin reuses a matching image on create", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = createTempDir("sandbox-image-stdin-create-");
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", sandbox: { tools: { ids: ["codex"], definitions: {} } } });
+    const signature = await sandboxImageSignature(fixture.repoDir);
+    spawnSandboxCli(fixture, tmpDir, ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"], {
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CLOSED_STDIN: "1", DOCKER_EXIT_FOR_RUN: "1",
+      DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({ "demo.sandbox.image-config": signature, "demo.sandbox.last-refresh": "1234" })
+    });
+    const calls = fixture.readDockerCalls();
+    assert.equal(calls.filter((call) => call[0] === "image" && call[1] === "inspect").length, 2);
+    assert.equal(calls.some((call) => call[0] === "build"), false);
+  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+});

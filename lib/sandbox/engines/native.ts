@@ -2,7 +2,7 @@ import type { StdioOptions } from 'node:child_process';
 import type { OnMessage, SandboxAdapter } from './index.ts';
 
 type NativeRunSafe = (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
-type EngineRun = (engine: string, cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
+type EngineRun = (engine: string, cmd: string, args: string[], options?: { noInput?: boolean }) => string;
 type EngineRunSafe = (engine: string, cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
 
 export function isRootlessDocker({
@@ -46,8 +46,8 @@ export function resolveBuildUid({
   }
 
   return {
-    uid: runFn(engine, 'id', ['-u'], { stdio: ['ignore', 'pipe', 'pipe'] }),
-    gid: runFn(engine, 'id', ['-g'], { stdio: ['ignore', 'pipe', 'pipe'] })
+    uid: runFn(engine, 'id', ['-u'], { noInput: true }),
+    gid: runFn(engine, 'id', ['-g'], { noInput: true })
   };
 }
 

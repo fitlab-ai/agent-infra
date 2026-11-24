@@ -372,6 +372,7 @@ function writeSandboxEngineFixture(
       "  process.exit(0);",
       "}",
       "if (args[0] === 'image' && args[1] === 'inspect') {",
+      "  if (process.env.TASK04_REQUIRE_CLOSED_STDIN === '1' && !fs.fstatSync(0).isCharacterDevice()) process.exit(91);",
       "  if (process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT && Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT) !== 0) {",
       "    process.exit(Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT));",
       "  }",

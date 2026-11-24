@@ -63,7 +63,7 @@ export function buildArgs(
 }
 
 function readExistingLastRefresh(config: SandboxConfig, engine: string): number {
-  if (!runOkEngine(engine, 'docker', ['image', 'inspect', config.imageName])) {
+  if (!runOkEngine(engine, 'docker', ['image', 'inspect', config.imageName], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     return 0;
   }
 
@@ -73,7 +73,7 @@ function readExistingLastRefresh(config: SandboxConfig, engine: string): number 
     '--format',
     '{{ json .Config.Labels }}',
     config.imageName
-  ]));
+  ], { stdio: ['ignore', 'pipe', 'pipe'] }));
 
   return parseRefreshTimestamp(labels[sandboxImageRefreshLabel(config)] ?? '');
 }

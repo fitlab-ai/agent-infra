@@ -1023,7 +1023,7 @@ function readImageLabels(config: Pick<SandboxCreateConfig, 'imageName'> & Pick<S
     '--format',
     '{{ json .Config.Labels }}',
     config.imageName
-  ]));
+  ], { stdio: ['ignore', 'pipe', 'pipe'] }));
 }
 
 function readProjectInitCommandDigest(controlRoot: string): string | null {
@@ -1160,7 +1160,7 @@ export async function create(
     p.log.success('Docker is ready');
 
     const ensureImage = (): void => {
-      const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName]);
+      const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName], { stdio: ['ignore', 'pipe', 'pipe'] });
       const imageLabels = imageExists ? readImageLabels(effectiveConfig, engine) : {};
       const currentImageSignature = imageLabels[sandboxImageConfigLabel(effectiveConfig)] ?? '';
       const currentLastRefresh = parseRefreshTimestamp(imageLabels[sandboxImageRefreshLabel(effectiveConfig)] ?? '');
