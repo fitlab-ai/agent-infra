@@ -190,6 +190,87 @@ function isRemovalPermitCommit(value: unknown): boolean {
     && (recovery.taskId === null || typeof recovery.taskId === 'string');
 }
 
+type RemovalJournalObject = Record<string, unknown> & { owner: Record<string, unknown>; target: Record<string, unknown> };
+
+function hasInvalidRemovalOperation(value: RemovalJournalObject): boolean {
+  return value.version !== 2 || value.operation !== 'sandbox-rm'
+    || value.oldOperation !== 'sandbox-rm' || value.newOperation !== 'sandbox-rm';
+}
+
+function hasInvalidRemovalIdentity(value: RemovalJournalObject): boolean {
+  return typeof value.handoffId !== 'string' || value.handoffId.length === 0
+    || typeof value.transitionId !== 'string' || value.transitionId.length === 0
+    || typeof value.engine !== 'string' || value.engine.length === 0
+    || typeof value.containerId !== 'string' || value.containerId.length === 0
+    || typeof value.generation !== 'string' || value.generation.length === 0;
+}
+
+function hasInvalidRemovalDigests(value: RemovalJournalObject): boolean {
+  return typeof value.carrierIdentityDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.carrierIdentityDigest)
+    || typeof value.lockDomain !== 'string' || !/^[a-f0-9]{64}$/u.test(value.lockDomain);
+}
+
+function hasInvalidRemovalOwner(value: RemovalJournalObject): boolean {
+  return !Number.isSafeInteger(value.owner.pid) || (value.owner.pid as number) <= 0
+    || !Number.isSafeInteger(value.owner.startTime) || typeof value.owner.leaseNonce !== 'string'
+    || value.owner.leaseNonce.length === 0;
+}
+
+function hasInvalidRemovalRevision(value: RemovalJournalObject): boolean {
+  return !SANDBOX_REMOVAL_JOURNAL_PHASES.includes(value.phase as SandboxRemovalJournalPhase)
+    || !(value.expectedOldJournalRevision === null
+      || (Number.isSafeInteger(value.expectedOldJournalRevision) && (value.expectedOldJournalRevision as number) >= 0))
+    || !Number.isSafeInteger(value.revision) || (value.revision as number) <= 0;
+}
+
+function hasInvalidRemovalTargetIdentity(value: RemovalJournalObject): boolean {
+  return typeof value.target.branch !== 'string' || value.target.branch.length === 0
+    || typeof value.target.project !== 'string' || value.target.project.length === 0
+    || typeof value.target.controlRoot !== 'string' || path.isAbsolute(value.target.controlRoot) === false;
+}
+
+function hasInvalidRemovalTargetDigests(value: RemovalJournalObject): boolean {
+  return typeof value.target.targetDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.targetDigest)
+    || typeof value.target.permitDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.permitDigest);
+}
+
+function hasInvalidRemovalTargetOptions(value: RemovalJournalObject): boolean {
+  return typeof value.target.removeWorktree !== 'boolean'
+    || typeof value.target.removeBranch !== 'boolean'
+    || typeof value.target.removeShare !== 'boolean'
+    || typeof value.target.sharePath !== 'string' || !path.isAbsolute(value.target.sharePath);
+}
+
+function hasInvalidRemovalWorkspacePaths(value: RemovalJournalObject): boolean {
+  return !Array.isArray(value.target.worktreePaths) || value.target.worktreePaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
+    || !Array.isArray(value.target.workspaceViewPaths) || value.target.workspaceViewPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry));
+}
+
+function hasInvalidRemovalToolPaths(value: RemovalJournalObject): boolean {
+  return !Array.isArray(value.target.toolPaths) || value.target.toolPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
+    || !Array.isArray(value.target.shellPaths) || value.target.shellPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry));
+}
+
+function hasInvalidRemovalPermits(value: RemovalJournalObject): boolean {
+  return !Array.isArray(value.target.permits)
+    || value.target.permits.some((permit) => !isRemovalPermitCommit(permit))
+    || !Number.isSafeInteger(value.recordedAt);
+}
+
+function hasInvalidRemovalFields(value: RemovalJournalObject): boolean {
+  return hasInvalidRemovalOperation(value)
+    || hasInvalidRemovalIdentity(value)
+    || hasInvalidRemovalDigests(value)
+    || hasInvalidRemovalOwner(value)
+    || hasInvalidRemovalRevision(value)
+    || hasInvalidRemovalTargetIdentity(value)
+    || hasInvalidRemovalTargetDigests(value)
+    || hasInvalidRemovalTargetOptions(value)
+    || hasInvalidRemovalWorkspacePaths(value)
+    || hasInvalidRemovalToolPaths(value)
+    || hasInvalidRemovalPermits(value);
+}
+
 function parseRemovalJournal(raw: string): SandboxRemovalJournal {
   let value: unknown;
   try {
@@ -208,38 +289,8 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
       'branch', 'controlRoot', 'permitDigest', 'permits', 'project', 'removeBranch', 'removeShare',
       'removeWorktree', 'sharePath', 'shellPaths', 'targetDigest', 'toolPaths', 'workspaceViewPaths',
       'worktreePaths'
-    ]) || value.version !== 2 || value.operation !== 'sandbox-rm'
-    || value.oldOperation !== 'sandbox-rm' || value.newOperation !== 'sandbox-rm'
-    || typeof value.handoffId !== 'string' || value.handoffId.length === 0
-    || typeof value.transitionId !== 'string' || value.transitionId.length === 0
-    || typeof value.engine !== 'string' || value.engine.length === 0
-    || typeof value.containerId !== 'string' || value.containerId.length === 0
-    || typeof value.generation !== 'string' || value.generation.length === 0
-    || typeof value.carrierIdentityDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.carrierIdentityDigest)
-    || typeof value.lockDomain !== 'string' || !/^[a-f0-9]{64}$/u.test(value.lockDomain)
-    || !Number.isSafeInteger(value.owner.pid) || (value.owner.pid as number) <= 0
-    || !Number.isSafeInteger(value.owner.startTime) || typeof value.owner.leaseNonce !== 'string'
-    || value.owner.leaseNonce.length === 0
-    || !SANDBOX_REMOVAL_JOURNAL_PHASES.includes(value.phase as SandboxRemovalJournalPhase)
-    || !(value.expectedOldJournalRevision === null
-      || (Number.isSafeInteger(value.expectedOldJournalRevision) && (value.expectedOldJournalRevision as number) >= 0))
-    || !Number.isSafeInteger(value.revision) || (value.revision as number) <= 0
-    || typeof value.target.branch !== 'string' || value.target.branch.length === 0
-    || typeof value.target.project !== 'string' || value.target.project.length === 0
-    || typeof value.target.controlRoot !== 'string' || path.isAbsolute(value.target.controlRoot) === false
-    || typeof value.target.targetDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.targetDigest)
-    || typeof value.target.permitDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.permitDigest)
-    || typeof value.target.removeWorktree !== 'boolean'
-    || typeof value.target.removeBranch !== 'boolean'
-    || typeof value.target.removeShare !== 'boolean'
-    || typeof value.target.sharePath !== 'string' || !path.isAbsolute(value.target.sharePath)
-    || !Array.isArray(value.target.worktreePaths) || value.target.worktreePaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
-    || !Array.isArray(value.target.workspaceViewPaths) || value.target.workspaceViewPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
-    || !Array.isArray(value.target.toolPaths) || value.target.toolPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
-    || !Array.isArray(value.target.shellPaths) || value.target.shellPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
-    || !Array.isArray(value.target.permits)
-    || value.target.permits.some((permit) => !isRemovalPermitCommit(permit))
-    || !Number.isSafeInteger(value.recordedAt)) {
+    ])
+    || hasInvalidRemovalFields(value as RemovalJournalObject)) {
     throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
   }
   const expected = value.expectedOldJournalRevision as number | null;
@@ -298,6 +349,15 @@ export function readSandboxRemovalJournal(manifest: SandboxControlManifest): San
   return readRemovalJournalAt(removalJournalPath(manifest));
 }
 
+function matchesRemovalJournalFilter(
+  record: SandboxRemovalJournal,
+  filter: Readonly<{ branch?: string; project?: string; targetDigest?: string }>
+): boolean {
+  return (!filter.branch || record.target.branch === filter.branch)
+    && (!filter.project || record.target.project === filter.project)
+    && (!filter.targetDigest || record.target.targetDigest === filter.targetDigest);
+}
+
 export function listSandboxRemovalJournals(
   filter: Readonly<{ branch?: string; project?: string; targetDigest?: string }> = {}
 ): SandboxRemovalJournal[] {
@@ -321,9 +381,7 @@ export function listSandboxRemovalJournals(
         || `${record.carrierIdentityDigest}.json` !== entry.name) {
         throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
       }
-      if ((!filter.branch || record.target.branch === filter.branch)
-        && (!filter.project || record.target.project === filter.project)
-        && (!filter.targetDigest || record.target.targetDigest === filter.targetDigest)) {
+      if (matchesRemovalJournalFilter(record, filter)) {
         journals.push(record);
       }
     }

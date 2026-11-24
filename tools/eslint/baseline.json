@@ -90,30 +90,12 @@
       "count": 1
     },
     {
-      "file": "lib/sandbox/control/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "402e89cdc5ecf59c8ba902f12f4e920d57559e1c08278e85fbe993de107260d4",
-      "displayName": "listSandboxRemovalJournals",
-      "metric": 19,
-      "normalizedMessage": "complexity=19",
-      "count": 1
-    },
-    {
       "file": "lib/process-data/materialize.ts",
       "ruleId": "complexity",
       "stableId": "fb21292a64f2e5682fe1d4639f9750c42e505e7611f45ecbc292c99ebdc3bfdb",
       "displayName": "materializeSnapshot",
       "metric": 25,
       "normalizedMessage": "complexity=25",
-      "count": 1
-    },
-    {
-      "file": "lib/sandbox/control/lifecycle.ts",
-      "ruleId": "complexity",
-      "stableId": "7a1dc21733e9da8a40d612f6888bedf86ddcda8cc094bc9a3697cda62c8104ca",
-      "displayName": "parseRemovalJournal",
-      "metric": 69,
-      "normalizedMessage": "complexity=69",
       "count": 1
     },
     {
