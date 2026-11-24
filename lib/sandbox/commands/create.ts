@@ -159,7 +159,7 @@ type ExecSyncOptions = ExecFileSyncOptions & {
 type ExecSyncFn = (cmd: string, args: string[], options?: ExecSyncOptions) => Buffer | string;
 type EngineExecFn = (engine: string, cmd: string, args: string[], opts?: ExecFileSyncOptions) => Buffer | string;
 type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => string;
-type EngineRunSafeFn = EngineRunFn;
+type EngineRunSafeFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: StdioOptions }) => string;
 type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
 type DirectRunSafeFn = (cmd: string, args: string[], opts?: { cwd?: string; stdio?: StdioOptions }) => string;
 type HostShellConfig = {
@@ -777,9 +777,16 @@ export function buildContainerEnvFile(
   const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
   entries.push(...additionalEntries);
   const appendGitHubToken = (): void => {
-    let ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
+    const hasEnvironmentToken = Boolean(process.env.GH_TOKEN);
+    const engineOptions = hasEnvironmentToken && engine !== 'wsl2' && runSafeEngineFn === runSafeEngine
+      ? { stdio: ['ignore', 'pipe', 'pipe'] as StdioOptions } : undefined;
+    let ghToken = engineOptions
+      ? runSafeEngineFn(engine, 'gh', ['auth', 'token'], engineOptions)
+      : runSafeEngineFn(engine, 'gh', ['auth', 'token']);
     if (!ghToken && engine === 'wsl2') {
-      ghToken = runSafeFn('gh', ['auth', 'token']);
+      const hostOptions = hasEnvironmentToken && runSafeFn === runSafe
+        ? { stdio: ['ignore', 'pipe', 'pipe'] as StdioOptions } : undefined;
+      ghToken = hostOptions ? runSafeFn('gh', ['auth', 'token'], hostOptions) : runSafeFn('gh', ['auth', 'token']);
     }
     if (ghToken) {
       entries.push(['GH_TOKEN', ghToken]);
