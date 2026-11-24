@@ -4,20 +4,20 @@ import os from 'node:os';
 import path from 'node:path';
 
 type CommandResult = { status: number | null; stdout: string; stderr: string };
-type GitRunner = (args: readonly string[], cwd: string) => CommandResult;
+type GitRunner = (args: readonly string[], cwd: string, noInput?: boolean) => CommandResult;
 type GitOperation = { name: string; status: 'applied' | 'no-op' | 'failed'; ref?: string; message?: string };
 
-const defaultRunner: GitRunner = (args, cwd) => {
-  const result = spawnSync('git', [...args], { cwd, encoding: 'utf8' });
-  return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+const defaultRunner: GitRunner = (args, cwd, noInput = false) => {
+  const result = spawnSync('git', [...args], { cwd, encoding: 'utf8', ...(noInput ? { stdio: ['ignore', 'pipe', 'pipe'] as const } : {}) });
+  return { status: result.error ? null : result.status, stdout: result.stdout ?? '', stderr: result.stderr || result.error?.message || '' };
 };
 
-function run(runner: GitRunner, cwd: string, args: readonly string[]): CommandResult {
-  return runner(args, cwd);
+function run(runner: GitRunner, cwd: string, args: readonly string[], noInput = false): CommandResult {
+  return runner(args, cwd, noInput);
 }
 
-function value(runner: GitRunner, cwd: string, args: readonly string[], trim = true): string | null {
-  const result = run(runner, cwd, args);
+function value(runner: GitRunner, cwd: string, args: readonly string[], trim = true, noInput = false): string | null {
+  const result = run(runner, cwd, args, noInput);
   return result.status === 0 ? (trim ? result.stdout.trim() : result.stdout.replace(/\n$/, '')) : null;
 }
 
@@ -30,10 +30,10 @@ function cleanMessage(message: string): string {
 }
 
 function inspectGitWorkflow(cwd: string, runner: GitRunner = defaultRunner, remoteInput?: { remote: string; refs: readonly string[] }) {
-  const head = value(runner, cwd, ['rev-parse', 'HEAD']);
-  const branch = value(runner, cwd, ['branch', '--show-current']);
-  const upstream = value(runner, cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-  const porcelain = value(runner, cwd, ['status', '--porcelain=v1'], false);
+  const head = value(runner, cwd, ['rev-parse', 'HEAD'], true, true);
+  const branch = value(runner, cwd, ['branch', '--show-current'], true, true);
+  const upstream = value(runner, cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], true, true);
+  const porcelain = value(runner, cwd, ['status', '--porcelain=v1'], false, true);
   if (!head || branch === null || porcelain === null) {
     return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_INSPECT_FAILED', message: 'Unable to inspect Git repository' } };
   }
@@ -133,9 +133,10 @@ function previewCommitTree(input: { cwd: string; paths: readonly string[]; expec
     const result = spawnSync('git', [...args], {
       cwd,
       env: { ...process.env, GIT_INDEX_FILE: indexFile },
-      encoding: 'utf8'
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
     });
-    return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+    return { status: result.error ? null : result.status, stdout: result.stdout ?? '', stderr: result.stderr || result.error?.message || '' };
   };
   try {
     const read = run(temporaryRunner, input.cwd, ['read-tree', input.expectedHead]);

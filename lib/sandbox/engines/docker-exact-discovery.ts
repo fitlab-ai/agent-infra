@@ -2,7 +2,7 @@ import type { SpawnSyncReturns } from 'node:child_process';
 import { commandForEngine, runProbe } from '../shell.ts';
 
 type ProbeResult = SpawnSyncReturns<string | Buffer>;
-type Probe = (cmd: string, args: string[], options?: { timeout?: number }) => ProbeResult;
+type Probe = (cmd: string, args: string[], options?: { timeout?: number; stdio?: ['ignore', 'pipe', 'pipe'] }) => ProbeResult;
 
 export type ExactContainerDiscovery =
   | Readonly<{ state: 'absent'; id: string; evidence: 'exact-empty' }>
@@ -49,7 +49,7 @@ function runDockerProbe(
   return (options.probe ?? runProbe)(
     command.cmd,
     command.args,
-    options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }
+    { stdio: ['ignore', 'pipe', 'pipe'], ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }) }
   );
 }
 
@@ -107,6 +107,7 @@ export function discoverExactContainer(
   } catch {
     return unknown('exact container query failed before producing a result');
   }
+  if (listed.error) return unknown('exact container query failed with a process error');
   if (listed.status !== 0) {
     return unknown(`exact container query exited with ${listed.status ?? 'unknown status'}`);
   }
@@ -121,6 +122,7 @@ export function discoverExactContainer(
   } catch {
     return unknown('exact container inspection failed before producing a result');
   }
+  if (inspected.error) return unknown('exact container inspection failed with a process error');
   if (inspected.status !== 0) {
     return unknown(`exact container inspection exited with ${inspected.status ?? 'unknown status'}`);
   }

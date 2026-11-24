@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { commitExplicitPaths, inspectGitWorkflow, previewCommitTree, pushGitRefs, pushRebasedBranch } from '../../../../lib/git/workflow.ts';
-import { createTempDir } from '../../../helpers.ts';
+import { createTempDir, onPlatforms } from '../../../helpers.ts';
 
 function fixture(): string {
   const root = createTempDir('git-workflow-');
@@ -324,4 +324,25 @@ test('pushRebasedBranch fails closed at every local, base, ancestry, push, and v
   assert.equal(runCase('ancestor').error?.code, 'GIT_REBASED_ANCESTOR_MISMATCH');
   assert.equal(runCase('push').error?.code, 'GIT_REBASED_PUSH_REJECTED');
   assert.equal(runCase('verify').error?.code, 'GIT_REBASED_VERIFY_FAILED');
+});
+
+test('default inspection and preview use no stdin pipe for their noninteractive Git calls', onPlatforms('linux', 'darwin'), () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'two\n');
+  const head = gitOutput(root, ['rev-parse', 'HEAD']);
+  const bin = createTempDir('git-stdin-shim-');
+  const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse|branch|status|read-tree|add|write-tree) [ -c /dev/stdin ] || exit 91 ;; esac\nexec "${git}" "$@"\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    const result = inspectGitWorkflow(root);
+    assert.equal(result.status, 'no-op');
+    assert.equal(result.snapshot?.head, head);
+    const preview = previewCommitTree({ cwd: root, paths: ['tracked.txt'], expectedHead: head });
+    assert.equal(preview.status, 'planned');
+    assert.match(preview.tree ?? '', /^[a-f0-9]{40}$/);
+  } finally {
+    process.env.PATH = oldPath;
+  }
 });

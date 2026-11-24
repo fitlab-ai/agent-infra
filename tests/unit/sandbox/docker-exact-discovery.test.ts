@@ -78,3 +78,21 @@ test('short, mismatched, and malformed rows fail closed', () => {
     assert.equal(observed.state, 'unknown', stdout);
   }
 });
+
+test('exact discovery does not treat a zero status with a process error as absence or identity', () => {
+  for (const errorAt of ['list', 'inspect']) {
+    let calls = 0;
+    const observed = discoverExactContainer('native', id, {
+      probe: (_cmd, args) => {
+        calls += 1;
+        const isList = args[1] === 'ls';
+        if ((isList ? 'list' : 'inspect') === errorAt) {
+          return { ...result(0, isList ? '' : JSON.stringify({ Id: id, State: { Running: true }, Config: { Labels: {} } })), error: new Error('spawn failure') };
+        }
+        return result(0, `${id}\n`);
+      }
+    });
+    assert.equal(observed.state, 'unknown');
+    assert.equal(calls, errorAt === 'list' ? 1 : 2);
+  }
+});
