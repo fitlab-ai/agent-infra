@@ -78,7 +78,7 @@ function parseGitHubRemote(remote: string): string | null {
 function defaultGitRemote(cwd: string): string | null {
   try {
     return execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
   } catch {
     return null;

@@ -66,7 +66,7 @@ const sessions = new Map<string, Promise<LoadedRuntimeProvider>>();
 function findRepositoryRoot(cwd: string): string {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
   } catch {
     return cwd;

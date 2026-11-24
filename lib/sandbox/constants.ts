@@ -36,7 +36,7 @@ export function assertValidBranchName(branch: string): void {
 
   try {
     execFileSync('git', ['check-ref-format', '--branch', branch], {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe']
     });
   } catch {
     throw new Error(`Invalid branch name '${branch}': does not satisfy git branch naming rules`);

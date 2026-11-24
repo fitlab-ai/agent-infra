@@ -40,7 +40,7 @@ export function runCommand(cmd: string, args: string[], input?: string): SpawnRe
   const result = spawnSync(cmd, args, {
     input,
     encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     timeout: COMMAND_TIMEOUT_MS
   });
 
