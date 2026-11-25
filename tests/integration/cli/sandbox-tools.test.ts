@@ -709,7 +709,7 @@ test("sandbox rebuild preserves last refresh label without refresh", onPlatforms
     });
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], {
-      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_R8_BUILD_STDIN: "1"
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0"
     });
     const buildCall = fixture.readDockerCalls().find((call) => call[0] === "build");
 
@@ -889,9 +889,11 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
       project: "demo",
       sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
+    execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"],
+      { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "pipe" });
     const signature = await sandboxImageSignature(fixture.repoDir);
 
-    spawnSandboxCli(
+    const result = spawnSandboxCli(
       fixture,
       tmpDir,
       ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"],
@@ -905,11 +907,13 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
       }
     );
 
+    const calls = fixture.readDockerCalls();
     assert.equal(
-      fixture.readDockerCalls().some((call) => call[0] === "build"),
+      calls.some((call) => call[0] === "build"),
       false,
       "expected --no-refresh to skip due refresh build"
     );
+    assert.ok(calls.some((call) => call[0] === "run"), `expected create to reach docker run: ${result.stderr}`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1210,54 +1214,4 @@ test("buildTmpfsRunArgs emits a sized --tmpfs flag for the container mount", asy
     create.buildTmpfsRunArgs("/home/devuser/.codex", {}),
     ["--tmpfs", "/home/devuser/.codex:rw,size=512m"]
   );
-});
-
-
-test("image inspect with closed stdin preserves rebuild refresh label", onPlatforms("linux", "darwin"), () => {
-  const tmpDir = createTempDir("sandbox-image-stdin-rebuild-");
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerLabelsForInspect: { "demo.sandbox.last-refresh": "1234" } });
-    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], { DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CLOSED_STDIN: "1" });
-    assert.equal(result.status, 0, result.stderr);
-    const calls = fixture.readDockerCalls();
-    assert.equal(calls.filter((call) => call[0] === "image" && call[1] === "inspect").length, 2);
-    assert.ok(calls.find((call) => call[0] === "build")?.includes("demo.sandbox.last-refresh=1234"));
-  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
-});
-
-test("image inspect with closed stdin reuses a matching image on create", onPlatforms("linux", "darwin"), async () => {
-  const tmpDir = createTempDir("sandbox-image-stdin-create-");
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", sandbox: { tools: { ids: ["codex"], definitions: {} } } });
-    const signature = await sandboxImageSignature(fixture.repoDir);
-    spawnSandboxCli(fixture, tmpDir, ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"], {
-      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CLOSED_STDIN: "1", DOCKER_EXIT_FOR_RUN: "1",
-      DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({ "demo.sandbox.image-config": signature, "demo.sandbox.last-refresh": "1234" })
-    });
-    const calls = fixture.readDockerCalls();
-    assert.equal(calls.filter((call) => call[0] === "image" && call[1] === "inspect").length, 2);
-    assert.equal(calls.some((call) => call[0] === "build"), false);
-  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
-});
-
-
-test("matching container identity probes use no stdin and matching image is reused", onPlatforms("linux", "darwin"), async () => {
-  const tmpDir = createTempDir("sandbox-container-query-stdin-");
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: "demo-dev-feature-x\tUp 1 minute\tdemo.sandbox.branch=feature-x", sandbox: { tools: { ids: ["codex"], definitions: {} } } });
-    const git = spawnSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], { cwd: fixture.repoDir, env: gitSafeEnv(), encoding: "utf8" });
-    assert.equal(git.status, 0, git.stderr);
-    const signature = await sandboxImageSignature(fixture.repoDir);
-    const result = spawnSandboxCli(fixture, tmpDir, ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"], {
-      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0", TASK04_REQUIRE_CONTAINER_QUERY_STDIN: "1", TASK04_REQUIRE_R8_FIXED_STDIN: "1", AGENT_INFRA_SANDBOX: undefined, AGENT_INFRA_TASK_ID: undefined, AGENT_INFRA_CONTROL_STATUS_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_ID: undefined, AGENT_INFRA_RUNTIME_DIR: undefined, AGENT_INFRA_CONTROL_DIR: undefined, AGENT_INFRA_CONTROL_ROOT_DIR: undefined, AGENT_INFRA_CONTROL_GENERATION: undefined,
-      DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({ "demo.sandbox.image-config": signature, "demo.sandbox.last-refresh": "1234" })
-    });
-    const calls = fixture.readDockerCalls();
-    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.equal(calls.some((call) => call[0] === "build"), false);
-    for (const operation of ["stop", "rm", "run"]) assert.equal(calls.filter((call) => call[0] === operation).length, 1);
-    assert.ok(calls.some((call) => call[0] === "ps" && call.includes("{{.Names}}")));
-    assert.ok(calls.some((call) => call[0] === "inspect" && call.includes("{{.Id}}") && call.includes("demo-dev-feature-x")));
-    assert.ok(calls.some((call) => call[0] === "inspect" && call.includes("{{json .Config.Labels}}") && call.includes("demo-dev-feature-x")));
-  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
 });

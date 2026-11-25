@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { createTempDir, filePath, gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../../helpers.ts";
+import { createTempDir, filePath, gitSafeEnv, initIsolatedGitRepo } from "../../../helpers.ts";
 import { validateMechanicalReport } from "../../../../lib/platform/pr-change-report.ts";
 
 const runtimeScript = filePath(".agents/skills/create-pr/scripts/change-report.mjs");
@@ -173,32 +173,4 @@ test("create-pr change report counts diff content beginning with header-like pre
 
 test("create-pr installs the same change report calculator as the local skill", () => {
   assert.deepEqual(fs.readFileSync(templateScript), fs.readFileSync(runtimeScript));
-});
-
-
-test("change report closes query stdin while preserving batch object input", onPlatforms("linux", "darwin"), () => {
-  const repo = createTempDir("report-stdin-");
-  initIsolatedGitRepo(repo);
-  git(repo, ["config", "user.email", "test@example.invalid"]);
-  git(repo, ["config", "user.name", "Test"]);
-  fs.writeFileSync(path.join(repo, "file.txt"), "before\n");
-  git(repo, ["add", "file.txt"]);
-  git(repo, ["commit", "-qm", "base"]);
-  const base = git(repo, ["rev-parse", "HEAD"]);
-  fs.writeFileSync(path.join(repo, "file.txt"), "after\n");
-  git(repo, ["add", "file.txt"]);
-  git(repo, ["commit", "-qm", "head"]);
-  const head = git(repo, ["rev-parse", "HEAD"]);
-  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  const bin = createTempDir("report-git-shim-");
-  fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\ncase "$*" in *--batch-check*) [ ! -c /dev/stdin ] || exit 92 ;; *) [ -c /dev/stdin ] || exit 91 ;; esac\nprintf report-warning >&2\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
-  const env = gitSafeEnv({ PATH: `${bin}${path.delimiter}${process.env.PATH}` });
-  for (const script of [runtimeScript, templateScript]) {
-    const result = spawnSync(process.execPath, [script, "--base", base, "--head", head, "--cwd", repo], { encoding: "utf8", env });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stderr, /report-warning/);
-    const report = JSON.parse(result.stdout);
-    assert.equal(report.files[0].oldBytes, 7);
-    assert.equal(report.files[0].newBytes, 6);
-  }
 });

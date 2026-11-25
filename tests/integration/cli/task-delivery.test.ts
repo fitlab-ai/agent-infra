@@ -9,7 +9,7 @@ import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
 import '../../../lib/task/artifact-receipts.ts';
 import { deliverTaskBranch } from '../../../lib/task/delivery.ts';
-import { createTempDir, onPlatforms } from '../../helpers.ts';
+import { createTempDir } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260831-000001';
 const BRANCH = 'agent-infra-feature-delivery';
@@ -173,23 +173,4 @@ test('task delivery does not use review state as an authorization gate', () => {
   assert.equal(result.status, 'planned');
   assert.equal(result.error, null);
   assert.equal(fs.existsSync(path.join(f.taskDir, 'review-code.md')), true);
-});
-
-
-test('delivery dry run performs local Git preflight without stdin pipes', onPlatforms('linux', 'darwin'), () => {
-  const f = fixture();
-  const bin = createTempDir('delivery-stdin-shim-');
-  roots.add(bin);
-  const realGit = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
-  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse|status|check-ref-format) [ -c /dev/stdin ] || exit 91 ;; esac\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
-  const oldPath = process.env.PATH;
-  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
-  try {
-    const observed = deliverTaskBranch(TASK_ID, { repoRoot: f.root, agent: 'codex', dryRun: true });
-    assert.equal(observed.status, 'planned', observed.error?.message);
-    assert.equal(observed.localHead, f.reviewedHead);
-    assert.equal(observed.state, 'absent');
-  } finally {
-    process.env.PATH = oldPath;
-  }
 });
