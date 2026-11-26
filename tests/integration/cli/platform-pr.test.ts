@@ -10,6 +10,7 @@ import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../..
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
+import { inspectPlatformCommentOperation } from '../../../lib/platform/issue-comments.ts';
 import { createPlatformPullRequest } from '../../../lib/platform/pull-requests.ts';
 import { createGitHubClient } from '../../../lib/platform/github-client.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
@@ -33,6 +34,12 @@ function boundFixture(number: number, headSha = 'a'.repeat(40)) {
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-pr', ...args], {
     encoding: 'utf8', cwd: options.cwd, env: gitSafeEnv(options.env)
+  });
+}
+
+function recover(f: { root: string; taskId: string; env: NodeJS.ProcessEnv }) {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+    cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
   });
 }
 
@@ -474,16 +481,19 @@ test('failed bind is rechecked from its recorded intent without changing the his
     const failed = readPlatformOperationJournal(f.taskId, f.root).operations[0]!;
     assert.equal(failed.lastCode, 'PR_BIND_IDENTITY_MISMATCH');
     assert.equal(failed.state, 'failed');
-    const stillWrong = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
-      cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
-    });
+    const stillWrong = recover(f);
     assert.equal(stillWrong.status, 2, stillWrong.stdout || stillWrong.stderr);
     assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root).operations[0], failed);
+    const later = inspectPlatformCommentOperation(f.taskId, { kind: 'task', agent: 'codex', cwd: f.root });
+    assert.ok(later);
+    recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, ...later, dependency: 'deferred', state: 'queued' });
+    const comments = path.join(f.root, 'comments.json');
+    fs.writeFileSync(comments, '[]');
+    const withComments = { ...f, env: { ...f.env, GH_FAKE_COMMENTS_PATH: comments, GH_FAKE_COMMENT_USER: 'test-user' } };
     pr.head.ref = 'feature';
     fs.writeFileSync(f.pr, JSON.stringify(pr));
-    const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
-      cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
-    });
+    fs.writeFileSync(f.calls, '');
+    const recovery = recover(withComments);
     assert.equal(recovery.status, 0, recovery.stdout || recovery.stderr);
     const recovered = readPlatformOperationJournal(f.taskId, f.root).operations[0]!;
     assert.equal(recovered.id, failed.id);
@@ -491,6 +501,14 @@ test('failed bind is rechecked from its recorded intent without changing the his
     assert.equal(recovered.lastCode, failed.lastCode);
     assert.equal(recovered.bindRecheck?.headSha, f.headSha);
     assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+    assert.equal(readPlatformOperationJournal(f.taskId, f.root).operations[1]?.state, 'succeeded');
+    assert.equal(JSON.parse(fs.readFileSync(comments, 'utf8')).length, 1);
+    const calls = fs.readFileSync(f.calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[]);
+    const inspected = calls.findIndex((args) => args.some((arg) => /\/pulls\/1$/.test(arg)));
+    const posted = calls.findIndex((args) => args.some((arg) => /\/issues\/7\/comments$/.test(arg)));
+    assert.ok(inspected >= 0 && posted > inspected);
+    assert.equal(recover(withComments).status, 0);
+    assert.equal(JSON.parse(fs.readFileSync(comments, 'utf8')).length, 1);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -506,9 +524,7 @@ for (const state of ['pending', 'unknown'] as const) {
         expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'queued',
         issueMetadata: { requirements: false, issueType: false, fields: true } });
       const before = readPlatformOperationJournal(f.taskId, f.root);
-      const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
-        cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
-      });
+      const recovery = recover(f);
       assert.equal(recovery.status, 2, recovery.stdout || recovery.stderr);
       assert.deepEqual(JSON.parse(recovery.stdout).pending, [first.id, later.id]);
       assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), before);
@@ -516,6 +532,42 @@ for (const state of ['pending', 'unknown'] as const) {
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });
     }
+  });
+}
+
+for (const variant of ['other-error', 'wrong-id', 'deferred', 'wrong-target', 'wrong-digest', 'extra-intent'] as const) {
+  test(`formal recovery preserves ineligible failed bind: ${variant}`, () => {
+    const f = createFixture(boundFixture(variant === 'other-error' ? 2 : 1));
+    try {
+      const pr = JSON.parse(fs.readFileSync(f.pr, 'utf8'));
+      const originalHead = pr.head;
+      pr.head.ref = 'other';
+      fs.writeFileSync(f.pr, JSON.stringify(pr));
+      assert.equal(run(['bind', f.taskId, '--agent', 'codex', '--pr', '1'], { cwd: f.root, env: f.env }).status, 1);
+      const journalPath = path.join(f.taskDir, '.platform-operations.json');
+      const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+      if (variant === 'other-error') assert.notEqual(journal.operations[0].lastCode, 'PR_BIND_IDENTITY_MISMATCH');
+      if (variant === 'wrong-id') journal.operations[0].id = 'f'.repeat(64);
+      if (variant === 'deferred') journal.operations[0].dependency = 'deferred';
+      if (variant === 'wrong-target') journal.operations[0].target = 'pr:2';
+      if (variant === 'wrong-digest') journal.operations[0].expectedDigest = 'e'.repeat(64);
+      if (variant === 'extra-intent') journal.operations[0].pullRequest.headRef = 'unexpected';
+      fs.writeFileSync(journalPath, JSON.stringify(journal));
+      recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, kind: 'issue-metadata', target: 'later',
+        expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'queued',
+        issueMetadata: { requirements: false, issueType: false, fields: true } });
+      pr.head = originalHead;
+      pr.head.ref = 'feature';
+      fs.writeFileSync(f.pr, JSON.stringify(pr));
+      const before = readPlatformOperationJournal(f.taskId, f.root);
+      const taskBefore = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+      fs.writeFileSync(f.calls, '');
+      const recovery = recover(f);
+      assert.equal(recovery.status, 2, recovery.stdout || recovery.stderr);
+      assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), before);
+      assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), taskBefore);
+      assert.equal(fs.readFileSync(f.calls, 'utf8'), '');
+    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   });
 }
 
@@ -573,15 +625,21 @@ test('platform-pr external binding rechecks the selected identity before writing
 });
 
 test('external recheck refuses missing current head instead of reusing the selected head', () => {
-  const f = externalFixture('---\nid: {task-id}\nstatus: active\nplatform_issue_identity: \'{"kind":"number","value":767}\'\n---\n\n# Task\n\n## Activity Log\n');
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\nplatform_issue_identity: \'{"kind":"number","value":7}\'\n---\n\n# Task\n\n## Activity Log\n');
   try {
     const taskPath = path.join(f.taskDir, 'task.md');
     const before = fs.readFileSync(taskPath, 'utf8');
-    const selected = JSON.parse(fs.readFileSync(f.selectedPr, 'utf8'));
-    delete selected.head;
-    fs.writeFileSync(f.selectedPr, JSON.stringify(selected));
+    const configPath = path.join(f.root, '.agents', '.airc.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.platform = { type: 'trae', providers: { trae: {
+      source: filePath('tests/fixtures/platform-providers/in-label-provider.mjs'),
+      config: { callsPath: f.calls, closingMatch: true, closingMerged: true, omitInspectedHead: true }
+    } } };
+    fs.writeFileSync(configPath, JSON.stringify(config));
     const output = run(['resolve-external', f.taskId, '--agent', 'codex'], { cwd: f.root, env: f.env });
-    assert.notEqual(output.status, 0, output.stdout);
+    assert.equal(output.status, 1, output.stdout || output.stderr);
+    assert.equal(JSON.parse(output.stdout).error.code, 'PR_IDENTITY_MISSING');
+    assert.match(fs.readFileSync(f.calls, 'utf8'), /changeRequests\.listClosing\nchangeRequests\.inspect\n/);
     assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

@@ -451,15 +451,19 @@ async function recoverSelectedOperation(task: ResolvedTask, operation: RecoveryO
     if (operation.state === 'pending' || operation.state === 'unknown') {
       return pendingResult(operation.id, 'PLATFORM_OPERATION_RECOVERY_PENDING', 'Unresolved bind outcome requires independent verification', false);
     }
-    if (operation.state === 'failed' && operation.lastCode === 'PR_BIND_IDENTITY_MISMATCH') {
+    if (operation.state === 'failed') {
       const token = operation.pullRequest.prToken;
       const intent = operation.pullRequest;
       const digest = createHash('sha256').update(JSON.stringify({ taskId: task.taskId, intent, identityInput: { pr: token } })).digest('hex');
+      if (operation.lastCode !== 'PR_BIND_IDENTITY_MISMATCH' || operation.dependency !== 'required'
+        || !token || operation.target !== `pr:${token}` || operation.expectedDigest !== digest
+        || operation.id !== operationId(operation) || Object.keys(intent).length !== 2) {
+        return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Failed bind intent cannot be verified', false);
+      }
       let fact: ReturnType<typeof readPrDeliveryFact>;
       try { fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(task.taskMdPath, 'utf8'))); }
       catch { return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Existing binding cannot be read safely', false); }
-      if (!token || operation.target !== `pr:${token}` || operation.expectedDigest !== digest
-        || Object.keys(intent).length !== 2 || fact.status !== 'valid' || fact.fact.state !== 'bound') {
+      if (fact.status !== 'valid' || fact.fact.state !== 'bound') {
         return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bind intent or existing binding cannot be verified', false);
       }
       const checked = await bindPlatformPullRequest(task.taskId, { agent: options.agent, cwd: task.repoRoot, pr: token, skipQueue: true });

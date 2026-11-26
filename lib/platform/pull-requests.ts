@@ -1026,8 +1026,7 @@ function bindIdentity(
   if (base.prIdentity && resourceIdentityEquals(base.prIdentity, pullRequestIdentity(pullRequest)) && base.fact?.state === 'bound') {
     const previous = base.fact.identity;
     const current = deliveryIdentity(pullRequest);
-    if (!resourceIdentityEquals(previous.resource, current.resource)
-      || repositoryKey(previous.repository) !== repositoryKey(current.repository)
+    if (repositoryKey(previous.repository) !== repositoryKey(current.repository)
       || repositoryKey(previous.head.repository) !== repositoryKey(current.head.repository)
       || previous.head.ref !== current.head.ref
       || repositoryKey(previous.base.repository) !== repositoryKey(current.base.repository)
