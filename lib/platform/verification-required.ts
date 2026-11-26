@@ -1,6 +1,7 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+
 
 import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformProviderContext } from "./context.ts";
@@ -21,7 +22,7 @@ function readPrFlow(repoRoot: any): any {
 
 function readHead(repoRoot: any): any {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
+    return execNoInput("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
   } catch {
     return null;
   }

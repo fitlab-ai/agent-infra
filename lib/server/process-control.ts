@@ -1,6 +1,7 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { loadServerConfig } from './config.ts';
 import type { ServerConfig } from './config.ts';
 import { runDaemon } from './daemon.ts';
@@ -62,7 +63,7 @@ function terminateIfMatching(record: ProcessIdentity): void {
   if (!processIdentityMatches(record)) return;
   const command = buildStopCommand(record.pid, process.platform);
   try {
-    if (command.kind === 'exec') execFileSync(command.command, command.args);
+    if (command.kind === 'exec') execNoInput(command.command, command.args);
     else process.kill(record.pid, command.signal);
   } catch {
     // Best effort cleanup for a daemon whose PID record could not be published.
@@ -157,7 +158,7 @@ export async function stop(): Promise<void> {
 
   const command = buildStopCommand(record.pid, process.platform);
   if (command.kind === 'exec') {
-    execFileSync(command.command, command.args);
+    execNoInput(command.command, command.args);
   } else {
     process.kill(record.pid, command.signal);
     const deadline = Date.now() + 5000;

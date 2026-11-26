@@ -1,8 +1,9 @@
+import type { StdioOptions } from 'node:child_process';
 import type { OnMessage, SandboxAdapter } from './index.ts';
 
-type NativeRunSafe = (cmd: string, args: string[]) => string;
-type EngineRun = (engine: string, cmd: string, args: string[]) => string;
-type EngineRunSafe = (engine: string, cmd: string, args: string[]) => string;
+type NativeRunSafe = (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
+type EngineRun = (engine: string, cmd: string, args: string[], options?: { noInput?: boolean }) => string;
+type EngineRunSafe = (engine: string, cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
 
 export function isRootlessDocker({
   env = process.env,
@@ -18,7 +19,7 @@ export function isRootlessDocker({
   }
 
   try {
-    const securityOptions = runSafe('docker', ['info', '--format', '{{.SecurityOptions}}']);
+    const securityOptions = runSafe('docker', ['info', '--format', '{{.SecurityOptions}}'], { stdio: ['ignore', 'pipe', 'pipe'] });
     return securityOptions.includes('rootless');
   } catch {
     return false;
@@ -37,7 +38,7 @@ export function resolveBuildUid({
   env?: NodeJS.ProcessEnv;
 }) {
   const runSafe = runSafeFn
-    ? (cmd: string, args: string[]) => runSafeFn(engine, cmd, args)
+    ? (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => runSafeFn(engine, cmd, args, options)
     : undefined;
 
   if (engine === 'native' && isRootlessDocker({ env, runSafe })) {
@@ -45,8 +46,8 @@ export function resolveBuildUid({
   }
 
   return {
-    uid: runFn(engine, 'id', ['-u']),
-    gid: runFn(engine, 'id', ['-g'])
+    uid: runFn(engine, 'id', ['-u'], { noInput: true }),
+    gid: runFn(engine, 'id', ['-g'], { noInput: true })
   };
 }
 
@@ -63,7 +64,7 @@ export const nativeAdapter: SandboxAdapter = {
   },
 
   async ensure(_config, _onMessage: OnMessage, { runOk, runSafe }) {
-    if (!runOk('which', ['docker'])) {
+    if (!runOk('which', ['docker'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       throw new Error([
         'Docker is not installed.',
         'Install Docker Engine for your distribution: https://docs.docker.com/engine/install/',
@@ -72,11 +73,11 @@ export const nativeAdapter: SandboxAdapter = {
       ].join('\n'));
     }
 
-    if (runOk('docker', ['info'])) {
+    if (runOk('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       return false;
     }
 
-    const serverVersion = runSafe('docker', ['version', '--format', '{{.Server.Version}}']);
+    const serverVersion = runSafe('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: ['ignore', 'pipe', 'pipe'] });
     const rootless = isRootlessDocker({ runSafe });
     if (!serverVersion) {
       if (rootless) {

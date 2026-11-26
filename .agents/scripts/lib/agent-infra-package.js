@@ -60,7 +60,7 @@ function lookupCommand(command, platform) {
   try {
     return childProcess.execSync(lookup, {
       encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"]
     }).trim().split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
   } catch {
     return [];

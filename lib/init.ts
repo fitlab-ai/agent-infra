@@ -67,7 +67,7 @@ const DEMO_PLATFORM_ENV = 'AGENT_INFRA_DEMO_PLATFORM';
 
 function detectProjectName(): string {
   try {
-    const url = execSync('git remote get-url origin', { stdio: ['pipe', 'pipe', 'pipe'] })
+    const url = execSync('git remote get-url origin', { stdio: ['ignore', 'pipe', 'pipe'] })
       .toString().trim().replace(/\.git$/, '');
     return path.basename(url);
   } catch {
@@ -77,7 +77,7 @@ function detectProjectName(): string {
 
 function detectOrgName(): string {
   try {
-    const url = execSync('git remote get-url origin', { stdio: ['pipe', 'pipe', 'pipe'] })
+    const url = execSync('git remote get-url origin', { stdio: ['ignore', 'pipe', 'pipe'] })
       .toString().trim().replace(/\.git$/, '');
     // SSH: git@github.com:org/repo  →  org
     // HTTPS: https://github.com/org/repo  →  org

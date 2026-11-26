@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 function fail(message) {
@@ -30,11 +30,19 @@ function parseArgs(argv) {
 }
 
 function git(args, options, encoding = "utf8") {
-  return execFileSync("git", args, {
+  const result = spawnSync("git", args, {
     cwd: options.cwd,
     encoding,
-    maxBuffer: 64 * 1024 * 1024
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"]
   });
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error || result.status !== 0) {
+    const error = result.error ?? new Error(`Command failed: git ${args.join(" ")}\n${result.stderr ?? ""}`);
+    Object.assign(error, { status: result.status, signal: result.signal, output: result.output, pid: result.pid, stdout: result.stdout, stderr: result.stderr });
+    throw error;
+  }
+  return result.stdout;
 }
 
 function parseRawDiff(buffer) {

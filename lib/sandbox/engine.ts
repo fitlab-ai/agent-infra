@@ -87,7 +87,7 @@ function buildKitError(engine: string): Error {
 }
 
 function ensureBuildKit(engine: string, runOkEngineFn: typeof runOkEngine): void {
-  if (!runOkEngineFn(engine, 'docker', ['buildx', 'inspect', '--bootstrap'])) {
+  if (!runOkEngineFn(engine, 'docker', ['buildx', 'inspect', '--bootstrap'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     throw buildKitError(engine);
   }
 }

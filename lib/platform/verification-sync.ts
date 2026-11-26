@@ -1078,7 +1078,7 @@ function loadInLabelMapping(shared: VerificationShared): any {
 
 function gitText(args: any, cwd: any): any {
   try {
-    const value = execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    const value = execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return { ok: true, value: String(value || "").trim() };
   } catch (error: any) {
     const stderr = `${error?.stderr || ""}${error?.stdout || ""}`.trim();

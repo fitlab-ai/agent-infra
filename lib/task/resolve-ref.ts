@@ -55,7 +55,7 @@ function detectRepoRoot(): string {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
   } catch {
     throw new Error('ai task: current directory is not inside a git repository');
@@ -221,7 +221,7 @@ function resolveCurrentBranchTaskContext(repoRoot: string): ResolveRefResult {
     branch = execFileSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
       cwd: repoRoot,
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
   } catch {
     return {

@@ -1,7 +1,8 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+
 
 import { inspectPlatformCommentOperation, syncPlatformComment } from '../platform/issue-comments.ts';
 import { parseDeliverySummaryContent, renderDeliverySummaryContent, parseCancelSummaryContent, renderCancelSummaryContent } from '../platform/issue-summary-content.ts';
@@ -125,7 +126,7 @@ function currentIssueMetadataOperation(taskId: string, taskMdPath: string, repoR
     const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
     if (!taskBase || (operation.issueMetadata.base && operation.issueMetadata.base !== taskBase)) return null;
     try {
-      fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+      fromDiffFiles = execNoInput('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
         cwd: repoRoot, encoding: 'utf8'
       }).trim().split(/\r?\n/).filter(Boolean).sort();
       const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { labels?: { in?: unknown } };

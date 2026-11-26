@@ -43,7 +43,7 @@ type WorktreeRecoveryContext = Readonly<{
 type Probe = typeof runProbe;
 
 function probeText(probe: Probe, cwd: string, args: string[]): string {
-  const result = probe('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+  const result = probe('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : result.stderr.toString('utf8').trim();
@@ -182,7 +182,7 @@ function probeTextWithEnv(
   args: string[],
   env: NodeJS.ProcessEnv
 ): string {
-  const result = probe('git', args, { cwd: repoRoot, encoding: 'utf8', env });
+  const result = probe('git', args, { cwd: repoRoot, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : result.stderr.toString('utf8').trim();
@@ -197,7 +197,7 @@ function probeMetadataCommand(
   args: string[],
   env: NodeJS.ProcessEnv
 ): boolean {
-  const result = probe('git', args, { cwd: repoRoot, encoding: 'utf8', env });
+  const result = probe('git', args, { cwd: repoRoot, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.error) throw result.error;
   return result.status === 0;
 }

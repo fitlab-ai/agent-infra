@@ -97,7 +97,7 @@ export function fetchSandboxRows(
     `label=${label}`,
     '--format',
     containerListFormat()
-  ]);
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
   return sortAndIndexSandboxRows(parseSandboxRows(raw, branchKey, workspaceKeys));
 }
 

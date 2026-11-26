@@ -1,5 +1,6 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
+
 import path from 'node:path';
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
@@ -24,7 +25,7 @@ export type ReviewIdentityResult = Readonly<{
 }>;
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+  return execNoInput('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
 }
 
 function result(

@@ -94,7 +94,7 @@ function assertBranchRemovalIdentity(
   branch: string,
   permits: ReadonlyMap<string, WorktreeRemovalPermit>
 ): void {
-  if (!runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${branch}`])) return;
+  if (!runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${branch}`], { stdio: ['ignore', 'pipe', 'pipe'] })) return;
   const expectedHeads = new Set(
     [...permits.values()]
       .filter((permit) => permit.snapshot.branch === branch)
@@ -103,7 +103,7 @@ function assertBranchRemovalIdentity(
   if (expectedHeads.size === 0) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
   }
-  const actualHead = runSafe('git', ['-C', config.repoRoot, 'rev-parse', `refs/heads/${branch}`]);
+  const actualHead = runSafe('git', ['-C', config.repoRoot, 'rev-parse', `refs/heads/${branch}`], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!expectedHeads.has(actualHead)) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
   }
@@ -154,7 +154,7 @@ function resolveRmTarget(
     candidates: toolConfigDirCandidates(tool, config.project, branch)
   }));
   const shellCandidates = shellConfigDirCandidates(config, branch);
-  const existing = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
+  const existing = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'], { noInput: true }).split('\n').filter(Boolean);
   const matchedContainers = options.discoveredContainers
     ? [...options.discoveredContainers]
     : containerNameCandidates(config, branch).filter((name) => existing.includes(name));
@@ -199,7 +199,7 @@ function assertRemoved(target: string, label: string): void {
 
 function sandboxContainersRemoved(engine: string, containers: readonly string[]): boolean {
   if (containers.length === 0) return true;
-  const remaining = new Set(runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'])
+  const remaining = new Set(runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'], { noInput: true })
     .split('\n')
     .filter(Boolean));
   return containers.every((container) => !remaining.has(container));
@@ -334,7 +334,7 @@ async function removeUncheckedSandbox(
     { ...options.prompt, interactive: options.interactive }
   );
 
-  for (const container of matchedContainers) runSafeEngine(engine, 'docker', ['rm', '-f', container]);
+  for (const container of matchedContainers) runSafeEngine(engine, 'docker', ['rm', '-f', container], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!sandboxContainersRemoved(engine, matchedContainers)) {
     throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${matchedContainers.join(', ')}`);
   }
@@ -378,7 +378,7 @@ async function removeUncheckedSandbox(
   }
   if (shouldDeleteBranch) {
     assertBranchRemovalIdentity(config, effectiveBranch, worktreePermits);
-    runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
+    runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch], { stdio: ['ignore', 'pipe', 'pipe'] });
   }
   if (toolRemovalFailures.length > 0) {
     throw new Error(`SANDBOX_TOOL_CLEANUP_INCOMPLETE:\n${toolRemovalFailures.map((failure) => `  - ${failure}`).join('\n')}`);
@@ -428,7 +428,7 @@ async function rmPurge(
   const rows = [...listed.running, ...listed.nonRunning];
   const containers = runEngine(engine, 'docker', [
     'ps', '-a', '--filter', `label=${sandboxLabel(config)}`, '--format', '{{.Names}}'
-  ]).split('\n').filter(Boolean);
+  ], { noInput: true }).split('\n').filter(Boolean);
   const controlRoots = rows.flatMap((row) => {
     if (!row.branch) return [];
     const identity = row.workspaceMode === 'task-bound' && row.taskId
@@ -445,7 +445,7 @@ async function rmPurge(
   const completedTaskIds = [...new Set(rows
     .filter((row) => row.workspaceMode === 'task-bound' && row.taskId)
     .map((row) => row.taskId!))];
-  for (const name of containers) runSafeEngine(engine, 'docker', ['rm', '-f', name]);
+  for (const name of containers) runSafeEngine(engine, 'docker', ['rm', '-f', name], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!sandboxContainersRemoved(engine, containers)) {
     throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${containers.join(', ')}`);
   }
@@ -459,7 +459,7 @@ async function rmPurge(
     const selected = await confirm({ message: `Remove all worktrees in ${config.worktreeBase}?`, initialValue: true });
     if (!isCancel(selected) && selected) {
       for (const worktree of worktrees) fs.rmSync(worktree, { recursive: true, force: true });
-      runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+      runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune'], { stdio: ['ignore', 'pipe', 'pipe'] });
     } else cleanupCompleted = false;
   }
 
@@ -480,7 +480,7 @@ async function rmPurge(
     for (const taskId of completedTaskIds) releaseStaleShortIdRegistry(config.repoRoot, taskId);
   }
   const removeImage = await confirm({ message: `Remove image ${config.imageName}?`, initialValue: false });
-  if (!isCancel(removeImage) && removeImage) runSafeEngine(engine, 'docker', ['rmi', config.imageName]);
+  if (!isCancel(removeImage) && removeImage) runSafeEngine(engine, 'docker', ['rmi', config.imageName], { stdio: ['ignore', 'pipe', 'pipe'] });
   p.outro(pc.green('All project sandboxes removed'));
 }
 

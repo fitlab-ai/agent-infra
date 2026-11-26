@@ -8,7 +8,7 @@ import {
   loadFreshEsm,
   onPlatforms
 } from "../../helpers.ts";
-import { restoreTerminal, runInteractive, runVerbose } from "../../../lib/sandbox/shell.ts";
+import { restoreTerminal, run, runInteractive, runVerbose } from "../../../lib/sandbox/shell.ts";
 
 type WriteCallback = (error?: Error | null) => void;
 type CommandOptions = Record<string, unknown> & {
@@ -256,6 +256,10 @@ test("runVerbose timeout messages do not include argv", () => {
       return true;
     }
   );
+});
+
+test("run captures stdout with no input", () => {
+  assert.equal(run(process.execPath, ["-e", "process.stdout.write(' value ')"], { noInput: true }), "value");
 });
 
 test("runSafe forwards stderr on non-zero exit while preserving stdout return", async () => {

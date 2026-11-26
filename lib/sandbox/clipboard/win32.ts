@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execNoInput } from '../../exec-no-input.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,7 @@ const READ_IMAGE_TIMEOUT_MS = 5_000;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const POWERSHELL_ARGS = ['-NoProfile', '-NonInteractive', '-STA', '-Command'];
 
-type ExecFn = (cmd: string, args: string[], options?: ExecFileSyncOptions) => Buffer | string;
+type ExecFn = (cmd: string, args: string[], options?: Omit<ExecFileSyncOptions, 'input' | 'stdio'> & { input?: never; stdio?: never }) => Buffer | string;
 type MkdtempFn = (prefix: string) => string;
 type ReadFileFn = (filePath: fs.PathOrFileDescriptor) => Buffer | string;
 type RmFn = (filePath: fs.PathLike, options: { recursive?: boolean; force?: boolean }) => void;
@@ -23,7 +23,7 @@ export type Win32ClipboardAdapter = {
 };
 
 export function createWin32ClipboardAdapter({
-  execFn = execFileSync,
+  execFn = execNoInput,
   mkdtempFn = fs.mkdtempSync,
   readFileFn = fs.readFileSync,
   rmFn = fs.rmSync,

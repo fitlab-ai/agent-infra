@@ -1,3 +1,4 @@
+import { execNoInput } from '../exec-no-input.ts';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { hostJoin } from './engines/wsl2-paths.ts';
@@ -36,7 +37,7 @@ export function assertValidBranchName(branch: string): void {
 
   try {
     execFileSync('git', ['check-ref-format', '--branch', branch], {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe']
     });
   } catch {
     throw new Error(`Invalid branch name '${branch}': does not satisfy git branch naming rules`);
@@ -136,8 +137,8 @@ export function detectHostResources(): HostResources {
   // other direct callers that need conservative CPU and memory defaults.
   if (process.platform === 'darwin') {
     try {
-      const hostCpu = Number(execFileSync('sysctl', ['-n', 'hw.ncpu'], { encoding: 'utf8' }).trim());
-      const hostMemBytes = Number(execFileSync('sysctl', ['-n', 'hw.memsize'], { encoding: 'utf8' }).trim());
+      const hostCpu = Number(execNoInput('sysctl', ['-n', 'hw.ncpu'], { encoding: 'utf8' }).trim());
+      const hostMemBytes = Number(execNoInput('sysctl', ['-n', 'hw.memsize'], { encoding: 'utf8' }).trim());
       const hostMemGb = Math.floor(hostMemBytes / 1024 / 1024 / 1024);
 
       return {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { StdioOptions } from 'node:child_process';
 import { detectEngine } from './engine.ts';
 import { resolveBuildUid } from './engines/native.ts';
 import { toEnginePath } from './engines/wsl2-paths.ts';
@@ -20,8 +21,8 @@ type BuildImageConfig = {
   repoRoot: string;
   engine?: string | null;
 };
-type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
-type EngineRunSafeFn = EngineRunFn;
+type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; noInput?: boolean }) => string;
+type EngineRunSafeFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; stdio?: StdioOptions }) => string;
 
 export function buildImageSignature(preparedDockerfile: PreparedDockerfileSignature, tools: SandboxTool[]): string {
   return createHash('sha256')

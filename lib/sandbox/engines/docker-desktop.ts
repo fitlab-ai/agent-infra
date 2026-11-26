@@ -13,7 +13,7 @@ export const dockerDesktopAdapter: SandboxAdapter = {
   },
 
   async ensure(_config, _onMessage: OnMessage, { runOk }) {
-    if (!runOk('docker', ['info'])) {
+    if (!runOk('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
       throw new Error('Docker Desktop is not running. Please start Docker Desktop manually.');
     }
 

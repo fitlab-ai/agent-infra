@@ -1,3 +1,4 @@
+import { execNoInput } from '../exec-no-input.ts';
 import type { PlatformIssueSnapshot as IssueSnapshot } from './snapshots.ts';
 import type { IssueFieldSchema } from './github-data.ts';
 import fs from 'node:fs';
@@ -443,7 +444,7 @@ function requirementsFromTask(content: string): Requirement[] {
 function milestoneBasis(repoRoot: string, current: string | null): string | null {
   if (!current || !/^\d+\.\d+\.x$/.test(current)) return current;
   try {
-    const refs = execFileSync('git', ['branch', '-r'], { cwd: repoRoot, encoding: 'utf8' });
+    const refs = execNoInput('git', ['branch', '-r'], { cwd: repoRoot, encoding: 'utf8' });
     const releaseRefs = refs.split('\n').map((line) => line.trim()).filter((line) => /^origin\/\d+\.\d+\.x$/.test(line));
     if (releaseRefs.length === 0) return current;
     const currentRef = `origin/${current}`;
@@ -541,7 +542,7 @@ function planInLabelsFromDiff(
   if (!taskBase) return { name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISSING' };
   if (options.base && options.base !== taskBase) return { name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISMATCH' };
   try {
-    const changed = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+    const changed = execNoInput('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
       cwd: base.resolved.repoRoot, encoding: 'utf8'
     }).trim().split(/\r?\n/).filter(Boolean);
     const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8')) as {
@@ -763,7 +764,7 @@ function deriveSyncTaskEvidence(
     const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
     if (taskBase && (!options.base || options.base === taskBase)) {
       try {
-        fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+        fromDiffFiles = execNoInput('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
           cwd: resolved.repoRoot, encoding: 'utf8'
         }).trim().split(/\r?\n/).filter(Boolean).sort();
         const config = JSON.parse(fs.readFileSync(path.join(resolved.repoRoot, '.agents', '.airc.json'), 'utf8')) as { labels?: { in?: unknown } };

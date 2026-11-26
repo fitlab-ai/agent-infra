@@ -48,7 +48,7 @@ function defaultGitStatus(repoRoot: string): string {
   return execFileSync('git', ['-c', 'core.quotePath=true', 'status', '--short', '--untracked-files=all'], {
     cwd: repoRoot,
     encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe']
   });
 }
 

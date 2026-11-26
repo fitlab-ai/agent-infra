@@ -38,11 +38,11 @@ export function removeWorktreeDir(
   verifyWorktreePermit(permit);
   if (permit.snapshot.source === 'recovered') {
     removeManagedDir(worktreeBase, dir);
-    runSafeFn('git', ['-C', repoRoot, 'worktree', 'prune']);
+    runSafeFn('git', ['-C', repoRoot, 'worktree', 'prune'], { stdio: ['ignore', 'pipe', 'pipe'] });
     return;
   }
   try {
-    runFn('git', ['-C', repoRoot, 'worktree', 'remove', dir, '--force']);
+    runFn('git', ['-C', repoRoot, 'worktree', 'remove', dir, '--force'], { noInput: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const registeredPathMismatch = /(?:is not|not a valid) working tree|not a working tree/i.test(message);
@@ -55,6 +55,6 @@ export function removeWorktreeDir(
     // branch is no longer reported as checked out.
     verifyWorktreePermit(permit);
     removeManagedDir(worktreeBase, dir);
-    runSafeFn('git', ['-C', repoRoot, 'worktree', 'prune']);
+    runSafeFn('git', ['-C', repoRoot, 'worktree', 'prune'], { stdio: ['ignore', 'pipe', 'pipe'] });
   }
 }

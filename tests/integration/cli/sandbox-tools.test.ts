@@ -889,9 +889,11 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
       project: "demo",
       sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
+    execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"],
+      { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "pipe" });
     const signature = await sandboxImageSignature(fixture.repoDir);
 
-    spawnSandboxCli(
+    const result = spawnSandboxCli(
       fixture,
       tmpDir,
       ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"],
@@ -905,11 +907,13 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
       }
     );
 
+    const calls = fixture.readDockerCalls();
     assert.equal(
-      fixture.readDockerCalls().some((call) => call[0] === "build"),
+      calls.some((call) => call[0] === "build"),
       false,
       "expected --no-refresh to skip due refresh build"
     );
+    assert.ok(calls.some((call) => call[0] === "run"), `expected create to reach docker run: ${result.stderr}`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

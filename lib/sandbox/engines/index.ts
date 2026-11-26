@@ -1,3 +1,4 @@
+import type { StdioOptions } from 'node:child_process';
 import { colimaAdapter } from './colima.ts';
 import { dockerDesktopAdapter } from './docker-desktop.ts';
 import { nativeAdapter } from './native.ts';
@@ -22,9 +23,9 @@ export type HostResources = {
 };
 
 export type RunFns = {
-  run: (cmd: string, args: string[]) => string;
-  runOk: (cmd: string, args: string[]) => boolean;
-  runSafe: (cmd: string, args: string[]) => string;
+  run: (cmd: string, args: string[], options?: { noInput?: boolean }) => string;
+  runOk: (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => boolean;
+  runSafe: (cmd: string, args: string[], options?: { stdio?: StdioOptions }) => string;
   runVerbose: (cmd: string, args: string[]) => void;
 };
 

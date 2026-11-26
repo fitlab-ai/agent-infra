@@ -1,6 +1,7 @@
+import { execNoInput } from '../exec-no-input.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+
 
 import { resolveBranchWorktree } from '../git/branch-worktree.ts';
 
@@ -106,11 +107,11 @@ function approvedCleanReviewedCommit(reviewContent: string, verdict: Verdict | u
   const worktree = branchWorktree(repoRoot, branch);
   if (!worktree) return null;
   try {
-    const currentHead = execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const currentHead = execNoInput('git', ['-C', worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     if (currentHead !== reviewedHead) return null;
-    const currentTree = execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    const currentTree = execNoInput('git', ['-C', worktree, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
     if (currentTree !== reviewedTree) return null;
-    execFileSync('git', ['-C', worktree, 'diff-index', '--quiet', 'HEAD', '--']);
+    execNoInput('git', ['-C', worktree, 'diff-index', '--quiet', 'HEAD', '--']);
     return reviewedHead;
   } catch {
     return null;

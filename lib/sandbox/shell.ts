@@ -15,6 +15,8 @@ type CommandOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
+type RunOptions = Omit<CommandOptions, 'stdio'> & { noInput?: boolean; stdio?: never };
+
 type RunProbeOptions = CommandOptions & {
   spawnFn?: typeof spawnSync;
 };
@@ -62,17 +64,17 @@ function commandOptions<T extends object>(cmd: string, opts: T): T | (T & { shel
   return opts;
 }
 
-export function run(cmd: string, args: string[], opts: CommandOptions = {}): string {
+export function run(cmd: string, args: string[], opts: RunOptions = {}): string {
   const resolved = resolveCommand(cmd);
   return execFileSync(resolved, args, commandOptions(resolved, {
-    ...normalizeOptions(opts, ['pipe', 'pipe', 'pipe']),
+    ...normalizeOptions(opts, opts.noInput ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']),
     encoding: 'utf8'
   })).trim();
 }
 
 export function runOk(cmd: string, args: string[], opts: CommandOptions = {}): boolean {
   const resolved = resolveCommand(cmd);
-  const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, 'pipe')));
+  const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, opts.stdio ?? 'pipe')));
   return result.status === 0;
 }
 
@@ -131,7 +133,7 @@ export function runVerbose(cmd: string, args: string[], opts: CommandOptions = {
 export function runSafe(cmd: string, args: string[], opts: CommandOptions = {}): string {
   const resolved = resolveCommand(cmd);
   const result = spawnSync(resolved, args, commandOptions(resolved, {
-    ...normalizeOptions(opts, ['pipe', 'pipe', 'pipe']),
+    ...normalizeOptions(opts, opts.stdio ?? ['pipe', 'pipe', 'pipe']),
     encoding: 'utf8',
   }));
   if (result.status !== 0 && result.stderr) {
@@ -156,7 +158,7 @@ export function commandForEngine(engine: string, cmd: string, args: string[] = [
   return { cmd, args };
 }
 
-export function runEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): string {
+export function runEngine(engine: string, cmd: string, args: string[], opts: RunOptions = {}): string {
   const command = commandForEngine(engine, cmd, args);
   return run(command.cmd, command.args, opts);
 }

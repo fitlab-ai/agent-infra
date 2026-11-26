@@ -202,7 +202,7 @@ export async function prune(args: string[], dependencies: PruneDependencies = {}
   let labelsOutput = dependencies.labelsOutput;
   if (labelsOutput === undefined) {
     try {
-      labelsOutput = runEngine(engine, 'docker', psArgs);
+      labelsOutput = runEngine(engine, 'docker', psArgs, { noInput: true });
     } catch {
       throw new Error('Unable to determine active sandbox branches: docker ps failed');
     }
@@ -251,7 +251,7 @@ export async function prune(args: string[], dependencies: PruneDependencies = {}
 
   const removedWorktrees = removeOrphanGroups(config, groups, permits, engine === ENGINES.WSL2);
   if (removedWorktrees) {
-    runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+    runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune'], { stdio: ['ignore', 'pipe', 'pipe'] });
   }
 
   p.outro(pc.green('Orphaned sandbox state dirs removed'));

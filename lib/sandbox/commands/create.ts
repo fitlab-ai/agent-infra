@@ -159,10 +159,9 @@ type ExecSyncOptions = ExecFileSyncOptions & {
 type ExecSyncFn = (cmd: string, args: string[], options?: ExecSyncOptions) => Buffer | string;
 type EngineExecFn = (engine: string, cmd: string, args: string[], opts?: ExecFileSyncOptions) => Buffer | string;
 type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => string;
-type EngineRunSafeFn = EngineRunFn;
+type EngineRunSafeFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: StdioOptions }) => string;
 type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
-type DirectRunFn = (cmd: string, args: string[], opts?: { cwd?: string }) => string;
-type DirectRunSafeFn = DirectRunFn;
+type DirectRunSafeFn = (cmd: string, args: string[], opts?: { cwd?: string; stdio?: StdioOptions }) => string;
 type HostShellConfig = {
   hostDir: string;
   mounts: Array<{ hostPath: string; containerPath: string }>;
@@ -729,7 +728,7 @@ export function syncGpgKeys(
   };
   importKeys();
 
-  dockerRunSafeFn('docker', ['exec', container, 'gpgconf', '--launch', 'gpg-agent']);
+  dockerRunSafeFn('docker', ['exec', container, 'gpgconf', '--launch', 'gpg-agent'], { stdio: ['ignore', 'pipe', 'pipe'] });
   return true;
 }
 
@@ -778,9 +777,16 @@ export function buildContainerEnvFile(
   const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
   entries.push(...additionalEntries);
   const appendGitHubToken = (): void => {
-    let ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
+    const hasEnvironmentToken = Boolean(process.env.GH_TOKEN);
+    const engineOptions = hasEnvironmentToken && engine !== 'wsl2' && runSafeEngineFn === runSafeEngine
+      ? { stdio: ['ignore', 'pipe', 'pipe'] as StdioOptions } : undefined;
+    let ghToken = engineOptions
+      ? runSafeEngineFn(engine, 'gh', ['auth', 'token'], engineOptions)
+      : runSafeEngineFn(engine, 'gh', ['auth', 'token']);
     if (!ghToken && engine === 'wsl2') {
-      ghToken = runSafeFn('gh', ['auth', 'token']);
+      const hostOptions = hasEnvironmentToken && runSafeFn === runSafe
+        ? { stdio: ['ignore', 'pipe', 'pipe'] as StdioOptions } : undefined;
+      ghToken = hostOptions ? runSafeFn('gh', ['auth', 'token'], hostOptions) : runSafeFn('gh', ['auth', 'token']);
     }
     if (ghToken) {
       entries.push(['GH_TOKEN', ghToken]);
@@ -837,7 +843,7 @@ export function assertBranchAvailable(
   { allowedWorktrees = [], runFn = runSafe }: { allowedWorktrees?: string[]; runFn?: DirectRunSafeFn } = {}
 ): void {
   const normalizedAllowedWorktrees = new Set(allowedWorktrees.map((worktree) => normalizeWorktreePath(worktree)));
-  const output = runFn('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain']);
+  const output = runFn('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain'], { stdio: ['ignore', 'pipe', 'pipe'] });
   if (!output) {
     return;
   }
@@ -951,7 +957,7 @@ export function commandErrorMessage(error: unknown): string {
   return redactCommandError(stderr || message);
 }
 
-function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): string {
+function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string; noInput?: boolean } = {}): string {
   try {
     return run(cmd, args, opts);
   } catch (error) {
@@ -959,7 +965,7 @@ function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string } = {}
   }
 }
 
-function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts: { cwd?: string } = {}): string {
+function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts: { cwd?: string; noInput?: boolean } = {}): string {
   const command = commandForEngine(engine, cmd, args);
   return runTaskCommand(command.cmd, command.args, opts);
 }
@@ -1023,7 +1029,7 @@ function readImageLabels(config: Pick<SandboxCreateConfig, 'imageName'> & Pick<S
     '--format',
     '{{ json .Config.Labels }}',
     config.imageName
-  ]));
+  ], { stdio: ['ignore', 'pipe', 'pipe'] }));
 }
 
 function readProjectInitCommandDigest(controlRoot: string): string | null {
@@ -1139,7 +1145,7 @@ export async function create(
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
   const preparedDockerfile = prepareDockerfile(effectiveConfig, capabilityPlan.image);
-  const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current']);
+  const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const expectedImageSignature = buildImageSignature(preparedDockerfile, tools);
   const engine = detectEngine(effectiveConfig);
   let createdTmpfsSeedPlan: TmpfsSeedPlanEntry[] = [];
@@ -1160,7 +1166,7 @@ export async function create(
     p.log.success('Docker is ready');
 
     const ensureImage = (): void => {
-      const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName]);
+      const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName], { stdio: ['ignore', 'pipe', 'pipe'] });
       const imageLabels = imageExists ? readImageLabels(effectiveConfig, engine) : {};
       const currentImageSignature = imageLabels[sandboxImageConfigLabel(effectiveConfig)] ?? '';
       const currentLastRefresh = parseRefreshTimestamp(imageLabels[sandboxImageRefreshLabel(effectiveConfig)] ?? '');
@@ -1258,7 +1264,7 @@ export async function create(
             '--verify',
             '--quiet',
             `refs/heads/${branch}`
-          ]);
+          ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
           if (branchExists) {
             message(`Using existing branch '${branch}'...`);
@@ -1352,7 +1358,7 @@ export async function create(
             const previousManifest = fs.existsSync(controlPaths.manifestPath)
               ? readSandboxControlManifest(controlPaths.manifestPath)
               : null;
-          const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
+          const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'], { stdio: ['ignore', 'pipe', 'pipe'] }).split('\n').filter(Boolean);
           const matchedContainers = containerNameCandidates(effectiveConfig, branch)
             .filter((name) => existing.includes(name));
 
@@ -1374,7 +1380,7 @@ export async function create(
           const validateMatchedContainers = (): void => {
             if (matchedContainers.length > 0) {
               for (const name of matchedContainers) {
-                const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name]).trim();
+                const id = runSafeEngine(engine, 'docker', ['inspect', '--format', '{{.Id}}', name], { stdio: ['ignore', 'pipe', 'pipe'] }).trim();
                 if (!/^[a-f0-9]{64}$/u.test(id)
                   || (previousManifest && id !== previousManifest.containerIdentity.id)) {
                   throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
@@ -1382,7 +1388,7 @@ export async function create(
                 removalIds.push(id);
                 const rawLabels = runSafeEngine(engine, 'docker', [
                   'inspect', '--format', '{{json .Config.Labels}}', name
-                ]).trim();
+                ], { stdio: ['ignore', 'pipe', 'pipe'] }).trim();
                 let labels: Record<string, string>;
                 try {
                   labels = JSON.parse(rawLabels) as Record<string, string>;
@@ -1530,8 +1536,8 @@ export async function create(
             const removePreviousContainers = (): void => {
               if (removalIds.length > 0) message('Removing old container instance...');
               for (const id of removalIds) {
-                runEngineTaskCommand(engine, 'docker', ['stop', id]);
-                runEngineTaskCommand(engine, 'docker', ['rm', id]);
+                runEngineTaskCommand(engine, 'docker', ['stop', id], { noInput: true });
+                runEngineTaskCommand(engine, 'docker', ['rm', id], { noInput: true });
               }
             };
             removePreviousContainers();
@@ -1709,18 +1715,18 @@ export async function create(
                   '-w',
                   '/workspace',
                   effectiveConfig.imageName
-                  ]);
+                  ], { noInput: true });
               };
               const dockerRunId = runContainer();
               createdContainerRef = dockerRunId.trim();
               const validateAndFinalizeContainer = (): void => {
                 const containerId = runEngineTaskCommand(engine, 'docker', [
                   'inspect', '--format', '{{.Id}}', dockerRunId.trim()
-                ]).trim();
+                ], { noInput: true }).trim();
                 if (!/^[a-f0-9]{64}$/u.test(containerId)) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
                 const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
                   'inspect', '--format', '{{json .Config.Labels}}', containerId
-                ]).trim();
+                ], { noInput: true }).trim();
                 let inspectedLabels: unknown;
                 try {
                   inspectedLabels = JSON.parse(rawContainerLabels);
@@ -1761,8 +1767,8 @@ export async function create(
             } catch (error) {
               const removeFailedContainer = (): void => {
                 if (createdContainerRef) {
-                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
-                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
+                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef], { stdio: ['ignore', 'pipe', 'pipe'] });
+                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef], { stdio: ['ignore', 'pipe', 'pipe'] });
                 }
                 if (!hadExistingControlRoot) removeDirRecursive(control.root);
               };
@@ -1939,14 +1945,14 @@ export async function create(
     container,
     copiedEntries: createdTmpfsSeedPlan
   });
-  const runningContainers = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
+  const runningContainers = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}'], { stdio: ['ignore', 'pipe', 'pipe'] }).split('\n');
   const checks = [
     { name: 'Container running', ok: runningContainers.includes(container) },
     ...runtimeChecks(effectiveConfig.runtimes).map((check) => ({
       name: check.name,
-      ok: runOkEngine(engine, 'docker', ['exec', container, ...check.cmd])
+      ok: runOkEngine(engine, 'docker', ['exec', container, ...check.cmd], { stdio: ['ignore', 'pipe', 'pipe'] })
     })),
-    { name: 'GitHub CLI', ok: runOkEngine(engine, 'docker', ['exec', container, 'gh', '--version']) }
+    { name: 'GitHub CLI', ok: runOkEngine(engine, 'docker', ['exec', container, 'gh', '--version'], { stdio: ['ignore', 'pipe', 'pipe'] }) }
   ];
   const toolChecks = tools.map((tool) => ({
     name: tool.name,

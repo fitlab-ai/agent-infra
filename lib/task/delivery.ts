@@ -31,18 +31,18 @@ function classifyDeliveryState(localHead: string, remoteHead: string | null, las
   return { state: 'unknown-drift', shouldPush: false };
 }
 
-function git(cwd: string, args: readonly string[]): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync('git', [...args], { cwd, encoding: 'utf8' });
-  return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+function git(cwd: string, args: readonly string[], noInput = false): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync('git', [...args], { cwd, encoding: 'utf8', ...(noInput ? { stdio: ['ignore', 'pipe', 'pipe'] as const } : {}) });
+  return { status: result.error ? null : result.status, stdout: result.stdout ?? '', stderr: result.stderr || result.error?.message || '' };
 }
 
-function gitValue(cwd: string, args: readonly string[]): string | null {
-  const result = git(cwd, args);
+function gitValue(cwd: string, args: readonly string[], noInput = false): string | null {
+  const result = git(cwd, args, noInput);
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
 function validateBranch(cwd: string, branch: string): boolean {
-  return git(cwd, ['check-ref-format', `refs/heads/${branch}`]).status === 0;
+  return git(cwd, ['check-ref-format', `refs/heads/${branch}`], true).status === 0;
 }
 
 function failure(taskId: string | null, code: string, message: string, retryable = false, status: 'failed' | 'blocked' = retryable ? 'blocked' : 'failed'): TaskBranchDeliveryResult {
@@ -104,9 +104,9 @@ function prepareTaskBranchDelivery(
 
 function inspectTaskBranchDelivery(prepared: PreparedDelivery): DeliveryStage<InspectedDelivery> {
   const { taskId, repoRoot, branch, ref, target, frontmatter, options } = prepared;
-  const localHead = gitValue(repoRoot, ['rev-parse', 'HEAD']);
+  const localHead = gitValue(repoRoot, ['rev-parse', 'HEAD'], true);
   if (!localHead) return { stage: 'result', result: failure(taskId, 'DELIVERY_LOCAL_HEAD_UNAVAILABLE', 'Unable to resolve local HEAD') };
-  const status = git(repoRoot, ['status', '--porcelain=v1']);
+  const status = git(repoRoot, ['status', '--porcelain=v1'], true);
   if (status.status !== 0) {
     return { stage: 'result', result: failure(taskId, 'DELIVERY_GIT_INSPECT_FAILED', status.stderr.trim() || 'Unable to inspect Git state') };
   }

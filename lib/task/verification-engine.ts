@@ -1,7 +1,8 @@
+import { execNoInput } from '../exec-no-input.ts';
 // frontmatter, ledger, Git snapshot and platform domains are imported below.
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+
 import { fileURLToPath } from "node:url";
 
 import {
@@ -817,7 +818,7 @@ function preparePostReviewCheck({ taskDir, config, repositoryRoot }: any): any {
 
   let gitRoot;
   try {
-    gitRoot = execFileSync("git", ["-C", repositoryRoot, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    gitRoot = execNoInput("git", ["-C", repositoryRoot, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
   } catch {
     return blockedResult("post-review-commit", "git unavailable or repository root is not inside a git repository");
   }
@@ -876,7 +877,7 @@ function collectPostReviewCommits({ gitRoot, lastReviewedCommit, reviewArtifact,
   const sha = baselineSource.sha;
   let commits;
   try {
-    const out = execFileSync("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
+    const out = execNoInput("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
     commits = out.split(/\r?\n/).filter((line) => line.trim() !== "");
   } catch {
     return { result: blockedResult("post-review-commit", `git rev-list failed for baseline ${sha}; manual inspection required`) };
@@ -913,7 +914,7 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
 
   let localHead: string;
   try {
-    localHead = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    localHead = execNoInput("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   } catch {
     return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
   }
@@ -1104,7 +1105,7 @@ function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact
 
 function gitCommitExists(gitRoot: any, sha: any): any {
   try {
-    execFileSync("git", ["-C", gitRoot, "cat-file", "-e", `${sha}^{commit}`], { encoding: "utf8" });
+    execNoInput("git", ["-C", gitRoot, "cat-file", "-e", `${sha}^{commit}`], { encoding: "utf8" });
     return true;
   } catch {
     return false;

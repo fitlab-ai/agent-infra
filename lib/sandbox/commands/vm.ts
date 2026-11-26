@@ -36,8 +36,8 @@ export function wsl2BackendStatus({ runOkFn = runOk }: { runOkFn?: typeof runOk 
   wslAvailable: boolean;
   dockerAvailable: boolean;
 } {
-  const wslAvailable = runOkFn('wsl.exe', ['--status']) || runOkFn('wsl.exe', ['--', 'true']);
-  const dockerAvailable = wslAvailable && runOkFn('wsl.exe', ['--', 'docker', 'info']);
+  const wslAvailable = runOkFn('wsl.exe', ['--status'], { stdio: ['ignore', 'pipe', 'pipe'] }) || runOkFn('wsl.exe', ['--', 'true'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const dockerAvailable = wslAvailable && runOkFn('wsl.exe', ['--', 'docker', 'info'], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   return { wslAvailable, dockerAvailable };
 }
@@ -66,20 +66,20 @@ function status(): void {
   }
 
   if (engine === ENGINES.COLIMA) {
-    if (runOk('colima', ['status'])) {
-      process.stdout.write(`${runSafe('colima', ['status'])}\n`);
+    if (runOk('colima', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
+      process.stdout.write(`${runSafe('colima', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })}\n`);
     } else {
       p.log.warn('Colima VM is not running');
     }
     return;
   }
 
-  if (!runOk('orb', ['status'])) {
+  if (!runOk('orb', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     p.log.warn(`${name} VM is not running`);
     return;
   }
 
-  process.stdout.write(`${runSafe('orb', ['status'])}\n`);
+  process.stdout.write(`${runSafe('orb', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })}\n`);
 }
 
 async function start(args: string[]): Promise<void> {
@@ -141,11 +141,11 @@ function stop(): void {
     return;
   }
 
-  if (engine === ENGINES.COLIMA && !runOk('colima', ['status'])) {
+  if (engine === ENGINES.COLIMA && !runOk('colima', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     p.log.warn(`${name} VM is not running`);
     return;
   }
-  if (engine === ENGINES.ORBSTACK && !runOk('orb', ['status'])) {
+  if (engine === ENGINES.ORBSTACK && !runOk('orb', ['status'], { stdio: ['ignore', 'pipe', 'pipe'] })) {
     p.log.warn(`${name} VM is not running`);
     return;
   }

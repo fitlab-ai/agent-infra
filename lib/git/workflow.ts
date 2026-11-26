@@ -3,21 +3,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-type CommandResult = { status: number | null; stdout: string; stderr: string };
-type GitRunner = (args: readonly string[], cwd: string) => CommandResult;
+type CommandResult = { status: number | null; stdout: string; stderr: string; error?: Error };
+type GitRunner = (args: readonly string[], cwd: string, noInput?: boolean) => CommandResult;
 type GitOperation = { name: string; status: 'applied' | 'no-op' | 'failed'; ref?: string; message?: string };
 
-const defaultRunner: GitRunner = (args, cwd) => {
-  const result = spawnSync('git', [...args], { cwd, encoding: 'utf8' });
-  return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+const defaultRunner: GitRunner = (args, cwd, noInput = false) => {
+  const result = spawnSync('git', [...args], { cwd, encoding: 'utf8', ...(noInput ? { stdio: ['ignore', 'pipe', 'pipe'] as const } : {}) });
+  return { status: result.error ? null : result.status, stdout: result.stdout ?? '', stderr: result.stderr || result.error?.message || '' };
 };
 
-function run(runner: GitRunner, cwd: string, args: readonly string[]): CommandResult {
-  return runner(args, cwd);
+function run(runner: GitRunner, cwd: string, args: readonly string[], noInput = false): CommandResult {
+  const result = runner(args, cwd, noInput);
+  return result.error ? { ...result, status: null, stderr: result.stderr || result.error.message } : result;
 }
 
-function value(runner: GitRunner, cwd: string, args: readonly string[], trim = true): string | null {
-  const result = run(runner, cwd, args);
+function value(runner: GitRunner, cwd: string, args: readonly string[], trim = true, noInput = false): string | null {
+  const result = run(runner, cwd, args, noInput);
   return result.status === 0 ? (trim ? result.stdout.trim() : result.stdout.replace(/\n$/, '')) : null;
 }
 
@@ -30,10 +31,10 @@ function cleanMessage(message: string): string {
 }
 
 function inspectGitWorkflow(cwd: string, runner: GitRunner = defaultRunner, remoteInput?: { remote: string; refs: readonly string[] }) {
-  const head = value(runner, cwd, ['rev-parse', 'HEAD']);
-  const branch = value(runner, cwd, ['branch', '--show-current']);
-  const upstream = value(runner, cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-  const porcelain = value(runner, cwd, ['status', '--porcelain=v1'], false);
+  const head = value(runner, cwd, ['rev-parse', 'HEAD'], true, true);
+  const branch = value(runner, cwd, ['branch', '--show-current'], true, true);
+  const upstream = value(runner, cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], true, true);
+  const porcelain = value(runner, cwd, ['status', '--porcelain=v1'], false, true);
   if (!head || branch === null || porcelain === null) {
     return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_INSPECT_FAILED', message: 'Unable to inspect Git repository' } };
   }
@@ -66,11 +67,22 @@ function validatePaths(paths: readonly string[]): string | null {
 
 type ExplicitCommitInput = { cwd: string; paths: readonly string[]; message: string; expectedHead?: string; expectedTree?: string };
 
+function checkStagedDiff(cwd: string, runner: GitRunner, stageFailure: (message: string) => ReturnType<typeof failedStage>) {
+  const staged = run(runner, cwd, ['diff', '--cached', '--quiet', '--'], true);
+  if (staged.status === 0) return { status: 'no-op' as const, changed: false, snapshot: inspectGitWorkflow(cwd, runner).snapshot, operations: [{ name: 'stage', status: 'no-op' as const }], error: null };
+  if (staged.status !== 1) return stageFailure(staged.stderr.trim() || 'Unable to inspect staged changes');
+  return null;
+}
+
+function failedStage(message: string, cwd: string, runner: GitRunner) {
+  return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(cwd, runner).snapshot, operations: [{ name: 'stage', status: 'failed' as const, message }], error: { code: 'GIT_STAGE_FAILED', message } };
+}
+
 function stageExplicitPaths(input: Pick<ExplicitCommitInput, 'cwd' | 'paths' | 'expectedTree'>, runner: GitRunner) {
-  const stageFailure = (message: string) => ({ status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'failed' as const, message }], error: { code: 'GIT_STAGE_FAILED', message } });
-  const indexed = run(runner, input.cwd, ['ls-files', '-z', '--', ...input.paths]);
+  const stageFailure = (message: string) => failedStage(message, input.cwd, runner);
+  const indexed = run(runner, input.cwd, ['ls-files', '-z', '--', ...input.paths], true);
   if (indexed.status !== 0) return stageFailure(indexed.stderr.trim());
-  const headed = run(runner, input.cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', ...input.paths]);
+  const headed = run(runner, input.cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', ...input.paths], true);
   if (headed.status !== 0) return stageFailure(headed.stderr.trim());
   const indexedPaths = new Set(nulPaths(indexed.stdout));
   const headPaths = new Set(nulPaths(headed.stdout));
@@ -88,10 +100,10 @@ function stageExplicitPaths(input: Pick<ExplicitCommitInput, 'cwd' | 'paths' | '
     const add = run(runner, input.cwd, ['add', '--', ...addPaths]);
     if (add.status !== 0) return stageFailure(add.stderr.trim());
   }
-  const staged = run(runner, input.cwd, ['diff', '--cached', '--quiet', '--']);
-  if (staged.status === 0) return { status: 'no-op' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'no-op' as const }], error: null };
+  const stagedResult = checkStagedDiff(input.cwd, runner, stageFailure);
+  if (stagedResult) return stagedResult;
   if (input.expectedTree) {
-    const tree = value(runner, input.cwd, ['write-tree']);
+    const tree = value(runner, input.cwd, ['write-tree'], true, true);
     if (tree !== input.expectedTree) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'applied' as const }], error: { code: 'GIT_TREE_MISMATCH', message: `Expected staged tree ${input.expectedTree}, received ${tree ?? 'unavailable'}` } };
   }
   return { status: 'staged' as const };
@@ -133,16 +145,17 @@ function previewCommitTree(input: { cwd: string; paths: readonly string[]; expec
     const result = spawnSync('git', [...args], {
       cwd,
       env: { ...process.env, GIT_INDEX_FILE: indexFile },
-      encoding: 'utf8'
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
     });
-    return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+    return { status: result.error ? null : result.status, stdout: result.stdout ?? '', stderr: result.stderr || result.error?.message || '' };
   };
   try {
     const read = run(temporaryRunner, input.cwd, ['read-tree', input.expectedHead]);
     if (read.status !== 0) return { status: 'failed' as const, tree: null, error: { code: 'GIT_PREVIEW_FAILED', message: read.stderr.trim() || 'Unable to prepare a temporary Git index' } };
     const stage = run(temporaryRunner, input.cwd, ['add', '-A', '--', ...input.paths]);
     if (stage.status !== 0) return { status: 'failed' as const, tree: null, error: { code: 'GIT_PREVIEW_FAILED', message: stage.stderr.trim() || 'Unable to stage the requested paths in a temporary index' } };
-    const tree = value(temporaryRunner, input.cwd, ['write-tree']);
+    const tree = value(temporaryRunner, input.cwd, ['write-tree'], true, true);
     if (!tree) return { status: 'failed' as const, tree: null, error: { code: 'GIT_PREVIEW_FAILED', message: 'Unable to write the temporary Git tree' } };
     return { status: 'planned' as const, tree, error: null };
   } finally {
@@ -210,7 +223,7 @@ function inspectRebasedLocalState(input: PushRebasedInput, runner: GitRunner) {
     return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_LOCAL_IDENTITY_MISMATCH', message: 'Current branch or HEAD does not match the rebased intent' } };
   }
   const rebasePaths = ['rebase-merge', 'rebase-apply']
-    .map((name) => value(runner, input.cwd, ['rev-parse', '--git-path', name]))
+    .map((name) => value(runner, input.cwd, ['rev-parse', '--git-path', name], true, true))
     .filter((candidate): candidate is string => Boolean(candidate));
   if (snapshot.worktree.length > 0 || snapshot.staged.length > 0 ||
       rebasePaths.some((candidate) => fs.existsSync(path.isAbsolute(candidate) ? candidate : path.join(input.cwd, candidate)))) {
@@ -230,7 +243,7 @@ function validateRebasedRemoteFacts(input: PushRebasedInput, runner: GitRunner) 
   if (baseHead !== input.expectedBaseHead) {
     return { code: 'GIT_REMOTE_BASE_MISMATCH', message: `Expected base head ${input.expectedBaseHead}, received ${baseHead ?? 'unavailable'}` };
   }
-  if (run(runner, input.cwd, ['merge-base', '--is-ancestor', input.expectedBaseHead, input.newHead]).status !== 0) {
+  if (run(runner, input.cwd, ['merge-base', '--is-ancestor', input.expectedBaseHead, input.newHead], true).status !== 0) {
     return { code: 'GIT_REBASED_ANCESTOR_MISMATCH', message: 'Rebased head does not contain the expected base head' };
   }
   return null;
