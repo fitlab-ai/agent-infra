@@ -65,6 +65,7 @@ type PlatformOperation = Readonly<{
   state: PlatformOperationState;
   attempts: number;
   lastCode: string | null;
+  bindRecheck?: Readonly<{ headSha: string; baseSha: string; verifiedAt: string }>;
   issueMetadata?: PlatformIssueMetadataIntent;
   issueCreate?: PlatformIssueCreateIntent;
   pullRequest?: PlatformPullRequestIntent;
@@ -86,6 +87,7 @@ type RecordOperationInput = Readonly<{
   dependency: 'deferred' | 'required';
   state: PlatformOperationState;
   lastCode?: string | null;
+  bindRecheck?: Readonly<{ headSha: string; baseSha: string; verifiedAt: string }>;
   issueMetadata?: PlatformIssueMetadataIntent;
   issueCreate?: PlatformIssueCreateIntent;
   pullRequest?: PlatformPullRequestIntent;
@@ -215,7 +217,11 @@ function invalidOperationBase(item: PlatformOperation): boolean {
       || !['deferred', 'required'].includes(item.dependency)
       || !['queued', 'pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
       || !Number.isSafeInteger(item.attempts) || item.attempts < 0
-      || !(item.lastCode === null || typeof item.lastCode === 'string');
+      || !(item.lastCode === null || typeof item.lastCode === 'string')
+      || (item.bindRecheck !== undefined && (item.kind !== 'pull-request' || item.pullRequest?.action !== 'bind'
+        || !item.bindRecheck || typeof item.bindRecheck.headSha !== 'string' || !item.bindRecheck.headSha.trim()
+        || typeof item.bindRecheck.baseSha !== 'string' || !item.bindRecheck.baseSha.trim()
+        || typeof item.bindRecheck.verifiedAt !== 'string' || Number.isNaN(Date.parse(item.bindRecheck.verifiedAt))));
 }
 
 function invalidJournalIdentity(journal: Partial<PlatformOperationJournal>, taskId: string): boolean {
@@ -313,6 +319,7 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     state: input.state,
     attempts: previousAttempts + (input.state === 'pending' ? 1 : 0),
     lastCode: input.lastCode ?? null,
+    ...(input.bindRecheck ? { bindRecheck: input.bindRecheck } : {}),
     ...operationIntentFields(input),
     updatedAt: new Date().toISOString()
   };

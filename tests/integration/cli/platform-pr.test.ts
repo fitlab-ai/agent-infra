@@ -9,7 +9,7 @@ import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, taskWorkspacePr
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
-import { readPlatformOperationJournal } from '../../../lib/task/platform-operation-journal.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import { createPlatformPullRequest } from '../../../lib/platform/pull-requests.ts';
 import { createGitHubClient } from '../../../lib/platform/github-client.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
@@ -447,6 +447,78 @@ test('platform-pr bind rejects mismatched task and delivery identities before wr
   }
 });
 
+test('platform-pr bind accepts a rebased existing PR without rewriting its historical fact', () => {
+  const f = createFixture(boundFixture(1));
+  try {
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8');
+    const output = run(['bind', f.taskId, '--agent', 'codex', '--pr', '1'], { cwd: f.root, env: f.env });
+    assert.equal(output.status, 0, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).status, 'no-op');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('failed bind is rechecked from its recorded intent without changing the historical fact', () => {
+  const f = createFixture(boundFixture(1));
+  try {
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8');
+    const pr = JSON.parse(fs.readFileSync(f.pr, 'utf8'));
+    pr.head.ref = 'other';
+    fs.writeFileSync(f.pr, JSON.stringify(pr));
+    const first = run(['bind', f.taskId, '--agent', 'codex', '--pr', '1'], { cwd: f.root, env: f.env });
+    assert.equal(first.status, 1, first.stdout || first.stderr);
+    const failed = readPlatformOperationJournal(f.taskId, f.root).operations[0]!;
+    assert.equal(failed.lastCode, 'PR_BIND_IDENTITY_MISMATCH');
+    assert.equal(failed.state, 'failed');
+    const stillWrong = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+      cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
+    });
+    assert.equal(stillWrong.status, 2, stillWrong.stdout || stillWrong.stderr);
+    assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root).operations[0], failed);
+    pr.head.ref = 'feature';
+    fs.writeFileSync(f.pr, JSON.stringify(pr));
+    const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+      cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
+    });
+    assert.equal(recovery.status, 0, recovery.stdout || recovery.stderr);
+    const recovered = readPlatformOperationJournal(f.taskId, f.root).operations[0]!;
+    assert.equal(recovered.id, failed.id);
+    assert.equal(recovered.state, 'succeeded');
+    assert.equal(recovered.lastCode, failed.lastCode);
+    assert.equal(recovered.bindRecheck?.headSha, f.headSha);
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+for (const state of ['pending', 'unknown'] as const) {
+  test(`formal recovery leaves ${state} bind and following operation untouched`, () => {
+    const f = createFixture(boundFixture(1));
+    try {
+      const first = recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, kind: 'pull-request', target: 'pr:1',
+        expectedDigest: 'a'.repeat(64), dependency: 'required', state, pullRequest: { action: 'bind', prToken: '1' } });
+      const later = recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, kind: 'issue-metadata', target: 'later',
+        expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'queued',
+        issueMetadata: { requirements: false, issueType: false, fields: true } });
+      const before = readPlatformOperationJournal(f.taskId, f.root);
+      const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+        cwd: f.root, env: gitSafeEnv(f.env), encoding: 'utf8'
+      });
+      assert.equal(recovery.status, 2, recovery.stdout || recovery.stderr);
+      assert.deepEqual(JSON.parse(recovery.stdout).pending, [first.id, later.id]);
+      assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), before);
+      assert.equal(fs.existsSync(f.calls), false);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('platform-pr bind normalizes a potential merge commit on an open PR', () => {
   const f = createFixture();
   try {
@@ -495,6 +567,22 @@ test('platform-pr external binding rechecks the selected identity before writing
     assert.equal(fact.status, 'valid');
     assert.equal(fact.fact.state, 'unbound');
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('external recheck refuses missing current head instead of reusing the selected head', () => {
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\nplatform_issue_identity: \'{"kind":"number","value":767}\'\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8');
+    const selected = JSON.parse(fs.readFileSync(f.selectedPr, 'utf8'));
+    delete selected.head;
+    fs.writeFileSync(f.selectedPr, JSON.stringify(selected));
+    const output = run(['resolve-external', f.taskId, '--agent', 'codex'], { cwd: f.root, env: f.env });
+    assert.notEqual(output.status, 0, output.stdout);
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

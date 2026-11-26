@@ -15,7 +15,8 @@ import { bindPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullReq
 import { replayPullRequestSummary } from '../platform/pr-summary.ts';
 import { publishPrReview, readReviewBodyFile } from '../platform/pr-review.ts';
 import type { PlatformClient } from '../platform/context.ts';
-import { parseTaskFrontmatter } from './frontmatter.ts';
+import { parseTaskFrontmatter, parseTypedTaskFrontmatter } from './frontmatter.ts';
+import { readPrDeliveryFact } from './pr-delivery-fact.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { parseResourceIdentity, resourceIdentityEquals } from '../platform/resource-identity.ts';
 import { operationId } from './platform-operation-journal.ts';
@@ -446,6 +447,36 @@ function persistRecoveryOutcome(task: ResolvedTask, operation: RecoveryOperation
 }
 
 async function recoverSelectedOperation(task: ResolvedTask, operation: RecoveryOperation, options: RecoveryOptions): Promise<RecoveryResult> {
+  if (operation.kind === 'pull-request' && operation.pullRequest?.action === 'bind') {
+    if (operation.state === 'pending' || operation.state === 'unknown') {
+      return pendingResult(operation.id, 'PLATFORM_OPERATION_RECOVERY_PENDING', 'Unresolved bind outcome requires independent verification', false);
+    }
+    if (operation.state === 'failed' && operation.lastCode === 'PR_BIND_IDENTITY_MISMATCH') {
+      const token = operation.pullRequest.prToken;
+      const intent = operation.pullRequest;
+      const digest = createHash('sha256').update(JSON.stringify({ taskId: task.taskId, intent, identityInput: { pr: token } })).digest('hex');
+      let fact: ReturnType<typeof readPrDeliveryFact>;
+      try { fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(task.taskMdPath, 'utf8'))); }
+      catch { return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Existing binding cannot be read safely', false); }
+      if (!token || operation.target !== `pr:${token}` || operation.expectedDigest !== digest
+        || Object.keys(intent).length !== 2 || fact.status !== 'valid' || fact.fact.state !== 'bound') {
+        return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bind intent or existing binding cannot be verified', false);
+      }
+      const checked = await bindPlatformPullRequest(task.taskId, { agent: options.agent, cwd: task.repoRoot, pr: token, skipQueue: true });
+      if (checked.status !== 'no-op' || checked.error || !checked.pullRequest) {
+        return pendingResult(operation.id, checked.error?.code || 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', checked.error?.message || 'Current binding could not be verified');
+      }
+      try {
+        recordPlatformOperation({ taskRef: task.taskId, cwd: task.repoRoot, kind: operation.kind, target: operation.target,
+          expectedDigest: operation.expectedDigest, dependency: operation.dependency, state: 'succeeded',
+          lastCode: operation.lastCode, pullRequest: intent,
+          bindRecheck: { headSha: checked.pullRequest.head.sha, baseSha: checked.pullRequest.base.sha, verifiedAt: new Date().toISOString() } });
+      } catch (error) {
+        return pendingResult(operation.id, 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', String(error));
+      }
+      return result('applied', [operation.id], [], null);
+    }
+  }
   try { recordPendingOperation(task, operation); }
   catch (error) {
     const value = error as { code?: string; message?: string };
