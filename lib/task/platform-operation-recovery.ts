@@ -446,41 +446,43 @@ function persistRecoveryOutcome(task: ResolvedTask, operation: RecoveryOperation
   }
 }
 
-async function recoverSelectedOperation(task: ResolvedTask, operation: RecoveryOperation, options: RecoveryOptions): Promise<RecoveryResult> {
-  if (operation.kind === 'pull-request' && operation.pullRequest?.action === 'bind') {
-    if (operation.state === 'pending' || operation.state === 'unknown') {
-      return pendingResult(operation.id, 'PLATFORM_OPERATION_RECOVERY_PENDING', 'Unresolved bind outcome requires independent verification', false);
-    }
-    if (operation.state === 'failed') {
-      const token = operation.pullRequest.prToken;
-      const intent = operation.pullRequest;
-      const digest = createHash('sha256').update(JSON.stringify({ taskId: task.taskId, intent, identityInput: { pr: token } })).digest('hex');
-      if (operation.lastCode !== 'PR_BIND_IDENTITY_MISMATCH' || operation.dependency !== 'required'
-        || !token || operation.target !== `pr:${token}` || operation.expectedDigest !== digest
-        || operation.id !== operationId(operation) || Object.keys(intent).length !== 2) {
-        return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Failed bind intent cannot be verified', false);
-      }
-      let fact: ReturnType<typeof readPrDeliveryFact>;
-      try { fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(task.taskMdPath, 'utf8'))); }
-      catch { return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Existing binding cannot be read safely', false); }
-      if (fact.status !== 'valid' || fact.fact.state !== 'bound') {
-        return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bind intent or existing binding cannot be verified', false);
-      }
-      const checked = await bindPlatformPullRequest(task.taskId, { agent: options.agent, cwd: task.repoRoot, pr: token, skipQueue: true });
-      if (checked.status !== 'no-op' || checked.error || !checked.pullRequest) {
-        return pendingResult(operation.id, checked.error?.code || 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', checked.error?.message || 'Current binding could not be verified');
-      }
-      try {
-        recordPlatformOperation({ taskRef: task.taskId, cwd: task.repoRoot, kind: operation.kind, target: operation.target,
-          expectedDigest: operation.expectedDigest, dependency: operation.dependency, state: 'succeeded',
-          lastCode: operation.lastCode, pullRequest: intent,
-          bindRecheck: { headSha: checked.pullRequest.head.sha, baseSha: checked.pullRequest.base.sha, verifiedAt: new Date().toISOString() } });
-      } catch (error) {
-        return pendingResult(operation.id, 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', String(error));
-      }
-      return result('applied', [operation.id], [], null);
-    }
+function eligibleFailedBind(task: ResolvedTask, operation: RecoveryOperation): boolean {
+  const intent = operation.pullRequest!;
+  const token = intent.prToken;
+  const digest = createHash('sha256').update(JSON.stringify({ taskId: task.taskId, intent, identityInput: { pr: token } })).digest('hex');
+  return operation.lastCode === 'PR_BIND_IDENTITY_MISMATCH' && operation.dependency === 'required'
+    && Boolean(token) && operation.target === `pr:${token}` && operation.expectedDigest === digest
+    && operation.id === operationId(operation) && Object.keys(intent).length === 2;
+}
+
+async function recoverFailedBind(task: ResolvedTask, operation: RecoveryOperation, options: RecoveryOptions): Promise<RecoveryResult> {
+  const intent = operation.pullRequest!;
+  const token = intent.prToken;
+  if (!eligibleFailedBind(task, operation) || !token) {
+    return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Failed bind intent cannot be verified', false);
   }
+  let fact: ReturnType<typeof readPrDeliveryFact>;
+  try { fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(task.taskMdPath, 'utf8'))); }
+  catch { return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Existing binding cannot be read safely', false); }
+  if (fact.status !== 'valid' || fact.fact.state !== 'bound') {
+    return pendingResult(operation.id, 'PLATFORM_OPERATION_IDENTITY_MISMATCH', 'Bind intent or existing binding cannot be verified', false);
+  }
+  const checked = await bindPlatformPullRequest(task.taskId, { agent: options.agent, cwd: task.repoRoot, pr: token, skipQueue: true });
+  if (checked.status !== 'no-op' || checked.error || !checked.pullRequest) {
+    return pendingResult(operation.id, checked.error?.code || 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', checked.error?.message || 'Current binding could not be verified');
+  }
+  try {
+    recordPlatformOperation({ taskRef: task.taskId, cwd: task.repoRoot, kind: operation.kind, target: operation.target,
+      expectedDigest: operation.expectedDigest, dependency: operation.dependency, state: 'succeeded',
+      lastCode: operation.lastCode, pullRequest: intent,
+      bindRecheck: { headSha: checked.pullRequest.head.sha, baseSha: checked.pullRequest.base.sha, verifiedAt: new Date().toISOString() } });
+  } catch (error) {
+    return pendingResult(operation.id, 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', String(error));
+  }
+  return result('applied', [operation.id], [], null);
+}
+
+async function recoverDispatchedOperation(task: ResolvedTask, operation: RecoveryOperation, options: RecoveryOptions): Promise<RecoveryResult> {
   try { recordPendingOperation(task, operation); }
   catch (error) {
     const value = error as { code?: string; message?: string };
@@ -497,6 +499,16 @@ async function recoverSelectedOperation(task: ResolvedTask, operation: RecoveryO
     code: 'PLATFORM_OPERATION_RECOVERY_UNKNOWN', message: 'Platform operation outcome remains unknown', retryable: true
   });
   return result('applied', [targetOperation.id], [], null, remote.warnings ?? []);
+}
+
+async function recoverSelectedOperation(task: ResolvedTask, operation: RecoveryOperation, options: RecoveryOptions): Promise<RecoveryResult> {
+  if (operation.kind === 'pull-request' && operation.pullRequest?.action === 'bind') {
+    if (operation.state === 'pending' || operation.state === 'unknown') {
+      return pendingResult(operation.id, 'PLATFORM_OPERATION_RECOVERY_PENDING', 'Unresolved bind outcome requires independent verification', false);
+    }
+    if (operation.state === 'failed') return recoverFailedBind(task, operation, options);
+  }
+  return recoverDispatchedOperation(task, operation, options);
 }
 
 async function recoverPlatformOperationsOnce(

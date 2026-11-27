@@ -478,10 +478,14 @@ function inspectedPullRequestIdentityError(
   return null;
 }
 
+function missingFreshSide(side: ProviderChangeRequestSnapshot['head'], sha: ProviderChangeRequestSnapshot['headSha']): boolean {
+  return !side?.repository?.trim() || !side.ref?.trim() || !(sha || side.sha)?.trim()
+    || Boolean(sha && side.sha && sha !== side.sha);
+}
+
 function freshIdentityError(remote: ProviderChangeRequestSnapshot, merged = false) {
   for (const [side, sha] of [[remote.head, remote.headSha], [remote.base, remote.baseSha]] as const) {
-    if (!side?.repository?.trim() || !side.ref?.trim() || !(sha || side.sha)?.trim()
-      || (sha && side.sha && sha !== side.sha)) {
+    if (missingFreshSide(side, sha)) {
       return { code: 'PR_IDENTITY_MISSING', message: 'Provider did not supply consistent fresh pull request refs and SHAs', retryable: false };
     }
   }
@@ -1005,6 +1009,14 @@ function writeCreateStarted(base: Awaited<ReturnType<typeof resolvedContext>> & 
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
 
+function boundIdentityMatches(previous: ReturnType<typeof deliveryIdentity>, current: ReturnType<typeof deliveryIdentity>): boolean {
+  return repositoryKey(previous.repository) === repositoryKey(current.repository)
+    && repositoryKey(previous.head.repository) === repositoryKey(current.head.repository)
+    && previous.head.ref === current.head.ref
+    && repositoryKey(previous.base.repository) === repositoryKey(current.base.repository)
+    && previous.base.ref === current.base.ref;
+}
+
 function bindIdentity(
   base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
   pullRequest: PullRequestSnapshot,
@@ -1026,11 +1038,7 @@ function bindIdentity(
   if (base.prIdentity && resourceIdentityEquals(base.prIdentity, pullRequestIdentity(pullRequest)) && base.fact?.state === 'bound') {
     const previous = base.fact.identity;
     const current = deliveryIdentity(pullRequest);
-    if (repositoryKey(previous.repository) !== repositoryKey(current.repository)
-      || repositoryKey(previous.head.repository) !== repositoryKey(current.head.repository)
-      || previous.head.ref !== current.head.ref
-      || repositoryKey(previous.base.repository) !== repositoryKey(current.base.repository)
-      || previous.base.ref !== current.base.ref) return { status: 'failed' as const, error: {
+    if (!boundIdentityMatches(previous, current)) return { status: 'failed' as const, error: {
       code: 'PR_BIND_IDENTITY_MISMATCH', message: `Task binding for PR #${pullRequest.number} does not match the fetched pull request identity`
     } };
     return { status: 'no-op' as const, error: null };

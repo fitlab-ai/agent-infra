@@ -209,6 +209,13 @@ function invalidPullRequestReview(item: PlatformOperation): boolean {
         : item.pullRequestReview !== undefined);
 }
 
+function invalidBindRecheck(item: PlatformOperation): boolean {
+  return item.bindRecheck !== undefined && (item.kind !== 'pull-request' || item.pullRequest?.action !== 'bind'
+    || !item.bindRecheck || typeof item.bindRecheck.headSha !== 'string' || !item.bindRecheck.headSha.trim()
+    || typeof item.bindRecheck.baseSha !== 'string' || !item.bindRecheck.baseSha.trim()
+    || typeof item.bindRecheck.verifiedAt !== 'string' || Number.isNaN(Date.parse(item.bindRecheck.verifiedAt)));
+}
+
 function invalidOperationBase(item: PlatformOperation): boolean {
   return !item || typeof item !== 'object' || !/^[a-f0-9]{64}$/u.test(item.id)
       || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-create', 'issue-metadata', 'pull-request', 'pull-request-summary', 'pull-request-review'].includes(item.kind)
@@ -218,10 +225,7 @@ function invalidOperationBase(item: PlatformOperation): boolean {
       || !['queued', 'pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
       || !Number.isSafeInteger(item.attempts) || item.attempts < 0
       || !(item.lastCode === null || typeof item.lastCode === 'string')
-      || (item.bindRecheck !== undefined && (item.kind !== 'pull-request' || item.pullRequest?.action !== 'bind'
-        || !item.bindRecheck || typeof item.bindRecheck.headSha !== 'string' || !item.bindRecheck.headSha.trim()
-        || typeof item.bindRecheck.baseSha !== 'string' || !item.bindRecheck.baseSha.trim()
-        || typeof item.bindRecheck.verifiedAt !== 'string' || Number.isNaN(Date.parse(item.bindRecheck.verifiedAt))));
+      || invalidBindRecheck(item);
 }
 
 function invalidJournalIdentity(journal: Partial<PlatformOperationJournal>, taskId: string): boolean {
