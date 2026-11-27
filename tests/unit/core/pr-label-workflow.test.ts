@@ -25,7 +25,7 @@ test("repository PR label workflow isolates dependency installation from writes"
   const checkout = prepare.steps.find((step: any) => step.uses?.startsWith("actions/checkout@"));
   assert.equal(checkout.with.ref, "${{ github.sha }}");
   assert.equal(checkout.with["persist-credentials"], false);
-  assert.ok(prepare.steps.some((step: any) => step.run === "npm ci --ignore-scripts"));
+  assert.ok(prepare.steps.some((step: any) => step.run === "npm ci --ignore-scripts --no-bin-links"));
   assert.ok(write.steps.some((step: any) => step.run?.includes("sha256sum -c -")));
   assert.ok(write.steps.some((step: any) => step.run?.includes("platform-pr sync-in-labels")));
 });

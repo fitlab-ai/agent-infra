@@ -759,14 +759,28 @@ async function executeInLabelResource(input: InLabelExecutionContext, item: InLa
   if (!synced.ok) {
     const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
     const retryable = synced.error.retryable || providerErrorRetryable(synced.error.code);
-    state.effect = retryable ? 'unknown' : 'no-op';
-    state.after = state.effect === 'unknown' ? null : item.snapshot.labels;
-    const partial = successfulWrites > 0 || retryable;
+    state.effect = 'unknown';
+    state.after = null;
+    try {
+      const observed = item.kind === 'issue'
+        ? await provider.issues?.inspect?.({ context: operationContext, target: targetIdentity })
+        : await provider.changeRequests?.inspect?.({ context: operationContext, target: targetIdentity });
+      if (observed?.ok && Array.isArray(observed.value.labels) && resourceIdentityEquals(observed.value.identity, targetIdentity)
+        && (item.kind !== 'pull-request' || !inspectedPullRequestIdentityError(observed.value as ProviderChangeRequestSnapshot, targetIdentity))) {
+        const labels = observed.value.labels;
+        state.after = labels;
+        if (!retryable && [...labels].sort().join('\0') === [...state.before].sort().join('\0')) state.effect = 'no-op';
+      }
+    } catch {
+      // Preserve the original write failure and unknown readback outcome.
+    }
+    const observedDifference = state.after !== null && [...state.after].sort().join('\0') !== [...state.before].sort().join('\0');
+    const partial = successfulWrites > 0 || state.effect === 'unknown';
     const error = partial
-      ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+      ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown (${synced.error.code}): ${synced.error.message}${observedDifference ? '; readback differs from before, cause unknown' : ''}` }
       : synced.error;
     return result(partial ? 'blocked' : providerStatus(synced.error), null, issueNumber, prNumber, {
-      changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
+      changed: successfulWrites > 0 || observedDifference, platform: context.platform, capabilities: context.capabilities,
       pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
       evidence: { kind: 'pull-request-files', pullRequestFiles: changedFiles, closingIssues: closingIssueIdentities }, error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
     });

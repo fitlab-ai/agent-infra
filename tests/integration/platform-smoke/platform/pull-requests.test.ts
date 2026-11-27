@@ -189,7 +189,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[]; issueRepositories?: string[] } = {}) {
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[]; issueRepositories?: string[]; failReadback?: boolean; mutateOnFailure?: boolean; failIssueWrite?: boolean; readbackIdentityMismatch?: boolean } = {}) {
   const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
@@ -209,10 +209,12 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
 
   const postLabels = (endpoint: string, request: RequestOptions) => {
     if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) {
+      if (fixtureOptions.mutateOnFailure) prLabels.push('in: core');
       return fixtureOptions.failPullRequestDeterministic
         ? { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } }
         : { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
     }
+    if (fixtureOptions.failIssueWrite && endpoint.includes('/issues/7/')) return { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'issue label rejected', retryable: false } };
     const labels = JSON.parse(request.input || '{}').labels as string[];
     if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
     else prLabels.push(...labels);
@@ -226,7 +228,11 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
     if (args[0] === 'api' && args[1] === 'repos/o/r') {
       return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
     }
-    if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(fixtureOptions.identityMismatch ? 43 : 42), labels: prLabels.map((name) => ({ name })) } };
+    if (/pulls\/42$/.test(args[1] || '')) {
+      if (fixtureOptions.failReadback && calls.some((call) => call.includes('POST'))) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'readback unavailable', retryable: true } };
+      const wrongIdentity = fixtureOptions.identityMismatch || (fixtureOptions.readbackIdentityMismatch && calls.some((call) => call.includes('POST')));
+      return { ok: true, value: { ...remote(wrongIdentity ? 43 : 42), labels: prLabels.map((name) => ({ name })) } };
+    }
   };
 
   const client: GitHubClient = {
@@ -529,6 +535,8 @@ test('in-label PR sync blocks with partial evidence when the PR write is uncerta
     assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
     assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
     assert.deepEqual(result.resources?.map((resource) => resource.effect), ['applied', 'unknown']);
+    assert.deepEqual(result.resources?.[1]?.after, ['type: feature']);
+    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -549,6 +557,58 @@ test('in-label PR sync upgrades a deterministic PR failure after Issue convergen
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+test('in-label write failure keeps unknown when the failed target cannot be read', async () => {
+  const fixture = prOnlyInLabelFixture([], { failPullRequestWrite: true, failPullRequestDeterministic: true, failReadback: true, prLabels: ['type: feature'] });
+  try {
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.match(result.error?.message || '', /label rejected/);
+    assert.equal(result.resources?.[0]?.after, null);
+    assert.equal(result.resources?.[0]?.effect, 'unknown');
+    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('deterministic write failure with different readback is partial without attributing the change', async () => {
+  const fixture = prOnlyInLabelFixture([], { failPullRequestWrite: true, failPullRequestDeterministic: true, mutateOnFailure: true, prLabels: ['type: feature'] });
+  try {
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.match(result.error?.message || '', /label rejected.*cause unknown/);
+    assert.equal(result.changed, true);
+    assert.equal(result.resources?.[0]?.effect, 'unknown');
+    assert.deepEqual(result.resources?.[0]?.after, ['in: core', 'type: feature']);
+    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('failure readback identity mismatch remains unknown', async () => {
+  const fixture = prOnlyInLabelFixture([], { failPullRequestWrite: true, failPullRequestDeterministic: true, readbackIdentityMismatch: true, prLabels: ['type: feature'] });
+  try {
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.resources?.[0]?.after, null);
+    assert.equal(result.resources?.[0]?.effect, 'unknown');
+    assert.match(result.error?.message || '', /label rejected/);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('failed Issue write reads only that Issue and does not write the PR', async () => {
+  const fixture = prOnlyInLabelFixture([7], { failIssueWrite: true });
+  try {
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'blocked');
+    assert.match(result.error?.message || '', /issue label rejected/);
+    assert.deepEqual(result.resources?.[0]?.after, ['keep']);
+    assert.equal(result.resources?.[0]?.effect, 'unknown');
+    const failedWrite = fixture.calls.findIndex((call) => /issues\/7\/labels.*POST/.test(call));
+    assert.ok(failedWrite >= 0 && fixture.calls.slice(failedWrite + 1).some((call) => /issues\/7$/.test(call)));
+    assert.equal(fixture.calls.some((call) => /issues\/42\/labels/.test(call)), false);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 });
 
 test('in-label PR sync preserves an unrelated label added after the initial read', async () => {

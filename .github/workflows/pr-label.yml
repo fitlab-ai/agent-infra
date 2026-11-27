@@ -31,7 +31,7 @@ jobs:
           node-version: 22.9.0
           package-manager-cache: false
       - name: Install locked dependencies without scripts
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Package locked dependencies
         id: bundle
         run: |
@@ -80,7 +80,7 @@ jobs:
           printf '%s  %s\n' "$EXPECTED_DIGEST" "$RUNNER_TEMP/pr-label-artifact/pr-label-dependencies.tar" | sha256sum -c -
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           printf '%s  %s\n' "$EXPECTED_LOCK" package-lock.json | sha256sum -c -
-          tar -xf "$RUNNER_TEMP/pr-label-artifact/pr-label-dependencies.tar" -C "$GITHUB_WORKSPACE"
+          python3 .github/scripts/extract-locked-dependencies.py "$RUNNER_TEMP/pr-label-artifact/pr-label-dependencies.tar" "$GITHUB_WORKSPACE"
       - name: Sync and verify in-labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
