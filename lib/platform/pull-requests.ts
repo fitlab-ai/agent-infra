@@ -734,10 +734,9 @@ async function verifyInLabelResource(input: InLabelExecutionContext, item: InLab
   return { currentPullRequest, successfulWrites };
 }
 
-async function executeInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, currentPullRequest: PullRequestSnapshot, successfulWrites: number): Promise<PullRequestResult | { currentPullRequest: PullRequestSnapshot; successfulWrites: number }> {
-  const { provider, context, operationContext, pullRequestIdentity, prNumber, changedFiles, closingIssueIdentities, issueIdentity, issueNumber, operations, resourcesState } = input;
-  const targetIdentity = item.kind === 'issue' ? issueIdentity! : pullRequestIdentity;
-  const synced = item.kind === 'issue'
+async function writeInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, targetIdentity: ResourceIdentity) {
+  const { provider, operationContext } = input;
+  return item.kind === 'issue'
     ? provider.issues?.update
       ? await provider.issues.update({
         context: operationContext,
@@ -756,35 +755,49 @@ async function executeInLabelResource(input: InLabelExecutionContext, item: InLa
         mutation: { idempotencyKey: `pull-request:update:${serializeResourceIdentity(targetIdentity)}:in-labels`, target: targetIdentity }
       })
       : unsupportedProviderOperation(provider, 'changeRequests.update');
-  if (!synced.ok) {
-    const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
-    const retryable = synced.error.retryable || providerErrorRetryable(synced.error.code);
-    state.effect = 'unknown';
-    state.after = null;
-    try {
-      const observed = item.kind === 'issue'
-        ? await provider.issues?.inspect?.({ context: operationContext, target: targetIdentity })
-        : await provider.changeRequests?.inspect?.({ context: operationContext, target: targetIdentity });
-      if (observed?.ok && Array.isArray(observed.value.labels) && resourceIdentityEquals(observed.value.identity, targetIdentity)
-        && (item.kind !== 'pull-request' || !inspectedPullRequestIdentityError(observed.value as ProviderChangeRequestSnapshot, targetIdentity))) {
-        const labels = observed.value.labels;
-        state.after = labels;
-        if (!retryable && [...labels].sort().join('\0') === [...state.before].sort().join('\0')) state.effect = 'no-op';
-      }
-    } catch {
-      // Preserve the original write failure and unknown readback outcome.
+}
+
+async function readFailedInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, targetIdentity: ResourceIdentity, retryable: boolean) {
+  const { provider, operationContext, resourcesState } = input;
+  const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
+  state.effect = 'unknown';
+  state.after = null;
+  try {
+    const observed = item.kind === 'issue'
+      ? await provider.issues?.inspect?.({ context: operationContext, target: targetIdentity })
+      : await provider.changeRequests?.inspect?.({ context: operationContext, target: targetIdentity });
+    if (observed?.ok && Array.isArray(observed.value.labels) && resourceIdentityEquals(observed.value.identity, targetIdentity)
+      && (item.kind !== 'pull-request' || !inspectedPullRequestIdentityError(observed.value as ProviderChangeRequestSnapshot, targetIdentity))) {
+      const labels = observed.value.labels;
+      state.after = labels;
+      if (!retryable && [...labels].sort().join('\0') === [...state.before].sort().join('\0')) state.effect = 'no-op';
     }
-    const observedDifference = state.after !== null && [...state.after].sort().join('\0') !== [...state.before].sort().join('\0');
-    const partial = successfulWrites > 0 || state.effect === 'unknown';
-    const error = partial
-      ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown (${synced.error.code}): ${synced.error.message}${observedDifference ? '; readback differs from before, cause unknown' : ''}` }
-      : synced.error;
-    return result(partial ? 'blocked' : providerStatus(synced.error), null, issueNumber, prNumber, {
-      changed: successfulWrites > 0 || observedDifference, platform: context.platform, capabilities: context.capabilities,
-      pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
-      evidence: { kind: 'pull-request-files', pullRequestFiles: changedFiles, closingIssues: closingIssueIdentities }, error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
-    });
+  } catch {
+    // Preserve the original write failure and unknown readback outcome.
   }
+  return state;
+}
+
+async function failedInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, targetIdentity: ResourceIdentity, currentPullRequest: PullRequestSnapshot, successfulWrites: number, failure: Extract<Awaited<ReturnType<typeof writeInLabelResource>>, { ok: false }>) {
+  const { context, pullRequestIdentity, prNumber, changedFiles, closingIssueIdentities, issueNumber, operations, resourcesState } = input;
+  const retryable = failure.error.retryable || providerErrorRetryable(failure.error.code);
+  const state = await readFailedInLabelResource(input, item, targetIdentity, retryable);
+  const observedDifference = state.after !== null && [...state.after].sort().join('\0') !== [...state.before].sort().join('\0');
+  const partial = successfulWrites > 0 || state.effect === 'unknown';
+  const error = partial
+    ? { ...failure.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown (${failure.error.code}): ${failure.error.message}${observedDifference ? '; readback differs from before, cause unknown' : ''}` }
+    : failure.error;
+  return result(partial ? 'blocked' : providerStatus(failure.error), null, issueNumber, prNumber, {
+    changed: successfulWrites > 0 || observedDifference, platform: context.platform, capabilities: context.capabilities,
+    pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
+    evidence: { kind: 'pull-request-files', pullRequestFiles: changedFiles, closingIssues: closingIssueIdentities }, error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+  });
+}
+
+async function executeInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, currentPullRequest: PullRequestSnapshot, successfulWrites: number): Promise<PullRequestResult | { currentPullRequest: PullRequestSnapshot; successfulWrites: number }> {
+  const targetIdentity = item.kind === 'issue' ? input.issueIdentity! : input.pullRequestIdentity;
+  const synced = await writeInLabelResource(input, item, targetIdentity);
+  if (!synced.ok) return failedInLabelResource(input, item, targetIdentity, currentPullRequest, successfulWrites, synced);
   successfulWrites += synced.value.changed ? 1 : 0;
   return verifyInLabelResource(input, item, targetIdentity, currentPullRequest, successfulWrites);
 }

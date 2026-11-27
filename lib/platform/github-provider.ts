@@ -568,6 +568,16 @@ function updateGitHubIssueFields(client: GitHubClient, cwd: string, issueId: str
   return updated.ok ? { ok: true, value: { changed: true } } : updated;
 }
 
+function closingIssueNode(value: unknown): ProviderResult<{ issue: number; repository: string }> {
+  const record = value as { number?: unknown; repository?: { nameWithOwner?: unknown } };
+  const issue = Number(record?.number);
+  const repository = record?.repository?.nameWithOwner;
+  if (!Number.isSafeInteger(issue) || issue <= 0 || typeof repository !== 'string' || !repository.trim()) {
+    return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue repository or identity is invalid');
+  }
+  return { ok: true, value: { issue, repository } };
+}
+
 function parseClosingIssuePage(value: unknown, repositoryName: string): ProviderResult<{ identities: ResourceIdentity[]; foreign: boolean; hasNextPage: boolean; endCursor: string | null }> {
   const connection = (value as {
     data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
@@ -578,13 +588,9 @@ function parseClosingIssuePage(value: unknown, repositoryName: string): Provider
   const identities: ResourceIdentity[] = [];
   let foreign = false;
   for (const node of connection.nodes) {
-    const record = node as { number?: unknown; repository?: { nameWithOwner?: unknown } };
-    const issue = Number(record?.number);
-    const ownerRepo = record?.repository?.nameWithOwner;
-    if (!Number.isSafeInteger(issue) || issue <= 0 || typeof ownerRepo !== 'string' || !ownerRepo.trim()) {
-      return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue repository or identity is invalid');
-    }
-    if (ownerRepo.toLowerCase() === repositoryName.toLowerCase()) identities.push({ kind: 'number', value: issue });
+    const parsed = closingIssueNode(node);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    if (parsed.value.repository.toLowerCase() === repositoryName.toLowerCase()) identities.push({ kind: 'number', value: parsed.value.issue });
     else foreign = true;
   }
   return { ok: true, value: { identities, foreign, hasNextPage: Boolean(connection.pageInfo.hasNextPage), endCursor: connection.pageInfo.endCursor || null } };

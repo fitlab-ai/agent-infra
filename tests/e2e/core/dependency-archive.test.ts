@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createTempDir, filePath } from "../../helpers.ts";
+import { createTempDir, filePath, onPlatforms } from "../../helpers.ts";
+
+const pythonFilter = spawnSync("python3", ["-c", "import tarfile; assert hasattr(tarfile, 'data_filter')"], { encoding: "utf8" });
+const archiveTestOptions = { skip: onPlatforms("linux").skip || (pythonFilter.status === 0 ? false : "python3 with tarfile data filter is unavailable") };
 
 function runArchive(entries: Array<{ name: string; kind?: string; link?: string; content?: string }>) {
   const root = createTempDir("dependency-archive-");
@@ -27,7 +30,7 @@ with tarfile.open(sys.argv[1], 'w') as tar:
   return { root, workspace, result };
 }
 
-test("dependency archive permits contained directories and regular files", () => {
+test("dependency archive permits contained directories and regular files", archiveTestOptions, () => {
   const { root, workspace, result } = runArchive([
     { name: "node_modules", kind: "dir" },
     { name: "node_modules/pkg/index.js", content: "module" }
@@ -39,7 +42,7 @@ test("dependency archive permits contained directories and regular files", () =>
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("dependency archive rejects traversal, escaping links, link parents and non-dependency entries", () => {
+test("dependency archive rejects traversal, escaping links, link parents and non-dependency entries", archiveTestOptions, () => {
   for (const entries of [
     [{ name: "node_modules", kind: "dir" }, { name: "node_modules/../sentinel", content: "bad" }],
     [{ name: "sentinel", content: "bad" }],
