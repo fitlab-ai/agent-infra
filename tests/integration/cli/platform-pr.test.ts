@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { createTempDir, filePath, gitSafeEnv, INTERNAL_CLI_PATH, taskWorkspaceProject } from '../../helpers.ts';
@@ -468,39 +469,26 @@ test('platform-pr bind accepts a rebased existing PR without rewriting its histo
   }
 });
 
-test('failed bind is rechecked from its recorded intent without changing the historical fact', () => {
+test('recovery replays a rebased PR bind before the queued comment without changing the historical fact', () => {
   const f = createFixture(boundFixture(1));
   try {
     const taskPath = path.join(f.taskDir, 'task.md');
     const before = fs.readFileSync(taskPath, 'utf8');
-    const pr = JSON.parse(fs.readFileSync(f.pr, 'utf8'));
-    pr.head.ref = 'other';
-    fs.writeFileSync(f.pr, JSON.stringify(pr));
-    const first = run(['bind', f.taskId, '--agent', 'codex', '--pr', '1'], { cwd: f.root, env: f.env });
-    assert.equal(first.status, 1, first.stdout || first.stderr);
-    const failed = readPlatformOperationJournal(f.taskId, f.root).operations[0]!;
-    assert.equal(failed.lastCode, 'PR_BIND_IDENTITY_MISMATCH');
-    assert.equal(failed.state, 'failed');
-    const stillWrong = recover(f);
-    assert.equal(stillWrong.status, 2, stillWrong.stdout || stillWrong.stderr);
-    assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root).operations[0], failed);
+    const intent = { action: 'bind' as const, prToken: '1' };
+    const expectedDigest = createHash('sha256').update(JSON.stringify({
+      taskId: f.taskId, intent, identityInput: { pr: '1' }
+    })).digest('hex');
+    const operation = { taskRef: f.taskId, cwd: f.root, kind: 'pull-request' as const, target: 'pr:1',
+      expectedDigest, dependency: 'required' as const, pullRequest: intent };
+    recordPlatformOperation({ ...operation, state: 'pending' });
+    const failed = recordPlatformOperation({ ...operation, state: 'failed', lastCode: 'PR_BIND_IDENTITY_MISMATCH' });
+    assert.notEqual(f.headSha, 'a'.repeat(40));
     const later = inspectPlatformCommentOperation(f.taskId, { kind: 'task', agent: 'codex', cwd: f.root });
     assert.ok(later);
     recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, ...later, dependency: 'deferred', state: 'queued' });
     const comments = path.join(f.root, 'comments.json');
     fs.writeFileSync(comments, '[]');
     const withComments = { ...f, env: { ...f.env, GH_FAKE_COMMENTS_PATH: comments, GH_FAKE_COMMENT_USER: 'test-user' } };
-    pr.head.ref = 'feature';
-    fs.writeFileSync(f.pr, JSON.stringify(pr));
-    const beforeRetry = readPlatformOperationJournal(f.taskId, f.root);
-    fs.writeFileSync(f.counter, '100');
-    const transient = recover({ ...withComments, env: { ...withComments.env,
-      GH_FAKE_TRANSIENT_FAIL_MATCHER: '/pulls/1', GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: f.counter } });
-    assert.equal(transient.status, 2, transient.stdout || transient.stderr);
-    assert.ok(Number(fs.readFileSync(f.counter, 'utf8')) < 100);
-    assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), beforeRetry);
-    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
-    assert.equal(JSON.parse(fs.readFileSync(comments, 'utf8')).length, 0);
     fs.writeFileSync(f.calls, '');
     const recovery = recover(withComments);
     assert.equal(recovery.status, 0, recovery.stdout || recovery.stderr);
@@ -521,63 +509,6 @@ test('failed bind is rechecked from its recorded intent without changing the his
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
-
-for (const state of ['pending', 'unknown'] as const) {
-  test(`formal recovery leaves ${state} bind and following operation untouched`, () => {
-    const f = createFixture(boundFixture(1));
-    try {
-      const first = recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, kind: 'pull-request', target: 'pr:1',
-        expectedDigest: 'a'.repeat(64), dependency: 'required', state, pullRequest: { action: 'bind', prToken: '1' } });
-      const later = recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, kind: 'issue-metadata', target: 'later',
-        expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'queued',
-        issueMetadata: { requirements: false, issueType: false, fields: true } });
-      const before = readPlatformOperationJournal(f.taskId, f.root);
-      const recovery = recover(f);
-      assert.equal(recovery.status, 2, recovery.stdout || recovery.stderr);
-      assert.deepEqual(JSON.parse(recovery.stdout).pending, [first.id, later.id]);
-      assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), before);
-      assert.equal(fs.existsSync(f.calls), false);
-    } finally {
-      fs.rmSync(f.root, { recursive: true, force: true });
-    }
-  });
-}
-
-for (const variant of ['other-error', 'wrong-id', 'deferred', 'wrong-target', 'wrong-digest', 'extra-intent'] as const) {
-  test(`formal recovery preserves ineligible failed bind: ${variant}`, () => {
-    const f = createFixture(boundFixture(variant === 'other-error' ? 2 : 1));
-    try {
-      const pr = JSON.parse(fs.readFileSync(f.pr, 'utf8'));
-      const originalHead = pr.head;
-      pr.head.ref = 'other';
-      fs.writeFileSync(f.pr, JSON.stringify(pr));
-      assert.equal(run(['bind', f.taskId, '--agent', 'codex', '--pr', '1'], { cwd: f.root, env: f.env }).status, 1);
-      const journalPath = path.join(f.taskDir, '.platform-operations.json');
-      const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
-      if (variant === 'other-error') assert.notEqual(journal.operations[0].lastCode, 'PR_BIND_IDENTITY_MISMATCH');
-      if (variant === 'wrong-id') journal.operations[0].id = 'f'.repeat(64);
-      if (variant === 'deferred') journal.operations[0].dependency = 'deferred';
-      if (variant === 'wrong-target') journal.operations[0].target = 'pr:2';
-      if (variant === 'wrong-digest') journal.operations[0].expectedDigest = 'e'.repeat(64);
-      if (variant === 'extra-intent') journal.operations[0].pullRequest.headRef = 'unexpected';
-      fs.writeFileSync(journalPath, JSON.stringify(journal));
-      recordPlatformOperation({ taskRef: f.taskId, cwd: f.root, kind: 'issue-metadata', target: 'later',
-        expectedDigest: 'b'.repeat(64), dependency: 'required', state: 'queued',
-        issueMetadata: { requirements: false, issueType: false, fields: true } });
-      pr.head = originalHead;
-      pr.head.ref = 'feature';
-      fs.writeFileSync(f.pr, JSON.stringify(pr));
-      const before = readPlatformOperationJournal(f.taskId, f.root);
-      const taskBefore = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
-      fs.writeFileSync(f.calls, '');
-      const recovery = recover(f);
-      assert.equal(recovery.status, 2, recovery.stdout || recovery.stderr);
-      assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), before);
-      assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), taskBefore);
-      assert.equal(fs.readFileSync(f.calls, 'utf8'), '');
-    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-  });
-}
 
 test('platform-pr bind normalizes a potential merge commit on an open PR', () => {
   const f = createFixture();
