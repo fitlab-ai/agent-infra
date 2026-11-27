@@ -492,14 +492,22 @@ test('failed bind is rechecked from its recorded intent without changing the his
     const withComments = { ...f, env: { ...f.env, GH_FAKE_COMMENTS_PATH: comments, GH_FAKE_COMMENT_USER: 'test-user' } };
     pr.head.ref = 'feature';
     fs.writeFileSync(f.pr, JSON.stringify(pr));
+    const beforeRetry = readPlatformOperationJournal(f.taskId, f.root);
+    fs.writeFileSync(f.counter, '100');
+    const transient = recover({ ...withComments, env: { ...withComments.env,
+      GH_FAKE_TRANSIENT_FAIL_MATCHER: '/pulls/1', GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: f.counter } });
+    assert.equal(transient.status, 2, transient.stdout || transient.stderr);
+    assert.ok(Number(fs.readFileSync(f.counter, 'utf8')) < 100);
+    assert.deepEqual(readPlatformOperationJournal(f.taskId, f.root), beforeRetry);
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+    assert.equal(JSON.parse(fs.readFileSync(comments, 'utf8')).length, 0);
     fs.writeFileSync(f.calls, '');
     const recovery = recover(withComments);
     assert.equal(recovery.status, 0, recovery.stdout || recovery.stderr);
     const recovered = readPlatformOperationJournal(f.taskId, f.root).operations[0]!;
     assert.equal(recovered.id, failed.id);
     assert.equal(recovered.state, 'succeeded');
-    assert.equal(recovered.lastCode, failed.lastCode);
-    assert.equal(recovered.bindRecheck?.headSha, f.headSha);
+    assert.equal(recovered.lastCode, null);
     assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
     assert.equal(readPlatformOperationJournal(f.taskId, f.root).operations[1]?.state, 'succeeded');
     assert.equal(JSON.parse(fs.readFileSync(comments, 'utf8')).length, 1);
