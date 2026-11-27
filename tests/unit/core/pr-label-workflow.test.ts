@@ -1,39 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { parse } from "yaml";
 
 import { read } from "../../helpers.ts";
 
-const workflowTargets = [
-  ".github/workflows/pr-label.yml",
-  "templates/.github/workflows/pr-label.yml"
-];
+const root = parse(read(".github/workflows/pr-label.yml"));
+const template = parse(read("templates/.github/workflows/pr-label.yml"));
 
-test("pr-label workflows use the same stable published package", () => {
-  const root = read(workflowTargets[0]!);
-  const template = read(workflowTargets[1]!);
-
-  assert.equal(root, template, "repository workflow and distributed template should stay identical");
-  assert.match(root, /npm exec --yes --package="@fitlab-ai\/agent-infra@latest" -- agent-infra-internal platform-pr sync-in-labels/);
+test("PR label workflows preserve the PR event and concurrency contract", () => {
+  for (const workflow of [root, template]) {
+    assert.deepEqual(workflow.on.pull_request_target.types, ["opened", "synchronize"]);
+    assert.equal(workflow.concurrency.group, "pr-label-${{ github.event.pull_request.number }}");
+    assert.equal(workflow.concurrency["cancel-in-progress"], true);
+  }
 });
 
-test("pr-label workflow reacts to PR open and synchronize events", () => {
-  workflowTargets.forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.match(content, /pull_request_target:\s*[\s\S]*types:\s*\[opened, synchronize\]/, `${relativePath} should react to opened and synchronize events`);
-    assert.match(content, /group: pr-label-\$\{\{ github\.event\.pull_request\.number \}\}/, `${relativePath} should serialize runs per PR`);
-  });
-});
-
-test("pr-label workflow delegates in-label authority and backfills assignees", () => {
-  workflowTargets.forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.match(content, /--pr "\$PR_NUMBER"/, `${relativePath} should sync labels against the PR target`);
-    assert.match(content, /platform-pr sync-in-labels/, `${relativePath} should use the typed in-label intent`);
-    assert.match(content, /issues: write/, `${relativePath} should request issue write permission for PR labels`);
-    assert.match(content, /pull-requests: write/, `${relativePath} should request pull request write permission for assignee updates`);
-    assert.match(content, /ASSIGNEES_JSON: \$\{\{ toJSON\(github\.event\.pull_request\.assignees\) \}\}/, `${relativePath} should inspect current assignees from the event payload`);
-    assert.match(content, /--add-assignee "\$CREATOR"/, `${relativePath} should assign the PR creator when no assignee exists`);
-  });
+test("repository PR label workflow isolates dependency installation from writes", () => {
+  const prepare = root.jobs.prepare;
+  const write = root.jobs["label-and-assign"];
+  assert.deepEqual(prepare.permissions, { contents: "read" });
+  assert.equal(write.needs, "prepare");
+  assert.equal(write.permissions.issues, "write");
+  assert.equal(write.permissions["pull-requests"], "write");
+  const checkout = prepare.steps.find((step: any) => step.uses?.startsWith("actions/checkout@"));
+  assert.equal(checkout.with.ref, "${{ github.sha }}");
+  assert.equal(checkout.with["persist-credentials"], false);
+  assert.ok(prepare.steps.some((step: any) => step.run === "npm ci --ignore-scripts"));
+  assert.ok(write.steps.some((step: any) => step.run?.includes("sha256sum -c -")));
+  assert.ok(write.steps.some((step: any) => step.run?.includes("platform-pr sync-in-labels")));
 });

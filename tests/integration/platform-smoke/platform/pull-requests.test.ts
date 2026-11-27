@@ -159,7 +159,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
       if (args[1] === 'graphql' && args.some((arg) => arg.includes('closingIssuesReferences'))) {
         return { ok: true, value: { data: { repository: { pullRequest: {
-          closingIssuesReferences: { nodes: [{ number: 7 }], pageInfo: { hasNextPage: false, endCursor: null } }
+          closingIssuesReferences: { nodes: [{ number: 7, repository: { nameWithOwner: 'o/r' } }], pageInfo: { hasNextPage: false, endCursor: null } }
         } } } } };
       }
       if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
@@ -189,7 +189,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[] } = {}) {
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[]; issueRepositories?: string[] } = {}) {
   const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
@@ -241,7 +241,7 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
       if (args[1] === 'graphql' && args.some((arg) => arg.includes('closingIssuesReferences'))) {
         return { ok: true, value: { data: { repository: { pullRequest: {
-          closingIssuesReferences: { nodes: closingIssues.map((number) => ({ number })), pageInfo: { hasNextPage: false, endCursor: null } }
+          closingIssuesReferences: { nodes: closingIssues.map((number, index) => ({ number, repository: { nameWithOwner: fixtureOptions.issueRepositories?.[index] || 'o/r' } })), pageInfo: { hasNextPage: false, endCursor: null } }
         } } } } };
       }
       if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
@@ -488,6 +488,21 @@ test('in-label PR sync updates only the PR when no unique closing Issue exists',
       assert.equal(fixture.calls.some((call) => /issues\/7|issues\/8/.test(call)), false);
       assert.equal(result.resources?.length, 1);
       assert.equal(result.resources?.[0]?.kind, 'pull-request');
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('in-label PR sync keeps foreign and mixed closing Issues PR-only', async () => {
+  for (const repositories of [['external/repo'], ['o/r', 'external/repo']]) {
+    const fixture = prOnlyInLabelFixture(repositories.map(() => 7), { issueRepositories: repositories });
+    try {
+      const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+      assert.equal(result.status, 'degraded');
+      assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature']);
+      assert.equal(fixture.calls.some((call) => /issues\/7/.test(call)), false);
+      assert.equal(result.resources?.[0]?.effect, 'applied');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }

@@ -13,7 +13,8 @@ type RunScriptOptions = {
   currentLabels?: string[];
   targets?: string[];
   prefix?: string;
-  failMode?: "" | "always" | "edit";
+  failMode?: "" | "always" | "edit" | "read42" | "remove43" | "add44";
+  strict?: boolean;
 };
 type FakeGhState = {
   calls: string[][];
@@ -49,6 +50,7 @@ if (state.failMode === "always") {
 if ((args[0] === "issue" || args[0] === "pr") && args[1] === "view") {
   state.calls.push(args);
   save();
+  if (state.failMode === "read42") { fs.writeSync(2, "read failed\\n"); process.exit(42); }
   printLabels(args[0]);
   process.exit(0);
 }
@@ -58,6 +60,12 @@ if ((args[0] === "issue" || args[0] === "pr") && args[1] === "edit") {
   const labelsKey = args[0] === "issue" ? "issueLabels" : "prLabels";
   const addIndex = args.indexOf("--add-label");
   const removeIndex = args.indexOf("--remove-label");
+
+  if ((state.failMode === "remove43" && removeIndex !== -1) || (state.failMode === "add44" && addIndex !== -1)) {
+    save();
+    process.stderr.write("write failed\\n");
+    process.exit(removeIndex !== -1 ? 43 : 44);
+  }
 
   if (state.failMode === "edit") {
     save();
@@ -95,7 +103,7 @@ process.exit(1);
   }
 }
 
-function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "" }: RunScriptOptions = {}) {
+function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "", strict = false }: RunScriptOptions = {}) {
   const tempDir = createTempDir("sync-labels-script-");
   const statePath = path.join(tempDir, "state.json");
   const binDir = path.join(tempDir, "bin");
@@ -116,6 +124,8 @@ function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = 
     kind === "issue" ? "--issue" : "--pr", "214",
     "--prefix", prefix
   ];
+
+  if (strict) args.push("--strict");
 
   targets.forEach((label) => {
     args.push("--target", label);
@@ -314,4 +324,26 @@ test("sync-labels script tolerates gh edit failures", () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+
+test("strict sync stops after a failed read without writing", () => {
+  const { result, state } = runScript({ strict: true, failMode: "read42", targets: ["type: bug"] });
+  assert.equal(result.status, 42);
+  assert.match(result.stderr, /read failed/);
+  assert.deepEqual(editCalls(state, "issue"), []);
+});
+
+test("strict sync stops after a failed removal without adding", () => {
+  const { result, state } = runScript({ strict: true, failMode: "remove43", currentLabels: ["type: feature"], targets: ["type: bug"] });
+  assert.equal(result.status, 43);
+  assert.equal(editCalls(state, "issue").length, 1);
+  assert.ok(editCalls(state, "issue")[0]!.includes("--remove-label"));
+});
+
+test("strict sync reports a failed addition after an earlier successful removal", () => {
+  const { result, state } = runScript({ strict: true, failMode: "add44", currentLabels: ["type: feature", "other"], targets: ["type: bug", "type: fix"] });
+  assert.equal(result.status, 44);
+  assert.equal(editCalls(state, "issue").length, 2);
+  assert.deepEqual(state.issueLabels, ["other"]);
 });

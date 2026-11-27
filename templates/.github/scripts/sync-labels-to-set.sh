@@ -23,9 +23,22 @@ number=""
 kind=""
 prefix=""
 targets=""
+strict=false
+
+run_gh() {
+  if [ "$strict" = true ]; then
+    gh "$@"
+  else
+    gh "$@" 2>/dev/null || true
+  fi
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --strict)
+      strict=true
+      shift
+      ;;
     --repo)
       [ $# -ge 2 ] || usage
       repo=$2
@@ -80,18 +93,16 @@ done <<EOF
 $targets
 EOF
 
-current_labels=$(gh "$kind" view "$number" \
+current_labels=$(run_gh "$kind" view "$number" \
   --repo "$repo" \
-  --json labels --jq ".labels[].name | select(startswith(\"$prefix\"))" \
-  2>/dev/null || true)
+  --json labels --jq ".labels[].name | select(startswith(\"$prefix\"))" )
 
 while IFS= read -r label; do
   [ -z "$label" ] && continue
   if ! printf '%s\n' "$targets" | grep -qxF "$label"; then
-    gh "$kind" edit "$number" \
+    run_gh "$kind" edit "$number" \
       --repo "$repo" \
-      --remove-label "$label" \
-      2>/dev/null || true
+      --remove-label "$label"
   fi
 done <<EOF
 $current_labels
@@ -100,10 +111,9 @@ EOF
 while IFS= read -r label; do
   [ -z "$label" ] && continue
   if ! printf '%s\n' "$current_labels" | grep -qxF "$label"; then
-    gh "$kind" edit "$number" \
+    run_gh "$kind" edit "$number" \
       --repo "$repo" \
-      --add-label "$label" \
-      2>/dev/null || true
+      --add-label "$label"
   fi
 done <<EOF
 $targets

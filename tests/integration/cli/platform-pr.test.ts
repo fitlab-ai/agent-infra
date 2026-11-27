@@ -78,6 +78,10 @@ test('platform-pr sync-in-labels routes all remote reads and writes through an e
     assert.equal(output.status, 0, output.stderr || output.stdout);
     const payload = JSON.parse(output.stdout);
     assert.equal(payload.status, 'applied');
+    assert.deepEqual(payload.operations.filter((item: { name: string }) => item.name.startsWith('labels:in:')).map((item: { name: string; status: string }) => [item.name, item.status]), [
+      ['labels:in:issue', 'no-op'], ['labels:in:pull-request', 'applied']
+    ]);
+    assert.deepEqual(payload.resources.find((item: { kind: string }) => item.kind === 'pull-request').after, ['in: core', 'type: feature']);
     assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n'), [
       'context.resolve',
       'changeRequests.inspect',

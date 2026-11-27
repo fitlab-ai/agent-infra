@@ -7,6 +7,7 @@ on:
     types: [closed]
 
 permissions:
+  contents: read
   issues: write
   pull-requests: read
 
@@ -19,8 +20,10 @@ jobs:
           (github.event_name == 'issues' && github.event.action == 'closed' && github.event.issue.state_reason == 'completed') ||
           (github.event_name == 'issues' && github.event.action == 'reopened') ||
           (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
 
@@ -33,10 +36,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          .github/scripts/sync-labels-to-set.sh \
+          if .github/scripts/sync-labels-to-set.sh \
             --repo "$GITHUB_REPOSITORY" \
             --issue "$ISSUE_NUMBER" \
-            --prefix "status:"
+            --prefix "status:" --strict; then
+            rc=0
+          else
+            rc=$?
+          fi
+          labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels) || {
+            echo "Failed to read labels after sync (sync exit $rc)" >&2
+            [ "$rc" -eq 0 ] && exit 1 || exit "$rc"
+          }
+          printf '%s\n' "$labels"
+          [ "$rc" -eq 0 ] || exit "$rc"
+          printf '%s' "$labels" | jq -e '[.labels[].name | select(startswith("status:"))] | length == 0' >/dev/null
 
       - name: Add triage label on issue reopen
         if: github.event_name == 'issues' && github.event.action == 'reopened'
@@ -44,11 +58,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          .github/scripts/sync-labels-to-set.sh \
+          if .github/scripts/sync-labels-to-set.sh \
             --repo "$GITHUB_REPOSITORY" \
             --issue "$ISSUE_NUMBER" \
-            --prefix "status:" \
-            --target "status: waiting-for-triage"
+            --prefix "status:" --strict --target "status: waiting-for-triage"; then
+            rc=0
+          else
+            rc=$?
+          fi
+          labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels) || {
+            echo "Failed to read labels after sync (sync exit $rc)" >&2
+            [ "$rc" -eq 0 ] && exit 1 || exit "$rc"
+          }
+          printf '%s\n' "$labels"
+          [ "$rc" -eq 0 ] || exit "$rc"
+          printf '%s' "$labels" | jq -e '[.labels[].name | select(startswith("status:"))] | . == ["status: waiting-for-triage"]' >/dev/null
 
       - name: Clean status labels on PR merge
         if: >-
@@ -67,9 +91,20 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --json state --jq '.state')
             if [ "$state" = "CLOSED" ]; then
-              .github/scripts/sync-labels-to-set.sh \
+              if .github/scripts/sync-labels-to-set.sh \
                 --repo "$GITHUB_REPOSITORY" \
                 --issue "$issue_number" \
-                --prefix "status:"
+                --prefix "status:" --strict; then
+                rc=0
+              else
+                rc=$?
+              fi
+              labels=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels) || {
+                echo "Failed to read labels for issue $issue_number after sync (sync exit $rc)" >&2
+                [ "$rc" -eq 0 ] && exit 1 || exit "$rc"
+              }
+              printf '%s\n' "$labels"
+              [ "$rc" -eq 0 ] || exit "$rc"
+              printf '%s' "$labels" | jq -e '[.labels[].name | select(startswith("status:"))] | length == 0' >/dev/null
             fi
           done

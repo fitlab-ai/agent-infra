@@ -176,23 +176,39 @@ test("Node runtime baseline stays aligned across metadata and automation", () =>
 });
 
 test("reused GitHub Actions keep consistent refs across workflows", () => {
+  const managed = new Set([
+    ".github/workflows/pr-title-check.yml",
+    ".github/workflows/pr-label.yml",
+    ".github/workflows/status-label.yml"
+  ]);
   const refsByAction = new Map<string, Map<string, string[]>>();
+  const managedRefs = new Map<string, string>();
 
   listFilesRecursive(".github/workflows")
     .filter((relativePath) => /\.ya?ml$/.test(relativePath))
     .forEach((relativePath) => {
-      const workflow = parse(read(relativePath)) as ReleaseWorkflow;
+      const source = read(relativePath);
+      const workflow = parse(source) as ReleaseWorkflow;
+      const versionComments = new Map([...source.matchAll(/uses:\s*([^@\s]+)@([0-9a-f]{40})\s*#\s*(v\d+)(?:\.\d+)*/g)]
+        .map((match) => [`${match[1]}@${match[2]}`, match[3]!]));
 
       Object.values(workflow.jobs ?? {}).forEach((job) => {
         (job.steps ?? []).forEach((step) => {
           const uses = step.uses;
           const separator = uses?.lastIndexOf("@") ?? -1;
-          if (!uses || uses.startsWith("./") || separator < 1 || separator === uses.length - 1) {
-            return;
-          }
-
+          if (!uses || uses.startsWith("./") || separator < 1 || separator === uses.length - 1) return;
           const action = uses.slice(0, separator);
           const ref = uses.slice(separator + 1);
+          if (managed.has(relativePath)) {
+            assert.match(ref, /^[0-9a-f]{40}$/, `${relativePath}: ${action} must use a full SHA`);
+            const major = versionComments.get(uses);
+            assert.ok(major, `${relativePath}: ${action} must document the matching major version`);
+            const key = `${action}@${major}`;
+            const existing = managedRefs.get(key);
+            if (existing) assert.equal(ref, existing, `${key} must use one SHA across managed workflows`);
+            managedRefs.set(key, ref);
+            return;
+          }
           const refs = refsByAction.get(action) ?? new Map<string, string[]>();
           refs.set(ref, [...(refs.get(ref) ?? []), relativePath]);
           refsByAction.set(action, refs);
@@ -201,13 +217,8 @@ test("reused GitHub Actions keep consistent refs across workflows", () => {
     });
 
   refsByAction.forEach((refs, action) => {
-    assert.equal(
-      refs.size,
-      1,
-      `${action} must use one ref across workflows: ${[...refs.entries()]
-        .map(([ref, paths]) => `${ref} in ${paths.join(", ")}`)
-        .join("; ")}`
-    );
+    assert.equal(refs.size, 1, `${action} must use one ref across other workflows: ${[...refs.entries()]
+      .map(([ref, paths]) => `${ref} in ${paths.join(", ")}`).join("; ")}`);
   });
 });
 
