@@ -39,7 +39,7 @@ function changeRequest(config, labels) {
     id: 'change-1',
     identity: configuredIdentity(config, 'change', 1),
     number: 1,
-    state: 'open',
+    state: config.closingMerged ? 'closed' : 'open',
     title: 'External Change',
     body: '',
     headSha: 'a'.repeat(40),
@@ -49,7 +49,8 @@ function changeRequest(config, labels) {
     labels,
     assignees: [],
     milestone: null,
-    mergeCommitSha: null,
+    mergedAt: config.closingMerged ? '2026-08-07T01:00:00Z' : null,
+    mergeCommitSha: config.closingMerged ? 'c'.repeat(40) : null,
     mergeability: { state: 'unknown', detail: null },
     head: { repository: 'external/project', ref: 'feature', sha: 'a'.repeat(40) },
     base: { repository: 'external/project', ref: 'main', sha: 'b'.repeat(40) }
@@ -130,7 +131,9 @@ export default async function createPlatformProvider(input) {
       async inspect(request) {
         recordCall(config, 'changeRequests.inspect');
         if (JSON.stringify(request.target) !== JSON.stringify(pullRequestIdentity)) return wrongTarget('Change request inspect target identity was not preserved');
-        return { ok: true, value: changeRequest(config, pullRequestLabels) };
+        const value = changeRequest(config, pullRequestLabels);
+        if (config.omitInspectedHead) delete value.head;
+        return { ok: true, value };
       },
       async listFiles(request) {
         recordCall(config, 'changeRequests.listFiles');

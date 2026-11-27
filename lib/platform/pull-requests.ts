@@ -478,6 +478,23 @@ function inspectedPullRequestIdentityError(
   return null;
 }
 
+function missingFreshSide(side: ProviderChangeRequestSnapshot['head'], sha: ProviderChangeRequestSnapshot['headSha']): boolean {
+  return !side?.repository?.trim() || !side.ref?.trim() || !(sha || side.sha)?.trim()
+    || Boolean(sha && side.sha && sha !== side.sha);
+}
+
+function freshIdentityError(remote: ProviderChangeRequestSnapshot, merged = false) {
+  for (const [side, sha] of [[remote.head, remote.headSha], [remote.base, remote.baseSha]] as const) {
+    if (missingFreshSide(side, sha)) {
+      return { code: 'PR_IDENTITY_MISSING', message: 'Provider did not supply consistent fresh pull request refs and SHAs', retryable: false };
+    }
+  }
+  if (merged && (remote.state !== 'closed' || !remote.mergedAt || !remote.mergeCommitSha)) {
+    return { code: 'PR_EXTERNAL_IDENTITY_MISMATCH', message: 'Provider did not supply current merge evidence', retryable: false };
+  }
+  return null;
+}
+
 function pullRequestIdentity(pullRequest: PullRequestSnapshot): ResourceIdentity {
   return pullRequest.identity || { kind: 'number', value: pullRequest.number };
 }
@@ -498,7 +515,8 @@ function providerPullRequestError(
 
 async function inspectExternalPullRequest(
   base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
-  prIdentity: ResourceIdentity
+  prIdentity: ResourceIdentity,
+  requireFresh = false
 ): Promise<PullRequestResult> {
   const prNumber = resourceIdentityNumber(prIdentity);
   const fallback = base.fact?.state === 'bound' && resourceIdentityEquals(base.fact.identity.resource, prIdentity)
@@ -510,6 +528,8 @@ async function inspectExternalPullRequest(
   if (!inspected.ok) return providerPullRequestError(base, inspected.error, prNumber);
   const identityError = inspectedPullRequestIdentityError(inspected.value, prIdentity);
   if (identityError) return providerPullRequestError(base, identityError, prNumber);
+  const freshError = requireFresh ? freshIdentityError(inspected.value) : null;
+  if (freshError) return providerPullRequestError(base, freshError, prNumber);
   const pullRequest = normalizeProviderPullRequest(inspected.value, base.context.platform.repository!, prNumber || 0, fallback);
   return result('no-op', base.resolved.taskId, base.issueNumber, prNumber, {
     platform: base.context.platform,
@@ -989,6 +1009,14 @@ function writeCreateStarted(base: Awaited<ReturnType<typeof resolvedContext>> & 
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
 
+function boundIdentityMatches(previous: ReturnType<typeof deliveryIdentity>, current: ReturnType<typeof deliveryIdentity>): boolean {
+  return repositoryKey(previous.repository) === repositoryKey(current.repository)
+    && repositoryKey(previous.head.repository) === repositoryKey(current.head.repository)
+    && previous.head.ref === current.head.ref
+    && repositoryKey(previous.base.repository) === repositoryKey(current.base.repository)
+    && previous.base.ref === current.base.ref;
+}
+
 function bindIdentity(
   base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
   pullRequest: PullRequestSnapshot,
@@ -1008,7 +1036,9 @@ function bindIdentity(
     code: 'PR_BIND_CONFLICT', message: 'Task is already bound to a different pull request identity'
   } };
   if (base.prIdentity && resourceIdentityEquals(base.prIdentity, pullRequestIdentity(pullRequest)) && base.fact?.state === 'bound') {
-    if (JSON.stringify(base.fact.identity) !== JSON.stringify(deliveryIdentity(pullRequest))) return { status: 'failed' as const, error: {
+    const previous = base.fact.identity;
+    const current = deliveryIdentity(pullRequest);
+    if (!boundIdentityMatches(previous, current)) return { status: 'failed' as const, error: {
       code: 'PR_BIND_IDENTITY_MISMATCH', message: `Task binding for PR #${pullRequest.number} does not match the fetched pull request identity`
     } };
     return { status: 'no-op' as const, error: null };
@@ -1041,7 +1071,7 @@ async function bindPlatformPullRequestImpl(taskRef: string, options: BindOptions
   if (base.prIdentity && !resourceIdentityEquals(base.prIdentity, prIdentity)) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PR_BIND_CONFLICT', message: 'Task is already bound to a different pull request identity', retryable: false }
   });
-  const inspected = await inspectExternalPullRequest(base, prIdentity);
+  const inspected = await inspectExternalPullRequest(base, prIdentity, true);
   if (inspected.status === 'failed' || inspected.status === 'blocked' || !inspected.pullRequest) return inspected;
   return bindInspectedPullRequest(base, options, inspected.pullRequest, requestedNumber);
 }
@@ -1204,6 +1234,8 @@ async function recheckExternalPullRequest(base: ReadyPlatformContext, selected: 
   if (identityError) return { pullRequest: null, error: externalResult(result(identityError.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: selected.selected, error: identityError
   }), { candidates: selected.candidates, eligible: selected.eligible, selected: selected.selected }) };
+  const freshError = freshIdentityError(response.value, true);
+  if (freshError) return { pullRequest: null, error: externalSelectionFailure(base, selected, selected.selected, freshError) };
   const current = normalizeProviderPullRequest(response.value, base.context.platform.repository!, selected.selected.number, selected.selected);
   if (!sameDeliveryIdentity(selected.selected, current)) return { pullRequest: null, error: externalSelectionFailure(base, selected, current,
     { code: 'PR_EXTERNAL_IDENTITY_MISMATCH', message: 'Selected pull request identity changed before task binding', retryable: false }) };
@@ -1371,7 +1403,7 @@ async function createPlatformPullRequestWithProjection(taskRef: string, options:
 }
 
 async function reuseBoundPullRequest(options: CreateOptions, base: ReadyPlatformContext, verifiedHeadSha: string | undefined): Promise<PullRequestResult> {
-  const inspected = await inspectExternalPullRequest(base, base.prIdentity!);
+  const inspected = await inspectExternalPullRequest(base, base.prIdentity!, true);
   if (inspected.status === 'failed' || inspected.status === 'blocked') {
     return withCreation(inspected, PRECONDITION_NOT_CREATED);
   }
@@ -1434,6 +1466,8 @@ async function bindCreatedPullRequest(options: CreateOptions, base: ReadyPlatfor
   if (!inspected.ok) return withCreation(providerPullRequestError(base, inspected.error, number), { kind: 'created', createdByCurrentOperation: true });
   const identityError = inspectedPullRequestIdentityError(inspected.value, createdIdentity);
   if (identityError) return withCreation(providerPullRequestError(base, identityError, number), { kind: 'created', createdByCurrentOperation: true });
+  const freshError = freshIdentityError(inspected.value);
+  if (freshError) return withCreation(providerPullRequestError(base, freshError, number), { kind: 'created', createdByCurrentOperation: true });
   const pullRequest = normalizeProviderPullRequest(
     inspected.value,
     base.context.platform.repository!,
