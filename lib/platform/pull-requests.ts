@@ -978,6 +978,9 @@ function githubEndpointPayloadMatches(event: GitHubPullRequestEvent, pr: string)
 }
 
 function githubEndpointEventMatches(pr: string): boolean {
+  const workflowPrefix = 'fitlab-ai/agent-infra/.github/workflows/pr-label.yml@refs/heads/';
+  const workflowRef = process.env.GITHUB_WORKFLOW_REF || '';
+  if (!workflowRef.startsWith(workflowPrefix) || workflowRef.length === workflowPrefix.length) return false;
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_EVENT_NAME !== 'pull_request_target'
     || process.env.GITHUB_REPOSITORY !== 'fitlab-ai/agent-infra' || !/^[1-9]\d*$/.test(pr)) return false;
   try {

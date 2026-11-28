@@ -189,7 +189,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[]; issueRepositories?: string[]; failReadback?: boolean; mutateOnFailure?: boolean; failIssueWrite?: boolean; readbackIdentityMismatch?: boolean; lowRole?: boolean; denyWrites?: boolean; repository?: string } = {}) {
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[]; issueRepositories?: string[]; failReadback?: boolean; mutateOnFailure?: boolean; failIssueWrite?: boolean; readbackIdentityMismatch?: boolean; lowRole?: boolean; denyWrites?: boolean; repository?: string; forkHead?: boolean } = {}) {
   const repository = fixtureOptions.repository || 'o/r';
   const root = prByNumberFixture(repository);
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
@@ -233,7 +233,7 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
       if (fixtureOptions.failReadback && calls.some((call) => call.includes('POST'))) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'readback unavailable', retryable: true } };
       const wrongIdentity = fixtureOptions.identityMismatch || (fixtureOptions.readbackIdentityMismatch && calls.some((call) => call.includes('POST')));
       const pr = remote(wrongIdentity ? 43 : 42);
-      pr.head.repo.full_name = repository;
+      pr.head.repo.full_name = fixtureOptions.forkHead ? 'contributor/fork' : repository;
       pr.base.repo.full_name = repository;
       return { ok: true, value: { ...pr, labels: prLabels.map((name) => ({ name })) } };
     }
@@ -506,17 +506,17 @@ test('in-label PR sync updates only the PR when no unique closing Issue exists',
 });
 
 function useTrustedLabelEvent(root: string) {
-  const names = ['GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_EVENT_PATH'] as const;
+  const names = ['GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_EVENT_PATH', 'GITHUB_WORKFLOW_REF'] as const;
   const before = names.map((name) => process.env[name]);
   const eventPath = path.join(root, 'event.json');
   fs.writeFileSync(eventPath, JSON.stringify({ action: 'opened', number: 42, repository: { full_name: 'fitlab-ai/agent-infra' }, pull_request: { number: 42, base: { repo: { full_name: 'fitlab-ai/agent-infra' } } } }));
-  Object.assign(process.env, { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_REPOSITORY: 'fitlab-ai/agent-infra', GITHUB_EVENT_PATH: eventPath });
+  Object.assign(process.env, { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_REPOSITORY: 'fitlab-ai/agent-infra', GITHUB_EVENT_PATH: eventPath, GITHUB_WORKFLOW_REF: ['fitlab-ai/agent-infra/.github/workflows/pr-label.yml', 'refs/heads/release/next'].join('@') });
   return () => names.forEach((name, index) => { if (before[index] === undefined) delete process.env[name]; else process.env[name] = before[index]; });
 }
 
 test('GitHub endpoint authorization keeps ordinary low-role gate and honors write outcome', async () => {
   for (const denied of [false, true]) {
-    const fixture = prOnlyInLabelFixture([7], { lowRole: true, denyWrites: denied, repository: 'fitlab-ai/agent-infra' });
+    const fixture = prOnlyInLabelFixture([7], { lowRole: true, denyWrites: denied, repository: 'fitlab-ai/agent-infra', forkHead: true });
     const restoreEvent = useTrustedLabelEvent(fixture.root);
     try {
       const ordinary = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
@@ -530,6 +530,7 @@ test('GitHub endpoint authorization keeps ordinary low-role gate and honors writ
         assert.equal(fixture.calls.some((call) => /issues\/42\/labels/.test(call)), false);
       } else {
         assert.equal(outcome.status, 'applied');
+        assert.equal(outcome.pullRequest?.head.repository, 'contributor/fork');
         assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
         assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature']);
       }

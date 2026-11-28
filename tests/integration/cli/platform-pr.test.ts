@@ -63,10 +63,10 @@ test('endpoint authorization rejects mismatched event scope before platform call
   try {
     const eventPath = path.join(root, 'event.json');
     const event = { action: 'opened', number: 42, repository: { full_name: 'fitlab-ai/agent-infra' }, pull_request: { number: 42, base: { repo: { full_name: 'fitlab-ai/agent-infra' } } } };
-    for (const scenario of ['repo', 'pr']) {
+    for (const scenario of ['repo', 'pr', 'workflow']) {
       fs.writeFileSync(eventPath, JSON.stringify(scenario === 'repo' ? { ...event, repository: { full_name: 'other/repo' } } : event));
       const output = run(['sync-in-labels', '--pr', scenario === 'pr' ? '43' : '42', '--github-endpoint-auth'], {
-        cwd: root, env: { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_REPOSITORY: 'fitlab-ai/agent-infra', GITHUB_EVENT_PATH: eventPath, AGENT_INFRA_GH_BIN: path.join(root, 'must-not-run') }
+        cwd: root, env: { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_REPOSITORY: 'fitlab-ai/agent-infra', GITHUB_EVENT_PATH: eventPath, GITHUB_WORKFLOW_REF: scenario === 'workflow' ? ['fitlab-ai/agent-infra/.github/workflows/other.yml', 'refs/heads/main'].join('@') : ['fitlab-ai/agent-infra/.github/workflows/pr-label.yml', 'refs/heads/release/next'].join('@'), AGENT_INFRA_GH_BIN: path.join(root, 'must-not-run') }
       });
       assert.equal(output.status, 1);
       assert.equal(JSON.parse(output.stdout).error.code, 'IN_LABEL_SYNC_SCOPE_INVALID');
