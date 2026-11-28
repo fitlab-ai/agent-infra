@@ -58,22 +58,6 @@ test('platform-pr sync-in-labels requires a PR token before platform access', ()
   assert.equal(JSON.parse(output.stdout).error.code, 'PR_PAYLOAD_INVALID');
 });
 
-test('endpoint authorization rejects mismatched event scope before platform calls', () => {
-  const root = createTempDir('platform-pr-event-scope-');
-  try {
-    const eventPath = path.join(root, 'event.json');
-    const event = { action: 'opened', number: 42, repository: { full_name: 'fitlab-ai/agent-infra' }, pull_request: { number: 42, base: { repo: { full_name: 'fitlab-ai/agent-infra' } } } };
-    for (const scenario of ['repo', 'pr', 'workflow']) {
-      fs.writeFileSync(eventPath, JSON.stringify(scenario === 'repo' ? { ...event, repository: { full_name: 'other/repo' } } : event));
-      const output = run(['sync-in-labels', '--pr', scenario === 'pr' ? '43' : '42', '--github-endpoint-auth'], {
-        cwd: root, env: { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_REPOSITORY: 'fitlab-ai/agent-infra', GITHUB_EVENT_PATH: eventPath, GITHUB_WORKFLOW_REF: scenario === 'workflow' ? ['fitlab-ai/agent-infra/.github/workflows/other.yml', 'refs/heads/main'].join('@') : ['fitlab-ai/agent-infra/.github/workflows/pr-label.yml', 'refs/heads/release/next'].join('@'), AGENT_INFRA_GH_BIN: path.join(root, 'must-not-run') }
-      });
-      assert.equal(output.status, 1);
-      assert.equal(JSON.parse(output.stdout).error.code, 'IN_LABEL_SYNC_SCOPE_INVALID');
-    }
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
-});
-
 test('platform-pr sync-in-labels routes all remote reads and writes through an external provider', () => {
   const root = createTempDir('platform-pr-provider-');
   const calls = path.join(root, 'provider-calls.txt');
@@ -94,10 +78,6 @@ test('platform-pr sync-in-labels routes all remote reads and writes through an e
     assert.equal(output.status, 0, output.stderr || output.stdout);
     const payload = JSON.parse(output.stdout);
     assert.equal(payload.status, 'applied');
-    assert.deepEqual(payload.operations.filter((item: { name: string }) => item.name.startsWith('labels:in:')).map((item: { name: string; status: string }) => [item.name, item.status]), [
-      ['labels:in:issue', 'no-op'], ['labels:in:pull-request', 'applied']
-    ]);
-    assert.deepEqual(payload.resources.find((item: { kind: string }) => item.kind === 'pull-request').after, ['in: core', 'type: feature']);
     assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n'), [
       'context.resolve',
       'changeRequests.inspect',

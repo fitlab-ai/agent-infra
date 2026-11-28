@@ -347,3 +347,45 @@ test("strict sync reports a failed addition after an earlier successful removal"
   assert.equal(editCalls(state, "issue").length, 2);
   assert.deepEqual(state.issueLabels, ["other"]);
 });
+
+test("PR label entry writes verified targets and reads back failed writes", () => {
+  for (const scenario of ["unique", "unknown", "write-fails"]) {
+    const root = createTempDir("pr-label-entry-");
+    const bin = path.join(root, "bin");
+    const statePath = path.join(root, "state.json");
+    const fake = path.join(bin, "fake-gh.cjs");
+    write(statePath, JSON.stringify({ scenario, calls: [], labels: { "1": ["keep"], "5": ["keep"] } }));
+    write(fake, `
+const fs = require('node:fs');
+const state = JSON.parse(fs.readFileSync(process.env.GH_FAKE_STATE, 'utf8'));
+const args = process.argv.slice(2); state.calls.push(args); fs.writeFileSync(process.env.GH_FAKE_STATE, JSON.stringify(state));
+const endpoint = args[1];
+if (endpoint === 'graphql') { console.log(JSON.stringify({ data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 5, ...(state.scenario === 'unknown' ? {} : { repository: { nameWithOwner: 'fitlab-ai/agent-infra' } }) }], pageInfo: { hasNextPage: false, endCursor: null } } } } } })); process.exit(0); }
+if (endpoint.includes('/pulls/')) { console.log(JSON.stringify([[{ filename: 'lib/example.ts' }]])); process.exit(0); }
+if (endpoint.includes('/issues/')) {
+  const id = endpoint.match(/issues\\/(\\d+)/)[1];
+  if (args.includes('POST')) {
+    if (state.scenario === 'write-fails') { console.error('denied'); process.exit(1); }
+    state.labels[id].push('in: cli'); fs.writeFileSync(process.env.GH_FAKE_STATE, JSON.stringify(state)); console.log('{}'); process.exit(0);
+  }
+  console.log(JSON.stringify([state.labels[id].map(name => ({ name }))])); process.exit(0);
+}
+console.log(JSON.stringify([[{ name: 'in: cli' }]]));
+`);
+    writeNodeCommandShim(path.join(bin, "gh"), fake);
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", filePath(".github/scripts/sync-pr-in-labels.ts")], {
+      cwd: filePath("."), encoding: "utf8", env: { ...envWithPrependedPath(process.env, bin), GH_FAKE_STATE: statePath, GITHUB_REPOSITORY: "fitlab-ai/agent-infra", PR_NUMBER: "1" }
+    });
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (scenario === "write-fails") {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /denied/);
+      assert.equal(state.calls.filter((call: string[]) => call[1]?.includes("/issues/1/labels?")).length, 2);
+      assert.equal(state.calls.filter((call: string[]) => call.includes("POST")).length, 1);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(state.labels["1"], ["keep", "in: cli"]);
+      assert.deepEqual(state.labels["5"], scenario === "unique" ? ["keep", "in: cli"] : ["keep"]);
+    }
+  }
+});

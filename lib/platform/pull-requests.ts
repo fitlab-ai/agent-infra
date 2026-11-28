@@ -680,7 +680,7 @@ type InLabelPlanningContext = {
   issueIdentity: ResourceIdentity | null;
   issueNumber: number | null;
   issue: ProviderIssueSnapshot | null;
-  options: SharedOptions & { dryRun?: boolean; githubEndpointAuth?: boolean };
+  options: SharedOptions & { dryRun?: boolean };
 };
 
 type InLabelResourcePlan = {
@@ -734,9 +734,10 @@ async function verifyInLabelResource(input: InLabelExecutionContext, item: InLab
   return { currentPullRequest, successfulWrites };
 }
 
-async function writeInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, targetIdentity: ResourceIdentity) {
-  const { provider, operationContext } = input;
-  return item.kind === 'issue'
+async function executeInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, currentPullRequest: PullRequestSnapshot, successfulWrites: number): Promise<PullRequestResult | { currentPullRequest: PullRequestSnapshot; successfulWrites: number }> {
+  const { provider, context, operationContext, pullRequestIdentity, prNumber, changedFiles, closingIssueIdentities, issueIdentity, issueNumber, operations, resourcesState } = input;
+  const targetIdentity = item.kind === 'issue' ? issueIdentity! : pullRequestIdentity;
+  const synced = item.kind === 'issue'
     ? provider.issues?.update
       ? await provider.issues.update({
         context: operationContext,
@@ -755,49 +756,21 @@ async function writeInLabelResource(input: InLabelExecutionContext, item: InLabe
         mutation: { idempotencyKey: `pull-request:update:${serializeResourceIdentity(targetIdentity)}:in-labels`, target: targetIdentity }
       })
       : unsupportedProviderOperation(provider, 'changeRequests.update');
-}
-
-async function readFailedInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, targetIdentity: ResourceIdentity, retryable: boolean) {
-  const { provider, operationContext, resourcesState } = input;
-  const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
-  state.effect = 'unknown';
-  state.after = null;
-  try {
-    const observed = item.kind === 'issue'
-      ? await provider.issues?.inspect?.({ context: operationContext, target: targetIdentity })
-      : await provider.changeRequests?.inspect?.({ context: operationContext, target: targetIdentity });
-    if (observed?.ok && Array.isArray(observed.value.labels) && resourceIdentityEquals(observed.value.identity, targetIdentity)
-      && (item.kind !== 'pull-request' || !inspectedPullRequestIdentityError(observed.value as ProviderChangeRequestSnapshot, targetIdentity))) {
-      const labels = observed.value.labels;
-      state.after = labels;
-      if (!retryable && [...labels].sort().join('\0') === [...state.before].sort().join('\0')) state.effect = 'no-op';
-    }
-  } catch {
-    // Preserve the original write failure and unknown readback outcome.
+  if (!synced.ok) {
+    const state = resourcesState.find((resource) => resource.kind === item.kind && resourceIdentityEquals(resource.identity, item.identity))!;
+    const retryable = synced.error.retryable || providerErrorRetryable(synced.error.code);
+    state.effect = retryable ? 'unknown' : 'no-op';
+    state.after = state.effect === 'unknown' ? null : item.snapshot.labels;
+    const partial = successfulWrites > 0 || retryable;
+    const error = partial
+      ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+      : synced.error;
+    return result(partial ? 'blocked' : providerStatus(synced.error), null, issueNumber, prNumber, {
+      changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
+      pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
+      evidence: { kind: 'pull-request-files', pullRequestFiles: changedFiles, closingIssues: closingIssueIdentities }, error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    });
   }
-  return state;
-}
-
-async function failedInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, targetIdentity: ResourceIdentity, currentPullRequest: PullRequestSnapshot, successfulWrites: number, failure: Extract<Awaited<ReturnType<typeof writeInLabelResource>>, { ok: false }>) {
-  const { context, pullRequestIdentity, prNumber, changedFiles, closingIssueIdentities, issueNumber, operations, resourcesState } = input;
-  const retryable = failure.error.retryable || providerErrorRetryable(failure.error.code);
-  const state = await readFailedInLabelResource(input, item, targetIdentity, retryable);
-  const observedDifference = state.after !== null && [...state.after].sort().join('\0') !== [...state.before].sort().join('\0');
-  const partial = successfulWrites > 0 || state.effect === 'unknown';
-  const error = partial
-    ? { ...failure.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown (${failure.error.code}): ${failure.error.message}${observedDifference ? '; readback differs from before, cause unknown' : ''}` }
-    : failure.error;
-  return result(partial ? 'blocked' : providerStatus(failure.error), null, issueNumber, prNumber, {
-    changed: successfulWrites > 0 || observedDifference, platform: context.platform, capabilities: context.capabilities,
-    pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
-    evidence: { kind: 'pull-request-files', pullRequestFiles: changedFiles, closingIssues: closingIssueIdentities }, error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
-  });
-}
-
-async function executeInLabelResource(input: InLabelExecutionContext, item: InLabelResourcePlan, currentPullRequest: PullRequestSnapshot, successfulWrites: number): Promise<PullRequestResult | { currentPullRequest: PullRequestSnapshot; successfulWrites: number }> {
-  const targetIdentity = item.kind === 'issue' ? input.issueIdentity! : input.pullRequestIdentity;
-  const synced = await writeInLabelResource(input, item, targetIdentity);
-  if (!synced.ok) return failedInLabelResource(input, item, targetIdentity, currentPullRequest, successfulWrites, synced);
   successfulWrites += synced.value.changed ? 1 : 0;
   return verifyInLabelResource(input, item, targetIdentity, currentPullRequest, successfulWrites);
 }
@@ -836,16 +809,15 @@ async function planAndSyncInLabelResources(input: InLabelPlanningContext): Promi
       mapping: mapping, repositoryLabels
     })
   }));
-  const canAttemptWrites = context.capabilities.triage || (options.githubEndpointAuth === true && context.platform.type === 'github');
   const operations: PlatformOperation[] = [
     { name: 'closing-issues', status: 'no-op', reasonCode: closingIssueIdentities.length === 1 ? null : closingIssueIdentities.length === 0 ? 'ISSUE_ASSOCIATION_NONE' : 'ISSUE_ASSOCIATION_AMBIGUOUS' },
     ...plans.map((item) => ({
       name: `labels:in:${item.kind}`,
-      status: !canAttemptWrites ? 'skipped' as const : item.plan.changed ? 'planned' as const : 'no-op' as const,
-      reasonCode: !canAttemptWrites ? 'TRIAGE_REQUIRED' : null
+      status: !context.capabilities.triage ? 'skipped' as const : item.plan.changed ? 'planned' as const : 'no-op' as const,
+      reasonCode: !context.capabilities.triage ? 'TRIAGE_REQUIRED' : null
     }))
   ];
-  const willWrite = canAttemptWrites && !options.dryRun;
+  const willWrite = context.capabilities.triage && !options.dryRun;
   const resourcesState = plans.map((item) => inLabelResource(
     item.kind,
     item.identity,
@@ -855,8 +827,8 @@ async function planAndSyncInLabelResources(input: InLabelPlanningContext): Promi
     item.plan.changed && willWrite ? 'unknown' : 'no-op',
     item.number
   ));
-  if (options.dryRun || !canAttemptWrites) return result(
-    !canAttemptWrites || closingIssueIdentities.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
+  if (options.dryRun || !context.capabilities.triage) return result(
+    !context.capabilities.triage || closingIssueIdentities.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
     null, issueNumber, prNumber, {
       platform: context.platform, capabilities: context.capabilities, pullRequest: fetched,
       resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
@@ -884,7 +856,7 @@ type InLabelReadContext = {
   pullRequestIdentity: ResourceIdentity;
   prNumber: number | null;
   inspected: ProviderChangeRequestSnapshot;
-  options: SharedOptions & { dryRun?: boolean; githubEndpointAuth?: boolean };
+  options: SharedOptions & { dryRun?: boolean };
 };
 
 type InLabelAssociationContext = InLabelReadContext & {
@@ -962,55 +934,14 @@ async function inspectInLabelPullRequest(input: Omit<InLabelReadContext, 'prNumb
   return readInLabelEvidence({ cwd, provider, context, operationContext, repository, pullRequestIdentity, prNumber, inspected: inspected.value, options });
 }
 
-type GitHubPullRequestEvent = {
-  action?: string;
-  number?: number;
-  repository?: { full_name?: string };
-  pull_request?: { number?: number; base?: { repo?: { full_name?: string } } };
-};
-
-function githubEndpointPayloadMatches(event: GitHubPullRequestEvent, pr: string): boolean {
-  return ['opened', 'synchronize'].includes(event.action || '')
-    && event.repository?.full_name === 'fitlab-ai/agent-infra'
-    && event.pull_request?.base?.repo?.full_name === 'fitlab-ai/agent-infra'
-    && Number.isSafeInteger(event.number) && String(event.number) === pr
-    && event.pull_request?.number === event.number;
-}
-
-function githubEndpointEventMatches(pr: string): boolean {
-  const workflowPrefix = 'fitlab-ai/agent-infra/.github/workflows/pr-label.yml@refs/heads/';
-  const workflowRef = process.env.GITHUB_WORKFLOW_REF || '';
-  if (!workflowRef.startsWith(workflowPrefix) || workflowRef.length === workflowPrefix.length) return false;
-  if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_EVENT_NAME !== 'pull_request_target'
-    || process.env.GITHUB_REPOSITORY !== 'fitlab-ai/agent-infra' || !/^[1-9]\d*$/.test(pr)) return false;
-  try {
-    const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH || '', 'utf8')) as GitHubPullRequestEvent;
-    return githubEndpointPayloadMatches(event, pr);
-  } catch {
-    return false;
-  }
-}
-
-
-function githubEndpointRepositoryInvalid(enabled: boolean | undefined, platform: { type: string | null; repository: string | null }): boolean {
-  return enabled === true && (platform.type !== 'github' || platform.repository !== 'fitlab-ai/agent-infra');
-}
-
-async function syncPlatformPullRequestInLabels(prToken: string | number, options: SharedOptions & { dryRun?: boolean; githubEndpointAuth?: boolean } = {}): Promise<PullRequestResult> {
+async function syncPlatformPullRequestInLabels(prToken: string | number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
   const token = String(prToken);
-  if (options.githubEndpointAuth && !githubEndpointEventMatches(token)) return result('failed', null, null, null, {
-    error: { code: 'IN_LABEL_SYNC_SCOPE_INVALID', message: 'GitHub endpoint authorization requires the matching repository pull_request_target event', retryable: false }
-  });
   const loaded = await resolvePlatformProviderContext({ cwd, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
   if (!loaded.ok || !usable) return result(context.status, null, null, null, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
-  });
-  if (githubEndpointRepositoryInvalid(options.githubEndpointAuth, context.platform)) return result('failed', null, null, null, {
-    platform: context.platform, capabilities: context.capabilities,
-    error: { code: 'IN_LABEL_SYNC_SCOPE_INVALID', message: 'GitHub endpoint authorization requires the expected repository', retryable: false }
   });
   if (!token || token.trim() !== token) return result('failed', null, null, null, {
     platform: context.platform, capabilities: context.capabilities,

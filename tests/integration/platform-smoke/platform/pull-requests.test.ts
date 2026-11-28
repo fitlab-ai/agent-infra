@@ -73,10 +73,10 @@ test('PR mergeability normalization fails closed on missing and contradictory fa
   });
 });
 
-function prByNumberFixture(repository = 'o/r') {
+function prByNumberFixture() {
   const root = createTempDir('pr-by-number-');
   spawnSync('git', ['init', '-q'], { cwd: root });
-  spawnSync('git', ['remote', 'add', 'origin', `git@github.com:${repository}.git`], { cwd: root });
+  spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:o/r.git'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
   return root;
@@ -159,7 +159,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
       if (args[1] === 'graphql' && args.some((arg) => arg.includes('closingIssuesReferences'))) {
         return { ok: true, value: { data: { repository: { pullRequest: {
-          closingIssuesReferences: { nodes: [{ number: 7, repository: { nameWithOwner: 'o/r' } }], pageInfo: { hasNextPage: false, endCursor: null } }
+          closingIssuesReferences: { nodes: [{ number: 7 }], pageInfo: { hasNextPage: false, endCursor: null } }
         } } } } };
       }
       if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
@@ -189,9 +189,8 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[]; issueRepositories?: string[]; failReadback?: boolean; mutateOnFailure?: boolean; failIssueWrite?: boolean; readbackIdentityMismatch?: boolean; lowRole?: boolean; denyWrites?: boolean; repository?: string; forkHead?: boolean } = {}) {
-  const repository = fixtureOptions.repository || 'o/r';
-  const root = prByNumberFixture(repository);
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; identityMismatch?: boolean; prLabels?: string[] } = {}) {
+  const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
   }));
@@ -210,12 +209,10 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
 
   const postLabels = (endpoint: string, request: RequestOptions) => {
     if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) {
-      if (fixtureOptions.mutateOnFailure) prLabels.push('in: core');
       return fixtureOptions.failPullRequestDeterministic
         ? { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } }
         : { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
     }
-    if (fixtureOptions.failIssueWrite && endpoint.includes('/issues/7/')) return { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'issue label rejected', retryable: false } };
     const labels = JSON.parse(request.input || '{}').labels as string[];
     if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
     else prLabels.push(...labels);
@@ -226,17 +223,10 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
     if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
       return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
     }
-    if (args[0] === 'api' && args[1] === `repos/${repository}`) {
-      return { ok: true, value: { full_name: repository, fork: false, permissions: { triage: !fixtureOptions.lowRole, push: !fixtureOptions.lowRole, admin: false } } };
+    if (args[0] === 'api' && args[1] === 'repos/o/r') {
+      return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
     }
-    if (/pulls\/42$/.test(args[1] || '')) {
-      if (fixtureOptions.failReadback && calls.some((call) => call.includes('POST'))) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'readback unavailable', retryable: true } };
-      const wrongIdentity = fixtureOptions.identityMismatch || (fixtureOptions.readbackIdentityMismatch && calls.some((call) => call.includes('POST')));
-      const pr = remote(wrongIdentity ? 43 : 42);
-      pr.head.repo.full_name = fixtureOptions.forkHead ? 'contributor/fork' : repository;
-      pr.base.repo.full_name = repository;
-      return { ok: true, value: { ...pr, labels: prLabels.map((name) => ({ name })) } };
-    }
+    if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(fixtureOptions.identityMismatch ? 43 : 42), labels: prLabels.map((name) => ({ name })) } };
   };
 
   const client: GitHubClient = {
@@ -251,7 +241,7 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
       if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
       if (args[1] === 'graphql' && args.some((arg) => arg.includes('closingIssuesReferences'))) {
         return { ok: true, value: { data: { repository: { pullRequest: {
-          closingIssuesReferences: { nodes: closingIssues.map((number, index) => ({ number, repository: { nameWithOwner: fixtureOptions.issueRepositories?.[index] || repository } })), pageInfo: { hasNextPage: false, endCursor: null } }
+          closingIssuesReferences: { nodes: closingIssues.map((number) => ({ number })), pageInfo: { hasNextPage: false, endCursor: null } }
         } } } } };
       }
       if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
@@ -259,7 +249,6 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
         labels: issueLabels.map((name) => ({ name })), assignees: [], milestone: null
       } };
       if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
-        if (fixtureOptions.denyWrites) return { ok: false, error: { code: 'FORBIDDEN', message: 'endpoint denied', retryable: false } };
         return deleteLabels(endpoint);
       }
       if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
@@ -505,77 +494,6 @@ test('in-label PR sync updates only the PR when no unique closing Issue exists',
   }
 });
 
-function useTrustedLabelEvent(root: string) {
-  const names = ['GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_EVENT_PATH', 'GITHUB_WORKFLOW_REF'] as const;
-  const before = names.map((name) => process.env[name]);
-  const eventPath = path.join(root, 'event.json');
-  fs.writeFileSync(eventPath, JSON.stringify({ action: 'opened', number: 42, repository: { full_name: 'fitlab-ai/agent-infra' }, pull_request: { number: 42, base: { repo: { full_name: 'fitlab-ai/agent-infra' } } } }));
-  Object.assign(process.env, { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_REPOSITORY: 'fitlab-ai/agent-infra', GITHUB_EVENT_PATH: eventPath, GITHUB_WORKFLOW_REF: ['fitlab-ai/agent-infra/.github/workflows/pr-label.yml', 'refs/heads/release/next'].join('@') });
-  return () => names.forEach((name, index) => { if (before[index] === undefined) delete process.env[name]; else process.env[name] = before[index]; });
-}
-
-test('GitHub endpoint authorization keeps ordinary low-role gate and honors write outcome', async () => {
-  for (const denied of [false, true]) {
-    const fixture = prOnlyInLabelFixture([7], { lowRole: true, denyWrites: denied, repository: 'fitlab-ai/agent-infra', forkHead: true });
-    const restoreEvent = useTrustedLabelEvent(fixture.root);
-    try {
-      const ordinary = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
-      assert.equal(ordinary.operations.find((operation) => operation.name === 'labels:in:issue')?.reasonCode, 'TRIAGE_REQUIRED');
-      assert.equal(fixture.calls.some((call) => /DELETE|POST/.test(call)), false);
-      const outcome = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client, githubEndpointAuth: true });
-      assert.equal(outcome.capabilities.triage, false);
-      if (denied) {
-        assert.notEqual(outcome.status, 'applied');
-        assert.match(outcome.error?.message || '', /endpoint denied/);
-        assert.equal(fixture.calls.some((call) => /issues\/42\/labels/.test(call)), false);
-      } else {
-        assert.equal(outcome.status, 'applied');
-        assert.equal(outcome.pullRequest?.head.repository, 'contributor/fork');
-        assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
-        assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature']);
-      }
-    } finally { restoreEvent(); fs.rmSync(fixture.root, { recursive: true, force: true }); }
-  }
-});
-
-test('GitHub endpoint authorization rejects a different target repository before writes', async () => {
-  const fixture = prOnlyInLabelFixture([7], { lowRole: true });
-  const restoreEvent = useTrustedLabelEvent(fixture.root);
-  try {
-    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client, githubEndpointAuth: true });
-    assert.equal(result.error?.code, 'IN_LABEL_SYNC_SCOPE_INVALID');
-    assert.equal(fixture.calls.some((call) => /DELETE|POST/.test(call)), false);
-  } finally { restoreEvent(); fs.rmSync(fixture.root, { recursive: true, force: true }); }
-});
-
-test('GitHub endpoint authorization retains Issue success and PR write failure evidence', async () => {
-  const fixture = prOnlyInLabelFixture([7], { lowRole: true, failPullRequestWrite: true, repository: 'fitlab-ai/agent-infra' });
-  const restoreEvent = useTrustedLabelEvent(fixture.root);
-  try {
-    const outcome = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client, githubEndpointAuth: true });
-    assert.equal(outcome.status, 'blocked');
-    assert.equal(outcome.capabilities.triage, false);
-    assert.equal(outcome.error?.code, 'IN_LABEL_SYNC_PARTIAL');
-    assert.deepEqual(outcome.resources?.map((resource) => resource.effect), ['applied', 'unknown']);
-    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
-  } finally { restoreEvent(); fs.rmSync(fixture.root, { recursive: true, force: true }); }
-});
-
-test('in-label PR sync keeps foreign and mixed closing Issues PR-only', async () => {
-  for (const repositories of [['external/repo'], ['o/r', 'external/repo']]) {
-    const fixture = prOnlyInLabelFixture(repositories.map(() => 7), { issueRepositories: repositories });
-    try {
-      const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
-      assert.equal(result.status, 'degraded');
-      assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature']);
-      assert.equal(fixture.calls.some((call) => /issues\/7/.test(call)), false);
-      assert.equal(result.resources?.[0]?.effect, 'applied');
-    } finally {
-      fs.rmSync(fixture.root, { recursive: true, force: true });
-    }
-  }
-});
-
 test('in-label PR sync rejects a snapshot identity mismatch before writes', async () => {
   const fixture = prOnlyInLabelFixture([], { identityMismatch: true });
   try {
@@ -596,8 +514,6 @@ test('in-label PR sync blocks with partial evidence when the PR write is uncerta
     assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
     assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
     assert.deepEqual(result.resources?.map((resource) => resource.effect), ['applied', 'unknown']);
-    assert.deepEqual(result.resources?.[1]?.after, ['type: feature']);
-    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -618,58 +534,6 @@ test('in-label PR sync upgrades a deterministic PR failure after Issue convergen
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
-});
-
-test('in-label write failure keeps unknown when the failed target cannot be read', async () => {
-  const fixture = prOnlyInLabelFixture([], { failPullRequestWrite: true, failPullRequestDeterministic: true, failReadback: true, prLabels: ['type: feature'] });
-  try {
-    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
-    assert.match(result.error?.message || '', /label rejected/);
-    assert.equal(result.resources?.[0]?.after, null);
-    assert.equal(result.resources?.[0]?.effect, 'unknown');
-    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
-  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
-});
-
-test('deterministic write failure with different readback is partial without attributing the change', async () => {
-  const fixture = prOnlyInLabelFixture([], { failPullRequestWrite: true, failPullRequestDeterministic: true, mutateOnFailure: true, prLabels: ['type: feature'] });
-  try {
-    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
-    assert.match(result.error?.message || '', /label rejected.*cause unknown/);
-    assert.equal(result.changed, true);
-    assert.equal(result.resources?.[0]?.effect, 'unknown');
-    assert.deepEqual(result.resources?.[0]?.after, ['in: core', 'type: feature']);
-    assert.match(fixture.calls.at(-1)!, /pulls\/42/);
-  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
-});
-
-test('failure readback identity mismatch remains unknown', async () => {
-  const fixture = prOnlyInLabelFixture([], { failPullRequestWrite: true, failPullRequestDeterministic: true, readbackIdentityMismatch: true, prLabels: ['type: feature'] });
-  try {
-    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.resources?.[0]?.after, null);
-    assert.equal(result.resources?.[0]?.effect, 'unknown');
-    assert.match(result.error?.message || '', /label rejected/);
-  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
-});
-
-test('failed Issue write reads only that Issue and does not write the PR', async () => {
-  const fixture = prOnlyInLabelFixture([7], { failIssueWrite: true });
-  try {
-    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
-    assert.equal(result.status, 'blocked');
-    assert.match(result.error?.message || '', /issue label rejected/);
-    assert.deepEqual(result.resources?.[0]?.after, ['keep']);
-    assert.equal(result.resources?.[0]?.effect, 'unknown');
-    const failedWrite = fixture.calls.findIndex((call) => /issues\/7\/labels.*POST/.test(call));
-    assert.ok(failedWrite >= 0 && fixture.calls.slice(failedWrite + 1).some((call) => /issues\/7$/.test(call)));
-    assert.equal(fixture.calls.some((call) => /issues\/42\/labels/.test(call)), false);
-  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 });
 
 test('in-label PR sync preserves an unrelated label added after the initial read', async () => {

@@ -67,7 +67,7 @@ function publicProviderErrors(provider: PlatformProvider): PlatformProvider {
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
 const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
-const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number repository{nameWithOwner}} pageInfo{hasNextPage endCursor}}}}}';
+const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number} pageInfo{hasNextPage endCursor}}}}}';
 
 function parseGitHubRemote(remote: string): string | null {
   const trimmed = remote.trim().replace(/\.git$/, '');
@@ -568,17 +568,7 @@ function updateGitHubIssueFields(client: GitHubClient, cwd: string, issueId: str
   return updated.ok ? { ok: true, value: { changed: true } } : updated;
 }
 
-function closingIssueNode(value: unknown): ProviderResult<{ issue: number; repository: string }> {
-  const record = value as { number?: unknown; repository?: { nameWithOwner?: unknown } };
-  const issue = Number(record?.number);
-  const repository = record?.repository?.nameWithOwner;
-  if (!Number.isSafeInteger(issue) || issue <= 0 || typeof repository !== 'string' || !repository.trim()) {
-    return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue repository or identity is invalid');
-  }
-  return { ok: true, value: { issue, repository } };
-}
-
-function parseClosingIssuePage(value: unknown, repositoryName: string): ProviderResult<{ identities: ResourceIdentity[]; foreign: boolean; hasNextPage: boolean; endCursor: string | null }> {
+function parseClosingIssuePage(value: unknown): ProviderResult<{ identities: ResourceIdentity[]; hasNextPage: boolean; endCursor: string | null }> {
   const connection = (value as {
     data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
       nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
@@ -586,14 +576,12 @@ function parseClosingIssuePage(value: unknown, repositoryName: string): Provider
   })?.data?.repository?.pullRequest?.closingIssuesReferences;
   if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue response is incomplete');
   const identities: ResourceIdentity[] = [];
-  let foreign = false;
   for (const node of connection.nodes) {
-    const parsed = closingIssueNode(node);
-    if (!parsed.ok) return { ok: false, error: parsed.error };
-    if (parsed.value.repository.toLowerCase() === repositoryName.toLowerCase()) identities.push({ kind: 'number', value: parsed.value.issue });
-    else foreign = true;
+    const issue = Number((node as { number?: unknown })?.number);
+    if (!Number.isSafeInteger(issue) || issue <= 0) return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue identity is invalid');
+    identities.push({ kind: 'number', value: issue });
   }
-  return { ok: true, value: { identities, foreign, hasNextPage: Boolean(connection.pageInfo.hasNextPage), endCursor: connection.pageInfo.endCursor || null } };
+  return { ok: true, value: { identities, hasNextPage: Boolean(connection.pageInfo.hasNextPage), endCursor: connection.pageInfo.endCursor || null } };
 }
 
 function uniqueResourceIdentities(identities: ResourceIdentity[]): ResourceIdentity[] {
@@ -611,18 +599,15 @@ function fetchClosingIssues(client: GitHubClient, repositoryName: string, cwd: s
   if (!owner || !name) return invalid('IN_LABEL_SYNC_REPOSITORY_INVALID', 'Repository identity is invalid');
   const identities: ResourceIdentity[] = [];
   let cursor: string | null = null;
-  let foreign = false;
   for (;;) {
     const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`];
     if (cursor) args.push('-F', `cursor=${cursor}`);
     const response = client.json<unknown>(args, { cwd });
     if (!response.ok) return response;
-    const page = parseClosingIssuePage(response.value, repositoryName);
+    const page = parseClosingIssuePage(response.value);
     if (!page.ok) return { ok: false, error: page.error };
     identities.push(...page.value.identities);
-    foreign ||= page.value.foreign;
-    // Only scoped numeric identities can be used to mutate the current repository.
-    if (!page.value.hasNextPage) return { ok: true, value: foreign ? [] : uniqueResourceIdentities(identities) };
+    if (!page.value.hasNextPage) return { ok: true, value: uniqueResourceIdentities(identities) };
     if (!page.value.endCursor || page.value.endCursor === cursor) {
       return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue pagination cursor is invalid');
     }

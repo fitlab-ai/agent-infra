@@ -161,7 +161,7 @@ test('GitHub provider paginates and de-duplicates closing Issue identities', asy
       calls.push(args);
       page += 1;
       return { ok: true, value: { data: { repository: { pullRequest: { closingIssuesReferences: {
-        nodes: (page === 1 ? [5, 6] : [6, 7]).map((number) => ({ number, repository: { nameWithOwner: 'Acme/Project' } })),
+        nodes: page === 1 ? [{ number: 5 }, { number: 6 }] : [{ number: 6 }, { number: 7 }],
         pageInfo: page === 1 ? { hasNextPage: true, endCursor: 'cursor-1' } : { hasNextPage: false, endCursor: null }
       } } } } } } as never;
     },
@@ -178,26 +178,6 @@ test('GitHub provider paginates and de-duplicates closing Issue identities', asy
   ] });
   assert.equal(calls.length, 2);
   assert.ok(calls[1]?.includes('cursor=cursor-1'));
-});
-
-test('GitHub provider does not map foreign closing Issues onto the local repository', async () => {
-  for (const repositories of [['elsewhere/project'], ['acme/project', 'elsewhere/project']]) {
-    const client: GitHubClient = {
-      version: () => ({ ok: true, value: '2.72.0' }),
-      json() {
-        return { ok: true, value: { data: { repository: { pullRequest: { closingIssuesReferences: {
-          nodes: repositories.map((nameWithOwner) => ({ number: 5, repository: { nameWithOwner } })),
-          pageInfo: { hasNextPage: false, endCursor: null }
-        } } } } } } as never;
-      },
-      text: () => ({ ok: true, value: '' })
-    };
-    const provider = createGitHubProvider({ providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {} }, client);
-    assert.deepEqual(await provider.changeRequests!.listClosingIssues!({
-      context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' },
-      target: { kind: 'number', value: 31 }
-    }), { ok: true, value: [] });
-  }
 });
 
 test('release-note provider emits typed history and keeps commit and closing-issue facts linked', async () => {

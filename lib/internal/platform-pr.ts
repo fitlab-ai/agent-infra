@@ -21,13 +21,13 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr bind <task-ref> --pr <token> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr skip <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-pr sync-in-labels --pr <token> [--github-endpoint-auth] [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr sync-in-labels --pr <token> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr change-report <task-ref> --agent <agent> --mechanical-file <path> --precheck-file <path> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --change-report-file <path> --result <pr_created|pr_reused|no_op> [--manual-phase pending|final ...] [--strict] [--dry-run] [--cwd <path>]
 `;
 
-const BOOLEAN_FLAGS = new Set(['--draft', '--dry-run', '--metadata', '--closing-issue', '--strict', '--github-endpoint-auth']);
+const BOOLEAN_FLAGS = new Set(['--draft', '--dry-run', '--metadata', '--closing-issue', '--strict']);
 const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--change-report-file', '--mechanical-file', '--precheck-file', '--pr', '--result', '--manual-phase', '--transaction-id', '--receipt-digest', '--pr-head-sha']);
 
 function key(flag: string): string {
@@ -159,16 +159,15 @@ async function handleCreate(
   }
 }
 
-
 async function handleSyncInLabels(args: string[]): Promise<void> {
   const parsed = parse(args, 1);
   if (parsed.error) { fail(parsed.error); return; }
   const values = parsed.values;
-  const unexpected = Object.keys(values).find((name) => !['cwd', 'pr', 'dryRun', 'githubEndpointAuth'].includes(name));
+  const unexpected = Object.keys(values).find((name) => !['cwd', 'pr', 'dryRun'].includes(name));
   if (unexpected) { fail(`sync-in-labels does not accept --${unexpected}`); return; }
   if (typeof values.pr !== 'string' || !values.pr || values.pr.trim() !== values.pr) { fail('sync-in-labels requires a non-empty --pr token'); return; }
   const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
-  finish(await syncPlatformPullRequestInLabels(values.pr, { cwd, dryRun: values.dryRun === true, githubEndpointAuth: values.githubEndpointAuth === true }));
+  finish(await syncPlatformPullRequestInLabels(values.pr, { cwd, dryRun: values.dryRun === true }));
 }
 
 async function handleReadOnlyOperation(operation: string, taskRef: string, cwd: string): Promise<boolean> {
