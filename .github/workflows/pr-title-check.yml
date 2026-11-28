@@ -5,14 +5,14 @@ on:
     types: [opened, edited, synchronize]
 
 permissions:
-  pull-requests: write
+  pull-requests: read
   statuses: write
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: amannn/action-semantic-pull-request@v6.1.3
+      - uses: amannn/action-semantic-pull-request@c5e23b7e584519ee15caa684cf60d056aa9f035f # v6.1.3
         with:
           # 允许的提交类型
           types: |

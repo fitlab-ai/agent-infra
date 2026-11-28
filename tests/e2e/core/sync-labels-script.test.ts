@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { parse } from "yaml";
 
 import { createTempDir, envWithPrependedPath, filePath, read, writeNodeCommandShim } from "../../helpers.ts";
 
@@ -13,7 +14,8 @@ type RunScriptOptions = {
   currentLabels?: string[];
   targets?: string[];
   prefix?: string;
-  failMode?: "" | "always" | "edit";
+  failMode?: "" | "always" | "edit" | "read42" | "remove43" | "add44";
+  strict?: boolean;
 };
 type FakeGhState = {
   calls: string[][];
@@ -49,6 +51,7 @@ if (state.failMode === "always") {
 if ((args[0] === "issue" || args[0] === "pr") && args[1] === "view") {
   state.calls.push(args);
   save();
+  if (state.failMode === "read42") { fs.writeSync(2, "read failed\\n"); process.exit(42); }
   printLabels(args[0]);
   process.exit(0);
 }
@@ -58,6 +61,12 @@ if ((args[0] === "issue" || args[0] === "pr") && args[1] === "edit") {
   const labelsKey = args[0] === "issue" ? "issueLabels" : "prLabels";
   const addIndex = args.indexOf("--add-label");
   const removeIndex = args.indexOf("--remove-label");
+
+  if ((state.failMode === "remove43" && removeIndex !== -1) || (state.failMode === "add44" && addIndex !== -1)) {
+    save();
+    process.stderr.write("write failed\\n");
+    process.exit(removeIndex !== -1 ? 43 : 44);
+  }
 
   if (state.failMode === "edit") {
     save();
@@ -95,7 +104,7 @@ process.exit(1);
   }
 }
 
-function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "" }: RunScriptOptions = {}) {
+function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "", strict = false }: RunScriptOptions = {}) {
   const tempDir = createTempDir("sync-labels-script-");
   const statePath = path.join(tempDir, "state.json");
   const binDir = path.join(tempDir, "bin");
@@ -116,6 +125,8 @@ function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = 
     kind === "issue" ? "--issue" : "--pr", "214",
     "--prefix", prefix
   ];
+
+  if (strict) args.push("--strict");
 
   targets.forEach((label) => {
     args.push("--target", label);
@@ -314,4 +325,93 @@ test("sync-labels script tolerates gh edit failures", () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+
+test("strict sync stops after a failed read without writing", () => {
+  const { result, state } = runScript({ strict: true, failMode: "read42", targets: ["type: bug"] });
+  assert.equal(result.status, 42);
+  assert.match(result.stderr, /read failed/);
+  assert.deepEqual(editCalls(state, "issue"), []);
+});
+
+test("strict sync stops after a failed removal without adding", () => {
+  const { result, state } = runScript({ strict: true, failMode: "remove43", currentLabels: ["type: feature"], targets: ["type: bug"] });
+  assert.equal(result.status, 43);
+  assert.equal(editCalls(state, "issue").length, 1);
+  assert.ok(editCalls(state, "issue")[0]!.includes("--remove-label"));
+});
+
+test("strict sync reports a failed addition after an earlier successful removal", () => {
+  const { result, state } = runScript({ strict: true, failMode: "add44", currentLabels: ["type: feature", "other"], targets: ["type: bug", "type: fix"] });
+  assert.equal(result.status, 44);
+  assert.equal(editCalls(state, "issue").length, 2);
+  assert.deepEqual(state.issueLabels, ["other"]);
+});
+
+test("PR label entry writes verified targets and reads back failed writes", () => {
+  for (const scenario of ["unique", "unknown", "write-fails", "incomplete", "cursor-cycle"]) {
+    const root = createTempDir("pr-label-entry-");
+    const bin = path.join(root, "bin");
+    const statePath = path.join(root, "state.json");
+    const fake = path.join(bin, "fake-gh.cjs");
+    write(statePath, JSON.stringify({ scenario, calls: [], labels: { "1": ["keep"], "5": ["keep"] } }));
+    write(fake, `
+const fs = require('node:fs');
+const state = JSON.parse(fs.readFileSync(process.env.GH_FAKE_STATE, 'utf8'));
+const args = process.argv.slice(2); state.calls.push(args); fs.writeFileSync(process.env.GH_FAKE_STATE, JSON.stringify(state));
+const endpoint = args[1];
+if (endpoint === 'graphql') { console.log(JSON.stringify({ data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 5, ...(state.scenario === 'unknown' ? {} : { repository: { nameWithOwner: 'fitlab-ai/agent-infra' } }) }], pageInfo: { hasNextPage: state.scenario === 'cursor-cycle', endCursor: state.scenario === 'cursor-cycle' ? 'same' : null } } } } } })); process.exit(0); }
+if (endpoint.endsWith('/pulls/1')) { console.log(JSON.stringify({ changed_files: state.scenario === 'incomplete' ? 2 : 1 })); process.exit(0); }
+if (endpoint.includes('/pulls/')) { console.log(JSON.stringify([[{ filename: 'lib/example.ts' }]])); process.exit(0); }
+if (endpoint.includes('/issues/')) {
+  const id = endpoint.match(/issues\\/(\\d+)/)[1];
+  if (args.includes('POST')) {
+    if (state.scenario === 'write-fails') { console.error('denied'); process.exit(1); }
+    state.labels[id].push('in: cli'); fs.writeFileSync(process.env.GH_FAKE_STATE, JSON.stringify(state)); console.log('{}'); process.exit(0);
+  }
+  console.log(JSON.stringify([state.labels[id].map(name => ({ name }))])); process.exit(0);
+}
+console.log(JSON.stringify([[{ name: 'in: cli' }]]));
+`);
+    writeNodeCommandShim(path.join(bin, "gh"), fake);
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", filePath(".github/scripts/sync-pr-in-labels.ts")], {
+      cwd: filePath("."), encoding: "utf8", env: { ...envWithPrependedPath(process.env, bin), GH_FAKE_STATE: statePath, GITHUB_REPOSITORY: "fitlab-ai/agent-infra", PR_NUMBER: "1" }
+    });
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (scenario === "incomplete" || scenario === "cursor-cycle") {
+      assert.notEqual(result.status, 0);
+      assert.equal(state.calls.filter((call: string[]) => call.includes("POST") || call.includes("DELETE")).length, 0);
+      if (scenario === "cursor-cycle") assert.equal(state.calls.filter((call: string[]) => call[1] === "graphql").length, 2);
+    } else if (scenario === "write-fails") {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /denied/);
+      assert.equal(state.calls.filter((call: string[]) => call[1]?.includes("/issues/5/labels?")).length, 2);
+      assert.equal(state.calls.filter((call: string[]) => call.includes("POST")).length, 1);
+      assert.equal(state.calls.find((call: string[]) => call.includes("POST"))[1].includes("/issues/5/"), true);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(state.labels["1"], ["keep", "in: cli"]);
+      assert.deepEqual(state.labels["5"], scenario === "unique" ? ["keep", "in: cli"] : ["keep"]);
+      if (scenario === "unique") assert.deepEqual(state.calls.filter((call: string[]) => call.includes("POST")).map((call: string[]) => call[1]?.match(/issues\/(\d+)/)?.[1]), ["5", "1"]);
+    }
+  }
+});
+
+
+test("PR assignment read failure is best-effort and performs no assignment", () => {
+  const root = createTempDir("pr-assignee-read-");
+  const bin = path.join(root, "bin");
+  const log = path.join(root, "calls.json");
+  const fake = path.join(bin, "fake-gh.cjs");
+  write(fake, `require('node:fs').appendFileSync(process.env.GH_FAKE_STATE, JSON.stringify(process.argv.slice(2)) + '\\n'); console.error('read denied'); process.exit(1);`);
+  writeNodeCommandShim(path.join(bin, "gh"), fake);
+  const workflow = parse(read(".github/workflows/pr-label.yml"));
+  const step = workflow.jobs["label-and-assign"].steps.find((item: any) => item.name === "Assign PR creator if still unassigned");
+  const result = spawnSync("bash", ["-c", step.run], { encoding: "utf8", env: { ...envWithPrependedPath(process.env, bin), GH_FAKE_STATE: log, GITHUB_REPOSITORY: "fitlab-ai/agent-infra", PR_NUMBER: "1", CREATOR: "author" } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /read denied/);
+  const calls = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].includes("POST"), false);
 });

@@ -4,10 +4,7 @@ on:
   pull_request_target:
     types: [opened, synchronize]
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: pr-label-${{ github.event.pull_request.number }}
@@ -16,31 +13,53 @@ concurrency:
 jobs:
   label-and-assign:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
-      - name: Checkout base branch
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - name: Checkout trusted event revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22.9.0
-
-      - name: Sync in-labels
+          package-manager-cache: false
+      - name: Sync and verify in-labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: npm exec --yes --package="@fitlab-ai/agent-infra@latest" -- agent-infra-internal platform-pr sync-in-labels --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE"
-
-      - name: Assign PR creator if unassigned
+        run: node --experimental-strip-types .github/scripts/sync-pr-in-labels.ts
+      - name: Assign PR creator if still unassigned
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CREATOR: ${{ github.event.pull_request.user.login }}
-          ASSIGNEES_JSON: ${{ toJSON(github.event.pull_request.assignees) }}
         run: |
-          count=$(printf '%s' "$ASSIGNEES_JSON" | jq 'length')
-          if [ "$count" -eq 0 ]; then
-            gh pr edit "$PR_NUMBER" \
-              --repo "$GITHUB_REPOSITORY" \
-              --add-assignee "$CREATOR" 2>/dev/null || true
+          set -eu
+          endpoint="repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER"
+          before=$(gh api "$endpoint" --jq '[.assignees[].login]') || {
+            echo "Assignee read failed; skipping assignment" >&2
+            exit 0
+          }
+          if [ "$(printf '%s' "$before" | jq 'length')" -ne 0 ]; then
+            echo "Existing assignees retained: $before"
+            exit 0
           fi
+          rc=0
+          gh api --method POST "$endpoint/assignees" -f "assignees[]=$CREATOR" || rc=$?
+          after=$(gh api "$endpoint" --jq '[.assignees[].login]') || {
+            echo "Assignee readback failed; assignment outcome is unknown (write exit $rc)" >&2
+            exit 0
+          }
+          echo "Assignees after attempt: $after"
+          if [ "$rc" -ne 0 ]; then
+            echo "Assignment failed or author cannot be assigned; review the readback" >&2
+            exit 0
+          fi
+          printf '%s' "$after" | jq -e --arg creator "$CREATOR" 'length == 1 and .[0] == $creator' >/dev/null || {
+            echo "Author missing or concurrent assignment detected; review assignees" >&2
+            exit 0
+          }
