@@ -199,7 +199,7 @@ test("reused GitHub Actions keep consistent refs across workflows", () => {
           if (!uses || uses.startsWith("./") || separator < 1 || separator === uses.length - 1) return;
           const action = uses.slice(0, separator);
           const ref = uses.slice(separator + 1);
-          if (managed.has(relativePath)) {
+          if (managed.has(relativePath.replaceAll("\\", "/"))) {
             assert.match(ref, /^[0-9a-f]{40}$/, `${relativePath}: ${action} must use a full SHA`);
             const major = versionComments.get(uses);
             assert.ok(major, `${relativePath}: ${action} must document the matching major version`);

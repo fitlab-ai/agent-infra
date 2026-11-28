@@ -680,7 +680,7 @@ type InLabelPlanningContext = {
   issueIdentity: ResourceIdentity | null;
   issueNumber: number | null;
   issue: ProviderIssueSnapshot | null;
-  options: SharedOptions & { dryRun?: boolean };
+  options: SharedOptions & { dryRun?: boolean; githubEndpointAuth?: boolean };
 };
 
 type InLabelResourcePlan = {
@@ -836,15 +836,16 @@ async function planAndSyncInLabelResources(input: InLabelPlanningContext): Promi
       mapping: mapping, repositoryLabels
     })
   }));
+  const canAttemptWrites = context.capabilities.triage || (options.githubEndpointAuth === true && context.platform.type === 'github');
   const operations: PlatformOperation[] = [
     { name: 'closing-issues', status: 'no-op', reasonCode: closingIssueIdentities.length === 1 ? null : closingIssueIdentities.length === 0 ? 'ISSUE_ASSOCIATION_NONE' : 'ISSUE_ASSOCIATION_AMBIGUOUS' },
     ...plans.map((item) => ({
       name: `labels:in:${item.kind}`,
-      status: !context.capabilities.triage ? 'skipped' as const : item.plan.changed ? 'planned' as const : 'no-op' as const,
-      reasonCode: !context.capabilities.triage ? 'TRIAGE_REQUIRED' : null
+      status: !canAttemptWrites ? 'skipped' as const : item.plan.changed ? 'planned' as const : 'no-op' as const,
+      reasonCode: !canAttemptWrites ? 'TRIAGE_REQUIRED' : null
     }))
   ];
-  const willWrite = context.capabilities.triage && !options.dryRun;
+  const willWrite = canAttemptWrites && !options.dryRun;
   const resourcesState = plans.map((item) => inLabelResource(
     item.kind,
     item.identity,
@@ -854,8 +855,8 @@ async function planAndSyncInLabelResources(input: InLabelPlanningContext): Promi
     item.plan.changed && willWrite ? 'unknown' : 'no-op',
     item.number
   ));
-  if (options.dryRun || !context.capabilities.triage) return result(
-    !context.capabilities.triage || closingIssueIdentities.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
+  if (options.dryRun || !canAttemptWrites) return result(
+    !canAttemptWrites || closingIssueIdentities.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
     null, issueNumber, prNumber, {
       platform: context.platform, capabilities: context.capabilities, pullRequest: fetched,
       resource: { kind: 'pull-request', number: prNumber, identity: pullRequestIdentity }, operations, resources: resourcesState,
@@ -883,7 +884,7 @@ type InLabelReadContext = {
   pullRequestIdentity: ResourceIdentity;
   prNumber: number | null;
   inspected: ProviderChangeRequestSnapshot;
-  options: SharedOptions & { dryRun?: boolean };
+  options: SharedOptions & { dryRun?: boolean; githubEndpointAuth?: boolean };
 };
 
 type InLabelAssociationContext = InLabelReadContext & {
@@ -961,14 +962,52 @@ async function inspectInLabelPullRequest(input: Omit<InLabelReadContext, 'prNumb
   return readInLabelEvidence({ cwd, provider, context, operationContext, repository, pullRequestIdentity, prNumber, inspected: inspected.value, options });
 }
 
-async function syncPlatformPullRequestInLabels(prToken: string | number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
+type GitHubPullRequestEvent = {
+  action?: string;
+  number?: number;
+  repository?: { full_name?: string };
+  pull_request?: { number?: number; base?: { repo?: { full_name?: string } } };
+};
+
+function githubEndpointPayloadMatches(event: GitHubPullRequestEvent, pr: string): boolean {
+  return ['opened', 'synchronize'].includes(event.action || '')
+    && event.repository?.full_name === 'fitlab-ai/agent-infra'
+    && event.pull_request?.base?.repo?.full_name === 'fitlab-ai/agent-infra'
+    && Number.isSafeInteger(event.number) && String(event.number) === pr
+    && event.pull_request?.number === event.number;
+}
+
+function githubEndpointEventMatches(pr: string): boolean {
+  if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_EVENT_NAME !== 'pull_request_target'
+    || process.env.GITHUB_REPOSITORY !== 'fitlab-ai/agent-infra' || !/^[1-9]\d*$/.test(pr)) return false;
+  try {
+    const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH || '', 'utf8')) as GitHubPullRequestEvent;
+    return githubEndpointPayloadMatches(event, pr);
+  } catch {
+    return false;
+  }
+}
+
+
+function githubEndpointRepositoryInvalid(enabled: boolean | undefined, platform: { type: string | null; repository: string | null }): boolean {
+  return enabled === true && (platform.type !== 'github' || platform.repository !== 'fitlab-ai/agent-infra');
+}
+
+async function syncPlatformPullRequestInLabels(prToken: string | number, options: SharedOptions & { dryRun?: boolean; githubEndpointAuth?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
   const token = String(prToken);
+  if (options.githubEndpointAuth && !githubEndpointEventMatches(token)) return result('failed', null, null, null, {
+    error: { code: 'IN_LABEL_SYNC_SCOPE_INVALID', message: 'GitHub endpoint authorization requires the matching repository pull_request_target event', retryable: false }
+  });
   const loaded = await resolvePlatformProviderContext({ cwd, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
   if (!loaded.ok || !usable) return result(context.status, null, null, null, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
+  });
+  if (githubEndpointRepositoryInvalid(options.githubEndpointAuth, context.platform)) return result('failed', null, null, null, {
+    platform: context.platform, capabilities: context.capabilities,
+    error: { code: 'IN_LABEL_SYNC_SCOPE_INVALID', message: 'GitHub endpoint authorization requires the expected repository', retryable: false }
   });
   if (!token || token.trim() !== token) return result('failed', null, null, null, {
     platform: context.platform, capabilities: context.capabilities,

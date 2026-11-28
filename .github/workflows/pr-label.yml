@@ -87,7 +87,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -eu
-          node --experimental-strip-types ./bin/internal-cli.ts platform-pr sync-in-labels --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/in-label-receipt.json" || {
+          node --experimental-strip-types ./bin/internal-cli.ts platform-pr sync-in-labels --github-endpoint-auth --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/in-label-receipt.json" || {
             cat "$RUNNER_TEMP/in-label-receipt.json"
             exit 1
           }
