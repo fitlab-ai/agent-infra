@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { parse } from "yaml";
 
 import { createTempDir, envWithPrependedPath, filePath, read, writeNodeCommandShim } from "../../helpers.ts";
 
@@ -349,7 +350,7 @@ test("strict sync reports a failed addition after an earlier successful removal"
 });
 
 test("PR label entry writes verified targets and reads back failed writes", () => {
-  for (const scenario of ["unique", "unknown", "write-fails"]) {
+  for (const scenario of ["unique", "unknown", "write-fails", "incomplete", "cursor-cycle"]) {
     const root = createTempDir("pr-label-entry-");
     const bin = path.join(root, "bin");
     const statePath = path.join(root, "state.json");
@@ -360,7 +361,8 @@ const fs = require('node:fs');
 const state = JSON.parse(fs.readFileSync(process.env.GH_FAKE_STATE, 'utf8'));
 const args = process.argv.slice(2); state.calls.push(args); fs.writeFileSync(process.env.GH_FAKE_STATE, JSON.stringify(state));
 const endpoint = args[1];
-if (endpoint === 'graphql') { console.log(JSON.stringify({ data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 5, ...(state.scenario === 'unknown' ? {} : { repository: { nameWithOwner: 'fitlab-ai/agent-infra' } }) }], pageInfo: { hasNextPage: false, endCursor: null } } } } } })); process.exit(0); }
+if (endpoint === 'graphql') { console.log(JSON.stringify({ data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 5, ...(state.scenario === 'unknown' ? {} : { repository: { nameWithOwner: 'fitlab-ai/agent-infra' } }) }], pageInfo: { hasNextPage: state.scenario === 'cursor-cycle', endCursor: state.scenario === 'cursor-cycle' ? 'same' : null } } } } } })); process.exit(0); }
+if (endpoint.endsWith('/pulls/1')) { console.log(JSON.stringify({ changed_files: state.scenario === 'incomplete' ? 2 : 1 })); process.exit(0); }
 if (endpoint.includes('/pulls/')) { console.log(JSON.stringify([[{ filename: 'lib/example.ts' }]])); process.exit(0); }
 if (endpoint.includes('/issues/')) {
   const id = endpoint.match(/issues\\/(\\d+)/)[1];
@@ -377,15 +379,39 @@ console.log(JSON.stringify([[{ name: 'in: cli' }]]));
       cwd: filePath("."), encoding: "utf8", env: { ...envWithPrependedPath(process.env, bin), GH_FAKE_STATE: statePath, GITHUB_REPOSITORY: "fitlab-ai/agent-infra", PR_NUMBER: "1" }
     });
     const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    if (scenario === "write-fails") {
+    if (scenario === "incomplete" || scenario === "cursor-cycle") {
+      assert.notEqual(result.status, 0);
+      assert.equal(state.calls.filter((call: string[]) => call.includes("POST") || call.includes("DELETE")).length, 0);
+      if (scenario === "cursor-cycle") assert.equal(state.calls.filter((call: string[]) => call[1] === "graphql").length, 2);
+    } else if (scenario === "write-fails") {
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, /denied/);
-      assert.equal(state.calls.filter((call: string[]) => call[1]?.includes("/issues/1/labels?")).length, 2);
+      assert.equal(state.calls.filter((call: string[]) => call[1]?.includes("/issues/5/labels?")).length, 2);
       assert.equal(state.calls.filter((call: string[]) => call.includes("POST")).length, 1);
+      assert.equal(state.calls.find((call: string[]) => call.includes("POST"))[1].includes("/issues/5/"), true);
     } else {
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(state.labels["1"], ["keep", "in: cli"]);
       assert.deepEqual(state.labels["5"], scenario === "unique" ? ["keep", "in: cli"] : ["keep"]);
+      if (scenario === "unique") assert.deepEqual(state.calls.filter((call: string[]) => call.includes("POST")).map((call: string[]) => call[1]?.match(/issues\/(\d+)/)?.[1]), ["5", "1"]);
     }
   }
+});
+
+
+test("PR assignment read failure is best-effort and performs no assignment", () => {
+  const root = createTempDir("pr-assignee-read-");
+  const bin = path.join(root, "bin");
+  const log = path.join(root, "calls.json");
+  const fake = path.join(bin, "fake-gh.cjs");
+  write(fake, `require('node:fs').appendFileSync(process.env.GH_FAKE_STATE, JSON.stringify(process.argv.slice(2)) + '\\n'); console.error('read denied'); process.exit(1);`);
+  writeNodeCommandShim(path.join(bin, "gh"), fake);
+  const workflow = parse(read(".github/workflows/pr-label.yml"));
+  const step = workflow.jobs["label-and-assign"].steps.find((item: any) => item.name === "Assign PR creator if still unassigned");
+  const result = spawnSync("bash", ["-c", step.run], { encoding: "utf8", env: { ...envWithPrependedPath(process.env, bin), GH_FAKE_STATE: log, GITHUB_REPOSITORY: "fitlab-ai/agent-infra", PR_NUMBER: "1", CREATOR: "author" } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /read denied/);
+  const calls = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].includes("POST"), false);
 });

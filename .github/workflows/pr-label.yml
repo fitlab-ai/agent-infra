@@ -40,7 +40,10 @@ jobs:
         run: |
           set -eu
           endpoint="repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER"
-          before=$(gh api "$endpoint" --jq '[.assignees[].login]')
+          before=$(gh api "$endpoint" --jq '[.assignees[].login]') || {
+            echo "Assignee read failed; skipping assignment" >&2
+            exit 0
+          }
           if [ "$(printf '%s' "$before" | jq 'length')" -ne 0 ]; then
             echo "Existing assignees retained: $before"
             exit 0

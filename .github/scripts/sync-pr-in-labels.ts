@@ -22,6 +22,7 @@ function readLabels(n: number): string[] {
 function closingIssue(): number | null {
   const query = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number repository{nameWithOwner}} pageInfo{hasNextPage endCursor}}}}}';
   let cursor: string | null = null;
+  const cursors = new Set<string>();
   const seen = new Map<string, { number: number; repo: string }>();
   let unidentified = false;
   do {
@@ -35,7 +36,10 @@ function closingIssue(): number | null {
       seen.set(`${repo.toLowerCase()}#${node.number}`, { number: node.number, repo });
     }
     cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
-    if (page.pageInfo.hasNextPage && (typeof cursor !== 'string' || !cursor)) throw new Error('Invalid closing issue cursor');
+    if (page.pageInfo.hasNextPage) {
+      if (typeof cursor !== 'string' || !cursor || cursors.has(cursor)) throw new Error('Invalid closing issue cursor');
+      cursors.add(cursor);
+    }
   } while (cursor);
   const issues = [...seen.values()];
   if (unidentified || issues.length !== 1 || issues[0]!.repo.toLowerCase() !== repository.toLowerCase()) {
@@ -60,11 +64,13 @@ function sync(n: number, before: string[], files: string[], repositoryLabels: Se
   if (JSON.stringify(after) !== JSON.stringify(plan.labels)) throw new Error(`Label readback mismatch for #${n}: ${JSON.stringify(after)}`);
   console.log(JSON.stringify({ number: n, before, after, delta }));
 }
+const changedFiles = api([`repos/${repository}/pulls/${number}`])?.changed_files;
+if (!Number.isSafeInteger(changedFiles) || changedFiles < 0) throw new Error('Invalid PR file count');
 const files = extractPullRequestFileNames(api([`repos/${repository}/pulls/${number}/files?per_page=100`, '--paginate', '--slurp']));
-if (!files) throw new Error('Invalid PR files response');
+if (!files || files.length !== changedFiles) throw new Error('Incomplete PR files response');
 const repoLabels = new Set(names(api([`repos/${repository}/labels?per_page=100`, '--paginate', '--slurp'])));
 const issue = closingIssue();
 const prBefore = readLabels(number);
 const issueBefore = issue === null ? null : readLabels(issue);
-sync(number, prBefore, files, repoLabels);
 if (issue !== null && issueBefore !== null) sync(issue, issueBefore, files, repoLabels);
+sync(number, prBefore, files, repoLabels);
